@@ -1,0 +1,1994 @@
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Helmet } from 'react-helmet-async';
+import CardView from "../components/CardView";
+import Sidebar from "../components/Sidebar";
+import TopBar from "../components/TopBar";
+import Button from "../components/Button";
+import MobileHeader from "../components/MobileHeader";
+import styled from "styled-components";
+import { Link, useLocation, useParams, useNavigationType, useNavigate } from 'react-router-dom';
+import { sortPosts } from '../utils/SortPosts.js';
+import Storage from '../utils/Storage';
+import Api from '../lib/api';
+import { isSubscribed, subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
+import { fetchFollowedUsers } from '../utils/FollowUsers';
+import { usePendingFollows } from '../utils/useFollowState';
+import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
+import { lightColors as fallbackLightColors } from "../styled/colors/light";
+import {
+    ContentGrid,
+    ModernPostFeed,
+    PostGrid,
+    AnimatedCard,
+    StyledError,
+} from "../styled/Layout";
+
+const pickThemeColor = (theme, key) => {
+    if (theme?.colors?.[key]) return theme.colors[key];
+    const isLight = theme?.name === 'light';
+    return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
+};
+
+// Welcome card that appears for first-time visitors on the front page
+const WelcomeCard = styled.div`
+    margin-top: 1rem;
+    background-color: rgba(251, 191, 36, 0.1);
+    border: 1px solid #f59e0b;
+    color: #f59e0b;
+    border-radius: 16px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+
+    @media (max-width: 1000px) {
+        border-radius: 12px;
+        padding: 1rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 8px;
+        padding: 0.75rem;
+    }
+`;
+
+const WelcomeDescription = styled.div`
+    color: #f59e0b;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    @media (max-width: 1000px) {
+        font-size: 0.55rem;
+    }
+`;
+
+const WelcomeFooter = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+`;
+
+const WelcomeText = styled.a`
+    color: #f59e0b;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.8rem;
+    flex: 1 1 auto;
+    &:hover {
+        color: #d97706;
+        text-decoration: underline;
+        text-decoration-color: #f59e0b;
+    }
+`;
+
+// Mobile header branding for home/following feeds
+
+// Home feed info card for logged-in users
+const HomeFeedInfoCard = styled.div`
+    margin-top: 1rem;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
+    padding: 0.6rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 6px;
+        padding: 0.4rem 0.6rem;
+        margin-top: 0.5rem;
+    }
+`;
+
+// NSFW welcome hero - shown once to logged-in users on home feed
+const NsfwWelcomeHero = styled.div`
+    margin-top: 1rem;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 127, 0.08) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 8px;
+        padding: 0.85rem 1rem;
+        margin-top: 0.5rem;
+    }
+`;
+
+const NsfwHeroTitle = styled.div`
+    font-size: 1rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    line-height: 1.2;
+
+    @media (max-width: 768px) {
+        font-size: 0.9rem;
+    }
+`;
+
+const NsfwHeroEmoji = styled.span`
+    font-size: 1.1rem;
+    line-height: 1;
+`;
+
+const NsfwHeroDescription = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    font-size: 0.8rem;
+    line-height: 1.6;
+
+    @media (max-width: 768px) {
+        font-size: 0.75rem;
+    }
+
+    strong {
+        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        font-weight: 600;
+    }
+`;
+
+const NsfwHeroButtons = styled.div`
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+
+    @media (max-width: 768px) {
+        gap: 0.5rem;
+    }
+`;
+
+const NsfwHeroButton = styled.button`
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+
+    @media (max-width: 768px) {
+        padding: 0.45rem 1rem;
+        font-size: 0.8rem;
+        flex: 1;
+        min-width: 80px;
+    }
+
+    ${({ $variant }) => $variant === 'yes' ? `
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        color: #fff;
+        &:hover {
+            background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+            transform: translateY(-1px);
+        }
+    ` : `
+        background: rgba(100, 116, 139, 0.2);
+        color: #94a3b8;
+        border: 1px solid rgba(100, 116, 139, 0.3);
+        &:hover {
+            background: rgba(100, 116, 139, 0.3);
+            color: #cbd5e1;
+        }
+    `}
+`;
+
+const NsfwHeroNote = styled.div`
+    color: ${({ theme }) => theme?.colors?.mutedText || '#64748b'};
+    font-size: 0.7rem;
+    font-style: italic;
+    margin-top: 0.25rem;
+
+    a {
+        color: ${({ theme }) => theme?.colors?.link || '#818cf8'};
+        text-decoration: none;
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+`;
+
+const HomeFeedInfoTitle = styled.div`
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    line-height: 1;
+
+    @media (max-width: 1000px) {
+        font-size: 0.6rem;
+    }
+`;
+
+const HomeFeedHeaderRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+`;
+
+const HomeFeedModeInline = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.7rem;
+`;
+
+const HomeFeedInfoEmoji = styled.span`
+    font-size: 0.85rem;
+    line-height: 1;
+    display: inline-block;
+    transform: translateY(-1px);
+
+    @media (max-width: 1000px) {
+        font-size: 0.75rem;
+    }
+`;
+
+const HomeFeedInfoDescription = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    font-size: 0.65rem;
+    line-height: 1.5;
+
+    @media (max-width: 1000px) {
+        font-size: 0.55rem;
+    }
+
+    strong {
+        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        font-weight: 600;
+    }
+`;
+
+const HomeFeedModeSelect = styled.select`
+    font-size: 0.65rem;
+    padding: 0.15rem 0.35rem;
+    border-radius: 6px;
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#cbd5e1'};
+    background: ${({ theme }) =>
+        theme?.colors?.inputBackground ||
+        theme?.colors?.surface ||
+        (theme?.name === 'light' ? '#f3f4f6' : '#1f1f1f')};
+    color: ${({ theme }) => theme?.colors?.text || (theme?.name === 'light' ? '#0f172a' : '#fff')};
+    outline: none;
+    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'};
+`;
+
+// Post header card shown on single post view
+const PostHeaderCard = styled.div`
+    margin-top: 0.5rem;
+    margin-left: 1rem;
+    margin-right: 1rem;
+    background-color: ${({ theme }) => pickThemeColor(theme, 'card') || '#23272C'};
+    border: 1px solid ${({ theme }) => pickThemeColor(theme, 'cardBorder') || '#333'};
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    border-radius: 6px;
+    padding: 0.2rem 0.6rem 0.4rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    @media (max-width: 1000px) {
+        margin-left: 0.25rem;
+        margin-right: 0.25rem;
+        padding: 0.3rem 0.6rem;
+    }
+`;
+
+const PostHeaderText = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    font-size: 0.6rem;
+    line-height: 1.5;
+`;
+
+const TopicLinkInHeader = styled(Link)`
+    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    text-decoration: none;
+    font-weight: 700;
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        text-decoration: underline;
+        text-decoration-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    }
+`;
+
+const PostHeaderTitle = styled.div`
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-size: 0.9rem;
+    font-weight: bold;
+`;
+
+const HeaderInlineLink = styled.a`
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    font-weight: 700;
+    font-size: 0.6rem;
+    font-family: inherit;
+    cursor: pointer;
+    text-decoration: none;
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.text || '#EEEEEE'};
+        text-decoration: none;
+    }
+`;
+/* inline subscribe/unsubscribe will be rendered via FilterBar rightAction */
+
+// Removed old topics bar styled components (unused)
+
+const LoadingMoreIndicator = styled.div`
+    width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.5rem 1rem;
+    text-align: center;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    font-size: 0.8rem;
+    font-style: italic;
+`;
+
+/**
+ * LoadingCard - Full-width loading/empty state card
+ * 
+ * No horizontal margins - parent ModernPostFeed provides padding.
+ * This ensures same width as CardView cards.
+ */
+const LoadingCard = styled.div`
+    margin: 1rem 0 0 0;
+    padding: 2rem 1rem;
+    background-color: ${({ theme }) => theme?.colors?.cardAlt || theme?.colors?.panelAlt || '#2c323a'};
+    border: 1px solid ${({ theme }) => theme?.colors?.cardBorder || theme?.colors?.border || '#393E46'};
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+
+    @media (max-width: 1000px) {
+        padding: 1.5rem 0.75rem;
+    }
+`;
+
+const LoadingSpinner = styled.div`
+    width: 24px;
+    height: 24px;
+    border: 3px solid ${({ theme }) => theme?.colors?.border || theme?.colors?.borderSubtle || '#393E46'};
+    border-top: 3px solid ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+`;
+
+const LoadingText = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    font-size: 0.85rem;
+    font-weight: 500;
+`;
+
+// TopicsBar removed (unused)
+
+const InlineLink = styled(Link)`
+    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    text-decoration: none;
+    font-weight: 700;
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        text-decoration: underline;
+        text-decoration-color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    }
+`;
+
+// Topic header card (for topic pages)
+const TopicHeroCard = styled.div`
+    width: 100%;
+    max-width: 100%;
+    background: ${({ theme }) => pickThemeColor(theme, 'cardAlt') || '#1f232a'};
+    border: 1px solid ${({ theme }) => pickThemeColor(theme, 'cardBorder') || '#2f343d'};
+    border-radius: 9px;
+    padding: 0.75rem 0.9rem;
+    margin-bottom: 0.5rem;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+    display: flex;
+    flex-direction: column;
+    gap: 0.24rem;
+`;
+
+const TopicHeroTitle = styled.div`
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    line-height: 1.12;
+    word-break: break-word;
+`;
+
+const TopicHeroHeader = styled.div`
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+`;
+
+const TopicHeroDescription = styled.div`
+    font-size: 0.8rem;
+    color: ${({ theme }) => theme?.colors?.mutedText || theme?.colors?.subtleText || '#b5bdc9'};
+    line-height: 1.3;
+    word-break: break-word;
+
+    @media (max-width: 600px) {
+        font-size: 0.55rem;
+        line-height: 1.25;
+    }
+`;
+
+
+/**
+ * EmptyHomeCard - Empty state for home feed
+ * 
+ * No horizontal margins - parent ModernPostFeed provides padding.
+ * This ensures same width as CardView cards.
+ */
+const EmptyHomeCard = styled.div`
+    margin: 1rem 0 0 0;
+    padding: 1.5rem 1.25rem;
+    background-color: ${({ theme }) => theme?.colors?.cardAlt || theme?.colors?.panelAlt || '#2c323a'};
+    border: 1px solid ${({ theme }) => theme?.colors?.cardBorder || theme?.colors?.border || '#393E46'};
+    border-radius: 12px;
+    text-align: center;
+
+    @media (max-width: 1000px) {
+        padding: 1.25rem 1rem;
+    }
+`;
+
+const EmptyHomeTitle = styled.div`
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: ${({ theme }) => theme?.colors?.text || '#DFD0B8'};
+`;
+
+const EmptyHomeBody = styled.div`
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+`;
+
+const EmptyHomeMessage = () => (
+    <EmptyHomeCard role="region" aria-label="Empty home feed">
+        <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
+        <EmptyHomeBody>
+            Your home feed mixes posts from the topics you follow with new communities to discover. Browse <InlineLink to="/discover">topics</InlineLink> to follow a few and personalize your feed.
+        </EmptyHomeBody>
+    </EmptyHomeCard>
+);
+
+// Session storage key helpers for feed state preservation (keyed by topic)
+const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
+
+const readSavedOrder = (topic) => {
+    try {
+        const savedOrder = sessionStorage.getItem(getFeedKey(topic, 'order'));
+        if (!savedOrder) return null;
+        const parsed = JSON.parse(savedOrder);
+        return Array.isArray(parsed) ? parsed : null;
+    } catch (_) {
+        return null;
+    }
+};
+
+const checkRestoreFeedIntent = (topic) => {
+    try {
+        const raw = sessionStorage.getItem('mirage_restore_feed');
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        const intended = String(parsed?.topic || '').trim();
+        const at = Number(parsed?.at || 0);
+        if (!intended || !Number.isFinite(at) || at <= 0) return false;
+        const ageMs = Date.now() - at;
+        if (ageMs < 0 || ageMs > 15000) return false;
+        return intended === String(topic || '');
+    } catch (_) {
+        return false;
+    }
+};
+
+const clearRestoreFeedIntent = () => {
+    try { sessionStorage.removeItem('mirage_restore_feed'); } catch (_) { }
+};
+
+// Check if we navigated here from view_post via browser back button
+// This flag is set when clicking a view_post link from the feed
+const checkCameFromViewPost = () => {
+    try {
+        const raw = sessionStorage.getItem('mirage_came_from_feed');
+        if (!raw) return false;
+        const parsed = JSON.parse(raw);
+        const at = Number(parsed?.at || 0);
+        if (!Number.isFinite(at) || at <= 0) return false;
+        // Valid for 30 minutes (enough time for reading a post with comments)
+        const ageMs = Date.now() - at;
+        if (ageMs < 0 || ageMs > 1800000) return false;
+        return true;
+    } catch (_) {
+        return false;
+    }
+};
+
+const clearCameFromFeedFlag = () => {
+    try { sessionStorage.removeItem('mirage_came_from_feed'); } catch (_) { }
+};
+
+// Check if current page load is a refresh (F5)
+const isPageRefresh = () => {
+    try {
+        const navEntries = performance.getEntriesByType('navigation');
+        if (navEntries.length > 0) {
+            return navEntries[0].type === 'reload';
+        }
+    } catch (_) { }
+    return false;
+};
+
+// Helper to detect back/forward navigation
+// Returns true for POP navigations (back button, navigate(-1), browser back/forward)
+// but NOT for page refresh (F5) - we handle that separately
+const getIsBackNavigation = (navigationType) => {
+    if (navigationType !== 'POP') return false;
+    // Page refresh triggers POP but we don't want to restore pagination state
+    if (isPageRefresh()) return false;
+    return true;
+};
+
+// For scroll restoration, we want to restore on BOTH back navigation AND page refresh
+const shouldRestoreScroll = (navigationType) => {
+    return navigationType === 'POP';
+};
+
+const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
+    const params = useParams();
+    const navigate = useNavigate();
+    const urlTopic = routeTopic || params.topic || "home"; // Get the topic from URL or prop
+    const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
+    const isBackNavigation = getIsBackNavigation(navigationType);
+    const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
+    // For browser back button: only restore if we came from a view_post that was opened from the feed
+    const cameFromViewPostRef = useRef(isBackNavigation && checkCameFromViewPost());
+    const shouldRestoreFeedState = cameFromViewPostRef.current || restoreFeedIntentRef.current === true;
+
+    // Clear the restore intent after we've consumed it (in effect to avoid StrictMode double-render issues)
+    useEffect(() => {
+        if (restoreFeedIntentRef.current) {
+            clearRestoreFeedIntent();
+        }
+        if (cameFromViewPostRef.current) {
+            clearCameFromFeedFlag();
+        }
+    }, []);
+
+    const [error, setError] = useState(null);
+    const [sortBy] = useState(() => {
+        try {
+            const saved = Storage.load('sort_by', 'magic');
+            return (saved === 'magic' || saved === 'points' || saved === 'newest') ? saved : 'magic';
+        } catch (_) {
+            return 'magic';
+        }
+    }); // Sorting mechanism (persisted)
+    const [, setTopics] = useState([]); // Dynamically store unique topics (state is persisted but value unused)
+
+    // Only restore from cache on back navigation (POP), not on direct nav (clicking links)
+    const [stableOrder, setStableOrder] = useState(() => {
+        if (!shouldRestoreFeedState) return [];
+        try {
+            const savedOrder = sessionStorage.getItem(getFeedKey(urlTopic, 'order'));
+            if (savedOrder) {
+                return JSON.parse(savedOrder);
+            }
+        } catch (_) { }
+        return [];
+    });
+
+    // Only skip loading on back navigation with cached state
+    const [isLoading, setIsLoading] = useState(() => {
+        if (!shouldRestoreFeedState) return true;
+        try {
+            const order = readSavedOrder(urlTopic);
+            if (!order || order.length === 0) return true;
+            if (state.posts && order.some(id => state.posts[id])) return false;
+        } catch (_) { }
+        return true;
+    });
+
+    // Only restore currentPage on back navigation
+    const [currentPage, setCurrentPage] = useState(() => {
+        if (!shouldRestoreFeedState) return 1;
+        try {
+            const savedPage = sessionStorage.getItem(getFeedKey(urlTopic, 'page'));
+            if (savedPage) return parseInt(savedPage, 10) || 1;
+        } catch (_) { }
+        return 1;
+    });
+
+    // Only restore hasMorePosts on back navigation
+    const [hasMorePosts, setHasMorePosts] = useState(() => {
+        if (!shouldRestoreFeedState) return false;
+        try {
+            const savedHasMore = sessionStorage.getItem(getFeedKey(urlTopic, 'hasmore'));
+            if (savedHasMore) return savedHasMore === 'true';
+        } catch (_) { }
+        return false;
+    });
+    const [homeChrono, setHomeChrono] = useState(() => {
+        const mode = Storage.load('home_sort_mode', 'magic');
+        return mode === 'newest';
+    });
+    const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
+        const val = Storage.load('hide_downvoted_posts', false);
+        return val === true ? true : false;
+    });
+    const [hiddenDownvotedSet, setHiddenDownvotedSet] = useState(() => new Set());
+    const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
+    const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
+        // Consume any pending highlight on mount
+        const pendingId = Storage.consumePendingPostHighlight();
+        return pendingId ? new Set([pendingId]) : new Set();
+    });
+    const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const location = useLocation();  // Call useLocation at the top level of the component
+    const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
+    const viewerAddress = Storage.load('publicKey', '') || 'guest';
+    const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
+    const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
+    const [topicFollowHover, setTopicFollowHover] = useState(false);
+    const { isTopicPending, formatTopicStatus } = usePendingFollows();
+    const followDataLoadedRef = useRef(false);
+    const afterSetPostsRef = useRef(0);
+    const topicsLoadedRef = useRef(false); // Track if we've attempted to load topics from API
+    const isMountedRef = useRef(true); // Track if component is mounted
+    const forceHardRefreshRef = useRef(isPageRefresh()); // Bypass debounce on page refresh
+
+    // First-visit welcome card: show on front page until dismissed (only for guests)
+    const [showWelcomeCard, setShowWelcomeCard] = useState(() => {
+        try {
+            return !Storage.load('welcome_card_dismissed_v1', false);
+        } catch (_) {
+            return true;
+        }
+    });
+    const dismissWelcomeCard = () => {
+        try { Storage.save('welcome_card_dismissed_v1', true); } catch (_) { }
+        setShowWelcomeCard(false);
+    };
+
+    // NSFW welcome hero: show once for logged-in users until they choose yes/no
+    const [showNsfwHero, setShowNsfwHero] = useState(() => {
+        try {
+            return !Storage.load('nsfw_hero_dismissed_v1', false);
+        } catch (_) {
+            return true;
+        }
+    });
+
+    // handleNsfwChoice is defined after getPosts (see below)
+
+    const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+
+    useEffect(() => {
+        let cancelled = false;
+        const loadFollowData = async () => {
+            if (!viewerAddress || viewerAddress === 'guest' || followDataLoadedRef.current) return;
+            try {
+                const [topics, authors] = await Promise.all([
+                    fetchFollowedTopics(viewerAddress),
+                    fetchFollowedUsers(viewerAddress)
+                ]);
+                if (cancelled) return;
+                setFollowedTopicsSet(new Set(topics.map(t => t.toLowerCase())));
+                setFollowedAuthorsSet(new Set(authors.map(a => a.toLowerCase())));
+                followDataLoadedRef.current = true;
+            } catch (_) { }
+        };
+        loadFollowData();
+        return () => { cancelled = true; };
+    }, [viewerAddress]);
+
+    // Listen for settings changes (downvote hiding) - tag changes handled after getPosts is defined
+    useEffect(() => {
+        const handler = (e) => {
+            const detail = e?.detail || {};
+            if (Object.prototype.hasOwnProperty.call(detail, 'hideDownvotedPosts')) {
+                setHideDownvotedPosts(Boolean(detail.hideDownvotedPosts));
+            }
+        };
+        window.addEventListener('settingsUpdated', handler);
+        return () => window.removeEventListener('settingsUpdated', handler);
+    }, []);
+
+    // Track posts the viewer downvoted to hide with animation on Home
+    useEffect(() => {
+        const handler = (e) => {
+            const detail = e?.detail || {};
+            const pid = String(detail?.postId || '').toLowerCase();
+            const dir = Number(detail?.direction);
+            if (!pid || dir >= 0) return;
+
+            // First, add to hiding set to trigger animation
+            setHidingPostsSet((prev) => {
+                if (prev.has(pid)) return prev;
+                const next = new Set(prev);
+                next.add(pid);
+                return next;
+            });
+
+            // After animation completes (300ms), actually hide the post
+            setTimeout(() => {
+                setHiddenDownvotedSet((prev) => {
+                    if (prev.has(pid)) return prev;
+                    const next = new Set(prev);
+                    next.add(pid);
+                    return next;
+                });
+                setHidingPostsSet((prev) => {
+                    if (!prev.has(pid)) return prev;
+                    const next = new Set(prev);
+                    next.delete(pid);
+                    return next;
+                });
+            }, 250);
+        };
+        window.addEventListener('postDownvoted', handler);
+        return () => window.removeEventListener('postDownvoted', handler);
+    }, []);
+
+    // Clear flash animation after it completes
+    useEffect(() => {
+        if (flashingPostsSet.size === 0) return;
+        const timer = setTimeout(() => {
+            setFlashingPostsSet(new Set());
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [flashingPostsSet]);
+
+    const optimisticPostIdsRef = useRef(new Map()); // post_id -> created_at_ms
+
+    const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false) => {
+        if (!isMountedRef.current) return;
+
+        const debouncingTime = 60; // in seconds
+
+        if (topic === "")
+            topic = "all";
+
+        const isHomeFeed = topic === 'home';
+        const isFollowingFeed = topic === 'following';
+
+        if (topic !== state.topic) {
+            if (!isMountedRef.current) return;
+            setTopic(topic);
+        } else {
+            // Skip debounce while paginating (infinite scroll)
+            const isPaginating = (currentPage > 1) || isLoadingMore;
+            const bypassDebounce = !!forceHardRefreshRef.current;
+            if (!isPaginating) {
+                if (!bypassDebounce && state.posts && Object.keys(state.posts).length > 0 && state.lastFetched) {
+                    const timeSinceLastFetch = Date.now() - state.lastFetched;
+                    if (timeSinceLastFetch < debouncingTime * 1000) {
+                        // For specific topics (not home/following/all), only use cache if we actually
+                        // have posts matching this topic. Otherwise fetch fresh data.
+                        const isSpecificTopic = !isHomeFeed && !isFollowingFeed && topic !== 'all';
+                        if (isSpecificTopic) {
+                            const topicLower = String(topic || '').toLowerCase();
+                            const hasPostsForTopic = Object.values(state.posts).some(
+                                (p) => p && String(p.topic || '').toLowerCase() === topicLower
+                            );
+                            if (!hasPostsForTopic) {
+                                // No cached posts for this topic - fetch fresh
+                            } else {
+                                // Cached posts exist and are recent - show them, don't refetch
+                                setIsLoading(false);
+                                return;
+                            }
+                        } else {
+                            // Home/following/all feeds - use normal cache behavior
+                            setIsLoading(false);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!isMountedRef.current) return;
+        // Only show full loading state for initial load or topic switch, not pagination
+        const effectivePage = (typeof pageOverride === 'number' && Number.isFinite(pageOverride) && pageOverride > 0) ? Math.floor(pageOverride) : currentPage;
+        const isPaginating = effectivePage > 1;
+        if (!silent && !isPaginating) {
+            setIsLoading(true);
+        }
+
+        const viewerAddress = Storage.load("publicKey", "");
+        const page = effectivePage;
+
+        const matchTopic = (t) => {
+            if (topic === 'all') return true;
+            if (topic === 'home' || topic === 'following') return true;
+            return String(t || '').toLowerCase() === String(topic || '').toLowerCase();
+        };
+
+        const handleResponse = (data) => {
+            if (!isMountedRef.current) return;
+            const forcedHard = !!forceHardRefreshRef.current;
+            const arr = (data && Array.isArray(data.posts)) ? data.posts : [];
+
+            // Dispatch inbox timestamp for badge notification (avoid separate get_inbox call)
+            if (data && typeof data.latest_inbox_timestamp === 'number') {
+                window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
+            }
+            const hasMore = !!(data && data.has_more);
+            if (!isMountedRef.current) return;
+            setHasMorePosts(hasMore);
+
+            const isTopLevelPost = (p) => {
+                if (!p) return false;
+                const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
+                const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
+                const topicVal = String(p.topic || '').trim().toLowerCase();
+                const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                return hasTitle && hasTopic && !isReserved;
+            };
+            const topLevel = arr.filter(isTopLevelPost);
+            let filtered = (isHomeFeed || isFollowingFeed)
+                ? topLevel
+                : topLevel.filter(p => matchTopic(p.topic));
+
+            // Hide posts the viewer downvoted immediately (Home only, client-side)
+            if (isHomeFeed && hideDownvotedPosts && hiddenDownvotedSet.size > 0) {
+                filtered = filtered.filter((p) => !hiddenDownvotedSet.has(String(p?.post_id || '').toLowerCase()));
+            }
+
+            // Optionally hide posts the viewer downvoted (Home only, client-side)
+            if (isHomeFeed && hideDownvotedPosts) {
+                const ownVotes = Storage.load('votes', {});
+                filtered = filtered.filter((p) => {
+                    const postKey = String(p?.post_id || '').toLowerCase();
+                    // Check local storage first (most up-to-date)
+                    const storedVote = ownVotes[postKey];
+                    if (typeof storedVote === 'number' && storedVote < 0) return false;
+                    // Fall back to backend field if present
+                    const uv = Number(
+                        p?.user_vote ?? p?.my_vote ?? p?.myVote ?? p?.userVote ?? NaN
+                    );
+                    if (!Number.isFinite(uv)) return true;
+                    return uv >= 0;
+                });
+            }
+
+            // Home feed: softly prioritize user's posts with a 60-minute decay (applies to both modes)
+            if (isHomeFeed) {
+                const viewerAddressLower = String(viewerAddress || '').toLowerCase();
+                const nowSec = Math.floor(Date.now() / 1000);
+                const MAX_AGE_SEC = 60 * 60; // 60 minutes
+                const decayMap = new Map();
+                const prioritized = [];
+                const rest = [];
+                for (const p of filtered) {
+                    const author = String(p?.author || p?.user_id || '').toLowerCase();
+                    let ts = Number(p?.timestamp || 0);
+                    if (ts > 1e12) ts = Math.floor(ts / 1000); // normalize ms to seconds
+                    const age = nowSec - ts;
+                    const decay = 1 - Math.min(Math.max(age, 0), MAX_AGE_SEC) / MAX_AGE_SEC; // 1 -> 0 over 60m
+                    decayMap.set(p.post_id, decay);
+                    if (viewerAddressLower && viewerAddressLower !== 'guest' && author === viewerAddressLower && decay > 0) {
+                        prioritized.push(p);
+                    } else {
+                        rest.push(p);
+                    }
+                }
+                prioritized.sort((a, b) => {
+                    const da = decayMap.get(a.post_id) ?? 0;
+                    const db = decayMap.get(b.post_id) ?? 0;
+                    if (db !== da) return db - da;
+                    const ta = Number(a?.timestamp || 0);
+                    const tb = Number(b?.timestamp || 0);
+                    return tb - ta;
+                });
+                filtered = [...prioritized, ...rest];
+            }
+
+            const sortedOnce = (isHomeFeed || isFollowingFeed)
+                ? filtered
+                : sortPosts(filtered, sortBy);
+            const sortedOrder = sortedOnce.map(p => p.post_id);
+
+            const postDict = sortedOnce.reduce((acc, post) => {
+                acc[post.post_id] = post;
+                return acc;
+            }, {});
+
+            if (!isMountedRef.current) return;
+            afterSetPostsRef.current = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+            if (page === 1) {
+                setPosts(postDict, Date.now());
+            } else {
+                // Append new posts to existing ones
+                const currentPosts = state.posts || {};
+                const combined = { ...currentPosts, ...postDict };
+                setPosts(combined, Date.now());
+            }
+
+            if (!isMountedRef.current) return;
+            setStableOrder((currentOrder) => {
+                if (page === 1) {
+                    const topicChanged = currentTopicRef.current !== topic;
+                    if (topicChanged || forcedHard) {
+                        const now = Date.now();
+                        const keepOptimistic = [];
+                        for (const [id, ts] of optimisticPostIdsRef.current.entries()) {
+                            if (now - Number(ts || 0) > 2 * 60 * 1000) continue;
+                            if (!sortedOrder.includes(id) && currentOrder.includes(id)) keepOptimistic.push(id);
+                            if (sortedOrder.includes(id)) optimisticPostIdsRef.current.delete(id);
+                        }
+                        return [...keepOptimistic, ...sortedOrder.filter((id) => !keepOptimistic.includes(id))];
+                    } else {
+                        // Same topic refresh: preserve existing posts from previous pages
+                        const currentPosts = state.posts || {};
+                        const existingPostsInOrder = currentOrder.filter(id => {
+                            const post = currentPosts[id];
+                            if (!post || post.deleted) return false;
+                            if (topic === 'all') {
+                                const hasTitle = typeof post.title === 'string' && post.title.trim().length > 0;
+                                const hasTopic = typeof post.topic === 'string' && post.topic.trim().length > 0;
+                                const topicVal = String(post.topic || '').trim().toLowerCase();
+                                const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                                return hasTitle && hasTopic && !isReserved;
+                            } else if (topic === 'home' || topic === 'following') {
+                                return isTopLevelPost(post);
+                            } else {
+                                return String(post.topic || '').trim().toLowerCase() === topic.toLowerCase();
+                            }
+                        }).filter(id => !sortedOrder.includes(id));
+                        return [...sortedOrder, ...existingPostsInOrder];
+                    }
+                } else {
+                    // Append new posts to existing order
+                    return [...currentOrder, ...sortedOrder.filter(id => !currentOrder.includes(id))];
+                }
+            });
+            try { forceHardRefreshRef.current = false; } catch (_) { }
+
+            // Mark topic switch complete - from now on, render new topic
+            if (!isMountedRef.current) return;
+            try { currentTopicRef.current = topic; } catch (_) { }
+            // Only clear isLoading if we set it (not during pagination)
+            if (page === 1) {
+                if (!silent) setIsLoading(false);
+                setIsLoadingMore(false);
+                try { loadMoreLockRef.current = false; } catch (_) { }
+            } else {
+                // For pagination, defer clearing isLoadingMore until after posts render
+                requestAnimationFrame(() => {
+                    if (isMountedRef.current) {
+                        setIsLoadingMore(false);
+                        try { loadMoreLockRef.current = false; } catch (_) { }
+                    }
+                });
+            }
+        };
+
+        const onError = (error) => {
+            if (!isMountedRef.current) return;
+            const errorMessage = (error && error.message) ? error.message : "An unknown error occurred";
+            setError(errorMessage);
+            try { forceHardRefreshRef.current = false; } catch (_) { }
+            // Only clear isLoading if we set it (not during pagination)
+            if (page === 1) {
+                if (!silent) setIsLoading(false);
+            }
+            setIsLoadingMore(false);
+            try { loadMoreLockRef.current = false; } catch (_) { }
+        };
+
+        // Build allowed_tags list from settings (default: only sensitive shown)
+        const getAllowedTags = () => {
+            const tags = [];
+            if (Storage.load('show_tag_sensitive', true) !== false) tags.push('sensitive');
+            if (Storage.load('show_tag_porn', false) === true) tags.push('porn');
+            if (Storage.load('show_tag_violence', false) === true) tags.push('violence');
+            if (Storage.load('show_tag_gore', false) === true) tags.push('gore');
+            if (Storage.load('show_tag_death', false) === true) tags.push('death');
+            return tags;
+        };
+
+        if (isHomeFeed || isFollowingFeed) {
+            const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
+            const useNewest = overrideChrono !== null ? overrideChrono : homeChrono;
+            params.by = useNewest ? 'newest' : 'magic';
+            params.allowed_tags = getAllowedTags().join(',');
+            Api.get('get_posts', params, { timeoutMs: 10000 })
+                .then(handleResponse)
+                .catch(onError);
+        } else {
+            const params = { topic, limit: 15, page: page, address: viewerAddress };
+            params.allowed_tags = getAllowedTags().join(',');
+            Api.get('get_posts', params, { timeoutMs: 10000 })
+                .then(handleResponse)
+                .catch(onError);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.topic, state.lastFetched, setTopic, setPosts, sortBy, currentPage, followedTopicsSet, followedAuthorsSet, homeChrono, isLoadingMore, hideDownvotedPosts]);
+
+    // handleNsfwChoice - must be after getPosts is defined
+    const handleNsfwChoice = useCallback((allowNsfw) => {
+        try {
+            // Dismiss the hero
+            Storage.save('nsfw_hero_dismissed_v1', true);
+            setShowNsfwHero(false);
+
+            if (allowNsfw) {
+                // Enable all NSFW tags
+                Storage.save('show_tag_porn', true);
+                Storage.save('show_tag_violence', true);
+                Storage.save('show_tag_gore', true);
+                Storage.save('show_tag_death', true);
+                // Dispatch settings update event so feed refreshes
+                window.dispatchEvent(new CustomEvent('settingsUpdated', {
+                    detail: {
+                        showTagPorn: true,
+                        showTagViolence: true,
+                        showTagGore: true,
+                        showTagDeath: true
+                    }
+                }));
+            }
+            // If they click "No", we keep defaults (only sensitive allowed)
+            // No action needed as that's already the default
+
+            // Force refresh the feed to apply the new settings
+            try {
+                forceHardRefreshRef.current = true;
+                setIsLoading(true);
+                setCurrentPage(1);
+                setHasMorePosts(false);
+                setStableOrder([]);
+                getPosts(urlTopic);
+            } catch (_) { /* noop */ }
+        } catch (_) { /* noop */ }
+    }, [getPosts, urlTopic]);
+
+    // Listen for content tag settings changes - must be after getPosts is defined
+    useEffect(() => {
+        const handler = (e) => {
+            const detail = e?.detail || {};
+            const tagKeys = ['showTagSensitive', 'showTagPorn', 'showTagViolence', 'showTagGore', 'showTagDeath'];
+            const hasTagChange = tagKeys.some(key => Object.prototype.hasOwnProperty.call(detail, key));
+            if (hasTagChange) {
+                // Force refresh the home feed to apply new tag filters
+                try {
+                    forceHardRefreshRef.current = true;
+                    setIsLoading(true);
+                    setCurrentPage(1);
+                    setHasMorePosts(false);
+                    setStableOrder([]);
+                    getPosts(urlTopic, null, 1);
+                    getPosts(urlTopic, null, 1);
+                } catch (_) { /* noop */ }
+            }
+        };
+        window.addEventListener('settingsUpdated', handler);
+        return () => window.removeEventListener('settingsUpdated', handler);
+    }, [getPosts, urlTopic]);
+
+    // Listen for new post creation events (must be after getPosts is defined)
+    useEffect(() => {
+        const handler = (e) => {
+            const detail = e?.detail || {};
+            const pid = String(detail?.postId || '').toLowerCase();
+            if (!pid) return;
+            try {
+                const viewer = String(Storage.load("publicKey", "") || '').trim().toLowerCase();
+                const topic = String(detail?.topic || '').trim();
+                const title = String(detail?.title || '').trim();
+                const content = String(detail?.content || '');
+                const tag = String(detail?.tag || '').trim().toLowerCase();
+                const thumbnail = String(detail?.thumbnail || '').trim();
+                if (viewer && viewer !== 'guest' && topic && title) {
+                    const nowSec = Math.floor(Date.now() / 1000);
+                    const optimistic = {
+                        post_id: pid,
+                        author: viewer,
+                        user_id: viewer,
+                        username: "",
+                        timestamp: nowSec,
+                        topic,
+                        title,
+                        content,
+                        tag,
+                        thumbnail: thumbnail || "",
+                        direction: 1,
+                        user_vote: 1,
+                        points: 1,
+                        comments: 0,
+                        deleted: false,
+                    };
+                    optimisticPostIdsRef.current.set(pid, Date.now());
+                    setPosts({ [pid]: optimistic }, Date.now());
+                    setStableOrder((prev) => [pid, ...prev.filter((id) => id !== pid)]);
+                }
+            } catch (_) { /* noop */ }
+            setFlashingPostsSet((prev) => {
+                if (prev.has(pid)) return prev;
+                const next = new Set(prev);
+                next.add(pid);
+                return next;
+            });
+            // If we're on home, immediately refetch page 1 in the current mode and pin the fresh post
+            if ((currentTopicRef.current === 'home') || (urlTopic === 'home')) {
+                try { forceHardRefreshRef.current = true; } catch (_) { }
+                setCurrentPage(1);
+                setHasMorePosts(false);
+                setIsLoadingMore(false);
+                try { loadMoreLockRef.current = false; } catch (_) { }
+                getPosts('home', homeChrono, 1, true);
+            }
+        };
+        window.addEventListener('postCreated', handler);
+        return () => window.removeEventListener('postCreated', handler);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [getPosts, urlTopic, homeChrono]);
+
+    // Reset page and loading state when topic changes
+    // Skip reset on back navigation (we want to restore cached state)
+    useEffect(() => {
+        // On back navigation, don't reset - state was already restored from cache
+        if (isBackNavigation || restoreFeedIntentRef.current === true) {
+            return;
+        }
+
+        setCurrentPage(1);
+        setHasMorePosts(false);
+        setIsLoading(true); // Show loading immediately when navigating
+    }, [urlTopic, viewerAddress, homeChrono, hideDownvotedPosts, isBackNavigation]);
+
+    // Infinite scroll: observe a sentinel near the bottom (also clickable fallback)
+    const bottomSentinelRef = useRef(null);
+    const loadMoreLockRef = useRef(false);
+    const loadMore = useCallback(() => {
+        if (!hasMorePosts || isLoadingMore || isLoading) return;
+        if (loadMoreLockRef.current) return;
+        loadMoreLockRef.current = true;
+        setIsLoadingMore(true);
+        setCurrentPage((prev) => prev + 1);
+    }, [hasMorePosts, isLoadingMore, isLoading]);
+
+    // IntersectionObserver for infinite scroll
+    useEffect(() => {
+        const el = bottomSentinelRef.current;
+        if (!el) return;
+        if (!hasMorePosts || isLoadingMore || isLoading) return;
+
+        // Check if sentinel is already in viewport (handles case where content is short)
+        const rect = el.getBoundingClientRect();
+        const isAlreadyVisible = rect.top < window.innerHeight + 800;
+        if (isAlreadyVisible) {
+            loadMore();
+            return;
+        }
+
+        // Trigger loading when ~3 cards away from bottom (800px margin)
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const entry = entries[0];
+                if (entry && entry.isIntersecting) {
+                    loadMore();
+                }
+            },
+            {
+                root: null,
+                rootMargin: '800px 0px',
+                threshold: 0
+            }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, [hasMorePosts, isLoadingMore, isLoading, stableOrder.length, loadMore]);
+
+    // Backup scroll listener for browsers where IntersectionObserver may not fire reliably
+    useEffect(() => {
+        if (!hasMorePosts || isLoadingMore || isLoading) return;
+
+        let ticking = false;
+        const handleScroll = () => {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(() => {
+                ticking = false;
+                if (!hasMorePosts || isLoadingMore || isLoading || loadMoreLockRef.current) return;
+                const el = bottomSentinelRef.current;
+                if (!el) return;
+                const rect = el.getBoundingClientRect();
+                // Trigger when sentinel is within 800px of viewport bottom
+                if (rect.top < window.innerHeight + 800) {
+                    loadMore();
+                }
+            });
+        };
+
+        window.addEventListener('scroll', handleScroll, { passive: true });
+        return () => window.removeEventListener('scroll', handleScroll);
+    }, [hasMorePosts, isLoadingMore, isLoading, loadMore]);
+
+    // Trigger fetch when page increments (pagination)
+    useEffect(() => {
+        if (currentPage > 1 && hasMorePosts) {
+            getPosts(urlTopic);
+        } else if (currentPage > 1 && !hasMorePosts) {
+            setIsLoadingMore(false);
+            try { loadMoreLockRef.current = false; } catch (_) { }
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [currentPage, urlTopic, hasMorePosts]);
+
+    useEffect(() => {
+        const storedTopicsData = Storage.load("topics", { topics: [], lastFetched: null });
+        const stored = Array.isArray(storedTopicsData.topics) ? storedTopicsData.topics : [];
+        const lastFetched = storedTopicsData.lastFetched ? new Date(storedTopicsData.lastFetched) : null;
+
+        const shouldFetch = stored.length === 0 || !lastFetched || (Date.now() - lastFetched.getTime()) > 24 * 60 * 60 * 1000;
+
+        if (shouldFetch && !topicsLoadedRef.current) {
+            topicsLoadedRef.current = true;
+            let cancelled = false;
+            Api.get('get_topics', { limit: 50 }, { timeoutMs: 10000 })
+                .then((data) => {
+                    if (cancelled || !isMountedRef.current) return;
+                    if (data && Array.isArray(data.topics)) {
+                        const topicsWithCounts = data.topics
+                            .filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '')
+                            .map(t => ({ topic: t.topic, count: t.post_count || t.count || 0 }));
+                        const topicNames = topicsWithCounts.map(t => t.topic);
+                        const topicsWithAll = ['all', ...topicNames];
+                        Storage.save("topics", { topics: topicsWithAll, topicsWithCounts: topicsWithCounts, lastFetched: new Date().toISOString() });
+                        setTopics(topicsWithAll);
+                    }
+                })
+                .catch((error) => {
+                    if (cancelled || !isMountedRef.current) return;
+                    topicsLoadedRef.current = false;
+                });
+            return () => {
+                cancelled = true;
+            };
+        } else if (stored.length > 0) {
+            setTopics(stored);
+        }
+    }, []);
+
+    useEffect(() => {
+        window.getPosts = getPosts;  // Expose getPosts globally
+        // Do not clear stableOrder here; keep rendering previous topic until new data arrives
+        let cancelled = false;
+
+        // Only skip fetch on back/restore when we have cached data.
+        // On direct navigation (clicking links), always fetch fresh.
+        const shouldRestore = isBackNavigation || restoreFeedIntentRef.current === true;
+        if (shouldRestore) {
+            let shouldSkipFetch = false;
+            try {
+                const order = readSavedOrder(urlTopic);
+                // We have cached order AND we have posts in state for these IDs
+                if (order && order.length > 0 && state.posts && Object.keys(state.posts).length > 0) {
+                    const hasPostsForOrder = order.some(id => state.posts[id]);
+                    if (hasPostsForOrder) shouldSkipFetch = true;
+                }
+            } catch (_) { }
+
+            if (shouldSkipFetch) {
+                // Back navigation with cached data - don't fetch
+                return;
+            }
+        }
+
+        const timeoutId = setTimeout(() => {
+            if (cancelled || !isMountedRef.current) return;
+            try {
+                // Always use the urlTopic from the route - don't let preferred_topic override it
+                // This ensures that refreshing preserves the current route
+                getPosts(urlTopic);
+            } catch (_) {
+                if (!cancelled && isMountedRef.current) {
+                    getPosts(urlTopic);
+                }
+            }
+        }, 50);
+        return () => {
+            cancelled = true;
+            clearTimeout(timeoutId);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [urlTopic, location.pathname]);
+
+    // Refetch when homeChrono changes (magic/newest toggle)
+    const prevHomeChronoRef = useRef(homeChrono);
+    useEffect(() => {
+        // Only trigger if homeChrono actually changed (not on mount)
+        if (prevHomeChronoRef.current === homeChrono) return;
+        prevHomeChronoRef.current = homeChrono;
+
+        // Only refetch for home/following feeds
+        const isHomeFeed = urlTopic === 'home';
+        const isFollowingFeed = urlTopic === 'following';
+        if (!isHomeFeed && !isFollowingFeed) return;
+
+        forceHardRefreshRef.current = true;
+        setCurrentPage(1);
+        setHasMorePosts(false);
+        setStableOrder([]);
+        setIsLoading(true);
+        getPosts(urlTopic, null, 1);
+    }, [homeChrono, urlTopic, getPosts]);
+
+    useEffect(() => {
+        const storedTopicsData = Storage.load("topics", { topics: [], lastFetched: null });
+        const stored = Array.isArray(storedTopicsData.topics) ? storedTopicsData.topics : [];
+
+        // If not viewing "all", preserve known topics from storage (do not drop).
+        if (urlTopic !== "all") {
+            if (stored.length > 0) {
+                setTopics(stored);
+            } else {
+                const fallback = ["all", ...(urlTopic ? [urlTopic] : [])];
+                setTopics(fallback);
+            }
+            return;
+        }
+
+        // When viewing "all", just use stored topics (no merging)
+        if (stored.length > 0) {
+            setTopics(stored);
+        }
+    }, [urlTopic]);
+
+    // Recompute stable order only when needed; skip if already set by latest fetch
+    useEffect(() => {
+        if (stableOrder.length > 0) return;
+        const postsArray = Object.values(state.posts || {});
+        const isTopLevelPost = (p) => {
+            if (!p) return false;
+            const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
+            const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
+            const topicVal = String(p.topic || '').trim().toLowerCase();
+            const isReserved = ['all', 'home', 'following'].includes(topicVal);
+            return hasTitle && hasTopic && !isReserved;
+        };
+        const topLevelPosts = postsArray.filter(isTopLevelPost);
+        const filtered = (urlTopic === "all" || urlTopic === "home" || urlTopic === "following")
+            ? topLevelPosts
+            : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
+        const sortedOnce = (urlTopic === "home" || urlTopic === "following")
+            ? filtered
+            : sortPosts(filtered, sortBy);
+        setStableOrder(sortedOnce.map(p => p.post_id));
+    }, [state.lastFetched, urlTopic, sortBy, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet]);
+
+    // Measure time from posts set to first render of list
+    useEffect(() => {
+        if (!state.lastFetched) return;
+        if (afterSetPostsRef.current) {
+            afterSetPostsRef.current = 0;
+        }
+    }, [state.lastFetched]);
+
+    // Cleanup on unmount
+    useEffect(() => {
+        isMountedRef.current = true;
+        return () => {
+            isMountedRef.current = false;
+        };
+    }, []);
+
+    // Save feed state to sessionStorage when values change (for back button restoration)
+    // Each topic gets its own cache keys so we can restore any feed independently
+    useEffect(() => {
+        try {
+            const orderKey = getFeedKey(urlTopic, 'order');
+            if (stableOrder.length > 0) sessionStorage.setItem(orderKey, JSON.stringify(stableOrder));
+            else sessionStorage.removeItem(orderKey);
+            sessionStorage.setItem(getFeedKey(urlTopic, 'page'), String(currentPage));
+            sessionStorage.setItem(getFeedKey(urlTopic, 'hasmore'), String(hasMorePosts));
+        } catch (_) { }
+    }, [urlTopic, stableOrder, currentPage, hasMorePosts]);
+
+    // Save scroll position before navigating away (keyed by current topic)
+    useEffect(() => {
+        const saveScrollPosition = () => {
+            try {
+                sessionStorage.setItem(getFeedKey(urlTopic, 'scroll'), String(window.scrollY || 0));
+            } catch (_) { }
+        };
+
+        // Save on any navigation (clicking links)
+        const handleClick = (e) => {
+            // Check if it's a link click that will navigate
+            const link = e.target.closest('a');
+            // eslint-disable-next-line no-script-url
+            if (link && link.href && !link.href.startsWith('javascript:')) {
+                saveScrollPosition();
+                // Mark that we navigated to view_post from the feed
+                // This enables browser back button to restore feed position
+                try {
+                    const url = new URL(link.href, window.location.origin);
+                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post')) {
+                        sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
+                            source: 'feed',
+                            topic: urlTopic,
+                            at: Date.now(),
+                        }));
+                        sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({
+                            topic: urlTopic,
+                            at: Date.now(),
+                        }));
+                    }
+                } catch (_) { }
+            }
+        };
+
+        // Also save before unload
+        window.addEventListener('click', handleClick, true);
+        window.addEventListener('beforeunload', saveScrollPosition);
+
+        return () => {
+            window.removeEventListener('click', handleClick, true);
+            window.removeEventListener('beforeunload', saveScrollPosition);
+        };
+    }, [urlTopic]);
+
+    // Track if scroll has been restored to prevent multiple restorations
+    const scrollRestoredRef = useRef(false);
+    // Store whether we should restore scroll (computed once on mount)
+    const shouldRestoreScrollRef = useRef(shouldRestoreScroll(navigationType) || restoreFeedIntentRef.current === true || cameFromViewPostRef.current === true);
+
+    // Restore scroll position on back navigation or page refresh
+    // Runs when stableOrder is populated (posts are ready to render)
+    useEffect(() => {
+        // Only restore scroll on POP navigation (back button or refresh)
+        if (!shouldRestoreScrollRef.current) return;
+        // Only restore once
+        if (scrollRestoredRef.current) return;
+        // Wait for posts to be loaded
+        if (stableOrder.length === 0) return;
+
+        try {
+            const savedScroll = sessionStorage.getItem(getFeedKey(urlTopic, 'scroll'));
+            if (savedScroll) {
+                const scrollY = parseInt(savedScroll, 10);
+                if (scrollY > 0) {
+                    scrollRestoredRef.current = true;
+                    // Use multiple requestAnimationFrames to ensure DOM is fully rendered
+                    // This gives React time to commit all the post cards to the DOM
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                window.scrollTo(0, scrollY);
+                            });
+                        });
+                    });
+                }
+            }
+        } catch (_) { }
+    }, [urlTopic, stableOrder.length]);
+
+    // Listen for global hard refresh requests (from header)
+    useEffect(() => {
+        const handler = () => {
+            try {
+                forceHardRefreshRef.current = true;
+                setIsLoading(true);
+                setIsLoadingMore(false);
+                try { loadMoreLockRef.current = false; } catch (_) { }
+                setHasMorePosts(false);
+                setCurrentPage(1);
+                setStableOrder([]);
+                // Refresh current visible topic
+                getPosts(urlTopic, null, 1);
+            } catch (_) { /* noop */ }
+        };
+        window.addEventListener('mirageRefreshFeed', handler);
+        return () => window.removeEventListener('mirageRefreshFeed', handler);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [getPosts, urlTopic]);
+
+    if (error) {
+        return <StyledError>{error}</StyledError>;
+    }
+
+    // When viewing a single post with comments, header should show topic > title
+    const isPostView = location.pathname.startsWith('/view_post');
+    let header = null;
+    if (isPostView) {
+        const params = new URLSearchParams(location.search);
+        const pid = params.get('post_id');
+        const p = pid ? state.posts[pid] : null;
+        if (p) {
+            const topicKey = String(p.topic || '').trim().toLowerCase();
+            const isTopicFollowing = topicKey && (followedTopicsSet.has(topicKey) || isSubscribed(viewerAddress || 'guest', p.topic));
+            const isTopicInProgress = isTopicPending(topicKey);
+
+            header = (
+                <PostHeaderCard role="region" aria-label="Post context">
+                    <PostHeaderText>
+                        Posted in{' '}
+                        <TopicLinkInHeader
+                            to={`/t/${p.topic}`}
+                            title={`View #${p.topic}`}
+                        >
+                            #{p.topic}
+                        </TopicLinkInHeader>{' '}
+                        (
+                        <HeaderInlineLink
+                            href="#"
+                            onClick={async (e) => {
+                                e.preventDefault();
+                                const key = topicKey;
+                                if (!key) return;
+                                if (isTopicPending(key)) return;
+                                try {
+                                    const isCurrentlyFollowing = key && (followedTopicsSet.has(key) || isSubscribed(viewerAddress || 'guest', p.topic));
+                                    if (isCurrentlyFollowing) {
+                                        await unsubscribe(viewerAddress || 'guest', p.topic);
+                                        setFollowedTopicsSet(prev => {
+                                            const next = new Set(prev);
+                                            next.delete(key);
+                                            return next;
+                                        });
+                                    } else {
+                                        await subscribe(viewerAddress || 'guest', p.topic);
+                                        setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                    }
+                                    invalidateTopicsCache();
+                                    setStableOrder((s) => s.slice());
+                                } catch (_) { /* noop */ }
+                            }}
+                        >
+                            {isTopicInProgress ? formatTopicStatus(topicKey) : (isTopicFollowing ? 'unfollow' : 'follow')}
+                        </HeaderInlineLink>
+                        )
+                    </PostHeaderText>
+                    <PostHeaderTitle>{p.title}</PostHeaderTitle>
+                </PostHeaderCard>
+            );
+        }
+    }
+
+    const showPosts = () => {
+        // Compute display state
+        const displayTopic = currentTopicRef.current || urlTopic;
+        const routeTopicLower = urlTopic ? String(urlTopic).toLowerCase() : '';
+        const topicKeyLower = routeTopicLower || (displayTopic ? String(displayTopic).toLowerCase() : '');
+        const isCurrentTopic = routeTopicLower && routeTopicLower !== 'home' && routeTopicLower !== 'all' && routeTopicLower !== 'following';
+        const isTopicFollowing = isCurrentTopic && (followedTopicsSet.has(routeTopicLower) || isSubscribed(viewerAddress || 'guest', urlTopic));
+        const isTopicInProgress = isCurrentTopic && isTopicPending(routeTopicLower);
+
+        // Determine what content to show
+        let showEmptyHome = false;
+        let showNoPostsAvailable = false;
+        let showLoadingPosts = false;
+        let orderedPosts = [];
+
+        // Show loading when switching to a different topic
+        const isTopicSwitching = isLoading && displayTopic !== urlTopic;
+        // Force loading overlay even when posts exist (e.g., mode toggle / hard refresh)
+        const isHardRefreshLoading = isLoading && forceHardRefreshRef.current;
+
+        // Check loading states
+        if (isHardRefreshLoading) {
+            showLoadingPosts = true;
+        } else if (isTopicSwitching) {
+            // Switching topics - show loading immediately
+            showLoadingPosts = true;
+        } else if (!state.posts || Object.keys(state.posts).length === 0) {
+            if (isLoading) {
+                showLoadingPosts = true;
+            } else if (displayTopic === 'home') {
+                showEmptyHome = true;
+            } else {
+                showNoPostsAvailable = true;
+            }
+        } else if (isLoading && stableOrder.length === 0) {
+            showLoadingPosts = true;
+        } else {
+            // Convert the posts object to an array once
+            const postsArray = Object.values(state.posts || {});
+
+            // Only include top-level posts (exclude comments or partial objects, and deleted posts)
+            const isTopLevelPost = (p) => {
+                if (!p || p.deleted) return false;
+                const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
+                const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
+                const topicVal = String(p.topic || '').trim().toLowerCase();
+                const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                return hasTitle && hasTopic && !isReserved;
+            };
+            const topLevelPosts = postsArray.filter(isTopLevelPost);
+
+            const filteredPosts = (displayTopic === "all" || displayTopic === "home" || displayTopic === "following")
+                ? topLevelPosts
+                : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(displayTopic || '').toLowerCase());
+
+            if (filteredPosts.length === 0 && !isLoading) {
+                if (displayTopic === 'home') {
+                    showEmptyHome = true;
+                } else {
+                    showNoPostsAvailable = true;
+                }
+            } else {
+                // Build a stable ordered list of posts
+                const postsById = {};
+                for (const p of filteredPosts) {
+                    if (p && p.post_id && !p.deleted) {
+                        postsById[p.post_id] = p;
+                    }
+                }
+
+                if (stableOrder.length > 0) {
+                    orderedPosts = stableOrder
+                        .map((id) => postsById[id])
+                        .filter(Boolean);
+                } else {
+                    orderedPosts = filteredPosts.filter((p) => p && !p.deleted);
+                }
+
+                // Hide posts the viewer downvoted (Home only, client-side)
+                if (displayTopic === 'home' && hideDownvotedPosts) {
+                    const ownVotes = Storage.load('votes', {});
+                    orderedPosts = orderedPosts.filter((p) => {
+                        const postKey = String(p?.post_id || '').toLowerCase();
+                        // If post is animating out, keep it in the list for now
+                        if (hidingPostsSet.has(postKey)) return true;
+                        // Check hiddenDownvotedSet (animation completed)
+                        if (hiddenDownvotedSet.has(postKey)) return false;
+                        // Check local storage (for previous session downvotes)
+                        const storedVote = ownVotes[postKey];
+                        if (typeof storedVote === 'number' && storedVote < 0) return false;
+                        return true;
+                    });
+                }
+            }
+        }
+
+        // Final client-side pinning: softly prioritize your posts on home with 60-minute decay
+        if (urlTopic === 'home' && orderedPosts.length > 0) {
+            const viewerAddressLower = String(viewerAddress || '').toLowerCase();
+            if (viewerAddressLower && viewerAddressLower !== 'guest') {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const MAX_AGE_SEC = 60 * 60;
+                const decayMap = new Map();
+                const pinned = [];
+                const rest = [];
+                for (const p of orderedPosts) {
+                    const author = String(p?.author || p?.user_id || '').toLowerCase();
+                    let ts = Number(p?.timestamp || 0);
+                    if (ts > 1e12) ts = Math.floor(ts / 1000);
+                    const age = nowSec - ts;
+                    const decay = 1 - Math.min(Math.max(age, 0), MAX_AGE_SEC) / MAX_AGE_SEC;
+                    decayMap.set(p.post_id, decay);
+                    if (author === viewerAddressLower && decay > 0) {
+                        pinned.push(p);
+                    } else {
+                        rest.push(p);
+                    }
+                }
+                pinned.sort((a, b) => {
+                    const da = decayMap.get(a.post_id) ?? 0;
+                    const db = decayMap.get(b.post_id) ?? 0;
+                    if (db !== da) return db - da;
+                    const ta = Number(a?.timestamp || 0);
+                    const tb = Number(b?.timestamp || 0);
+                    return tb - ta;
+                });
+                orderedPosts = [...pinned, ...rest];
+            }
+        }
+
+        // Always render the full layout with sidebar and header
+        const pageTitle = urlTopic === 'home' ? 'Home'
+            : urlTopic === 'following' ? 'Following'
+                : urlTopic === 'all' ? 'All Posts'
+                    : `#${urlTopic}`;
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>{pageTitle} | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    {header}
+                    <TopBar state={state} />
+
+                    <ModernPostFeed>
+                        <MobileHeader />
+
+                        {isCurrentTopic && (
+                            <TopicHeroCard>
+                                <TopicHeroHeader>
+                                    <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
+                                    <Button
+                                        variant={
+                                            isTopicFollowing && topicFollowHover
+                                                ? 'primaryDanger'
+                                                : isTopicFollowing
+                                                    ? 'subtle'
+                                                    : 'primary'
+                                        }
+                                        size="pill"
+                                        minWidth="follow"
+                                        onMouseEnter={() => setTopicFollowHover(true)}
+                                        onMouseLeave={() => setTopicFollowHover(false)}
+                                        disabled={isTopicInProgress}
+                                        onClick={async () => {
+                                            const topicName = urlTopic;
+                                            if (!topicName) return;
+                                            const key = topicKeyLower;
+                                            if (!key) return;
+                                            if (isTopicPending(key)) return;
+                                            try {
+                                                if (isTopicFollowing) {
+                                                    await unsubscribe(viewerAddress || 'guest', topicName);
+                                                    setFollowedTopicsSet(prev => {
+                                                        const next = new Set(prev);
+                                                        next.delete(key);
+                                                        return next;
+                                                    });
+                                                } else {
+                                                    await subscribe(viewerAddress || 'guest', topicName);
+                                                    setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                                }
+                                                invalidateTopicsCache();
+                                            } catch (_) { /* noop */ }
+                                        }}
+                                    >
+                                        {isTopicInProgress
+                                            ? formatTopicStatus(topicKeyLower)
+                                            : isTopicFollowing
+                                                ? (topicFollowHover ? 'Unfollow' : 'Following')
+                                                : 'Follow'}
+                                    </Button>
+                                </TopicHeroHeader>
+                                <TopicHeroDescription>
+                                    Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
+                                </TopicHeroDescription>
+                            </TopicHeroCard>
+                        )}
+
+                        {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
+                        {isLoggedIn && urlTopic === 'home' && showNsfwHero && (
+                            <NsfwWelcomeHero role="region" aria-label="Content preferences">
+                                <NsfwHeroTitle>
+                                    <NsfwHeroEmoji>🔞</NsfwHeroEmoji> Allow Adult Content?
+                                </NsfwHeroTitle>
+                                <NsfwHeroDescription>
+                                    Mirage is uncensored and includes adult content like <strong>pornography</strong>, <strong>violence</strong>, and other NSFW material. Would you like to see this content in your feed?
+                                </NsfwHeroDescription>
+                                <NsfwHeroButtons>
+                                    <NsfwHeroButton $variant="yes" onClick={() => handleNsfwChoice(true)}>
+                                        Yes, show everything
+                                    </NsfwHeroButton>
+                                    <NsfwHeroButton $variant="no" onClick={() => handleNsfwChoice(false)}>
+                                        No, keep it clean
+                                    </NsfwHeroButton>
+                                </NsfwHeroButtons>
+                                <NsfwHeroNote>
+                                    You can change this anytime in <Link to="/settings" style={{ color: 'inherit', textDecoration: 'underline' }}>Settings</Link>.
+                                </NsfwHeroNote>
+                            </NsfwWelcomeHero>
+                        )}
+
+                        {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
+                        {isLoggedIn && urlTopic === 'home' && !showNsfwHero && (
+                            <HomeFeedInfoCard role="region" aria-label="Home feed information">
+                                <HomeFeedHeaderRow>
+                                    <HomeFeedInfoTitle>
+                                        <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
+                                    </HomeFeedInfoTitle>
+                                    <HomeFeedModeInline>
+                                        <HomeFeedModeSelect
+                                            value={homeChrono ? 'newest' : 'magic'}
+                                            onChange={(e) => {
+                                                const nextChrono = e.target.value === 'newest';
+                                                setHomeChrono(nextChrono);
+                                                Storage.save('home_sort_mode', nextChrono ? 'newest' : 'magic');
+                                            }}
+                                        >
+                                            <option value="magic">Magic</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                    </HomeFeedModeInline>
+                                </HomeFeedHeaderRow>
+                                <HomeFeedInfoDescription>
+                                    Your followed topics plus fresh content to discover. <strong>The more you vote, the more your feed reflects your preferences.</strong>
+                                </HomeFeedInfoDescription>
+                            </HomeFeedInfoCard>
+                        )}
+
+                        {/* Following feed info card - permanent for logged-in users */}
+                        {isLoggedIn && urlTopic === 'following' && (
+                            <HomeFeedInfoCard role="region" aria-label="Following feed information">
+                                <HomeFeedHeaderRow>
+                                    <HomeFeedInfoTitle>
+                                        <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
+                                    </HomeFeedInfoTitle>
+                                    <HomeFeedModeInline>
+                                        <HomeFeedModeSelect
+                                            value={homeChrono ? 'newest' : 'magic'}
+                                            onChange={(e) => {
+                                                const nextChrono = e.target.value === 'newest';
+                                                setHomeChrono(nextChrono);
+                                                Storage.save('home_sort_mode', nextChrono ? 'newest' : 'magic');
+                                            }}
+                                        >
+                                            <option value="magic">Magic</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                    </HomeFeedModeInline>
+                                </HomeFeedHeaderRow>
+                                <HomeFeedInfoDescription>
+                                    <strong>Only posts from topics and people you follow.</strong> A focused view of your communities without discovery content.
+                                </HomeFeedInfoDescription>
+                            </HomeFeedInfoCard>
+                        )}
+
+                        {/* Loading state */}
+                        {showLoadingPosts && (
+                            <LoadingCard>
+                                <LoadingSpinner />
+                                <LoadingText>Loading posts...</LoadingText>
+                            </LoadingCard>
+                        )}
+
+                        {/* Empty home feed */}
+                        {showEmptyHome && <EmptyHomeMessage />}
+
+                        {/* No posts available */}
+                        {showNoPostsAvailable && (
+                            <LoadingCard>
+                                <LoadingText>No posts available</LoadingText>
+                            </LoadingCard>
+                        )}
+
+                        {/* Welcome card - only for guests (not logged in) */}
+                        {!showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && !isLoggedIn && (urlTopic === 'all' && showWelcomeCard) && (
+                            <WelcomeCard role="region" aria-label="Welcome">
+                                <WelcomeDescription>
+                                    What is Mirage you ask? Well, Mirage is what old Reddit could have been if it never sold out. It has the same simple, community-first design that lets you browse, post, comment, and vote without the noise of algorithms. The difference is that Mirage is built so that no one person, company, or government can control it or force their rules on you.
+                                </WelcomeDescription>
+                                <WelcomeFooter>
+                                    <WelcomeText href="https://mirage.foundation/" target="_blank" rel="noopener noreferrer" onClick={dismissWelcomeCard}>
+                                        Welcome to Mirage! Click here to learn more.
+                                    </WelcomeText>
+                                    <Button variant="warning" size="sm" onClick={dismissWelcomeCard} aria-label="Close welcome" mobileFullWidth>
+                                        Dismiss
+                                    </Button>
+                                </WelcomeFooter>
+                            </WelcomeCard>
+                        )}
+
+                        {/* Posts grid */}
+                        {!showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (
+                            <PostGrid>
+                                {orderedPosts.map((post, index) => {
+                                    // Skip posts that would render as empty (no title/topic)
+                                    const hasValidTitle = post && typeof post.title === 'string' && post.title.trim().length > 0;
+                                    const hasValidTopic = post && typeof post.topic === 'string' && post.topic.trim().length > 0;
+                                    if (!hasValidTitle || !hasValidTopic || post.deleted) return null;
+
+                                    const postKey = String(post?.post_id || '').toLowerCase();
+                                    const isHiding = hidingPostsSet.has(postKey);
+                                    // Flash if in flashingPostsSet OR if it's a very recent post by the viewer (< 30 sec)
+                                    // Don't flash if hiding
+                                    const isViewerPost = String(post?.author || '').toLowerCase() === viewerAddress.toLowerCase();
+                                    let postTs = Number(post?.timestamp || 0);
+                                    if (postTs > 1e12) postTs = Math.floor(postTs / 1000);
+                                    const isVeryRecent = Number.isFinite(postTs) && (Math.floor(Date.now() / 1000) - postTs) <= 30;
+                                    const isFlashing = !isHiding && (flashingPostsSet.has(postKey) || (isViewerPost && isVeryRecent));
+                                    // Only stagger animation for first ~5 posts (avoid long delays on pagination)
+                                    const animDelay = isHiding ? 0 : Math.min(index * 50, 250);
+                                    return (
+                                        <AnimatedCard
+                                            key={post.post_id}
+                                            $hiding={isHiding}
+                                            $flash={isFlashing}
+                                            style={{
+                                                animationDelay: `${animDelay}ms`,
+                                                zIndex: 1000 - index,
+                                                position: 'relative'
+                                            }}
+                                        >
+                                            <CardView
+                                                state={state}
+                                                post={post}
+                                                updatePost={updatePost}
+                                            />
+                                        </AnimatedCard>
+                                    );
+                                })}
+                            </PostGrid>
+                        )}
+
+                        {isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
+                            <LoadingMoreIndicator>Loading more content...</LoadingMoreIndicator>
+                        )}
+                        <button
+                            ref={bottomSentinelRef}
+                            type="button"
+                            onClick={loadMore}
+                            aria-label="Load more"
+                            tabIndex={-1}
+                            style={{
+                                width: '100%',
+                                height: '32px',
+                                minHeight: '32px',
+                                border: 'none',
+                                padding: 0,
+                                margin: 0,
+                                background: 'transparent',
+                                opacity: 0,
+                                cursor: 'default',
+                            }}
+                        >
+                            Load more
+                        </button>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    };
+
+    return showPosts();
+};
+
+export default MainView;

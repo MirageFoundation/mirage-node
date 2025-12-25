@@ -1,0 +1,59 @@
+syntax = "proto3";
+package mirage.core.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "mirage/core/v1/params.proto";
+
+option go_package = "mirage/x/core/types";
+
+// ProfileCore contains the core scalar fields for a user profile.
+// This is the canonical definition used both at genesis and runtime.
+message ProfileCore {
+  string owner = 1;
+  string username = 2;
+  int32 level = 3;
+  int64 created_at = 4;
+  int64 subscription_expiry = 5;
+  bool auto_renew = 6;
+  uint64 reserve_funds = 7;
+  bool is_moderator = 8;
+  string biography = 9;
+  string avatar = 10;
+  string banner = 11;
+}
+
+// InitialProfile is used in genesis to bootstrap profiles.
+// It wraps ProfileCore and includes all list fields (stored separately at runtime).
+message InitialProfile {
+  ProfileCore core = 1;
+  repeated string followed_moderators = 2;
+  repeated string followed_users = 3;
+  repeated string followed_topics = 4;
+  repeated string blocked_users = 5;
+  repeated string blocked_posts = 6;
+  repeated string quality_posts = 7;
+}
+
+// RawKVPair stores a single key-value pair from the KV store for generic export/import.
+// Keys and values are base64-encoded bytes.
+message RawKVPair {
+  string key = 1;
+  string value = 2;
+}
+
+// GenesisState defines the core module's genesis state.
+message GenesisState {
+  // params defines all the parameters of the module.
+  Params params = 1 [
+    (gogoproto.nullable) = false,
+    (amino.dont_omitempty) = true
+  ];
+
+  // initial_profiles are profiles to create at genesis (used for bootstrap or backfill)
+  repeated InitialProfile initial_profiles = 2;
+
+  // raw_state contains ALL key-value pairs from the module's KV store.
+  // This is the preferred import method as it preserves complete state.
+  repeated RawKVPair raw_state = 3;
+}

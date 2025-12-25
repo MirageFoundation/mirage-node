@@ -1,0 +1,18 @@
+{
+    "messages": [
+        {
+            "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "plan": {
+                "name": "v1.6.0-personalized-feeds",
+                "height": "T+50",
+                "info": "Personalized Home/Following feeds, single-topic posts, reduced limits"
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "10000000umirage",
+    "title": "Upgrade: v1.6.0-personalized-feeds",
+    "summary": "v1.6 Personalized Feeds: Home feed with tier-weighted vote scores, Following feed for subscribed users/topics. Single topic per post (removes cross-posting), max_cross_posts removed from tiers, mint_interval 20->200 blocks (10 min), max_topic_size 50->35, max_username_size 40->30, content/title limits count Unicode characters.",
+    "expedited": true
+}

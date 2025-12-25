@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package mirage.core.v1;
+
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "google/api/annotations.proto";
+import "cosmos/base/query/v1beta1/pagination.proto";
+import "mirage/core/v1/params.proto";
+
+option go_package = "mirage/x/core/types";
+
+// Query defines the gRPC querier service.
+service Query {
+  // Parameters queries the parameters of the module.
+  rpc Params(QueryParamsRequest) returns (QueryParamsResponse) {
+    option (google.api.http).get = "/mirage/core/v1/params";
+  }
+
+  // Difficulty queries the current PoW difficulty state.
+  rpc Difficulty(QueryDifficultyRequest) returns (QueryDifficultyResponse) {
+    option (google.api.http).get = "/mirage/core/v1/difficulty";
+  }
+
+  // Profile queries a profile by address.
+  rpc Profile(QueryProfileRequest) returns (QueryProfileResponse) {
+    option (google.api.http).get = "/mirage/core/v1/profile/{address}";
+  }
+
+  // Profiles queries all profiles with pagination.
+  rpc Profiles(QueryProfilesRequest) returns (QueryProfilesResponse) {
+    option (google.api.http).get = "/mirage/core/v1/profiles";
+  }
+}
+
+// QueryParamsRequest is request type for the Query/Params RPC method.
+message QueryParamsRequest {}
+
+// QueryParamsResponse is response type for the Query/Params RPC method.
+message QueryParamsResponse {
+  // params holds all the parameters of this module.
+  Params params = 1 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
+}
+
+// QueryDifficultyRequest is request type for the Query/Difficulty RPC method.
+message QueryDifficultyRequest {}
+
+// QueryDifficultyResponse is response type for the Query/Difficulty RPC method.
+message QueryDifficultyResponse {
+  // current_difficulty is the current PoW difficulty (leading zero bits required)
+  uint64 current_difficulty = 1;
+  // previous_difficulty is the difficulty before the last change
+  uint64 previous_difficulty = 2;
+  // last_change_height is the block height when difficulty last changed
+  int64 last_change_height = 3;
+  // pow_message_count is the number of PoW messages in the current window
+  uint64 pow_message_count = 4;
+  // consecutive_low_usage is the count of consecutive calm periods
+  uint64 consecutive_low_usage = 5;
+  // latest_block_hash is the most recent committed block hash (hex, lowercase)
+  string latest_block_hash = 6;
+  // current_height is the current block height
+  int64 current_height = 7;
+}
+
+// QueryProfileRequest is the request type for the Query/Profile RPC method.
+message QueryProfileRequest {
+  string address = 1;
+}
+
+// QueryProfileResponse is the response type for the Query/Profile RPC method.
+message QueryProfileResponse {
+  string owner = 1;
+  string username = 2;
+  int32 level = 3;
+  int64 created_at = 4;
+  int64 subscription_expiry = 5;
+  bool auto_renew = 6;
+  uint64 reserve_funds = 7;
+  bool is_moderator = 8;
+  string biography = 9;
+  string avatar = 10;
+  string banner = 11;
+  
+  // Lists (stored separately but returned together for convenience)
+  repeated string followed_moderators = 12;
+  repeated string followed_users = 13;
+  repeated string followed_topics = 14;
+  repeated string blocked_users = 15;
+  repeated string blocked_posts = 16;
+  repeated string quality_posts = 17;
+}
+
+// QueryProfilesRequest is the request type for the Query/Profiles RPC method.
+message QueryProfilesRequest {
+  cosmos.base.query.v1beta1.PageRequest pagination = 1;
+}
+
+// QueryProfilesResponse is the response type for the Query/Profiles RPC method.
+message QueryProfilesResponse {
+  repeated QueryProfileResponse profiles = 1;
+  cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}

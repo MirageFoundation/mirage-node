@@ -1,0 +1,30 @@
+:80 {
+	encode zstd gzip
+
+	@api {
+		path /api/*
+	}
+	handle @api {
+		reverse_proxy 127.0.0.1:5000
+	}
+
+	# Chain RPC (CometBFT) - includes WebSocket at /rpc/websocket
+	handle /rpc/* {
+		uri strip_prefix /rpc
+		reverse_proxy 127.0.0.1:26657
+	}
+
+	# Chain REST/LCD (Cosmos SDK)
+	handle /lcd/* {
+		uri strip_prefix /lcd
+		reverse_proxy 127.0.0.1:1317
+	}
+
+	handle {
+	root * /opt/mirage/web/frontend/build
+	try_files {path} /index.html
+	file_server
+	}
+}
+
+

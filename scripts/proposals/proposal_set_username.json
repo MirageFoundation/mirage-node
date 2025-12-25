@@ -1,0 +1,15 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgSetUsername",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "target": "mirage16mrm3yzf7d4fnnlwtp3zxp6rusjzhw2pr9dwdr",
+            "username": "RedditMumbler"
+        }
+    ],
+    "metadata": "",
+    "deposit": "10000000umirage",
+    "title": "Set username for address",
+    "summary": "Set the username for address",
+    "expedited": true
+}
