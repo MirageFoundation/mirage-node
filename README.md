@@ -76,7 +76,7 @@ Mirage uses **PoW** so normal users can post immediately without paying, while b
 
 Here’s how Mirage compares at a high level (more detail + more platforms in `docs/comparison.md`):
 
-| Dimension | Mirage | Centralized | Federated | Social L1 | Social L2 |
+| Dimension | **Mirage** | Centralized | Federated | Social L1 | Social L2 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Decentralized?** | **✅ Fully** | ❌ No | ⚠️ Partial | ⚠️ Limited | ⚠️ Limited |
 | **Onboarding** | **✅ PoW** | ✅ Email | ✅ Email | ❌ Wallet | ❌ Fees |

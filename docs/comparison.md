@@ -144,7 +144,7 @@ The point of this table is the *trade‑offs people actually feel*.
 
 **Legend**: ✅ advantage, ⚠️ mixed, ❌ downside
 
-| Dimension | Mirage | Centralized | Federated | Relays | Social L1 | Social L2 |
+| Dimension | **Mirage** | Centralized | Federated | Relays | Social L1 | Social L2 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Decentralized?** | **✅ Fully** | ❌ No | ⚠️ Partial | ⚠️ Partial | ⚠️ Limited | ⚠️ Limited |
 | **Onboarding** | **✅ PoW** | ✅ Email | ✅ Email | ❌ Keys | ❌ Wallet | ❌ Fees |
