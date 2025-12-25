@@ -78,13 +78,11 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 
 | Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Decentralized?** | **Fully** | No | Partially (many servers, fragmented) | Limited (small producer set) |
-| **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Funded wallet required |
-| **Spam resistance** | **PoW at the edge** | Centralized anti-abuse | Admin/moderation + rate limits | Stake-based resources |
-| **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change frontend) |
-| **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Stake whales + producer set |
-| **Identity & graph** | **On-chain** | Site DB | Instance DB | On-chain |
-| **Content serving** | Node-indexed content | Site DB | Instance DB | Chain history + frontends |
+| **Decentralized?** | **Fully** | No | Partial | Limited |
+| **Onboarding** | **PoW** | Email | Email | Wallet |
+| **Anti-spam** | **PoW** | Admin | Admin | Stake |
+| **Switch nodes** | **Seamless** | No | Hard | Easy |
+| **Can delete you?** | No | Yes | Yes | Yes |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
