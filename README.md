@@ -82,7 +82,7 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 | **Onboarding** | **PoW** | Email | Email | Wallet |
 | **Anti-spam** | **PoW** | Admin | Admin | Stake |
 | **Switch nodes** | **Seamless** | No | Hard | Easy |
-| **Deplatform risk** | **No** | Yes | Yes | Yes |
+| **Can ban?** | **No** | Yes | Yes | Yes |
 | **Own identity** | **Yes** | No | Admin | Yes |
 | **Own graph** | **Yes** | No | Admin | Yes |
 | **Post record** | **Yes** | No | Mixed | Yes |
