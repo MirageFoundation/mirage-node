@@ -78,14 +78,14 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 
 | Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Decentralized?** | **Fully** | NO | Partial | Limited |
+| **Decentralized?** | **Fully** | No | Partial | Limited |
 | **Onboarding** | **PoW** | Email | Email | Wallet |
 | **Anti-spam** | **PoW** | Admin | Admin | Stake |
-| **Switch nodes** | **Seamless** | NO | Hard | Easy |
-| **Deplatform risk** | **NO** | YES | YES | YES |
-| **Own identity** | **YES** | NO | Admin | YES |
-| **Own graph** | **YES** | NO | Admin | YES |
-| **Post record** | **YES** | NO | Mixed | YES |
+| **Switch nodes** | **Seamless** | No | Hard | Easy |
+| **Deplatform risk** | **No** | Yes | Yes | Yes |
+| **Own identity** | **Yes** | No | Admin | Yes |
+| **Own graph** | **Yes** | No | Admin | Yes |
+| **Post record** | **Yes** | No | Mixed | Yes |
 | **Content hosting** | Nodes | Site | Instances | Frontends |
 | **Moderation** | Opt-in | Admin | Admin | Stake |
 
