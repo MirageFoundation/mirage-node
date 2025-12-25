@@ -18,11 +18,11 @@ Centralized platforms are broken. Admins deplatform communities overnight, and *
 
 Mirage fixes this by changing the architecture of internet discussion:
 
-- **No Authoritarian Moderation**: moderation is separated from content hosting. No moderator can ban you from the network or delete your posts from the blockchain.
-- **Node Choice**: if a node operator or their filters become tyrannical, you can simply switch to another node. Your history and social graph follow you seamlessly.
+- **No Authoritarian Moderation**: moderation is separated from content hosting. No moderator can delete your identity or social graph.
+- **Node Choice**: if a node operator or their filters become tyrannical, you can simply switch to another node. Your identity and social graph follow you seamlessly.
 - **Voluntary Filters**: moderation is opt-in. You choose which filters to apply and which curators to trust.
-- **Unfiltered Truth**: because the data lives on-chain, you can always run your own node to bypass all gatekeepers and see the raw reality of the network.
-- **No Global Censorship**: transactions propagate across the decentralized network. A single operator can refuse to serve content on their specific node, but they cannot remove it from existence.
+- **Unfiltered Truth**: because your identity and graph are not owned by any one website, you can always run your own node to bypass gatekeepers and see the raw reality of the network.
+- **No Global Censorship**: a single operator can refuse to serve content on their specific node, but they cannot erase your identity from the network.
 
 ---
 
@@ -33,7 +33,7 @@ Most decentralized apps are hard to use. Mirage is different.
 1. **Visit a Node**: Go to any public node (website) like [mirage.talk](https://mirage.talk). It looks and feels like a normal forum.
 2. **Create an Account**: No email or phone number required. Your browser generates a cryptographic key pair locally. This is your "account."
 3. **Start Posting**: When you post, vote, or reply, your browser signs the action and performs a lightweight **Proof-of-Work** calculation. This prevents spam without requiring you to pay transaction fees or hold tokens.
-4. **Permanent Record**: The node broadcasts your signed action to the blockchain. Once confirmed, it is permanent and replicated across the entire network.
+4. **Permanent Record**: The node broadcasts your signed action to the network. Once confirmed, its existence is permanent, and nodes can index and serve it.
 
 ---
 
@@ -42,7 +42,7 @@ Most decentralized apps are hard to use. Mirage is different.
 Nodes are the backbone of the network, and the protocol rewards them directly.
 
 - **Earn MIRAGE**: Node operators earn tokens simply for hosting a node, maintaining uptime, and strengthening the network's resilience.
-- **Unfiltered Truth**: View the raw data directly from the blockchain. Bypass other nodes' filters and see exactly what is happening on the network.
+- **Unfiltered Truth**: View the raw data directly from the chain and your node’s local index. Bypass other nodes' filters and see exactly what is happening on the network.
 - **Sovereignty**: Run a community on your own terms. Set your own rules, theme, and culture without answering to a central authority.
 - **Resilience**: Help secure the global ledger. The more nodes exist, the harder the network is to stop.
 
@@ -56,7 +56,7 @@ Nodes are the backbone of the network, and the protocol rewards them directly.
 - **Anonymous-by-Default**: Identities are cryptographic keys, not real-world profiles.
 
 ### Pro Tier (Token Powered)
-- **Custom Usernames**: Claim a unique handle wthout the `Anon-` prefix from the free tier.
+- **Custom Usernames**: Claim a unique handle without the `Anon-` prefix from the free tier.
 - **Priority Access**: Skip the Proof-of-Work and get guaranteed transaction inclusion.
 - **Moderation Tooling**: Create filters others can subscribe to.
 
@@ -68,18 +68,21 @@ Nodes are the backbone of the network, and the protocol rewards them directly.
 
 ## Mirage vs. The World
 
-How does Mirage compare to other decentralized platforms?
+Most “decentralized social” projects are forced to choose:
 
-| Feature | Mirage | Federated (Lemmy/Mastodon) | Relays (Nostr) | Social L1 (Steem/Hive) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Data Storage** | **On-Chain Identity** | Admin's Database | Specific Relay | On-Chain Identity |
-| **Censorship** | **Unstoppable** | Admin can ban/delete | Relay can ban | Whale downvotes |
-| **Decentralization** | **High (Open Set)** | Low (Federated) | Medium | Low (21 Nodes) |
-| **Onboarding** | **Very Easy (PoW)** | Easy (Email) | Complex (Keys+Relays) | Funded Wallet Required |
-| **Permanence** | **High** | Low (Server death) | Medium (Relay death) | High |
-| **Portability** | **Seamless** | Difficult (Migration) | Easy | Seamless |
-| **Cost to Post** | **PoW** | Free | Free (usually) | Staked Tokens |
-| **Moderation** | **Voluntary/Opt-in** | Authoritarian | Client-side | Stake-based |
+> If posting is free, bots will spam you. If posting costs money, onboarding dies.
+
+Mirage uses **PoW** so normal users can post immediately without paying, while bots can’t spam at scale without burning real compute.
+
+Here’s how Mirage compares to the main alternatives people actually use:
+
+| Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Relays (Nostr) | Social L1 (Steem/Hive) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Complex (keys + relay choices) | Funded wallet required |
+| **Spam resistance** | **PoW at the edge** | Centralized anti-abuse | Admin/moderation + rate limits | Often paid relays / filtering | Stake-based resources |
+| **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change relays) | Easy (change frontend) |
+| **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Relay operator can drop you | Stake whales + producer set |
+| **Identity & graph** | **On-chain** | Site DB | Instance DB | Keys (portable) | On-chain |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
