@@ -74,20 +74,27 @@ Most “decentralized social” projects are forced to choose:
 
 Mirage uses **PoW** so normal users can post immediately without paying, while bots can’t spam at scale without burning real compute.
 
-Here’s how Mirage compares to the main alternatives people actually use (we cover more, like Nostr and hybrid crypto social, in `docs/comparison.md`):
+Here’s how Mirage compares at a high level (more detail + more platforms in `docs/comparison.md`):
 
-| Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Decentralized?** | **Fully** | No | Partial | Limited |
-| **Onboarding** | **PoW** | Email | Email | Wallet |
-| **Anti-spam** | **PoW** | Admin | Admin | Stake |
-| **Switch nodes** | **Seamless** | No | Hard | Easy |
-| **Can ban?** | **No** | Yes | Yes | Yes |
-| **Own identity** | **Yes** | No | Admin | Yes |
-| **Own graph** | **Yes** | No | Admin | Yes |
-| **Post record** | **Yes** | No | Mixed | Yes |
-| **Content hosting** | Nodes | Site | Instances | Frontends |
-| **Moderation** | Opt-in | Admin | Admin | Stake |
+| Dimension | Mirage | Centralized | Federated | Social L1 | Social L2 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Decentralized?** | **Fully** | No | Partial | Limited | Limited |
+| **Onboarding** | **PoW** | Email | Email | Wallet | Fees |
+| **Anti-spam** | **PoW** | Admin | Admin | Stake | Fees |
+| **Switch nodes** | **Seamless** | No | Hard | Easy | Mixed |
+| **Can ban?** | **No** | Yes | Yes | Yes | Yes |
+| **Own identity** | **Yes** | No | Admin | Yes | Yes |
+| **Own graph** | **Yes** | No | Admin | Yes | Yes |
+| **Post record** | **Yes** | No | Mixed | Yes | Mixed |
+| **Content hosting** | Nodes | Site | Instances | Frontends | Hubs |
+| **Moderation** | Opt-in | Admin | Admin | Stake | Apps |
+
+### Category key (examples)
+
+- **Centralized**: Discuit, Tildes, Squabblr, Scored, Disqus
+- **Federated**: Lemmy, Mastodon, kbin, PieFed
+- **Social L1**: Steem, Hive
+- **Social L2**: Farcaster, Lens
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
