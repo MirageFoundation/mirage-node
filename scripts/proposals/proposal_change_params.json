@@ -1,0 +1,21 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgUpdateParams",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "params": {
+                "min_difficulty": "5",
+                "pow_calm_period_definition": "1",
+                "pow_calm_sequence_threshold": "1",
+                "pow_difficulty_allowance": "2",
+                "pow_message_limit": "25",
+                "pow_message_window": "20"
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "10000000umirage",
+    "title": "Changing parameters",
+    "summary": "Changing some parameter(s) summary",
+    "expedited": true
+}

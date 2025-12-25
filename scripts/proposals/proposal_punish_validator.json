@@ -1,0 +1,18 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgPunishValidator",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "valoper": "miragevaloper1pmj9qscwfjzt85655txfduz38lvgtvz4sxj7ze",
+            "fraction": "1.0",
+            "jail": true,
+            "tombstone": false,
+            "reason": "Governance-directed punishment"
+        }
+    ],
+    "metadata": "",
+    "deposit": "10000000umirage",
+    "title": "Punish validator",
+    "summary": "Slash and optionally jail/tombstone a validator by governance.",
+    "expedited": true
+}

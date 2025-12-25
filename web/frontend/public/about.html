@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>About - Mirage</title>
+    <style>
+        .accordion {
+            margin-bottom: 1rem;
+        }
+
+        .accordion-header {
+            cursor: pointer;
+            padding: 0.75rem 0;
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .accordion-header:hover {
+            opacity: 0.8;
+        }
+
+        .accordion-header::after {
+            content: '▼';
+            font-size: 0.8rem;
+            transition: transform 0.3s;
+        }
+
+        .accordion-header.expanded::after {
+            transform: rotate(180deg);
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+        }
+
+        .accordion-content.expanded {
+            max-height: 10000px;
+        }
+
+        .accordion-body {
+            padding: 0.5rem 0;
+        }
+
+        .tech-link {
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .tech-link a {
+            color: inherit;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+
+        .tech-link a:hover {
+            opacity: 0.8;
+        }
+
+        code {
+            background-color: rgba(0, 0, 0, 0.3);
+            padding: 0.1rem 0.3rem;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.9em;
+        }
+
+        .video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .video-thumbnail {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            background: #000;
+            z-index: 1;
+        }
+
+        .video-thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .play-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 86px;
+            height: 86px;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 50%;
+            z-index: 100;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+        }
+
+        .play-button::before {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 0;
+            height: 0;
+            border-left: 26px solid #000;
+            border-top: 16px solid transparent;
+            border-bottom: 16px solid transparent;
+            /* Nudge slightly right to visually center the triangle within the circle */
+            margin-left: 3px;
+        }
+
+        .video-thumbnail:hover .play-button {
+            transform: translate(-50%, -50%) scale(1.06);
+        }
+
+        #video-iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="accordion">
+        <div class="accordion-header expanded">
+            1-Min Explainer Video
+        </div>
+        <div class="accordion-content expanded">
+            <div class="accordion-body">
+                <div class="video-wrapper">
+                    <div class="video-container" id="video-container">
+                        <!-- Thumbnail with play button -->
+                        <div class="video-thumbnail" id="video-thumbnail" onclick="loadVideo()">
+                            <img src="https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+                                alt="Mirage Explainer Video">
+                            <div class="play-button"></div>
+                        </div>
+                        <!-- Video iframe (hidden initially) -->
+                        <iframe id="video-iframe" src="" title="Mirage 1-Minute Explainer Video" frameborder="0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            allowfullscreen style="display: none;">
+                        </iframe>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="accordion">
+        <div class="accordion-header">
+            Introduction to Mirage
+        </div>
+        <div class="accordion-content">
+            <div class="accordion-body">
+                <h2>A new kind of social platform</h2>
+
+                <p>Mirage is a decentralized, community driven alternative to corporate social networks. It feels
+                    familiar, like classic Reddit, but it is designed so no single company or moderator can control the
+                    entire conversation. Many independent nodes host the site, share a common global state, and let
+                    people choose how they want to browse and participate.</p>
+
+                <h3>What makes Mirage different</h3>
+
+                <ul>
+                    <li><strong>No single gatekeeper</strong>: many nodes host and mirror the network, so no one can
+                        quietly erase content everywhere.</li>
+                    <li><strong>Use it without crypto</strong>: you can post, comment, and vote right away, no wallet
+                        needed.</li>
+                    <li><strong>Your choice of moderation</strong>: follow moderators you trust, or view unfiltered
+                        feeds if you prefer.</li>
+                    <li><strong>Open by design</strong>: anyone can run a node and contribute to the network.</li>
+                </ul>
+
+                <h3>Use Mirage without crypto</h3>
+
+                <p>Most people do not want to set up a wallet or buy tokens to try a new platform. On Mirage, you do not
+                    need to. The browser performs a tiny proof of work that takes a few seconds, then your action is
+                    accepted. You can participate immediately. Tokens are optional for priority and for extra features
+                    like custom usernames and longer posts.</p>
+
+                <h3>Two ways to participate</h3>
+
+                <ul>
+                    <li><strong>Free Tier</strong>: post, comment, and vote with a small, automatic proof of work in
+                        your browser. No wallet or tokens required.</li>
+                    <li><strong>Pro Tier</strong>: if you hold MIRAGE tokens in your wallet you are automatically on
+                        Pro. Your actions can skip proof of work and get priority, you can reserve a custom username,
+                        and more features unlock over time. You can also show admiration by burning tokens on posts,
+                        similar to giving awards.</li>
+                </ul>
+
+                <h3>Moderation on your terms</h3>
+
+                <ul>
+                    <li><strong>Voluntary and transparent</strong>: moderators offer filters and curation that users can
+                        choose to follow.</li>
+                    <li><strong>No network wide bans</strong>: a node can block content locally, but it cannot remove it
+                        from every node.</li>
+                    <li><strong>Move freely</strong>: if you dislike a node's policy, you can browse another node with
+                        different settings.</li>
+                </ul>
+
+                <h3>What persists and what is ephemeral</h3>
+
+                <ul>
+                    <li><strong>On chain and persistent</strong>: usernames and who owns them, account balances and
+                        transfers, validator and staking data, governance parameters, and core network counters.</li>
+                    <li><strong>Off chain and ephemeral</strong>: the actual text of posts and comments, attachments,
+                        and feed views are stored by nodes and indexers. If no node keeps a post, it disappears.</li>
+                    <li><strong>Why the name Mirage</strong>: user content appears as long as nodes keep it. If it is
+                        not retained, it fades. That is the idea behind the name.</li>
+                </ul>
+
+                <h3>Safety and spam resistance</h3>
+
+                <ul>
+                    <li><strong>Lightweight proof of work</strong>: makes spam costly without forcing you to handle
+                        tokens.</li>
+                    <li><strong>Local keys</strong>: your keys live in your browser. The seed is not sent to the
+                        backend.</li>
+                    <li><strong>Transparent costs</strong>: Pro Tier uses small, visible fees for priority instead of
+                        dark algorithms.</li>
+                </ul>
+
+                <h3>Running a node</h3>
+
+                <p>Anyone can run a Mirage node. Nodes host the site, serve users, and take part in the network. This
+                    grows resilience, spreads out control, and improves availability. You can use Mirage without running
+                    a node. Running one is optional.</p>
+
+                <h3>What you can do today</h3>
+
+                <ul>
+                    <li><strong>Browse</strong>: read posts by topic or sort by different views.</li>
+                    <li><strong>Post and comment</strong>: share ideas and discuss without a wallet.</li>
+                    <li><strong>Vote</strong>: upvote or downvote to shape what rises.</li>
+                    <li><strong>Reserve a username</strong>: use Pro Tier to claim a custom name that is recognized
+                        across nodes.</li>
+                    <li><strong>Follow moderation</strong>: choose the level of filtering that works for you.</li>
+                </ul>
+
+                <h3>Quick answers</h3>
+
+                <ul>
+                    <li><strong>Do I need a wallet</strong>: no, you can use Mirage right away.</li>
+                    <li><strong>Can content be erased</strong>: a node can hide content locally. If no node retains a
+                        post, it disappears. Content is not permanently stored on chain.</li>
+                    <li><strong>Who controls the network</strong>: there is no single owner. Many nodes participate and
+                        agree on shared state.</li>
+                    <li><strong>Is this another crypto site</strong>: Mirage uses a small proof of work so everyone can
+                        post without tokens. Tokens are only needed for priority and extra features.</li>
+                </ul>
+
+                <h3>Try Mirage</h3>
+
+                <p>Open a node website, browse a few topics, and make your first post. No wallet setup, no token
+                    purchase, and no learning curve required. If you want more control later, you can pick a custom
+                    username or even run a node. The choice is yours.</p>
+
+            </div>
+        </div>
+    </div>
+
+
+    <div class="accordion">
+        <div class="accordion-header" id="faq-header">
+            FAQ
+        </div>
+        <div class="accordion-content" id="faq-content">
+            <div class="accordion-body">
+                <h3>Introduction</h3>
+                <p><strong>What is Mirage?</strong></p>
+                <p>Mirage is what old Reddit could have been if it never sold out. It has
+                    the same
+                    simple, community-first design that lets you browse, post, comment, and vote without the
+                    noise of
+                    algorithms or the control of a single corporate owner. The difference is that Mirage is
+                    built so no
+                    one person, company, or government can take over the entire network or force the same
+                    rules on
+                    everyone.<br /><br />
+                    Every post and comment exists across the entire network through a
+                    blockchain, so no
+                    single server holds the keys to your content. All nodes see the same live feed of
+                    activity, and the
+                    blockchain ensures that what you see is agreed upon by the network as a whole. This
+                    makes Mirage
+                    fast, censorship-resistant, and impossible for one operator to quietly remove content
+                    from the
+                    entire system. Nodes can still choose what they display locally, but they cannot erase
+                    it from
+                    Mirage itself.
+                    <br /><br />
+                    You do not need a wallet, tokens, or any understanding of crypto to
+                    join. Anyone can
+                    sign up instantly and start posting just like they would on Reddit or X. The result is a
+                    platform
+                    where communities cannot be shut down overnight, moderation is open and transparent, and
+                    your feed
+                    is shaped by what you choose to follow — not by advertisers or hidden algorithms.
+                </p>
+                </p>
+                <h3>Getting Started</h3>
+                <p><strong>Can I use Mirage without knowing anything about crypto?</strong></p>
+                <p>Yes. The Free Tier allows anyone to join instantly without needing a wallet, tokens, or
+                    blockchain
+                    knowledge. You can post, comment, and vote just like you would on Reddit or X. The
+                    crypto features
+                    are optional and can be explored later if you choose.</p>
+                <p><strong>Do I need to choose a specific node before I can use Mirage (like on Mastodon or
+                        Lemmy)?</strong></p>
+                <p>No. You can start on any public node (a website that looks like a simple forum) and begin
+                    participating immediately. Later, you can switch to a node that better matches your
+                    preferred rules
+                    or content policies. Moving between nodes is simple and does not require starting from
+                    scratch.</p>
+                <p><strong>Will Mirage look and feel like platforms I already know?</strong></p>
+                <p>Yes. You will still see posts, comments, votes, and communities in a familiar layout. The
+                    big
+                    difference is behind the scenes. Instead of one company running everything, Mirage is
+                    powered by
+                    independent nodes that connect to each other.</p>
+                <p><strong>Do I have to log in to read posts?</strong></p>
+                <p>No. Most public nodes can be browsed without logging in. You only need an account if you
+                    want to
+                    post, comment, or vote.</p>
+                <p><strong>Can I keep my username forever?</strong></p>
+                <p>You can create any username you want, but it will have the "Anon-" prefix (e.g.,
+                    "Anon-divergent-happy-hippo"). You can remove this prefix by using Mirage tokens and paying for a
+                    name change.</p>
+                <p><strong>Can I import my friends list from Reddit, Facebook, BlueSky, or X?</strong></p>
+                <p>No. Mirage does not connect directly to those platforms. You can share your Mirage
+                    profile and
+                    communities with your friends so they can join you here.</p>
+
+                <h3>Content and Communities</h3>
+                <p><strong>Why does a platform like this need to exist?</strong></p>
+                <p>On today’s major social platforms, what you can say is ultimately decided by one company.
+                    Entire
+                    discussions can vanish due to corporate rules, advertiser pressure, or political
+                    influence. Mirage
+                    prevents that by ensuring no single entity can enforce one set of speech rules for the
+                    whole
+                    network.</p>
+                <p><strong>How does Mirage keep communities alive without a central owner?</strong></p>
+                <p>Every post and comment is broadcast in real time to all nodes. Each node chooses what to
+                    display or
+                    store, but no node can remove it from Mirage as a whole. If you dislike a node’s
+                    choices, you can
+                    use another node and still see the same live conversations.</p>
+                <p><strong>Is Mirage really a blockchain?</strong></p>
+                <p>Yes — but the blockchain is used only for live consensus, not for permanent storage of
+                    posts. That
+                    keeps Mirage fast, efficient, and tamper-resistant without acting like a permanent
+                    ledger for
+                    content. This ephemeral nature of content (appearing and potentially fading away if not retained by
+                    nodes) explains the name "Mirage" and why it was chosen.</p>
+                <p><strong>What is the difference between a node and a topic?</strong></p>
+                <p>A node is the website you connect to in order to use Mirage and can set its own local
+                    policies. A
+                    topic is like a subreddit and exists network-wide — every node receives its posts in
+                    real time.</p>
+
+                <h3>Moderation and Safety</h3>
+                <p><strong>How is moderation handled?</strong></p>
+                <p>Admins can delete content, but only if nodes implement that functionality. For example, mirage.talk
+                    follows US law, so deletion requests by admins lead to offending posts actually getting deleted on
+                    that node. However, other nodes outside of US jurisdiction might not follow those deletions and
+                    could show any content, even if marked for deletion. Additionally, you can follow any user as a
+                    moderator (assuming you have an account), meaning that any posts or users that they block will not
+                    show up for you either.</p>
+                <p><strong>Can my account get banned from the whole network?</strong></p>
+                <p>No. A node can block you locally, but you can always connect to another node. Nodes are
+                    required to
+                    relay valid messages to the network.</p>
+
+                <h3>Spam and Access Tiers</h3>
+                <p><strong>How is spam handled?</strong></p>
+                <p>Spam is handled locally by nodes using proof of work, rate limits, moderation, or voting.
+                    In the Free
+                    Tier, your browser performs a small proof of work to make automated spam expensive.</p>
+                <p><strong>What is the Free Tier vs. the Pro Tier?</strong></p>
+                <p>The Free Tier lets anyone participate immediately without tokens. The Pro Tier gives
+                    priority
+                    posting, custom usernames, longer limits, and more.</p>
+
+                <h3>Technical and Blockchain</h3>
+                <p><strong>How does consensus work if posts are not stored forever?</strong></p>
+                <p>The blockchain is only used to agree on what’s happening right now. Once a new block is
+                    confirmed,
+                    older blocks are no longer needed for consensus. Messages move in real time between
+                    nodes, and each
+                    node decides what to keep.</p>
+                <p><strong>Why not use a general-purpose smart‑contract chain?</strong></p>
+                <p>Mirage is purpose-built for real-time social consensus. Avoiding generic features keeps
+                    it faster,
+                    cheaper, and simpler to run while reducing attack surface.</p>
+
+                <h3>Privacy and Control</h3>
+                <p><strong>Can I see what other nodes are showing?</strong></p>
+                <p>Yes. Because all posts are broadcast network-wide in real time, you can switch nodes to
+                    see topics or
+                    posts your current node hides.</p>
+                <p><strong>Will Mirage sell my data?</strong></p>
+                <p>Public posts are visible network-wide by design. How registration and other optional data
+                    are handled
+                    depends on the node you choose. Pick a node you trust.</p>
+
+                <h3>Vision</h3>
+                <p><strong>What is the long‑term vision?</strong></p>
+                <p>A network where speech is not controlled by a single authority, moderation is a user
+                    choice, and
+                    entire conversations cannot be erased by centralized decisions.</p>
+            </div>
+        </div>
+    </div>
+
+
+    <div class="accordion">
+        <div class="accordion-header" id="tech-header">
+            Technical Implementation
+        </div>
+        <div class="accordion-content" id="tech-content">
+            <div class="accordion-body">
+                <h2>Mirage: Technical Overview</h2>
+
+                <p>Mirage is a decentralized, censorship-resistant discussion platform (Reddit-like UX) backed by an
+                    application-specific blockchain and a full web stack. It is designed so anyone can run a node that
+                    serves the site, participates in consensus, and mirrors global state. Users can participate without
+                    tokens using a lightweight, browser-executed Proof-of-Work (PoW), while token holders gain
+                    additional capabilities and guarantees.</p>
+
+                <p>This document explains how Mirage works at a high level for technical readers. It focuses on
+                    architecture, core flows, security model, and operational conventions, without going into wire
+                    formats or endpoint payloads.</p>
+
+                <p><strong>Important:</strong> anyone can use Mirage without a wallet or tokens. The browser does a
+                    small PoW and your post/comment/vote is accepted. No "crypto bro" setup required. The token path
+                    adds priority and features, but is optional by design.</p>
+
+                <h3>High-level goals</h3>
+
+                <ul>
+                    <li>Censorship resistance through many independent nodes sharing a global state.</li>
+                    <li>Low-friction onboarding via Free Tier (no wallet required) powered by client-side PoW.</li>
+                    <li>Priority and advanced features through Pro Tier (token-paid) operations.</li>
+                    <li>Clear architecture and operational simplicity while following proven blockchain conventions.
+                    </li>
+                </ul>
+
+                <h2>System Architecture</h2>
+
+                <p>Mirage consists of four major parts that work together:</p>
+
+                <ul>
+                    <li>Application-specific blockchain using a Tendermint/CometBFT Byzantine Fault Tolerant (BFT)
+                        consensus engine that has been battle-tested for years; compiled as the <code>miraged</code>
+                        binary.</li>
+                    <li>Core module <code>x/core</code> that defines Mirage-specific logic (posts, votes, usernames, PoW
+                        accounting, minting parameters, moderation actions).</li>
+                    <li>Web backend (Flask) that relays user messages to the chain and exposes a simple HTTP API for the
+                        frontend and tools.</li>
+                    <li>React frontend (SPA) that provides the UI, performs local cryptography, and solves PoW in a Web
+                        Worker.</li>
+                </ul>
+
+                <p><strong>Optional components:</strong></p>
+
+                <ul>
+                    <li>Indexer (<code>/indexer</code>) for read-optimized queries and analytics.</li>
+                </ul>
+
+                <h3>Chain layer</h3>
+
+                <ul>
+                    <li>Mirage's own blockchain runs a CometBFT (Tendermint-family) BFT consensus.</li>
+                    <li>Base denom: <code>umirage</code> (micro-denom). Bech32 address prefix: <code>mirage</code>.</li>
+                    <li>Chain ID: <code>mirage-1</code> (fixed).</li>
+                    <li>Binary name: <code>miraged</code>.</li>
+                    <li>Includes built-in modules for accounts, balances, staking, slashing, distribution, minting,
+                        governance, parameter management, upgrades, and interchain support (IBC wiring), plus the
+                        Mirage-specific <code>x/core</code> module.</li>
+                </ul>
+
+                <h3>Web backend</h3>
+
+                <ul>
+                    <li>Python/Flask app that provides a stable HTTP surface for the frontend and scripts.</li>
+                    <li>Constructs and relays transactions to the node's RPC/gRPC/ABCI interfaces.</li>
+                    <li>Attaches transaction fees and handles networking, retries, and result propagation.</li>
+                    <li>Runs under Gunicorn in production; simple <code>app.run()</code> in development.</li>
+                </ul>
+
+                <h3>Frontend</h3>
+
+                <ul>
+                    <li>React SPA with a clean, responsive UI for browsing, posting, voting, profiles, and network
+                        status.</li>
+                    <li>Generates/holds user keys client-side. The mnemonic/seed never leaves the browser.</li>
+                    <li>Solves browser-based PoW using Argon2id inside a dedicated Web Worker to keep the UI responsive.
+                    </li>
+                </ul>
+
+                <h3>Indexer (optional)</h3>
+
+                <ul>
+                    <li>Consumes chain state, events, and ABCI queries to build read-optimized views for the UI (feeds,
+                        profiles, summaries) and external analytics.</li>
+                </ul>
+
+                <h2>Data and Message Model</h2>
+
+                <p>The <code>x/core</code> module defines the primary message families that represent user activity:</p>
+
+                <ul>
+                    <li>Posts and comments</li>
+                    <li>Votes (upvote/downvote)</li>
+                    <li>Username claims/changes</li>
+                    <li>Moderation primitives (e.g., block post, block user, set moderators)</li>
+                    <li>Utility messages (e.g., module-scoped send tokens, if enabled)</li>
+                </ul>
+
+                <p>Mirage follows standard blockchain application patterns with a pre-execution check pipeline specific
+                    to Mirage's PoW and relay model.</p>
+
+                <h2>Identity, Authorization, and Relay</h2>
+
+                <p>Mirage separates "who executes the outer transaction" from "who authored the content."</p>
+
+                <ul>
+                    <li>The outer transaction signer (the "authority") is the relayer (typically the node's relay/faucet
+                        account or the governance module for parameter updates). The end-user is not the outer signer in
+                        the Free/relayed path.</li>
+                    <li>The end-user's identity and authorization are embedded inside each Mirage message via a
+                        meta-signature (public key + signature over canonical bytes). This meta-signature is validated
+                        by a custom ante decorator before any state change.</li>
+                    <li>The node attaches fees and broadcasts the transaction on behalf of the user. This enables Free
+                        Tier usage without requiring the user to fund an on-chain account.</li>
+                </ul>
+
+                <p>This design keeps keys client-side while aligning with industry norms for fees, routing, and
+                    pre-execution verification.</p>
+
+                <h2>Access Tiers and Anti‑Spam</h2>
+
+                <p>Mirage supports two complementary paths for user actions:</p>
+
+                <ul>
+                    <li><strong>Free Tier (default)</strong>: actions are admitted through client-side PoW. No wallet or
+                        tokens are required. The browser computes a proof that meets the current chain difficulty, and
+                        the node relays the message to the chain.</li>
+                    <li><strong>Pro Tier</strong>: actions pay fees in tokens and can bypass PoW. This provides priority
+                        and unlocks advanced functionality (custom usernames, guaranteed relaying, extended limits,
+                        optional moderation roles, and other perks).</li>
+                </ul>
+
+                <p>This two-tier model keeps entry friction low while maintaining strong spam resistance and predictable
+                    throughput.</p>
+
+                <p><strong>Note:</strong> this is deliberate: normal users can participate immediately without "doing
+                    crypto." Tokens are optional for priority and extra features.</p>
+
+                <h2>Proof‑of‑Work (PoW)</h2>
+
+                <ul>
+                    <li><strong>Algorithm:</strong> Argon2id tuned for mobile devices (e.g., time=1, memory ~4–8 MiB,
+                        parallelism=1, 32-byte digest).</li>
+                    <li>Executed client-side in a Web Worker for responsive UX.</li>
+                    <li><strong>Salt:</strong> recent block hash, with a bounded acceptance window to prevent stale or
+                        precomputed proofs.</li>
+                    <li><strong>Validity:</strong> digest must have a number of leading zero bits ≥ the active
+                        difficulty threshold.</li>
+                </ul>
+
+                <p><strong>Why Argon2id:</strong></p>
+
+                <ul>
+                    <li>Memory-hard and bandwidth-bound which reduces specialized hardware advantage compared to
+                        hash-only schemes like SHA-256.</li>
+                    <li>Tunable so puzzles complete in seconds on commodity laptops and mobile devices without excessive
+                        heat or battery drain.</li>
+                    <li>Mature and audited with high quality WebAssembly implementations, suitable for secure execution
+                        inside the browser.</li>
+                    <li>The Argon2id variant blends Argon2i and Argon2d to mitigate side-channel issues and GPU
+                        precomputation advantages.</li>
+                    <li>Improves fairness and UX by emphasizing short, bounded CPU and memory bursts rather than
+                        continuous high-power mining.</li>
+                </ul>
+
+                <p><strong>Difficulty control:</strong></p>
+
+                <ul>
+                    <li>Sliding-window scheme over recent blocks counts accepted PoW messages and adjusts difficulty
+                        up/down using parameters:
+                        <ul>
+                            <li>MinDifficulty</li>
+                            <li>PowMessageWindow</li>
+                            <li>BusyPeriodDefinition, DifficultyUpThreshold</li>
+                            <li>CalmPeriodDefinition, DifficultyDownThreshold</li>
+                            <li>BlockHashWindow</li>
+                            <li>MintInterval, MintQuantity</li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <p>All of these are on-chain module params and can be updated via governance.</p>
+
+                <h2>Fees, Gas, and Economics</h2>
+
+                <ul>
+                    <li>A minimum gas price is configured by validators. Mempool admission enforces this.</li>
+                    <li>In the relayed path, the node pays chain gas/fees (sets a payer on the outer transaction), so
+                        Free Tier users do not need tokens.</li>
+                    <li>Messages may include optional in-message "application fees" (distinct from gas). If set, these
+                        are deducted from the author's balance during delivery by the module.</li>
+                    <li><strong>Minting:</strong> at fixed intervals (<code>MintInterval</code>), the chain mints
+                        <code>MintQuantity</code> <code>umirage</code> into the module account and auto-distributes to
+                        the bonded pool/validators according to stake, keeping balances clean by burning residuals as
+                        needed.
+                    </li>
+                </ul>
+
+                <h2>Transaction Lifecycle</h2>
+
+                <ol>
+                    <li>User action (post, comment, vote) in the frontend.</li>
+                    <li>Frontend builds canonical bytes for the Mirage message and signs locally with the user's key.
+                    </li>
+                    <li>Frontend computes PoW (Free Tier) against the most recent block hash window.</li>
+                    <li>Frontend submits the meta-signed message and proof to the backend.</li>
+                    <li>Backend wraps the message in an outer transaction, attaches fees (payer is the node), and
+                        broadcasts to the chain.</li>
+                    <li>Node pre-execution handling:
+                        <ul>
+                            <li>Logging and basic checks (timeout/Tx size gas).</li>
+                            <li>Ensure accounts exist for derived addresses when needed.</li>
+                            <li>Pay fees from the designated payer.</li>
+                            <li>Verify PoW against the active difficulty and block-hash window; record PoW counters.
+                            </li>
+                            <li>Enforce chain-specific staking/usage rules.</li>
+                            <li>Verify the meta-signature (author identity).</li>
+                        </ul>
+                    </li>
+                    <li>DeliverTx executes the module message handler, emits events, and persists state.</li>
+                    <li>Indexer/UI observe state/events and update feeds and views.</li>
+                </ol>
+
+                <h2>Governance and Parameters</h2>
+
+                <ul>
+                    <li>The <code>x/core</code> module exposes a parameter set that controls PoW difficulty behavior,
+                        minting schedule, and safety windows (as described above).</li>
+                    <li>Governance proposals update params and can also enact administrative actions consistent with
+                        chain norms.</li>
+                </ul>
+
+                <h2>Validators and Staking</h2>
+
+                <ul>
+                    <li>Follows standard staking and slashing conventions.</li>
+                    <li>Enforces a minimum self-delegation of 1 MIRAGE (1,000,000 <code>umirage</code>) for
+                        <code>MsgCreateValidator</code> to ensure skin-in-the-game at the chain level.
+                    </li>
+                    <li><strong>Operational conventions (suggested):</strong>
+                        <ul>
+                            <li>Moniker format: <code>mirage-node-X</code> (e.g., <code>mirage-node-1</code>).</li>
+                            <li>Minimum gas price set in <code>app.toml</code> and startup scripts to keep mempools
+                                healthy.</li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <h2>Security Model and Invariants</h2>
+
+                <ul>
+                    <li>Private keys remain in the browser; the backend never receives the mnemonic/seed or private key.
+                    </li>
+                    <li>The outer transaction signer is the relayer ("authority"), not the end-user; user identity is
+                        enforced by the validated meta-signature embedded in each Mirage message.</li>
+                    <li>PoW gating throttles spam independently of account sequence economics.</li>
+                    <li>Strict pre-execution ordering ensures: accounts exist, fees are covered, PoW passes, then the
+                        meta-signature is verified before any state change.</li>
+                    <li>Only recent block hashes are accepted as PoW salts to prevent replay or precomputation.</li>
+                </ul>
+
+                <h2>Storage, Retention, and Content</h2>
+
+                <ul>
+                    <li>The chain tracks consensus state and events. It is not a general-purpose permanent storage
+                        layer.</li>
+                    <li><strong>Persistent on-chain state includes:</strong>
+                        <ul>
+                            <li>Username registry and ownership mapping</li>
+                            <li>Account addresses, balances, and transfers</li>
+                            <li>Staking and validator metadata, slashing records, and related consensus data</li>
+                            <li>Governance parameters, PoW difficulty state, and minting counters</li>
+                            <li>Module configuration and moderation registries where applicable</li>
+                        </ul>
+                    </li>
+                    <li><strong>Ephemeral and off-chain indexed content includes:</strong>
+                        <ul>
+                            <li>Post and comment bodies, attachments, and full discussion threads</li>
+                            <li>Vote details and ranking views built for feeds</li>
+                            <li>Reports, analytics, and other read models produced by indexers</li>
+                        </ul>
+                    </li>
+                    <li>Posts and comments are validated and finalized for inclusion, but their full content is not
+                        durably stored on-chain. Indexers persist and serve this content according to their own
+                        retention policies. If an indexer loses the history and no other node retains it, that content
+                        is gone. This is intentional and is the origin of the name Mirage.</li>
+                    <li>In other words, user content such as posts and comments is ephemeral and exists only as long as
+                        nodes choose to keep it. Hence the name Mirage.</li>
+                    <li>Because many nodes can mirror content, local hiding or removal by one node does not erase global
+                        availability. Users can switch nodes.</li>
+                </ul>
+
+                <h2>Deployment and Environments</h2>
+
+                <ul>
+                    <li>The chain binary is <code>miraged</code>.</li>
+                    <li>Chain ID is fixed to <code>mirage-1</code>.</li>
+                    <li>Docker artifacts and helper scripts are provided under <code>/deploy</code> and
+                        <code>/scripts</code> (including Caddy integration and remote/local deployment helpers).
+                    </li>
+                    <li>For local scripting and automation, a consistent Python environment is recommended; project
+                        scripts assume a stable environment for reproducibility.</li>
+                </ul>
+
+                <h2>Conventions and Where to Look in the Code</h2>
+
+                <ul>
+                    <li><strong>Chain application wiring and pre-execution (ante):</strong>
+                        <ul>
+                            <li><code>blockchain/app/app.go</code> (app wiring, pre-execution chains, proposal handlers)</li>
+                            <li><code>blockchain/app/ante_pow.go</code>, <code>blockchain/app/ante_metasig.go</code>,
+                                <code>blockchain/app/ante_relay_acc.go</code>, <code>blockchain/app/ante_disable_staking.go</code>,
+                                <code>blockchain/app/ante_log.go</code>
+                            </li>
+                            <li>Custom fee logic: <code>blockchain/app/powfee.go</code></li>
+                        </ul>
+                    </li>
+                    <li><strong>Core module:</strong>
+                        <ul>
+                            <li><code>blockchain/x/core/types/*</code> (params, message types, codec)</li>
+                            <li><code>blockchain/x/core/keeper/*</code> (keepers, difficulty accounting, minting)</li>
+                            <li><code>blockchain/x/core/module/*</code> (module interface and wiring)</li>
+                        </ul>
+                    </li>
+                    <li><strong>Backend:</strong>
+                        <ul>
+                            <li><code>web/backend/app.py</code>, <code>web/backend/factory.py</code></li>
+                            <li><code>web/backend/routes/*</code> (public/core routes)</li>
+                            <li><code>web/backend/pow.py</code>, <code>web/backend/tx.py</code>,
+                                <code>web/backend/params.py</code>
+                            </li>
+                        </ul>
+                    </li>
+                    <li><strong>Frontend:</strong>
+                        <ul>
+                            <li><code>web/frontend/src/App.js</code> (routing, theme, data wiring)</li>
+                            <li><code>web/frontend/src/utils/TransactionHandler.js</code> (message build/submit, local
+                                caching)</li>
+                            <li><code>web/frontend/public/pow/worker.js</code> (Argon2id PoW worker)</li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Define accordion initialization function globally so React can call it
+        window.initializeAccordion = function (container) {
+            console.log('[about.html] initializeAccordion called with container:', container);
+            console.log('[about.html] Container type:', container?.constructor?.name);
+            console.log('[about.html] Container tagName:', container?.tagName);
+
+            if (!container) {
+                console.error('[about.html] No container provided!');
+                return;
+            }
+
+
+            const toggleAccordion = (header) => {
+                console.log('[about.html] toggleAccordion called for:', header.textContent.trim());
+                const content = header.nextElementSibling;
+                if (!content) {
+                    console.error('[about.html] No content element found next to header!');
+                    return;
+                }
+
+                const wasExpanded = header.classList.contains('expanded');
+                console.log('[about.html] Currently expanded:', wasExpanded);
+
+                // STEP 1: Close ALL sections first (including the one we clicked if it was expanded)
+                const allHeaders = container.querySelectorAll('.accordion-header');
+                console.log('[about.html] Closing all sections');
+                allHeaders.forEach((h) => {
+                    h.classList.remove('expanded');
+                    const sibling = h.nextElementSibling;
+                    if (sibling) {
+                        sibling.classList.remove('expanded');
+                        sibling.style.maxHeight = '0px';
+                    }
+                });
+
+                // STEP 2: If it wasn't expanded, expand the clicked section
+                if (!wasExpanded) {
+                    console.log('[about.html] Expanding section, scrollHeight:', content.scrollHeight);
+                    header.classList.add('expanded');
+                    content.classList.add('expanded');
+                    content.style.maxHeight = content.scrollHeight + 'px';
+
+                    // STEP 3: Scroll to the header after expansion (use requestAnimationFrame to ensure DOM updated)
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const headerTop = header.getBoundingClientRect().top + window.pageYOffset;
+                            window.scrollTo({ top: headerTop, behavior: 'auto' });
+                        });
+                    });
+                }
+                console.log('[about.html] After toggle - expanded:', header.classList.contains('expanded'));
+            };
+
+            const expandTechnical = () => {
+                console.log('[about.html] expandTechnical called');
+                const techHeader = container.querySelector('#tech-header');
+                const techContent = container.querySelector('#tech-content');
+                console.log('[about.html] techHeader:', techHeader, 'techContent:', techContent);
+
+                if (techHeader && techContent) {
+                    // Close all other sections
+                    const allHeaders = container.querySelectorAll('.accordion-header');
+                    allHeaders.forEach((h) => {
+                        if (h !== techHeader) {
+                            h.classList.remove('expanded');
+                            const sibling = h.nextElementSibling;
+                            if (sibling) {
+                                sibling.classList.remove('expanded');
+                                sibling.style.maxHeight = '0px';
+                            }
+                        }
+                    });
+
+                    techHeader.classList.add('expanded');
+                    techContent.classList.add('expanded');
+                    techContent.style.maxHeight = techContent.scrollHeight + 'px';
+                    requestAnimationFrame(() => {
+                        requestAnimationFrame(() => {
+                            const headerTop = techHeader.getBoundingClientRect().top + window.pageYOffset;
+                            window.scrollTo({ top: headerTop, behavior: 'auto' });
+                        });
+                    });
+                }
+            };
+
+            // Initialize content heights
+            const allContents = container.querySelectorAll('.accordion-content');
+            console.log('[about.html] Found', allContents.length, 'accordion-content elements');
+            allContents.forEach((c, idx) => {
+                const isExpanded = c.classList.contains('expanded');
+                console.log(`[about.html] Content ${idx}: expanded=${isExpanded}, scrollHeight=${c.scrollHeight}`);
+                if (isExpanded) {
+                    c.style.maxHeight = c.scrollHeight + 'px';
+                } else {
+                    c.style.maxHeight = '0px';
+                }
+            });
+
+            // Attach click handlers to accordion headers
+            const headers = container.querySelectorAll('.accordion-header');
+            console.log('[about.html] Found', headers.length, 'accordion headers');
+
+            headers.forEach((header, idx) => {
+                console.log(`[about.html] Header ${idx}:`, header.textContent.trim(), 'classes:', header.className);
+                const clickHandler = (e) => {
+                    console.log(`[about.html] CLICK on header ${idx}:`, header.textContent.trim());
+                    console.log('[about.html] Event target:', e.target);
+                    console.log('[about.html] Event currentTarget:', e.currentTarget);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleAccordion(header);
+                };
+                header.addEventListener('click', clickHandler);
+                console.log(`[about.html] Event listener attached to header ${idx}`);
+            });
+
+            console.log('[about.html] Accordion initialization complete');
+        };
+
+        console.log('[about.html] Script loaded, window.initializeAccordion defined:', typeof window.initializeAccordion);
+
+        // Video loading function
+        function loadVideo() {
+            const thumbnail = document.getElementById('video-thumbnail');
+            const iframe = document.getElementById('video-iframe');
+
+            if (!thumbnail || !iframe) return;
+
+            // Set the video source with autoplay
+            iframe.src = "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=0";
+
+            // Hide thumbnail, show iframe
+            thumbnail.style.display = 'none';
+            iframe.style.display = 'block';
+        }
+    </script>
+</body>
+
+</html>

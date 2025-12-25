@@ -1,0 +1,57 @@
+# Node modules and build artifacts
+node_modules/
+web/frontend/build/
+web/frontend/node_modules/
+
+# Network data
+network/
+
+# Apptainer files
+*.sif
+deploy/*.sif
+deploy/mirage-base.sif
+deploy/mirage.sif
+
+# Python cache
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker artifacts
+mirage-docker.tar.gz
+deploy/mirage-docker.tar.gz
+
+# Temporary files
+*.tmp
+*.bak
+*.old
+
+
+

@@ -1,0 +1,53 @@
+# This is a TOML config file.
+# For more information, see https://github.com/toml-lang/toml
+
+###############################################################################
+###                           Base Configuration                            ###
+###############################################################################
+
+# The minimum gas prices a validator is willing to accept for processing a
+# transaction. A transaction's fees must meet the minimum of any denomination
+# specified in this config (e.g. 0.25token1,0.0001token2).
+minimum-gas-prices = "0.025umirage"
+
+# The maximum gas a query coming over rest/grpc may consume.
+# If this is set to zero, the query can consume an unbounded amount of gas.
+query-gas-limit = "0"
+
+# default: the last 362880 states are kept, pruning at 10 block intervals
+# nothing: all historic states will be saved, nothing will be deleted (i.e. archiving node)
+# everything: 2 latest states will be kept; pruning at 10 block intervals.
+# custom: allow pruning options to be manually specified through 'pruning-keep-recent', and 'pruning-interval'
+pruning = "custom"
+pruning-keep-recent = "1000"
+pruning-interval = "100"
+
+# Minimum number of blocks to retain in blockstore (for historical RPC queries)
+# This keeps recent blocks/commits/txs so /block, /commit and tx lookups work.
+min-retain-blocks = 28800
+
+[api]
+enable = true
+enabled-unsafe-cors = true
+address = "tcp://0.0.0.0:1317"
+
+[grpc]
+enable = true
+address = "0.0.0.0:9090"
+
+[rosetta]
+enable = false
+
+[telemetry]
+enabled = false
+
+[state-sync]
+snapshot-interval = 1000
+snapshot-keep-recent = 2
+
+[mempool]
+max-txs = 5000
+
+[logging]
+format = "plain"
+level = "info"

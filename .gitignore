@@ -1,0 +1,61 @@
+# Build artifacts
+release/
+build/
+dist/
+
+# IDE files
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.dot
+*.ign
+
+# Logs
+*.log
+logs/
+
+# Python / Flask
+*.py[cod]
+*.pyd
+__pycache__/
+.python-version
+.eggs/
+*.egg-info/
+.venv/
+venv/
+ENV/
+env/
+.env
+.env.*
+!.env.example
+!**/.env.example
+.mypy_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# Frontend
+web/frontend/build/
+web/frontend/node_modules/
+
+# Blockchain data
+.mirage
+blockchain/miraged
+
+# Databases
+*.sqlite
+*.sqlite3
+*.db
+
+deploy/mirage-docker-*.tar.gz
+
+# Referrals
+referrals/analysis/
+referrals/airdrop_pending.csv
+referrals/payout_history.csv
