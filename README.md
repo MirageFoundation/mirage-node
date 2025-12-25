@@ -78,11 +78,11 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 
 | Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Decentralized?** | **Fully** | No | Partial | Limited |
+| **Decentralized?** | **Fully** | NO | Partial | Limited |
 | **Onboarding** | **PoW** | Email | Email | Wallet |
 | **Anti-spam** | **PoW** | Admin | Admin | Stake |
-| **Switch nodes** | **Seamless** | No | Hard | Easy |
-| **Can delete you?** | No | Yes | Yes | Yes |
+| **Switch nodes** | **Seamless** | NO | Hard | Easy |
+| **Deplatform risk** | **NO** | YES | YES | YES |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
