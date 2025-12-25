@@ -75,12 +75,13 @@ Mirage is a **sovereign L1**. We don't depend on Ethereum gas prices, complex L2
 
 | Feature | Mirage | Federated (Lemmy/Mastodon) | Relays (Nostr) | Social L1 (Steem) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Data Storage** | **Hybrid (On-Chain Identity)** | Admin's Database | Specific Relay | Blockchain |
+| **Data Storage** | **On-Chain Identity** | Admin's Database | Specific Relay | On-Chain Identity |
 | **Censorship** | **Unstoppable** | Admin can ban/delete | Relay can ban | Whale downvotes |
 | **Decentralization** | **High (Open Set)** | Low (Federated) | Medium | Low (21 Nodes) |
+| **Onboarding** | **Very Easy (PoW)** | Easy (Email) | Complex (Keys+Relays) | Funded Wallet Required |
 | **Permanence** | **High** | Low (Server death) | Medium (Relay death) | High |
 | **Portability** | **Seamless** | Difficult (Migration) | Easy | Seamless |
-| **Cost to Post** | **Proof-of-Work** | Free | Free (usually) | Staked Tokens |
+| **Cost to Post** | **PoW** | Free | Free (usually) | Staked Tokens |
 | **Moderation** | **Voluntary/Opt-in** | Authoritarian | Client-side | Stake-based |
 
 Mirage uses a **hybrid storage model**:

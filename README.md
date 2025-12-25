@@ -6,7 +6,9 @@ We are building true discourse without gatekeepers, decentralized by design and 
 
 Instead of a corporate database, Mirage runs on **its own L1 blockchain** secured by battle-tested Tendermint-style consensus. This ensures that communities are durable, rules are transparent, and no single operator can rewrite history or erase your identity.
 
-Crucially, **Mirage is not just for crypto users.** There are no wallets to install, no extensions to manage, and no coins to buy. You can start browsing and posting immediately; the cryptography is handled silently in the background.
+Crucially, **Mirage is not just for crypto users.** There are no wallets to install, no coins to buy, and no transaction fees to pay.
+
+Instead, Mirage uses a **Proof-of-Work (PoW)** handshake to combat spam. Your device silently solves a cryptographic puzzle in the background to "pay" for your post. This allows for a completely permissionless, free-to-use network that remains resistant to bot attacks—solving the biggest problem of decentralized social media.
 
 ---
 
@@ -70,12 +72,13 @@ How does Mirage compare to other decentralized platforms?
 
 | Feature | Mirage | Federated (Lemmy/Mastodon) | Relays (Nostr) | Social L1 (Steem/Hive) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Data Storage** | **Hybrid (On-Chain Identity)** | Admin's Database | Specific Relay | Blockchain |
+| **Data Storage** | **On-Chain Identity** | Admin's Database | Specific Relay | On-Chain Identity |
 | **Censorship** | **Unstoppable** | Admin can ban/delete | Relay can ban | Whale downvotes |
 | **Decentralization** | **High (Open Set)** | Low (Federated) | Medium | Low (21 Nodes) |
+| **Onboarding** | **Very Easy (PoW)** | Easy (Email) | Complex (Keys+Relays) | Funded Wallet Required |
 | **Permanence** | **High** | Low (Server death) | Medium (Relay death) | High |
 | **Portability** | **Seamless** | Difficult (Migration) | Easy | Seamless |
-| **Cost to Post** | **Proof-of-Work** | Free | Free (usually) | Staked Tokens |
+| **Cost to Post** | **PoW** | Free | Free (usually) | Staked Tokens |
 | **Moderation** | **Voluntary/Opt-in** | Authoritarian | Client-side | Stake-based |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
