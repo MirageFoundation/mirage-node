@@ -150,6 +150,8 @@ The point of this table is the *trade‑offs people actually feel*.
 | **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Relay operator can drop you | Stake whales + producer set | Hub/indexer operators |
 | **Identity & graph** | **On‑chain** | Site DB | Instance DB | Keys (portable) | On‑chain | On‑chain |
 | **Content serving** | Node‑indexed content | Site DB | Instance DB | Relays | Chain history + frontends | Hubs/indexers/storage |
+| **Permanence / availability** | Identity is durable; content can be re-indexed and served by nodes | Operator can delete or shut down | Depends on instance survival + federation | Depends on relay replication | Text durable; media typically off-chain | Depends on hubs/indexers/storage |
+| **Moderation model** | Voluntary filters + node policies | Central admins | Instance admins + defederation | Client-side lists + relay policies | Stake dynamics + frontend policies | App/hub policies |
 | **Decentralization** | **Open validator set (no hard cap)** | Single operator | Many operators, but fragmented | Many relays, weak guarantees | Small producer set (often ~21) | Depends on L2 + operators |
 
 ### Why PoW matters (and why it’s the key differentiator)

@@ -74,15 +74,17 @@ Most “decentralized social” projects are forced to choose:
 
 Mirage uses **PoW** so normal users can post immediately without paying, while bots can’t spam at scale without burning real compute.
 
-Here’s how Mirage compares to the main alternatives people actually use:
+Here’s how Mirage compares to the main alternatives people actually use (we cover more, like Nostr and hybrid crypto social, in `docs/comparison.md`):
 
-| Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Relays (Nostr) | Social L1 (Steem/Hive) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Complex (keys + relay choices) | Funded wallet required |
-| **Spam resistance** | **PoW at the edge** | Centralized anti-abuse | Admin/moderation + rate limits | Often paid relays / filtering | Stake-based resources |
-| **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change relays) | Easy (change frontend) |
-| **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Relay operator can drop you | Stake whales + producer set |
-| **Identity & graph** | **On-chain** | Site DB | Instance DB | Keys (portable) | On-chain |
+| Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Decentralized?** | **Yes (open validator set)** | No | Partially (many servers, fragmented) | Limited (small producer set) |
+| **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Funded wallet required |
+| **Spam resistance** | **PoW at the edge** | Centralized anti-abuse | Admin/moderation + rate limits | Stake-based resources |
+| **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change frontend) |
+| **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Stake whales + producer set |
+| **Identity & graph** | **On-chain** | Site DB | Instance DB | On-chain |
+| **Content serving** | Node-indexed content | Site DB | Instance DB | Chain history + frontends |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
