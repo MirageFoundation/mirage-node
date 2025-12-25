@@ -78,7 +78,7 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 
 | Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Social L1 (Steem/Hive) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Decentralized?** | **Yes (open validator set)** | No | Partially (many servers, fragmented) | Limited (small producer set) |
+| **Decentralized?** | **Fully** | No | Partially (many servers, fragmented) | Limited (small producer set) |
 | **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Funded wallet required |
 | **Spam resistance** | **PoW at the edge** | Centralized anti-abuse | Admin/moderation + rate limits | Stake-based resources |
 | **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change frontend) |
