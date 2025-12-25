@@ -83,6 +83,11 @@ Here’s how Mirage compares to the main alternatives people actually use (we co
 | **Anti-spam** | **PoW** | Admin | Admin | Stake |
 | **Switch nodes** | **Seamless** | NO | Hard | Easy |
 | **Deplatform risk** | **NO** | YES | YES | YES |
+| **Own identity** | **YES** | NO | Admin | YES |
+| **Own graph** | **YES** | NO | Admin | YES |
+| **Post record** | **YES** | NO | Mixed | YES |
+| **Content hosting** | Nodes | Site | Instances | Frontends |
+| **Moderation** | Opt-in | Admin | Admin | Stake |
 
 [**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
 
