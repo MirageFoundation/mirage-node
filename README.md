@@ -64,6 +64,24 @@ Nodes are the backbone of the network, and the protocol rewards them directly.
 
 ---
 
+## Mirage vs. The World
+
+How does Mirage compare to other decentralized platforms?
+
+| Feature | Mirage | Federated (Lemmy/Mastodon) | Relays (Nostr) | Social L1 (Steem/Hive) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Data Storage** | **Hybrid (On-Chain Identity)** | Admin's Database | Specific Relay | Blockchain |
+| **Censorship** | **Unstoppable** | Admin can ban/delete | Relay can ban | Whale downvotes |
+| **Decentralization** | **High (Open Set)** | Low (Federated) | Medium | Low (21 Nodes) |
+| **Permanence** | **High** | Low (Server death) | Medium (Relay death) | High |
+| **Portability** | **Seamless** | Difficult (Migration) | Easy | Seamless |
+| **Cost to Post** | **Proof-of-Work** | Free | Free (usually) | Staked Tokens |
+| **Moderation** | **Voluntary/Opt-in** | Authoritarian | Client-side | Stake-based |
+
+[**Read the full analysis in our documentation**](docs/comparison.md) to understand why we chose a custom L1 blockchain over federation or relays.
+
+---
+
 ## Get Started
 
 ### For Users
