@@ -28,7 +28,7 @@ Mirage fixes this by changing the architecture of internet discussion:
 
 Most decentralized apps are hard to use. Mirage is different.
 
-1. **Visit a Node**: Go to any public node (website) like [Mirage.vote](https://mirage.vote). It looks and feels like a normal forum.
+1. **Visit a Node**: Go to any public node (website) like [mirage.talk](https://mirage.talk). It looks and feels like a normal forum.
 2. **Create an Account**: No email or phone number required. Your browser generates a cryptographic key pair locally. This is your "account."
 3. **Start Posting**: When you post, vote, or reply, your browser signs the action and performs a lightweight **Proof-of-Work** calculation. This prevents spam without requiring you to pay transaction fees or hold tokens.
 4. **Permanent Record**: The node broadcasts your signed action to the blockchain. Once confirmed, it is permanent and replicated across the entire network.
