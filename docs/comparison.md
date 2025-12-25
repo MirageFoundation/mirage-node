@@ -117,7 +117,7 @@ Steem/Hive are the closest spiritually to Mirage in the sense that they are “s
 
 ---
 
-## 5) Hybrid crypto social (Farcaster, Lens)
+## 5) Social L2 (Farcaster, Lens)
 
 ### What they are
 
@@ -142,17 +142,40 @@ Steem/Hive are the closest spiritually to Mirage in the sense that they are “s
 
 The point of this table is the *trade‑offs people actually feel*.
 
-| Dimension | Mirage | Centralized (Discuit/Tildes/etc.) | Federated (Lemmy/Mastodon/kbin/PieFed) | Relays (Nostr) | Social L1 (Steem/Hive) | Hybrid (Farcaster/Lens) |
+**Legend**: ✅ advantage, ⚠️ mixed, ❌ downside
+
+| Dimension | Mirage | Centralized | Federated | Relays | Social L1 | Social L2 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Onboarding** | **Very easy (PoW)** | Easy (email) | Easy (email) | Complex (keys + relay choices) | Funded wallet required | Fees/subscriptions + crypto complexity |
-| **Spam resistance** | **PoW at the edge** | Centralized anti‑abuse | Admin/moderation + rate limits | Often paid relays / filtering | Stake‑based resources | Fees + hub/operator controls |
-| **Switching providers** | **Seamless (pick another node)** | Not possible (new site, new account) | Hard (migration/defederation) | Easy (change relays) | Easy (change frontend) | Mixed (depends on hubs/indexers) |
-| **Who can delete you?** | No single operator can delete your identity/graph | Site operator | Instance admin + defederation | Relay operator can drop you | Stake whales + producer set | Hub/indexer operators |
-| **Identity & graph** | **On‑chain** | Site DB | Instance DB | Keys (portable) | On‑chain | On‑chain |
-| **Content serving** | Node‑indexed content | Site DB | Instance DB | Relays | Chain history + frontends | Hubs/indexers/storage |
-| **Permanence / availability** | Identity is durable; content can be re-indexed and served by nodes | Operator can delete or shut down | Depends on instance survival + federation | Depends on relay replication | Text durable; media typically off-chain | Depends on hubs/indexers/storage |
-| **Moderation model** | Voluntary filters + node policies | Central admins | Instance admins + defederation | Client-side lists + relay policies | Stake dynamics + frontend policies | App/hub policies |
-| **Decentralization** | **Open validator set (no hard cap)** | Single operator | Many operators, but fragmented | Many relays, weak guarantees | Small producer set (often ~21) | Depends on L2 + operators |
+| **Decentralized?** | **✅ Fully** | ❌ No | ⚠️ Partial | ⚠️ Partial | ⚠️ Limited | ⚠️ Limited |
+| **Onboarding** | **✅ PoW** | ✅ Email | ✅ Email | ❌ Keys | ❌ Wallet | ❌ Fees |
+| **Anti-spam** | **✅ PoW** | ⚠️ Enforced | ⚠️ Enforced | ⚠️ Paid | ⚠️ Stake | ⚠️ Fees |
+| **Switch nodes** | **✅ Seamless** | ❌ No | ❌ Hard | ✅ Easy | ✅ Easy | ⚠️ Mixed |
+| **Can ban?** | **✅ No** | ❌ Yes | ❌ Yes | ⚠️ Relay | ❌ Yes | ❌ Yes |
+| **Own identity** | **✅ Yes** | ❌ No | ❌ Admin | ✅ Keys | ✅ Yes | ✅ Yes |
+| **Own graph** | **✅ Yes** | ❌ No | ❌ Admin | ✅ Keys | ✅ Yes | ✅ Yes |
+| **Post record** | **✅ Yes** | ❌ No | ⚠️ Mixed | ⚠️ Mixed | ✅ Yes | ⚠️ Mixed |
+| **Content hosting** | **✅ Nodes** | ❌ Site | ⚠️ Instances | ⚠️ Relays | ⚠️ Frontends | ❌ Hubs |
+| **Moderation** | **✅ Opt-in** | ❌ Enforced | ❌ Enforced | ⚠️ Client | ❌ Stake | ❌ Enforced |
+
+### Category key (examples)
+
+- **Centralized**: Discuit, Tildes, Squabblr, Scored, Disqus
+- **Federated**: Lemmy, Mastodon, kbin, PieFed
+- **Relays**: Nostr
+- **Social L1**: Steem, Hive
+- **Social L2**: Farcaster, Lens
+
+### How to read the rows
+
+- **Decentralized?**: “Can anyone join as infrastructure without needing permission from a small fixed set?”
+- **Onboarding**: What a normal user needs to do to make their first post.
+- **Anti-spam**: What the system uses to prevent bot flooding at scale.
+- **Switch nodes**: Whether you can change providers without losing identity/graph.
+- **Can ban?**: Whether a provider/operator can stop you from participating (globally vs locally).
+- **Own identity / Own graph**: Whether your identity and follower graph are portable or owned by an operator.
+- **Post record**: Whether posts have a durable record vs being purely “database content”.
+- **Content hosting**: Where the actual content is served from in practice.
+- **Moderation**: Whether moderation is opt‑in / user‑controlled vs centrally enforced.
 
 ### Why PoW matters (and why it’s the key differentiator)
 
