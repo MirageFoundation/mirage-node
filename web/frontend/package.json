@@ -29,7 +29,7 @@
         "stream-browserify": "^3.0.0",
         "styled-components": "^5.3.3",
         "unist-util-visit": "^4.1.2",
-        "web-vitals": "^2.1.4"
+        "web-vitals": "^5.1.0"
     },
     "scripts": {
         "start": "sh -c 'GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo \"?\"); GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo \"?\"); export REACT_APP_VERSION=\"${GIT_BRANCH} (${GIT_HASH})\"; BROWSER=none react-app-rewired start'",
