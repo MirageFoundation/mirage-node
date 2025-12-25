@@ -69,7 +69,7 @@ Mirage uses **Proof-of-Work for access**, not stake. A billionaire's upvote coun
 *   **Storage guarantees**: "Hubs" eventually prune data. Old posts may disappear if not pinned elsewhere.
 
 **Mirage Difference**:
-Mirage is a **sovereign L1**. We don't depend on Ethereum gas prices, complex L2 bridges, or third-party "hubs" that might shut down. We optimize the entire chain for storage and indexing of social data, ensuring specific guarantees about data retention that general-purpose chains cannot match.
+Mirage uses a **sovereign L1 for identity**, ensuring you own your social graph without paying rent to Ethereum validators. Unlike hybrid models that rely on third-party "hubs" or confusing L2 bridges, Mirage's architecture is integrated: nodes index content directly from the network, and your cryptographic identity works seamlessly across any node you choose.
 
 ## Summary
 
