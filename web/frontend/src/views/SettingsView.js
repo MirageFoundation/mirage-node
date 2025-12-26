@@ -151,15 +151,6 @@ export default function SettingsView({ state }) {
             return true;
         }
     });
-    const [hideDownvotedThreshold, setHideDownvotedThreshold] = useState(() => {
-        try {
-            const v = Number(Storage.load('hide_downvoted_threshold', -4));
-            return Number.isFinite(v) ? v : -4;
-        } catch (_) {
-            return -4;
-        }
-    });
-
     // Content tag visibility (default: only sensitive shown, others hidden)
     const [showTagSensitive, setShowTagSensitive] = useState(() => {
         try {
@@ -460,37 +451,6 @@ export default function SettingsView({ state }) {
                                         <HelperText>
                                             People shown in sidebar before "show more".
                                         </HelperText>
-                                    </div>
-                                </ValueBox>
-                            </Row>
-
-                            <Row>
-                                <Label style={{ whiteSpace: 'normal' }}>Hide negative comments:</Label>
-                                <ValueBox>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                            <ThemeSelect
-                                                value={String(hideDownvotedThreshold)}
-                                                onChange={(e) => {
-                                                    const n = Number(e.target.value);
-                                                    if (!Number.isFinite(n)) return;
-                                                    setHideDownvotedThreshold(n);
-                                                    Storage.save('hide_downvoted_threshold', n);
-                                                    window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { hideDownvotedThreshold: n } }));
-                                                }}
-                                                style={{ width: '5rem', minWidth: '5rem', fontSize: '0.85rem' }}
-                                            >
-                                                <option value="-1">-1</option>
-                                                <option value="-2">-2</option>
-                                                <option value="-3">-3</option>
-                                                <option value="-4">-4</option>
-                                                <option value="-5">-5</option>
-                                                <option value="-10">-10</option>
-                                            </ThemeSelect>
-                                            <HelperText style={{ maxWidth: '260px', lineHeight: 1.4 }}>
-                                                Hide comments at or below this net score (client-side).
-                                            </HelperText>
-                                        </div>
                                     </div>
                                 </ValueBox>
                             </Row>
