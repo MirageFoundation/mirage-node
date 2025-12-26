@@ -3540,6 +3540,20 @@ def get_posts():
         total = cur.fetchone()[0] or 0
 
         # Fetch paginated posts
+        # Determine sort order based on sort_mode
+        if sort_mode in ("magic", "magic2", "magic3"):
+            # Magic sort: score by (votes + comments) * recency
+            # Using a simpler formula for topic feeds than home feed
+            order_clause = """
+                ORDER BY (
+                    (COALESCE(v.vote_sum, 0) + COALESCE(c.comment_count, 0) * 2)
+                    / POWER(((EXTRACT(EPOCH FROM NOW()) - p.created_at) / 3600.0) + 2, 1.2)
+                ) DESC, p.created_at DESC
+            """
+        else:
+            # Default: newest first
+            order_clause = "ORDER BY p.created_at DESC"
+
         if topic and topic != "all":
             cur.execute(
                 f"""
@@ -3558,8 +3572,19 @@ def get_posts():
                        COALESCE(p.thumbnail_url, '') as thumbnail
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
+                LEFT JOIN (
+                    SELECT LOWER(target) as target, COALESCE(SUM(user_weight), 0) as vote_sum
+                    FROM votes
+                    GROUP BY LOWER(target)
+                ) v ON v.target = LOWER(p.txhash)
+                LEFT JOIN (
+                    SELECT target, COUNT(*) as comment_count
+                    FROM posts
+                    WHERE COALESCE(target, '') != ''
+                    GROUP BY target
+                ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND p.topic = %s AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
-                ORDER BY p.created_at DESC
+                {order_clause}
                 LIMIT %s OFFSET %s
                 """,
                 (topic, limit, offset),
@@ -3582,8 +3607,19 @@ def get_posts():
                        COALESCE(p.thumbnail_url, '') as thumbnail
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
+                LEFT JOIN (
+                    SELECT LOWER(target) as target, COALESCE(SUM(user_weight), 0) as vote_sum
+                    FROM votes
+                    GROUP BY LOWER(target)
+                ) v ON v.target = LOWER(p.txhash)
+                LEFT JOIN (
+                    SELECT target, COUNT(*) as comment_count
+                    FROM posts
+                    WHERE COALESCE(target, '') != ''
+                    GROUP BY target
+                ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
-                ORDER BY p.created_at DESC
+                {order_clause}
                 LIMIT %s OFFSET %s
                 """,
                 (limit, offset),

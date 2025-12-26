@@ -423,45 +423,64 @@ const InlineLink = styled(Link)`
     }
 `;
 
-// Topic header card (for topic pages)
+// Topic header card (for topic pages) - unified with HomeFeedInfoCard
 const TopicHeroCard = styled.div`
-    width: 100%;
-    max-width: 100%;
-    background: ${({ theme }) => pickThemeColor(theme, 'cardAlt') || '#1f232a'};
-    border: 1px solid ${({ theme }) => pickThemeColor(theme, 'cardBorder') || '#2f343d'};
-    border-radius: 9px;
-    padding: 0.75rem 0.9rem;
-    margin-bottom: 0.5rem;
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.14);
+    margin-top: 1rem;
+    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 10px;
+    padding: 0.6rem 0.9rem;
     display: flex;
     flex-direction: column;
-    gap: 0.24rem;
+    gap: 0.35rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 6px;
+        padding: 0.4rem 0.6rem;
+        margin-top: 0.5rem;
+    }
 `;
 
 const TopicHeroTitle = styled.div`
-    font-size: 1.05rem;
-    font-weight: 800;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    line-height: 1.12;
-    word-break: break-word;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    line-height: 1;
+
+    @media (max-width: 1000px) {
+        font-size: 0.6rem;
+    }
 `;
 
 const TopicHeroHeader = styled.div`
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
+    flex-wrap: wrap;
 `;
 
 const TopicHeroDescription = styled.div`
-    font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.mutedText || theme?.colors?.subtleText || '#b5bdc9'};
-    line-height: 1.3;
-    word-break: break-word;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    font-size: 0.65rem;
+    line-height: 1.5;
 
-    @media (max-width: 600px) {
+    @media (max-width: 1000px) {
         font-size: 0.55rem;
-        line-height: 1.25;
+        line-height: 1.4;
+    }
+
+    strong {
+        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+        font-weight: 600;
     }
 `;
 
@@ -667,6 +686,18 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         // Valid modes: magic, magic2, magic3, newest
         return ['magic', 'magic2', 'magic3', 'newest'].includes(mode) ? mode : 'magic';
     });
+    const [cardSize, setCardSize] = useState(() => {
+        try {
+            return Storage.load('card_size', 'large');
+        } catch (_) {
+            return 'large';
+        }
+    });
+    const handleCardSizeChange = (newSize) => {
+        setCardSize(newSize);
+        Storage.save('card_size', newSize);
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { cardSize: newSize } }));
+    };
     const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
         const val = Storage.load('hide_downvoted_posts', false);
         return val === true ? true : false;
@@ -1045,12 +1076,13 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             return tags;
         };
 
+        // Determine sort mode
+        const mode = overrideChrono !== null
+            ? (overrideChrono ? 'newest' : 'magic')
+            : homeSortMode;
+
         if (isHomeFeed || isFollowingFeed) {
             const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
-            // overrideChrono is boolean for backwards compat; homeSortMode is the new way
-            const mode = overrideChrono !== null
-                ? (overrideChrono ? 'newest' : 'magic')
-                : homeSortMode;
             params.by = mode;
             params.allowed_tags = getAllowedTags().join(',');
             Api.get('get_posts', params, { timeoutMs: 10000 })
@@ -1058,6 +1090,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 .catch(onError);
         } else {
             const params = { topic, limit: 15, page: page, address: viewerAddress };
+            params.by = mode;
             params.allowed_tags = getAllowedTags().join(',');
             Api.get('get_posts', params, { timeoutMs: 10000 })
                 .then(handleResponse)
@@ -1363,11 +1396,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (prevHomeSortModeRef.current === homeSortMode) return;
         prevHomeSortModeRef.current = homeSortMode;
 
-        // Only refetch for home/following feeds
-        const isHomeFeed = urlTopic === 'home';
-        const isFollowingFeed = urlTopic === 'following';
-        if (!isHomeFeed && !isFollowingFeed) return;
-
+        // Force refetch with new mode (works for all feeds including topics)
         forceHardRefreshRef.current = true;
         setCurrentPage(1);
         setHasMorePosts(false);
@@ -1760,47 +1789,70 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             <TopicHeroCard>
                                 <TopicHeroHeader>
                                     <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>
-                                    <Button
-                                        variant={
-                                            isTopicFollowing && topicFollowHover
-                                                ? 'primaryDanger'
+                                    <HomeFeedModeInline>
+                                        <HomeFeedModeSelect
+                                            value={homeSortMode}
+                                            onChange={(e) => {
+                                                const mode = e.target.value;
+                                                setHomeSortMode(mode);
+                                                Storage.save('home_sort_mode', mode);
+                                            }}
+                                        >
+                                            <option value="magic">Magic 1</option>
+                                            <option value="magic2">Magic 2</option>
+                                            <option value="magic3">Magic 3</option>
+                                            <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect
+                                            value={cardSize}
+                                            onChange={(e) => handleCardSizeChange(e.target.value)}
+                                        >
+                                            <option value="large">Large</option>
+                                            <option value="compact">Compact</option>
+                                            <option value="media">Media</option>
+                                        </HomeFeedModeSelect>
+                                        <Button
+                                            variant={
+                                                isTopicFollowing && topicFollowHover
+                                                    ? 'primaryDanger'
+                                                    : isTopicFollowing
+                                                        ? 'subtle'
+                                                        : 'primary'
+                                            }
+                                            size="xs"
+                                            minWidth="4.5rem"
+                                            onMouseEnter={() => setTopicFollowHover(true)}
+                                            onMouseLeave={() => setTopicFollowHover(false)}
+                                            disabled={isTopicInProgress}
+                                            onClick={async () => {
+                                                const topicName = urlTopic;
+                                                if (!topicName) return;
+                                                const key = topicKeyLower;
+                                                if (!key) return;
+                                                if (isTopicPending(key)) return;
+                                                try {
+                                                    if (isTopicFollowing) {
+                                                        await unsubscribe(viewerAddress || 'guest', topicName);
+                                                        setFollowedTopicsSet(prev => {
+                                                            const next = new Set(prev);
+                                                            next.delete(key);
+                                                            return next;
+                                                        });
+                                                    } else {
+                                                        await subscribe(viewerAddress || 'guest', topicName);
+                                                        setFollowedTopicsSet(prev => new Set([...prev, key]));
+                                                    }
+                                                    invalidateTopicsCache();
+                                                } catch (_) { /* noop */ }
+                                            }}
+                                        >
+                                            {isTopicInProgress
+                                                ? formatTopicStatus(topicKeyLower)
                                                 : isTopicFollowing
-                                                    ? 'subtle'
-                                                    : 'primary'
-                                        }
-                                        size="pill"
-                                        minWidth="follow"
-                                        onMouseEnter={() => setTopicFollowHover(true)}
-                                        onMouseLeave={() => setTopicFollowHover(false)}
-                                        disabled={isTopicInProgress}
-                                        onClick={async () => {
-                                            const topicName = urlTopic;
-                                            if (!topicName) return;
-                                            const key = topicKeyLower;
-                                            if (!key) return;
-                                            if (isTopicPending(key)) return;
-                                            try {
-                                                if (isTopicFollowing) {
-                                                    await unsubscribe(viewerAddress || 'guest', topicName);
-                                                    setFollowedTopicsSet(prev => {
-                                                        const next = new Set(prev);
-                                                        next.delete(key);
-                                                        return next;
-                                                    });
-                                                } else {
-                                                    await subscribe(viewerAddress || 'guest', topicName);
-                                                    setFollowedTopicsSet(prev => new Set([...prev, key]));
-                                                }
-                                                invalidateTopicsCache();
-                                            } catch (_) { /* noop */ }
-                                        }}
-                                    >
-                                        {isTopicInProgress
-                                            ? formatTopicStatus(topicKeyLower)
-                                            : isTopicFollowing
-                                                ? (topicFollowHover ? 'Unfollow' : 'Following')
-                                                : 'Follow'}
-                                    </Button>
+                                                    ? (topicFollowHover ? 'Unfollow' : 'Following')
+                                                    : 'Follow'}
+                                        </Button>
+                                    </HomeFeedModeInline>
                                 </TopicHeroHeader>
                                 <TopicHeroDescription>
                                     Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
@@ -1852,6 +1904,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             <option value="magic3">Magic 3</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect
+                                            value={cardSize}
+                                            onChange={(e) => handleCardSizeChange(e.target.value)}
+                                        >
+                                            <option value="large">Large</option>
+                                            <option value="compact">Compact</option>
+                                            <option value="media">Media</option>
+                                        </HomeFeedModeSelect>
                                     </HomeFeedModeInline>
                                 </HomeFeedHeaderRow>
                                 <HomeFeedInfoDescription>
@@ -1880,6 +1940,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             <option value="magic2">Magic 2</option>
                                             <option value="magic3">Magic 3</option>
                                             <option value="newest">Newest</option>
+                                        </HomeFeedModeSelect>
+                                        <HomeFeedModeSelect
+                                            value={cardSize}
+                                            onChange={(e) => handleCardSizeChange(e.target.value)}
+                                        >
+                                            <option value="large">Large</option>
+                                            <option value="compact">Compact</option>
+                                            <option value="media">Media</option>
                                         </HomeFeedModeSelect>
                                     </HomeFeedModeInline>
                                 </HomeFeedHeaderRow>

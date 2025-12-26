@@ -255,6 +255,7 @@ const MobileCardSquare = styled.div`
     /* 2:1 aspect ratio (half the height of the width) */
     padding-bottom: 50%;
     background: ${({ $gradient }) => $gradient || '#fff'};
+    overflow: hidden;
 `
 
 const MobileCardImg = styled.img`
@@ -772,6 +773,32 @@ const MediaWrapper = styled.div`
     max-width: 100%;
 `
 
+// Container for full-size media in media mode
+const MediaModeContainer = styled.div`
+    margin: 0.5rem 0;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 8px;
+    
+    img, video {
+        max-width: 100%;
+        max-height: 2000px;
+        width: auto;
+        height: auto;
+        border-radius: 8px;
+        display: block;
+        ${({ $blur }) => $blur ? 'filter: blur(30px);' : ''}
+    }
+    
+    /* For iframes (YouTube, Redgifs embeds) */
+    & > div {
+        max-height: 2000px;
+        overflow: hidden;
+        border-radius: 8px;
+        ${({ $blur }) => $blur ? 'filter: blur(30px);' : ''}
+    }
+`
+
 const StyledFooter = styled.div`
     margin-top: 0rem;
     border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
@@ -1243,6 +1270,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     // Compact mode: smaller thumb + tighter spacing on desktop (>600px)
     const isCompact = cardSize === 'compact';
+    // Media mode: hide thumbnails, show full media below title
+    const isMediaMode = cardSize === 'media';
+    // Check if post has actual media content to display in media mode
+    const hasMediaModeContent = isMediaMode && firstLinkInContent && (isDirectImage || isPrimaryVideo);
 
     const renderCommentCount = () => {
         const currentCount = Number.isFinite(Number(post.comments)) ? Math.round(Number(post.comments)) : 0;
@@ -1330,7 +1361,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     // Compact mode inline style overrides (desktop only)
     // Affects container padding, thumbnail size, internal spacing, and gaps
     const compactContainerStyle = isCompact
-        ? { padding: '0.25rem 0.6rem' }
+        ? { padding: '0.5rem 0.6rem 0.5rem 0.6rem' }
         : undefined;
     const compactThumbVoteStyle = isCompact
         ? { marginRight: '0.5rem', gap: '0.15rem' }
@@ -1351,7 +1382,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     return (
         <div>
             <StyledMainContainer isFlash={!!(post && post.flash)} style={compactContainerStyle}>
-                <ThumbVoteContainer style={compactThumbVoteStyle}>
+                {!hasMediaModeContent && <ThumbVoteContainer style={compactThumbVoteStyle}>
                     <StyledThumbBox style={compactThumbBoxStyle}>
                         {(() => {
                             const pickPlaceholder = () => {
@@ -1377,7 +1408,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     loading="lazy"
                                     style={(() => {
                                         const s = {};
-                                        if (shouldBlurMedia && displayThumbSrc) s.filter = 'blur(10px)';
+                                        if (shouldBlurMedia && displayThumbSrc) s.filter = 'blur(15px)';
                                         if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                         return Object.keys(s).length ? s : undefined;
                                     })()}
@@ -1403,7 +1434,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             );
                         })()}
                     </StyledThumbBox>
-                </ThumbVoteContainer>
+                </ThumbVoteContainer>}
                 <StyledContentArea>
                     <MobileMetaLine>
                         <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
@@ -1411,7 +1442,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <span>{elapsed} ago</span>
                         {post && post.tag ? <TagBadge $tag={post.tag}>{post.tag}</TagBadge> : null}
                     </MobileMetaLine>
-                    <MobileCardWrapper>
+                    {!hasMediaModeContent && <MobileCardWrapper>
                         <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
                             {(() => {
                                 // Use the already-computed proxied thumbnail (Photon primary, wsrv fallback)
@@ -1426,7 +1457,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     loading="lazy"
                                                     style={(() => {
                                                         const s = {};
-                                                        if (shouldBlurMedia) s.filter = 'blur(10px)';
+                                                        if (shouldBlurMedia) s.filter = 'blur(15px)';
                                                         if (isYoutubeThumb) s.transform = `scale(${YOUTUBE_THUMB_ZOOM})`;
                                                         return Object.keys(s).length ? s : undefined;
                                                     })()}
@@ -1443,7 +1474,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 }
                             })()}
                         </MobileCardSquare>
-                    </MobileCardWrapper>
+                    </MobileCardWrapper>}
                     <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
                             <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
@@ -1662,9 +1693,20 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
                         </FeedReasonLine>
                     )}
-                    <HideOnMobileTitle style={compactTitleStyle}>
-                        {title}
-                    </HideOnMobileTitle>
+                    {hasMediaModeContent ? (
+                        <div style={compactTitleStyle}>
+                            {title}
+                        </div>
+                    ) : (
+                        <HideOnMobileTitle style={compactTitleStyle}>
+                            {title}
+                        </HideOnMobileTitle>
+                    )}
+                    {hasMediaModeContent && (
+                        <MediaModeContainer $blur={shouldBlurMedia}>
+                            <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay />
+                        </MediaModeContainer>
+                    )}
                     <MetaRow style={compactMetaRowStyle}>
                         <VoteInline>
                             <VoteSection inline state={state} post={post} updatePost={updatePost} />

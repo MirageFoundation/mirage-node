@@ -63,7 +63,7 @@ const MAX_INITIAL_HEIGHT_ROOT = 600;
 const MAX_INITIAL_HEIGHT_COMMENT = 225;
 const MAX_INITIAL_WIDTH = 600;
 
-export default function InlineMedia({ url, variant }) {
+export default function InlineMedia({ url, variant, autoPlay = false }) {
     const [naturalWidth, setNaturalWidth] = React.useState(0);
     const [naturalHeight, setNaturalHeight] = React.useState(0);
     const [displayWidth, setDisplayWidth] = React.useState(null);
@@ -313,7 +313,9 @@ export default function InlineMedia({ url, variant }) {
         // YouTube embed
         const youtubeId = extractYoutubeId(url);
         if (youtubeId) {
-            const embedUrl = `https://www.youtube.com/embed/${youtubeId}?rel=0`;
+            const embedUrl = autoPlay
+                ? `https://www.youtube.com/embed/${youtubeId}?rel=0&autoplay=1&mute=1`
+                : `https://www.youtube.com/embed/${youtubeId}?rel=0`;
             const aspectPadding = '56.25%'; // 16:9 default
             return (
                 <div style={{ position: 'relative', width: '100%', paddingTop: aspectPadding, borderRadius: '4px', overflow: 'hidden' }}>
@@ -426,6 +428,9 @@ export default function InlineMedia({ url, variant }) {
                         controlsList="nodownload nofullscreen noremoteplayback"
                         disablePictureInPicture
                         crossOrigin="anonymous"
+                        autoPlay={autoPlay}
+                        muted={autoPlay}
+                        loop={autoPlay}
                         style={{ width: '100%', height: '100%', backgroundColor: '#000', display: 'block' }}
                         onLoadedMetadata={(e) => {
                             if (!mountedRef.current) return;
@@ -433,7 +438,7 @@ export default function InlineMedia({ url, variant }) {
                             setNaturalHeight(e.currentTarget.videoHeight);
                         }}
                         onCanPlay={() => setIsProcessing(false)}
-                        preload="none"
+                        preload={autoPlay ? "auto" : "none"}
                     >
                         Your browser does not support HLS video playback.
                     </video>
@@ -462,9 +467,10 @@ export default function InlineMedia({ url, variant }) {
                         controls
                         controlsList="nodownload nofullscreen noremoteplayback"
                         disablePictureInPicture
-                        autoPlay
-                        loop
-                        muted
+                        autoPlay={autoPlay}
+                        loop={autoPlay}
+                        muted={autoPlay}
+                        preload={autoPlay ? "auto" : "metadata"}
                         onLoadedMetadata={(e) => {
                             if (!mountedRef.current) return;
                             setNaturalWidth(e.currentTarget.videoWidth);

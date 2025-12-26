@@ -77,11 +77,12 @@ export const ContainerBody = styled.div`
 
 // Shared grid layout for main content alongside the sidebar
 // Breakpoints: Desktop (>1000px) | Tablet (601-1000px) | Mobile (<=600px)
+// Uses CSS custom property --content-max-width for full-width mode support
 export const ContentGrid = styled.div`
     display: grid;
     grid-template-columns: 200px minmax(0, 1fr);
     gap: 0.5rem;
-    max-width: 1240px;
+    max-width: var(--content-max-width, 1240px);
     margin: 0 auto;
     padding: 0 0.5rem;
     box-sizing: border-box;
@@ -100,10 +101,10 @@ export const ContentGrid = styled.div`
  * Cards and content inside should NOT add their own horizontal margins.
  * Use margin: 0 for cards to match CardView width.
  * 
- * Width: max-width 1000px, centered
+ * Width: max-width 1000px, centered (or full width via CSS custom property)
  */
 export const ModernPostFeed = styled.div`
-    max-width: 1000px;
+    max-width: var(--feed-max-width, 1000px);
     width: 100%;
     margin: 0 auto;
     padding: 0 0.75rem;
@@ -244,9 +245,10 @@ export const EmptyBody = styled.div`
 
 // Shared search shell (input and its container/row)
 // Horizontally aligned with the topic hero card in MainView
+// Uses CSS custom property --feed-max-width for full-width mode support
 export const SearchContainer = styled.div`
     width: 100%;
-    max-width: 1000px;
+    max-width: var(--feed-max-width, 1000px);
     margin: 0.75rem auto;
     padding: 0 0.75rem;
     box-sizing: border-box;

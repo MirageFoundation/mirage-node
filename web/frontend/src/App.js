@@ -403,6 +403,19 @@ class App extends Component {
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
         try { window.__MIRAGE_BUILD__ = { version: version, buildId: buildId || null }; } catch (_) { }
 
+        // Initialize full width mode CSS custom properties
+        try {
+            const fullWidthMode = Storage.load('full_width_mode', false) === true;
+            const root = document.documentElement;
+            if (fullWidthMode) {
+                root.style.setProperty('--content-max-width', 'none');
+                root.style.setProperty('--feed-max-width', 'none');
+            } else {
+                root.style.setProperty('--content-max-width', '1240px');
+                root.style.setProperty('--feed-max-width', '1000px');
+            }
+        } catch (_) { }
+
         // Stats tracking is handled by RouteTracker to avoid duplicate requests
         // Only set up session end tracking via sendBeacon
         this.setupSessionEndTracking();

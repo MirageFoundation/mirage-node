@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Helmet } from 'react-helmet-async';
 import styled from "styled-components";
 import { useLocation } from 'react-router-dom';
@@ -101,13 +101,6 @@ export default function SettingsView({ state }) {
             return 'system';
         }
     });
-    const [cardSize, setCardSize] = useState(() => {
-        try {
-            return Storage.load('card_size', 'large');
-        } catch (_) {
-            return 'large';
-        }
-    });
     const [collapseThreshold, setCollapseThreshold] = useState(() => {
         try {
             const v = Storage.load('comment_auto_collapse_threshold', -5);
@@ -188,6 +181,25 @@ export default function SettingsView({ state }) {
             return false;
         }
     });
+    const [fullWidthMode, setFullWidthMode] = useState(() => {
+        try {
+            return Storage.load('full_width_mode', false) === true;
+        } catch (_) {
+            return false;
+        }
+    });
+
+    // Apply full width mode on mount and when it changes
+    useEffect(() => {
+        const root = document.documentElement;
+        if (fullWidthMode) {
+            root.style.setProperty('--content-max-width', 'none');
+            root.style.setProperty('--feed-max-width', 'none');
+        } else {
+            root.style.setProperty('--content-max-width', '1240px');
+            root.style.setProperty('--feed-max-width', '1000px');
+        }
+    }, [fullWidthMode]);
 
     const handleThemeModeChange = (e) => {
         const newMode = e.target.value;
@@ -197,12 +209,6 @@ export default function SettingsView({ state }) {
         window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: { mode: newMode } }));
     };
 
-    const handleCardSizeChange = (e) => {
-        const newSize = e.target.value;
-        setCardSize(newSize);
-        Storage.save('card_size', newSize);
-        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { cardSize: newSize } }));
-    };
 
     const handleCollapseThresholdChange = (e) => {
         const raw = e.target.value;
@@ -274,17 +280,21 @@ export default function SettingsView({ state }) {
                             </Row>
 
                             <Row>
-                                <Label>Card size:</Label>
+                                <Label>Full width:</Label>
                                 <ValueBox>
-                                    <ThemeSelect value={cardSize} onChange={handleCardSizeChange}>
-                                        <option value="large">Large</option>
-                                        <option value="compact">Compact</option>
-                                    </ThemeSelect>
-                                    <ExplanationText>
-                                        {cardSize === 'compact'
-                                            ? 'Tighter spacing, smaller thumbnails, reduced gaps between cards'
-                                            : 'Full-size thumbnails and standard spacing'}
-                                    </ExplanationText>
+                                    <CheckboxLabel>
+                                        <input
+                                            type="checkbox"
+                                            checked={fullWidthMode}
+                                            onChange={(e) => {
+                                                const val = !!e.target.checked;
+                                                setFullWidthMode(val);
+                                                Storage.save('full_width_mode', val);
+                                            }}
+                                            style={{ width: '16px', height: '16px' }}
+                                        />
+                                        Expand cards to full screen width
+                                    </CheckboxLabel>
                                 </ValueBox>
                             </Row>
 
