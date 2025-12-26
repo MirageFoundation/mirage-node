@@ -1713,14 +1713,33 @@ def main():
     # Generate summary
     print("Generating summary...")
 
-    # Build clusters from CRITICAL matches using Union-Find
-    # Only consider matches between accounts that are both in our target list
+    # Build clusters from CRITICAL matches using Union-Find.
+    # IMPORTANT: clusters are built against ALL ACCOUNTS (targets + their CRITICAL matches),
+    # not only between accounts in the input list.
     target_addrs = {e.address for e in all_evidence}
-    addr_to_username = {e.address: e.username for e in all_evidence}
+
+    # Seed the cluster universe with targets + any CRITICAL match addresses
+    cluster_nodes: Set[str] = set(target_addrs)
+    for e in all_evidence:
+        for m in e.matches:
+            if m.severity == "CRITICAL":
+                cluster_nodes.add(m.match_addr)
+
+    # Username map for display (prefer real usernames from loaded profiles)
+    addr_to_username: Dict[str, str] = {}
+    for addr in cluster_nodes:
+        if addr in target_addrs:
+            # target username is authoritative for the report label
+            t = next((x for x in all_evidence if x.address == addr), None)
+            if t:
+                addr_to_username[addr] = t.username
+                continue
+        u = users.get(addr)
+        addr_to_username[addr] = u.username if u else addr[:20]
 
     # Union-Find data structures
-    parent: Dict[str, str] = {addr: addr for addr in target_addrs}
-    rank: Dict[str, int] = {addr: 0 for addr in target_addrs}
+    parent: Dict[str, str] = {addr: addr for addr in cluster_nodes}
+    rank: Dict[str, int] = {addr: 0 for addr in cluster_nodes}
 
     def find(x: str) -> str:
         if parent[x] != x:
@@ -1737,15 +1756,15 @@ def main():
         if rank[px] == rank[py]:
             rank[px] += 1
 
-    # Build edges from CRITICAL matches
+    # Build edges from CRITICAL matches (from each target to all CRITICAL matches)
     for e in all_evidence:
         for m in e.matches:
-            if m.severity == "CRITICAL" and m.match_addr in target_addrs:
+            if m.severity == "CRITICAL":
                 union(e.address, m.match_addr)
 
     # Group by cluster
     clusters: Dict[str, List[str]] = defaultdict(list)
-    for addr in target_addrs:
+    for addr in cluster_nodes:
         clusters[find(addr)].append(addr)
 
     # Filter to clusters with 2+ members and sort by size
@@ -1778,7 +1797,7 @@ def main():
     else:
         summary_lines.append("## Clusters (CRITICAL Connections)")
         summary_lines.append("")
-        summary_lines.append("*No clusters found (no CRITICAL connections between analyzed accounts).*")
+        summary_lines.append("*No clusters found (no CRITICAL connections found for the analyzed targets).*")
         summary_lines.append("")
 
     # Stats
