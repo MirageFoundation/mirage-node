@@ -81,8 +81,11 @@ from chain import (
     is_valid_recent_block_hash,
 )
 from bank import get_balance
+import hashlib
 import json
+import socket
 import urllib.request as _ur
+from psycopg.types.json import Jsonb
 
 
 core_bp = Blueprint("core", __name__)
@@ -2704,13 +2707,55 @@ def core_set_auto_renewal():
         return jsonify({"error": str(e)}), 500
 
 
-import hashlib
-from psycopg.types.json import Jsonb
+def _lookup_ip_info(ip: str) -> dict:
+    """Lookup IP metadata using ip-api.com (free, no API key).
+
+    Returns dict with: country, countryCode, isp, org, mobile, proxy, hosting, reverse DNS.
+    On failure, returns empty dict (non-blocking).
+
+    Rate limit: 45 requests/minute on free tier.
+    """
+    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
+        return {}
+
+    result = {}
+
+    # Try reverse DNS first (fast, local)
+    try:
+        hostname = socket.gethostbyaddr(ip)[0]
+        result["rdns"] = hostname
+    except (socket.herror, socket.gaierror, OSError):
+        pass
+
+    # Lookup via ip-api.com (free tier, no key needed)
+    try:
+        url = (
+            f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,region,city,isp,org,as,mobile,proxy,hosting"
+        )
+        req = _ur.Request(url, headers={"User-Agent": "mirage-backend/1.0"})
+        with _ur.urlopen(req, timeout=2) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("status") == "success":
+                result["country"] = data.get("country")
+                result["countryCode"] = data.get("countryCode")
+                result["region"] = data.get("region")
+                result["city"] = data.get("city")
+                result["isp"] = data.get("isp")
+                result["org"] = data.get("org")
+                result["asn"] = data.get("as")
+                result["mobile"] = data.get("mobile", False)
+                result["proxy"] = data.get("proxy", False)
+                result["hosting"] = data.get("hosting", False)
+    except Exception:
+        # Non-blocking - if lookup fails, we just don't have the metadata
+        pass
+
+    return result
 
 
 def _compute_fp_hash(data: dict, attributes: dict) -> str:
     """Compute fingerprint hash from material fields.
-    
+
     Includes both legacy fields and key attributes from the extended JSONB blob.
     """
     parts = [
@@ -2727,12 +2772,14 @@ def _compute_fp_hash(data: dict, attributes: dict) -> str:
         plugins = attributes.get("plugins", {})
         webgl = attributes.get("webgl", {})
         audio = attributes.get("audio", {})
-        parts.extend([
-            str(plugins.get("hash") or ""),
-            str(webgl.get("extensionsHash") or ""),
-            str(audio.get("codecsHash") or ""),
-            str(attributes.get("mathHash") or ""),
-        ])
+        parts.extend(
+            [
+                str(plugins.get("hash") or ""),
+                str(webgl.get("extensionsHash") or ""),
+                str(audio.get("codecsHash") or ""),
+                str(attributes.get("mathHash") or ""),
+            ]
+        )
     combined = "|".join(parts)
     return hashlib.sha256(combined.encode()).hexdigest()[:32]
 
@@ -2752,6 +2799,9 @@ def save_fingerprint():
         ip_raw = request.headers.get("X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr or ""))
         ip_raw = ip_raw.split(",")[0].strip() if ip_raw else ""
         ip_hash = hashlib.sha256(ip_raw.encode()).hexdigest()[:32] if ip_raw else None
+
+        # Lookup IP metadata (country, ISP, proxy detection, etc.)
+        ip_info = _lookup_ip_info(ip_raw) if ip_raw else {}
 
         user_agent = request.headers.get("User-Agent", "")[:500]
         user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:32] if user_agent else None
@@ -2792,13 +2842,17 @@ def save_fingerprint():
 
         # Extended attributes from frontend (stored as JSONB)
         frontend_attributes = data.get("attributes", {})
-        
+
         # Combine frontend attributes with server-side captured data
         attributes = {
             **frontend_attributes,
             "httpHeaders": http_headers,
             "serverTimestamp": now_ts,
         }
+
+        # Add IP metadata if available (country, ISP, proxy/VPN detection)
+        if ip_info:
+            attributes["ipInfo"] = ip_info
 
         fingerprint_hash = _compute_fp_hash(fp_data, attributes)
         attributes_jsonb = Jsonb(attributes or {})

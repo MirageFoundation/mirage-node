@@ -58,6 +58,46 @@ class FingerprintData:
     last_seen: int = 0
     seen_count: int = 1
 
+    @property
+    def ip_info(self) -> Dict[str, Any]:
+        """Get IP metadata (country, ISP, proxy detection) if available."""
+        return self.attributes.get("ipInfo", {})
+
+    @property
+    def ip_country(self) -> Optional[str]:
+        """Get IP country code (e.g., 'US', 'PH')."""
+        return self.ip_info.get("countryCode")
+
+    @property
+    def ip_isp(self) -> Optional[str]:
+        """Get ISP name (e.g., 'Comcast', 'PLDT')."""
+        return self.ip_info.get("isp")
+
+    @property
+    def ip_org(self) -> Optional[str]:
+        """Get organization name (e.g., 'University of Manila')."""
+        return self.ip_info.get("org")
+
+    @property
+    def ip_is_proxy(self) -> bool:
+        """Check if IP is detected as proxy/VPN."""
+        return self.ip_info.get("proxy", False)
+
+    @property
+    def ip_is_mobile(self) -> bool:
+        """Check if IP is from mobile carrier."""
+        return self.ip_info.get("mobile", False)
+
+    @property
+    def ip_is_hosting(self) -> bool:
+        """Check if IP is from datacenter/hosting provider."""
+        return self.ip_info.get("hosting", False)
+
+    @property
+    def ip_rdns(self) -> Optional[str]:
+        """Get reverse DNS hostname."""
+        return self.ip_info.get("rdns")
+
 
 @dataclass
 class FingerprintFrequency:

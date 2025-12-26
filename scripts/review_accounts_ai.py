@@ -18,6 +18,7 @@ Usage:
     python scripts/review_accounts_ai.py --input accounts.txt
     python scripts/review_accounts_ai.py --input accounts.txt --output-dir /tmp/review
     python scripts/review_accounts_ai.py --input accounts.txt --lookback-days 60
+    python scripts/review_accounts_ai.py --input accounts.txt --no-fingerprint
 """
 
 from __future__ import annotations
@@ -170,21 +171,95 @@ class AccountMatch:
     same_ip: bool = False
     same_canvas: bool = False
 
+    # IP metadata context (when available)
+    ip_has_metadata: bool = False  # True if both users have ipInfo
+    ip_is_datacenter: bool = False  # VPN/proxy/hosting detected
+    ip_is_mobile: bool = False  # Mobile carrier (CGNAT - less unique)
+    ip_country: str = ""  # Country code if available
+
     # Severity category
     severity: str = "NOTABLE"  # CRITICAL, HIGH, NOTABLE
 
-    def compute_severity(self):
-        """Determine severity based on signals."""
-        # Direct device signals
-        if self.same_ip or self.same_canvas:
+    def compute_severity(self, no_fingerprint: bool = False):
+        """Determine severity based on signals.
+
+        Uses ENTROPY-WEIGHTED total weight, not raw attribute counts.
+        Rare attributes contribute more weight, so this naturally prioritizes
+        unique device signals over common browser/platform attributes.
+
+        IP MATCHING WITH METADATA:
+          - Same residential IP = CRITICAL (very strong signal)
+          - Same mobile carrier IP = HIGH (CGNAT means many users share)
+          - Same datacenter/VPN IP = HIGH (many users share VPN exit nodes)
+          - Same IP but NO metadata = HIGH (can't verify, be cautious)
+
+        CRITICAL = very high confidence same person:
+          - Same residential IP (with metadata confirming it's not VPN/mobile)
+          - Total FP weight >= 100 (very strong fingerprint overlap with rare attrs)
+
+        HIGH = strong suspicion but not definitive:
+          - Same IP on VPN/datacenter/mobile (shared infrastructure)
+          - Same IP without metadata (older fingerprints, can't verify)
+          - Same canvas (can be shared on Safari/Mac, but suspicious)
+          - Total FP weight >= 60 (moderate fingerprint overlap)
+
+        NOTABLE = worth investigating but weak signal
+
+        When no_fingerprint=True (--no-fingerprint mode):
+          - Use preference similarity as primary signal
+          - CRITICAL: pref_sim >= 0.85 with 10+ shared prefs
+          - HIGH: pref_sim >= 0.70 with 5+ shared prefs
+        """
+        # No-fingerprint mode: use preference similarity only
+        if no_fingerprint:
+            if self.pref_sim >= 0.85 and self.pref_shared >= 10:
+                self.severity = "CRITICAL"
+            elif self.pref_sim >= 0.70 and self.pref_shared >= 5:
+                self.severity = "HIGH"
+            elif self.pref_sim >= HIGH_PREF_SIM:
+                self.severity = "NOTABLE"
+            else:
+                self.severity = "NOTABLE"
+            return
+
+        # Get total entropy-weighted score
+        total_weight = self.fp_match.total_weight if self.fp_match else 0.0
+
+        # Same IP handling - consider metadata context
+        if self.same_ip:
+            if self.ip_has_metadata:
+                # We have IP context - use it smartly
+                if self.ip_is_datacenter:
+                    # VPN/proxy/datacenter - many users share, less definitive
+                    self.severity = "HIGH"
+                elif self.ip_is_mobile:
+                    # Mobile carrier CGNAT - many users share, less definitive
+                    self.severity = "HIGH"
+                else:
+                    # Residential IP with metadata = very strong signal
+                    self.severity = "CRITICAL"
+            else:
+                # No metadata (older fingerprint) - can't verify, be cautious
+                # Downgrade to HIGH since we can't confirm it's not VPN/mobile
+                self.severity = "HIGH"
+            return
+
+        # Very high total weight = CRITICAL (many rare attributes match)
+        # 100+ weight requires multiple rare/uncommon matches beyond just canvas+webgl+ua
+        if total_weight >= 100:
             self.severity = "CRITICAL"
-        # Strong fingerprint combo match
-        elif self.fp_score >= CRITICAL_FP_SCORE:
-            self.severity = "CRITICAL"
-        # High fingerprint combo match *with* at least one high-entropy attribute match
-        # (prevents labeling broad/common matches as HIGH severity)
-        elif self.fp_score >= HIGH_FP_SCORE and self.fp_match and self.fp_match.has_device_match:
+        # Same canvas = HIGH (can be shared on same browser/GPU, but suspicious)
+        elif self.same_canvas:
             self.severity = "HIGH"
+        # Moderate total weight = HIGH (meaningful fingerprint overlap)
+        elif total_weight >= 60:
+            self.severity = "HIGH"
+        # Strong percentage match = HIGH (many attributes match, even if common)
+        elif self.fp_score >= CRITICAL_FP_SCORE:
+            self.severity = "HIGH"
+        # Lower weight with at least one high-entropy match = NOTABLE
+        elif total_weight >= 30 and self.fp_match and self.fp_match.has_device_match:
+            self.severity = "NOTABLE"
         else:
             self.severity = "NOTABLE"
 
@@ -672,10 +747,16 @@ def compute_preference_similarity(prefs_a: Dict[str, float], prefs_b: Dict[str, 
 def find_direct_matches(
     target_fps: List[FingerprintData],
     other_fps: List[FingerprintData],
-) -> Tuple[bool, bool]:
+) -> Tuple[bool, bool, bool, bool, bool, str]:
     """Check for direct IP and canvas hash matches between two users.
 
-    Returns (same_ip, same_canvas).
+    Returns (same_ip, same_canvas, ip_has_metadata, ip_is_datacenter, ip_is_mobile, ip_country).
+
+    IP metadata context is used to determine if a shared IP is suspicious:
+    - Residential IP = very suspicious (CRITICAL)
+    - VPN/datacenter IP = less suspicious (many people share)
+    - Mobile carrier IP = less suspicious (CGNAT)
+    - No metadata = uncertain (older fingerprints)
     """
     target_ips = {fp.ip_hash for fp in target_fps if fp.ip_hash}
     target_canvas = {fp.canvas_hash for fp in target_fps if fp.canvas_hash}
@@ -686,7 +767,28 @@ def find_direct_matches(
     same_ip = bool(target_ips & other_ips)
     same_canvas = bool(target_canvas & other_canvas)
 
-    return same_ip, same_canvas
+    # IP metadata context (only relevant if same_ip)
+    ip_has_metadata = False
+    ip_is_datacenter = False
+    ip_is_mobile = False
+    ip_country = ""
+
+    if same_ip:
+        # Find the shared IP(s) and check metadata
+        shared_ips = target_ips & other_ips
+
+        # Collect IP info from both users for shared IPs
+        for fp in target_fps + other_fps:
+            if fp.ip_hash in shared_ips and fp.ip_info:
+                ip_has_metadata = True
+                if fp.ip_info.get("proxy") or fp.ip_info.get("hosting"):
+                    ip_is_datacenter = True
+                if fp.ip_info.get("mobile"):
+                    ip_is_mobile = True
+                if not ip_country and fp.ip_info.get("countryCode"):
+                    ip_country = fp.ip_info.get("countryCode", "")
+
+    return same_ip, same_canvas, ip_has_metadata, ip_is_datacenter, ip_is_mobile, ip_country
 
 
 def compare_all_users(
@@ -698,6 +800,7 @@ def compare_all_users(
     all_fps: Dict[str, List[FingerprintData]],
     all_prefs: Dict[str, Dict[str, float]],
     fp_freq: FingerprintFrequency,
+    no_fingerprint: bool = False,
 ) -> List[AccountMatch]:
     """Compare target against ALL other users, return all notable matches."""
     matches = []
@@ -709,16 +812,22 @@ def compare_all_users(
         other_fps_list = all_fps.get(other_addr, [])
         other_prefs = all_prefs.get(other_addr, {})
 
-        # Compute fingerprint match
+        # Compute fingerprint match (skip if --no-fingerprint)
         fp_match = None
         fp_score = 0.0
         same_ip = False
         same_canvas = False
+        ip_has_metadata = False
+        ip_is_datacenter = False
+        ip_is_mobile = False
+        ip_country = ""
 
-        if target_fps and other_fps_list:
+        if not no_fingerprint and target_fps and other_fps_list:
             fp_match = compare_all_fingerprints(target_fps, other_fps_list, fp_freq)
             fp_score = fp_match.score
-            same_ip, same_canvas = find_direct_matches(target_fps, other_fps_list)
+            same_ip, same_canvas, ip_has_metadata, ip_is_datacenter, ip_is_mobile, ip_country = find_direct_matches(
+                target_fps, other_fps_list
+            )
 
         # Compute preference similarity
         pref_sim, pref_shared = compute_preference_similarity(target_prefs, other_prefs)
@@ -738,8 +847,12 @@ def compare_all_users(
                 pref_shared=pref_shared,
                 same_ip=same_ip,
                 same_canvas=same_canvas,
+                ip_has_metadata=ip_has_metadata,
+                ip_is_datacenter=ip_is_datacenter,
+                ip_is_mobile=ip_is_mobile,
+                ip_country=ip_country,
             )
-            match.compute_severity()
+            match.compute_severity(no_fingerprint=no_fingerprint)
             matches.append(match)
 
     # Sort by severity then by fp_score + pref_sim
@@ -816,6 +929,7 @@ def build_target_evidence(
     referral_links: Dict[str, Tuple[str, int]],
     referee_counts: Dict[str, int],
     pending_by_referee: Dict[str, float],
+    no_fingerprint: bool = False,
 ) -> TargetEvidence:
     """Build complete evidence bundle for a target."""
     evidence = TargetEvidence(address=addr, username=username)
@@ -846,6 +960,7 @@ def build_target_evidence(
         all_fps,
         all_prefs,
         fp_freq,
+        no_fingerprint=no_fingerprint,
     )
 
     return evidence
@@ -945,6 +1060,38 @@ def generate_evidence_markdown(
             tz = fp.timezone or "-"
             lines.append(f"| {i} | {first} | {last} | {fp.seen_count} | {ip} | {screen} | {canvas} | {tz} |")
         lines.append("")
+
+        # IP Metadata (if available)
+        ip_infos_seen: Set[str] = set()
+        ip_info_lines = []
+        for fp in evidence.fingerprints:
+            ip_info = fp.ip_info
+            if ip_info and fp.ip_hash and fp.ip_hash not in ip_infos_seen:
+                ip_infos_seen.add(fp.ip_hash)
+                ip_short = fp.ip_hash[:12] + "..."
+                country = ip_info.get("countryCode", "-")
+                isp = ip_info.get("isp", "-")
+                org = ip_info.get("org", "-")
+                rdns = ip_info.get("rdns", "-")
+                flags = []
+                if ip_info.get("mobile"):
+                    flags.append("📱 Mobile")
+                if ip_info.get("proxy"):
+                    flags.append("🔒 Proxy/VPN")
+                if ip_info.get("hosting"):
+                    flags.append("🖥️ Datacenter")
+                flags_str = ", ".join(flags) if flags else "Residential"
+                ip_info_lines.append(
+                    f"| `{ip_short}` | {country} | {isp} | {org[:30]}{'...' if len(org) > 30 else ''} | {flags_str} |"
+                )
+
+        if ip_info_lines:
+            lines.append("### IP Metadata")
+            lines.append("")
+            lines.append("| IP Hash | Country | ISP | Organization | Type |")
+            lines.append("|---------|---------|-----|--------------|------|")
+            lines.extend(ip_info_lines)
+            lines.append("")
     else:
         lines.append("*No fingerprint data available.*")
         lines.append("")
@@ -988,7 +1135,20 @@ def generate_evidence_markdown(
                 lines.append("")
                 flags = []
                 if m.same_ip:
-                    flags.append("**SAME IP**")
+                    # Show IP context when available
+                    if m.ip_has_metadata:
+                        if m.ip_is_datacenter:
+                            flags.append(
+                                f"**SAME IP** (⚠️ VPN/Datacenter{f' - {m.ip_country}' if m.ip_country else ''})"
+                            )
+                        elif m.ip_is_mobile:
+                            flags.append(
+                                f"**SAME IP** (📱 Mobile carrier{f' - {m.ip_country}' if m.ip_country else ''})"
+                            )
+                        else:
+                            flags.append(f"**SAME IP** (🏠 Residential{f' - {m.ip_country}' if m.ip_country else ''})")
+                    else:
+                        flags.append("**SAME IP** (⚠️ no metadata - older fingerprint)")
                 if m.same_canvas:
                     flags.append("**SAME CANVAS**")
                 if m.fp_score >= CRITICAL_FP_SCORE:
@@ -1055,10 +1215,11 @@ def generate_evidence_markdown(
                     lines.append("")
 
         if high:
-            lines.append("### HIGH Severity Fingerprint Matches")
+            lines.append("### HIGH Severity Matches")
             lines.append("")
             lines.append(
-                "These accounts have a strong fingerprint combo match with at least one high-entropy attribute match."
+                "Suspicious but not definitive. Includes: same canvas alone (can be shared on same browser/GPU platform), "
+                "or strong FP score without multiple high-entropy matches."
             )
             lines.append("")
             lines.append("| Username | Address | FP Score | FP Weight | Pref Sim | Flags |")
@@ -1294,9 +1455,15 @@ CHATGPT_SYSTEM_PROMPT = """You are a fraud detection expert analyzing user accou
 Your task is to determine if accounts are REAL users or GAMING (sockpuppets / fake accounts).
 
 Key signals to look for:
-1. SAME IP HASH - Two accounts from same IP are highly suspicious
-2. SAME CANVAS HASH - Browser fingerprint match indicates same device
-3. HIGH FINGERPRINT COMBO SCORE - Rare attribute combinations matching
+1. SAME IP HASH - Strength depends on IP TYPE:
+   - 🏠 Residential IP = VERY suspicious (CRITICAL) - real users rarely share residential IPs
+   - 📱 Mobile carrier IP = LESS suspicious (HIGH) - CGNAT means many users share mobile IPs
+   - ⚠️ VPN/Datacenter IP = LESS suspicious (HIGH) - many users share VPN exit nodes
+   - No metadata = UNCERTAIN (HIGH) - older fingerprints without IP lookup data
+2. SAME CANVAS HASH - Browser fingerprint match, BUT can be legitimately shared by different users
+   on the same browser/GPU platform (e.g., all Safari/Mac users may share canvas hash).
+   Canvas alone is NOT definitive - only suspicious when combined with other signals.
+3. HIGH FINGERPRINT COMBO SCORE (3+ high-entropy attributes) - Rare attribute combinations matching = strong evidence
 4. PREFERENCE SIMILARITY - Same voting patterns can be correlated for real users in the same community.
    Treat preference similarity as SUPPORTING evidence only unless paired with device/fingerprint evidence.
 5. COORDINATED ACTIVITY - Same timezone, same topics, same timing
@@ -1479,7 +1646,16 @@ def generate_ai_evidence_markdown(
             for m in crit:
                 flags = []
                 if m.same_ip:
-                    flags.append("SAME_IP")
+                    # Include IP type context for AI
+                    if m.ip_has_metadata:
+                        if m.ip_is_datacenter:
+                            flags.append(f"SAME_IP(VPN/DC,{m.ip_country or '?'})")
+                        elif m.ip_is_mobile:
+                            flags.append(f"SAME_IP(Mobile,{m.ip_country or '?'})")
+                        else:
+                            flags.append(f"SAME_IP(Residential,{m.ip_country or '?'})")
+                    else:
+                        flags.append("SAME_IP(no_metadata)")
                 if m.same_canvas:
                     flags.append("SAME_CANVAS")
                 if m.fp_match:
@@ -1552,6 +1728,11 @@ def main():
         default=LOOKBACK_DAYS,
         help=f"Days of activity to analyze (default: {LOOKBACK_DAYS})",
     )
+    parser.add_argument(
+        "--no-fingerprint",
+        action="store_true",
+        help="Disable fingerprint analysis (test other heuristics only)",
+    )
     args = parser.parse_args()
 
     # Validate input file
@@ -1572,6 +1753,8 @@ def main():
     print(f"Targets: {len(identifiers)}")
     print(f"Output: {args.output_dir}")
     print(f"Lookback: {args.lookback_days} days")
+    if args.no_fingerprint:
+        print(f"Mode: NO FINGERPRINT (testing other heuristics only)")
     print("")
 
     # Prompt for API key if not set
@@ -1642,13 +1825,18 @@ def main():
             users = load_all_users(cur, since_ts)
             print(f"  Loaded {len(users)} users")
 
-            print("Loading fingerprints...")
-            all_fps = load_fingerprints_from_db(cur)
-            print(f"  Loaded fingerprints for {len(all_fps)} users")
+            if args.no_fingerprint:
+                print("Fingerprint analysis DISABLED (--no-fingerprint)")
+                all_fps: Dict[str, List[FingerprintData]] = {}
+                fp_freq = FingerprintFrequency()
+            else:
+                print("Loading fingerprints...")
+                all_fps = load_fingerprints_from_db(cur)
+                print(f"  Loaded fingerprints for {len(all_fps)} users")
 
-            print("Loading fingerprint frequencies...")
-            fp_freq = load_fingerprint_frequencies(cur)
-            print(f"  {fp_freq.total_users} users, {len(fp_freq.counts)} attribute types")
+                print("Loading fingerprint frequencies...")
+                fp_freq = load_fingerprint_frequencies(cur)
+                print(f"  {fp_freq.total_users} users, {len(fp_freq.counts)} attribute types")
 
             print("Loading preferences...")
             all_prefs = load_all_preferences(cur)
@@ -1676,6 +1864,7 @@ def main():
                     referral_links,
                     referee_counts,
                     pending_by_referee,
+                    no_fingerprint=args.no_fingerprint,
                 )
 
                 # Attach recent posts (target + small sample for CRITICAL/HIGH matches)
@@ -1785,7 +1974,7 @@ def main():
     if multi_clusters:
         summary_lines.append("## Clusters (CRITICAL Connections)")
         summary_lines.append("")
-        summary_lines.append("Accounts connected by CRITICAL-level signals (same IP, same canvas, or FP ≥50%).")
+        summary_lines.append("Accounts connected by CRITICAL-level signals (same residential IP, or FP weight ≥100).")
         summary_lines.append("Each cluster likely represents the same person.")
         summary_lines.append("")
         for i, cluster_addrs in enumerate(multi_clusters, 1):

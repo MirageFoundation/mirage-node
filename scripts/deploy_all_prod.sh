@@ -79,10 +79,10 @@ fi
 # Hard-coded production hosts
 SSH_USER="${SSH_USER:-root}"
 HOSTS=(
-#   "mirage.vote"
-  "146.190.108.140"
-  "139.59.9.96"
   "mirage.talk"
+  "mirage.vote"
+  "146.190.108.140"
+  "139.59.9.96"  
 )
 
 # Show deployment info and get confirmation BEFORE building
