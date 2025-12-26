@@ -80,6 +80,13 @@ export default function SettingsView({ state }) {
             return 'system';
         }
     });
+    const [cardSize, setCardSize] = useState(() => {
+        try {
+            return Storage.load('card_size', 'large');
+        } catch (_) {
+            return 'large';
+        }
+    });
     const [collapseThreshold, setCollapseThreshold] = useState(() => {
         try {
             const v = Storage.load('comment_auto_collapse_threshold', -5);
@@ -178,6 +185,13 @@ export default function SettingsView({ state }) {
         window.dispatchEvent(new CustomEvent('themeModeChanged', { detail: { mode: newMode } }));
     };
 
+    const handleCardSizeChange = (e) => {
+        const newSize = e.target.value;
+        setCardSize(newSize);
+        Storage.save('card_size', newSize);
+        window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { cardSize: newSize } }));
+    };
+
     const handleCollapseThresholdChange = (e) => {
         const raw = e.target.value;
         if (raw === '' || raw === '-' || raw === '−') {
@@ -244,6 +258,21 @@ export default function SettingsView({ state }) {
                                         <option value="system">System</option>
                                     </ThemeSelect>
                                     <ExplanationText>{getThemeExplanation(themeMode)}</ExplanationText>
+                                </ValueBox>
+                            </Row>
+
+                            <Row>
+                                <Label>Card size:</Label>
+                                <ValueBox>
+                                    <ThemeSelect value={cardSize} onChange={handleCardSizeChange}>
+                                        <option value="large">Large</option>
+                                        <option value="compact">Compact</option>
+                                    </ThemeSelect>
+                                    <ExplanationText>
+                                        {cardSize === 'compact'
+                                            ? 'Tighter spacing, smaller thumbnails, reduced gaps between cards'
+                                            : 'Full-size thumbnails and standard spacing'}
+                                    </ExplanationText>
                                 </ValueBox>
                             </Row>
 

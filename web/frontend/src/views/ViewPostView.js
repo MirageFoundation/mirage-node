@@ -734,7 +734,7 @@ const TooltipText = styled.div`
   border-radius: 6px;
   padding: 0.1rem 0.25rem;
   position: absolute;
-  z-index: 1;
+  z-index: 9999;
   bottom: 100%;
   left: 50%;
   opacity: 0.5;

@@ -898,6 +898,16 @@ def _get_home_feed(
     if not viewer_lower or viewer_lower == "guest":
         return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
 
+    # Dispatch to magic2/magic3 algorithm if requested
+    if sort_mode == "magic2":
+        return _get_home_feed_magic2(
+            cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags
+        )
+    if sort_mode == "magic3":
+        return _get_home_feed_magic3(
+            cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags
+        )
+
     # 1. Load user preferences
     topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
 
@@ -1067,6 +1077,486 @@ def _get_home_feed(
         "limit": limit,
         "has_more": has_more,
     }
+
+
+def _get_home_feed_magic2(
+    cur,
+    viewer: str,
+    limit: int,
+    page: int,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    allowed_tags: set[str],
+) -> dict:
+    """
+    Simplified magic2 feed algorithm.
+
+    Single unified score based on:
+    - Similar users who upvoted the post
+    - Unique commenters (distinct users, not total comments)
+    - Votes with softer compression (sqrt instead of log)
+    - Aggressive exponential recency decay
+
+    No bucket interleaving - just rank by final score.
+    """
+    import math
+    import time
+    from similarity import get_or_compute_similarities
+
+    viewer_lower = viewer.strip().lower() if viewer else ""
+
+    # 1. Load user preferences (for hide threshold only)
+    topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
+
+    # 2. Get similar users (cached or computed on-demand)
+    similar_users = get_or_compute_similarities(cur, viewer_lower)
+    sim_lookup = {u[0]: u[1] for u in similar_users}  # addr -> similarity
+    similar_addrs = set(sim_lookup.keys())
+
+    # 3. Load candidate posts
+    max_candidates = max(500, limit * page * 3)
+    candidates = _load_home_candidates(
+        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
+    )
+
+    if not candidates:
+        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+
+    # 4. Load which posts similar users have upvoted
+    post_ids = [c["post_id"] for c in candidates]
+    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+
+    # 5. Load stats: vote totals, unique commenters, viewer's votes
+    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+        cur, post_ids, blocked_posts, blocked_users, viewer_lower
+    )
+    unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+
+    # 6. Score each post with magic2 algorithm
+    now_ts = int(time.time())
+    scored_posts = []
+
+    for post in candidates:
+        score, debug, should_hide = _score_magic2(
+            post,
+            sim_lookup,
+            similar_upvotes,
+            unique_commenters,
+            vote_totals,
+            topic_prefs,
+            author_prefs,
+            now_ts,
+        )
+
+        if should_hide:
+            continue
+
+        post["_score"] = score
+        post["feed_debug"] = debug
+        post["points"] = vote_totals.get(post["post_id"], 0.0)
+        post["comments"] = comment_counts.get(post["post_id"], 0)
+        post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
+        post["children"] = []
+        post["feed_type"] = "home"
+        post["feed_bucket"] = debug.get("bucket", "magic2")
+        post["user_vote"] = user_votes.get(post["post_id"], 0)
+        post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
+        scored_posts.append(post)
+
+    # 7. Sort by score descending
+    scored_posts.sort(key=lambda p: -p["_score"])
+
+    # 8. Paginate
+    start = (page - 1) * limit
+    end = start + limit
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
+
+    # Clean up internal fields
+    for post in page_posts:
+        post.pop("_score", None)
+
+    return {
+        "posts": page_posts,
+        "total": len(scored_posts),
+        "page": page,
+        "limit": limit,
+        "has_more": has_more,
+    }
+
+
+def _get_home_feed_magic3(
+    cur,
+    viewer: str,
+    limit: int,
+    page: int,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    allowed_tags: set[str],
+) -> dict:
+    """
+    Magic3 feed algorithm - magic2 + preference boost.
+
+    Single unified score: (S + V + U + P) × R
+
+    Where:
+    - S = similarity boost from similar users who upvoted
+    - V = vote score (sqrt scaling)
+    - U = unique commenter score (sqrt scaling)
+    - P = preference boost from topic/author prefs (sqrt scaling)
+    - R = recency decay (exponential)
+    """
+    import math
+    import time
+    from similarity import get_or_compute_similarities
+
+    viewer_lower = viewer.strip().lower() if viewer else ""
+
+    # 1. Load user preferences
+    topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
+
+    # 2. Get similar users (cached or computed on-demand)
+    similar_users = get_or_compute_similarities(cur, viewer_lower)
+    sim_lookup = {u[0]: u[1] for u in similar_users}
+    similar_addrs = set(sim_lookup.keys())
+
+    # 3. Load candidate posts
+    max_candidates = max(500, limit * page * 3)
+    candidates = _load_home_candidates(
+        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
+    )
+
+    if not candidates:
+        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+
+    # 4. Load which posts similar users have upvoted
+    post_ids = [c["post_id"] for c in candidates]
+    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+
+    # 5. Load stats
+    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+        cur, post_ids, blocked_posts, blocked_users, viewer_lower
+    )
+    unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+
+    # 6. Score each post with magic3 algorithm
+    now_ts = int(time.time())
+    scored_posts = []
+
+    for post in candidates:
+        score, debug, should_hide = _score_magic3(
+            post,
+            sim_lookup,
+            similar_upvotes,
+            unique_commenters,
+            vote_totals,
+            topic_prefs,
+            author_prefs,
+            now_ts,
+        )
+
+        if should_hide:
+            continue
+
+        post["_score"] = score
+        post["feed_debug"] = debug
+        post["points"] = vote_totals.get(post["post_id"], 0.0)
+        post["comments"] = comment_counts.get(post["post_id"], 0)
+        post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
+        post["children"] = []
+        post["feed_type"] = "home"
+        post["feed_bucket"] = debug.get("bucket", "magic3")
+        post["user_vote"] = user_votes.get(post["post_id"], 0)
+        post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
+        scored_posts.append(post)
+
+    # 7. Sort by score descending
+    scored_posts.sort(key=lambda p: -p["_score"])
+
+    # 8. Paginate
+    start = (page - 1) * limit
+    end = start + limit
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
+
+    # Clean up internal fields
+    for post in page_posts:
+        post.pop("_score", None)
+
+    return {
+        "posts": page_posts,
+        "total": len(scored_posts),
+        "page": page,
+        "limit": limit,
+        "has_more": has_more,
+    }
+
+
+def _score_magic3(
+    post: dict,
+    sim_lookup: dict[str, float],
+    similar_upvotes: dict[str, list[str]],
+    unique_commenters: dict[str, int],
+    vote_totals: dict[str, float],
+    topic_prefs: dict[str, float],
+    author_prefs: dict[str, float],
+    now_ts: int,
+) -> tuple[float, dict, bool]:
+    """
+    Magic3 scoring: (S + V + U + P) × R
+
+    Components:
+    - S = similarity boost (capped at 2.0)
+    - V = sqrt(net_votes) × 0.5
+    - U = sqrt(unique_commenters) × 0.3
+    - P = sqrt(max(0, topic_pref + author_pref)) × 0.3
+    - R = 1 / (1 + (age_hours/24)^1.585) — gentle decay: 12h=0.75, 24h=0.5, 48h=0.25
+
+    Returns (score, debug_info, should_hide).
+    """
+    import math
+
+    SIM_CAP = 2.0
+    HIDE_THRESHOLD = -5.0
+
+    pid = post["post_id"]
+    author = post["author"]
+    topic_lower = (post.get("topic") or "").strip().lower()
+    timestamp = post.get("timestamp", 0)
+
+    # Check user preference - hide severely disliked content
+    topic_pref = topic_prefs.get(topic_lower, 0)
+    author_pref = author_prefs.get(author, 0)
+    combined_pref = topic_pref + author_pref
+
+    if combined_pref <= HIDE_THRESHOLD:
+        return 0.0, {}, True
+
+    # S = Similarity boost
+    upvoters = similar_upvotes.get(pid, [])
+    raw_sim = sum(sim_lookup.get(v, 0) for v in upvoters)
+    S = min(raw_sim, SIM_CAP)
+
+    # V = Vote score (sqrt scaling)
+    net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
+    V = math.sqrt(max(0, net_vote)) * 0.5
+
+    # U = Unique commenter score
+    unique_count = unique_commenters.get(pid, 0)
+    U = math.sqrt(unique_count) * 0.3
+
+    # P = Preference boost (only positive prefs boost, negative just for hiding)
+    P = math.sqrt(max(0, combined_pref)) * 0.3
+
+    # R = Recency: inverse polynomial decay (gentler than exponential)
+    # 12h=0.75, 24h=0.50, 48h=0.25
+    age_hours = max(0, (now_ts - timestamp) / 3600)
+    R = 1 / (1 + (age_hours / 24) ** 1.585)
+
+    # Final score
+    score = (S + V + U + P) * R
+
+    # Determine primary reason based on dominant component
+    components = [("S", S), ("V", V), ("U", U), ("P", P)]
+    dominant = max(components, key=lambda x: x[1])
+
+    if dominant[0] == "S" and S > 0.3:
+        reason = "Similar users liked this"
+        bucket = "similar"
+    elif dominant[0] == "P" and P > 0.3:
+        if topic_pref > author_pref:
+            reason = f"You like #{topic_lower}" if topic_lower else "You like this topic"
+        elif author_pref > topic_pref:
+            reason = "You like this author"
+        else:
+            reason = "You like this topic & author"
+        bucket = "liked"
+    elif dominant[0] == "V" and net_vote >= 3:
+        reason = "Popular post"
+        bucket = "popular"
+    elif dominant[0] == "U" and unique_count >= 2:
+        reason = "Active discussion"
+        bucket = "discussion"
+    else:
+        reason = "Fresh content"
+        bucket = "discovery"
+
+    debug = {
+        "bucket": bucket,
+        "reason": reason,
+        "score": round(float(score), 4),
+        "S": round(S, 3),
+        "V": round(V, 3),
+        "U": round(U, 3),
+        "P": round(P, 3),
+        "R": round(R, 4),
+        "age_hours": round(age_hours, 1),
+        "points": round(net_vote, 1),
+        "unique_commenters": unique_count,
+        "t_pref": round(topic_pref, 1),
+        "a_pref": round(author_pref, 1),
+        "source": post.get("_source", "unknown"),
+    }
+
+    return score, debug, False
+
+
+def _score_magic2(
+    post: dict,
+    sim_lookup: dict[str, float],
+    similar_upvotes: dict[str, list[str]],
+    unique_commenters: dict[str, int],
+    vote_totals: dict[str, float],
+    topic_prefs: dict[str, float],
+    author_prefs: dict[str, float],
+    now_ts: int,
+) -> tuple[float, dict, bool]:
+    """
+    Simplified magic2 scoring.
+
+    Score = (S + V + U) * R
+
+    Where:
+    - S = similarity boost from similar users who upvoted (capped at 2.0)
+    - V = sqrt(net_votes) * 0.5 (softer compression than log)
+    - U = sqrt(unique_commenters) * 0.3
+    - R = 1 / (1 + (age_hours/24)^1.585) — gentle decay: 12h=0.75, 24h=0.5, 48h=0.25
+
+    Returns (score, debug_info, should_hide).
+    """
+    import math
+
+    SIM_CAP = 2.0
+    HIDE_THRESHOLD = -5.0
+
+    pid = post["post_id"]
+    author = post["author"]
+    topic_lower = (post.get("topic") or "").strip().lower()
+    timestamp = post.get("timestamp", 0)
+
+    # Check user preference for topic/author - hide severely disliked content
+    topic_pref = topic_prefs.get(topic_lower, 0)
+    author_pref = author_prefs.get(author, 0)
+    combined_pref = topic_pref + author_pref
+
+    if combined_pref <= HIDE_THRESHOLD:
+        return 0.0, {}, True
+
+    # S = Similarity boost: sum of similarities from users who upvoted this post
+    upvoters = similar_upvotes.get(pid, [])
+    raw_sim = sum(sim_lookup.get(v, 0) for v in upvoters)
+    S = min(raw_sim, SIM_CAP)
+
+    # V = Vote score: sqrt compression (softer than log)
+    net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
+    V = math.sqrt(max(0, net_vote)) * 0.5
+
+    # U = Unique commenter score
+    unique_count = unique_commenters.get(pid, 0)
+    U = math.sqrt(unique_count) * 0.3
+
+    # R = Recency: inverse polynomial decay (gentler than exponential)
+    # 12h=0.75, 24h=0.50, 48h=0.25
+    age_hours = max(0, (now_ts - timestamp) / 3600)
+    R = 1 / (1 + (age_hours / 24) ** 1.585)
+
+    # Final score
+    score = (S + V + U) * R
+
+    # Determine the primary reason for showing this post
+    if S > 0.3 and S >= V and S >= U:
+        reason = "Similar users liked this"
+        bucket = "similar"
+    elif topic_pref > 0 or author_pref > 0:
+        if topic_pref > 0 and author_pref > 0:
+            reason = "You like this topic and author"
+        elif topic_pref > 0:
+            reason = "You like this topic"
+        else:
+            reason = "You like this author"
+        bucket = "liked"
+    elif V >= U and net_vote >= 3:
+        reason = "Popular post"
+        bucket = "popular"
+    elif U > 0:
+        reason = "Active discussion"
+        bucket = "discussion"
+    else:
+        reason = "Fresh content"
+        bucket = "discovery"
+
+    debug = {
+        "bucket": bucket,
+        "reason": reason,
+        "score": round(float(score), 4),
+        "S": round(S, 3),
+        "V": round(V, 3),
+        "U": round(U, 3),
+        "R": round(R, 4),
+        "age_hours": round(age_hours, 1),
+        "points": round(net_vote, 1),
+        "unique_commenters": unique_count,
+        "t_pref": round(topic_pref, 1),
+        "a_pref": round(author_pref, 1),
+        "source": post.get("_source", "unknown"),
+    }
+
+    return score, debug, False
+
+
+def _load_unique_commenter_counts(
+    cur,
+    post_ids: list[str],
+    blocked_posts: set[str],
+    blocked_users: set[str],
+) -> dict[str, int]:
+    """
+    Load count of unique commenters per post.
+
+    Unlike regular comment_counts which just counts all comments,
+    this counts DISTINCT owners to avoid inflating scores when
+    one user spams multiple comments.
+    """
+    if not post_ids:
+        return {}
+
+    result: dict[str, int] = {}
+    id_ph = ",".join(["%s"] * len(post_ids))
+    all_blocked = blocked_posts | blocked_users
+
+    if all_blocked:
+        ab_ph = ",".join(["%s"] * len(all_blocked))
+        cur.execute(
+            f"""
+            SELECT LOWER(root_post_id), COUNT(DISTINCT LOWER(owner)) AS unique_commenters
+            FROM posts
+            WHERE LOWER(root_post_id) IN ({id_ph})
+              AND COALESCE(target, '') != ''
+              AND LOWER(txhash) NOT IN ({ab_ph})
+              AND LOWER(owner) NOT IN ({ab_ph})
+              AND deleted = false
+            GROUP BY LOWER(root_post_id)
+            """,
+            post_ids + list(all_blocked) + list(all_blocked),
+        )
+    else:
+        cur.execute(
+            f"""
+            SELECT LOWER(root_post_id), COUNT(DISTINCT LOWER(owner)) AS unique_commenters
+            FROM posts
+            WHERE LOWER(root_post_id) IN ({id_ph})
+              AND COALESCE(target, '') != ''
+              AND deleted = false
+            GROUP BY LOWER(root_post_id)
+            """,
+            post_ids,
+        )
+
+    for root_id, cnt in cur.fetchall():
+        if root_id:
+            result[root_id] = int(cnt or 0)
+
+    return result
 
 
 def _load_home_candidates(

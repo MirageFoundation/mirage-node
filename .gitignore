@@ -59,3 +59,6 @@ deploy/mirage-docker-*.tar.gz
 referrals/analysis/
 referrals/airdrop_pending.csv
 referrals/payout_history.csv
+
+
+cursor.md

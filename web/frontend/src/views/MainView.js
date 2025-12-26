@@ -662,9 +662,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         } catch (_) { }
         return false;
     });
-    const [homeChrono, setHomeChrono] = useState(() => {
+    const [homeSortMode, setHomeSortMode] = useState(() => {
         const mode = Storage.load('home_sort_mode', 'magic');
-        return mode === 'newest';
+        // Valid modes: magic, magic2, magic3, newest
+        return ['magic', 'magic2', 'magic3', 'newest'].includes(mode) ? mode : 'magic';
     });
     const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
         const val = Storage.load('hide_downvoted_posts', false);
@@ -1046,8 +1047,11 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
         if (isHomeFeed || isFollowingFeed) {
             const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
-            const useNewest = overrideChrono !== null ? overrideChrono : homeChrono;
-            params.by = useNewest ? 'newest' : 'magic';
+            // overrideChrono is boolean for backwards compat; homeSortMode is the new way
+            const mode = overrideChrono !== null
+                ? (overrideChrono ? 'newest' : 'magic')
+                : homeSortMode;
+            params.by = mode;
             params.allowed_tags = getAllowedTags().join(',');
             Api.get('get_posts', params, { timeoutMs: 10000 })
                 .then(handleResponse)
@@ -1060,7 +1064,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 .catch(onError);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, sortBy, currentPage, followedTopicsSet, followedAuthorsSet, homeChrono, isLoadingMore, hideDownvotedPosts]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, sortBy, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback((allowNsfw) => {
@@ -1173,13 +1177,13 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 setHasMorePosts(false);
                 setIsLoadingMore(false);
                 try { loadMoreLockRef.current = false; } catch (_) { }
-                getPosts('home', homeChrono, 1, true);
+                getPosts('home', homeSortMode === 'newest', 1, true);
             }
         };
         window.addEventListener('postCreated', handler);
         return () => window.removeEventListener('postCreated', handler);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [getPosts, urlTopic, homeChrono]);
+    }, [getPosts, urlTopic, homeSortMode]);
 
     // Reset page and loading state when topic changes
     // Skip reset on back navigation (we want to restore cached state)
@@ -1192,7 +1196,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         setCurrentPage(1);
         setHasMorePosts(false);
         setIsLoading(true); // Show loading immediately when navigating
-    }, [urlTopic, viewerAddress, homeChrono, hideDownvotedPosts, isBackNavigation]);
+    }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts, isBackNavigation]);
 
     // Infinite scroll: observe a sentinel near the bottom (also clickable fallback)
     const bottomSentinelRef = useRef(null);
@@ -1219,7 +1223,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             return;
         }
 
-        // Trigger loading when ~3 cards away from bottom (800px margin)
+        // Trigger loading when ~5-6 cards away from bottom (1500px margin)
         const observer = new IntersectionObserver(
             (entries) => {
                 const entry = entries[0];
@@ -1229,7 +1233,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             },
             {
                 root: null,
-                rootMargin: '800px 0px',
+                rootMargin: '1500px 0px',
                 threshold: 0
             }
         );
@@ -1251,8 +1255,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const el = bottomSentinelRef.current;
                 if (!el) return;
                 const rect = el.getBoundingClientRect();
-                // Trigger when sentinel is within 800px of viewport bottom
-                if (rect.top < window.innerHeight + 800) {
+                // Trigger when sentinel is within 1500px of viewport bottom
+                if (rect.top < window.innerHeight + 1500) {
                     loadMore();
                 }
             });
@@ -1352,12 +1356,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [urlTopic, location.pathname]);
 
-    // Refetch when homeChrono changes (magic/newest toggle)
-    const prevHomeChronoRef = useRef(homeChrono);
+    // Refetch when homeSortMode changes (magic/magic2/newest toggle)
+    const prevHomeSortModeRef = useRef(homeSortMode);
     useEffect(() => {
-        // Only trigger if homeChrono actually changed (not on mount)
-        if (prevHomeChronoRef.current === homeChrono) return;
-        prevHomeChronoRef.current = homeChrono;
+        // Only trigger if homeSortMode actually changed (not on mount)
+        if (prevHomeSortModeRef.current === homeSortMode) return;
+        prevHomeSortModeRef.current = homeSortMode;
 
         // Only refetch for home/following feeds
         const isHomeFeed = urlTopic === 'home';
@@ -1370,7 +1374,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         setStableOrder([]);
         setIsLoading(true);
         getPosts(urlTopic, null, 1);
-    }, [homeChrono, urlTopic, getPosts]);
+    }, [homeSortMode, urlTopic, getPosts]);
 
     useEffect(() => {
         const storedTopicsData = Storage.load("topics", { topics: [], lastFetched: null });
@@ -1836,14 +1840,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     </HomeFeedInfoTitle>
                                     <HomeFeedModeInline>
                                         <HomeFeedModeSelect
-                                            value={homeChrono ? 'newest' : 'magic'}
+                                            value={homeSortMode}
                                             onChange={(e) => {
-                                                const nextChrono = e.target.value === 'newest';
-                                                setHomeChrono(nextChrono);
-                                                Storage.save('home_sort_mode', nextChrono ? 'newest' : 'magic');
+                                                const mode = e.target.value;
+                                                setHomeSortMode(mode);
+                                                Storage.save('home_sort_mode', mode);
                                             }}
                                         >
-                                            <option value="magic">Magic</option>
+                                            <option value="magic">Magic 1</option>
+                                            <option value="magic2">Magic 2</option>
+                                            <option value="magic3">Magic 3</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
                                     </HomeFeedModeInline>
@@ -1863,14 +1869,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     </HomeFeedInfoTitle>
                                     <HomeFeedModeInline>
                                         <HomeFeedModeSelect
-                                            value={homeChrono ? 'newest' : 'magic'}
+                                            value={homeSortMode}
                                             onChange={(e) => {
-                                                const nextChrono = e.target.value === 'newest';
-                                                setHomeChrono(nextChrono);
-                                                Storage.save('home_sort_mode', nextChrono ? 'newest' : 'magic');
+                                                const mode = e.target.value;
+                                                setHomeSortMode(mode);
+                                                Storage.save('home_sort_mode', mode);
                                             }}
                                         >
-                                            <option value="magic">Magic</option>
+                                            <option value="magic">Magic 1</option>
+                                            <option value="magic2">Magic 2</option>
+                                            <option value="magic3">Magic 3</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
                                     </HomeFeedModeInline>

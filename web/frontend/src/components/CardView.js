@@ -84,6 +84,7 @@ const ThumbVoteContainer = styled.div`
     align-items: center;
     gap: 0.5rem;
     margin-right: 1.5rem;
+    margin-top: 0.3rem;
 
     @media (max-width: 600px) {
         display: none;
@@ -780,38 +781,23 @@ const StyledFooter = styled.div`
     font-size: 0.5rem;
 `
 
-const TooltipText = styled.div`
-  visibility: hidden;
-  background-color: black;
-  color: white;
-  text-align: center;
-  border-radius: 6px;
-  padding: 0.1rem 0.25rem;
-  position: absolute;
-  z-index: 1;
-  bottom: 125%; /* Position the tooltip above the text */
-  left: 50%;
-  transform: translateX(-50%);
-  opacity: 0.5;
-  transition: opacity 0.3s;
-  font-size: inherit;
-  white-space: nowrap;
+// Simple tooltip rendered via portal (like FeedDebugTooltip)
+const TimeTooltip = styled.div`
+    position: fixed;
+    z-index: 10000;
+    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
+    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
+    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
 `;
 
-const TooltipContainer = styled.div`
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  font-size: inherit;
-  text-decoration: none;
-  line-height: 1.15;
-
-  &:hover ${TooltipText} {
-    visibility: visible;
-    opacity: 1;
-    font-weight: bold;      
-    font-size: 0.6rem;
-  }
+const TimeWrapper = styled.span`
+    cursor: help;
 `;
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
@@ -835,12 +821,22 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
     const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0 });
     const feedReasonRef = useRef(null);
+    const [timeTooltipOpen, setTimeTooltipOpen] = useState(false);
+    const [timeTooltipPosition, setTimeTooltipPosition] = useState({ top: 0, left: 0 });
+    const timeRef = useRef(null);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);
             return val === false ? false : true;
         } catch (_) {
             return true;
+        }
+    });
+    const [cardSize, setCardSize] = useState(() => {
+        try {
+            return Storage.load('card_size', 'large');
+        } catch (_) {
+            return 'large';
         }
     });
     const menuRef = useRef(null);
@@ -871,15 +867,30 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             try {
                 if (e && e.detail && typeof e.detail.blurSensitiveMedia !== 'undefined') {
                     setBlurSensitiveMedia(e.detail.blurSensitiveMedia === false ? false : true);
+                }
+                if (e && e.detail && typeof e.detail.cardSize !== 'undefined') {
+                    setCardSize(e.detail.cardSize);
                     return;
                 }
                 const val = Storage.load('blur_sensitive_media', true);
                 setBlurSensitiveMedia(val === false ? false : true);
+                const size = Storage.load('card_size', 'large');
+                setCardSize(size);
             } catch (_) { }
         };
         window.addEventListener('settingsUpdated', handleSettingsUpdated);
         return () => window.removeEventListener('settingsUpdated', handleSettingsUpdated);
     }, []);
+
+    // Set CSS custom properties for card gap based on compact mode
+    useEffect(() => {
+        const isCompactMode = cardSize === 'compact';
+        const root = document.documentElement;
+        root.style.setProperty('--card-gap', isCompactMode ? '0.5rem' : '1.5rem');
+        root.style.setProperty('--card-gap-mobile', isCompactMode ? '0.25rem' : '0.5rem');
+        root.style.setProperty('--card-margin-top', isCompactMode ? '0.35rem' : '1rem');
+        root.style.setProperty('--card-margin-top-mobile', isCompactMode ? '0.2rem' : '0.5rem');
+    }, [cardSize]);
 
     // Ensure flash happens only once per post
     useEffect(() => {
@@ -1230,6 +1241,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     if (hideTeaser) return null;
 
+    // Compact mode: smaller thumb + tighter spacing on desktop (>600px)
+    const isCompact = cardSize === 'compact';
+
     const renderCommentCount = () => {
         const currentCount = Number.isFinite(Number(post.comments)) ? Math.round(Number(post.comments)) : 0;
         return `${currentCount} comments`;
@@ -1313,11 +1327,32 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) { /* noop */ }
     };
 
+    // Compact mode inline style overrides (desktop only)
+    // Affects container padding, thumbnail size, internal spacing, and gaps
+    const compactContainerStyle = isCompact
+        ? { padding: '0.25rem 0.6rem' }
+        : undefined;
+    const compactThumbVoteStyle = isCompact
+        ? { marginRight: '0.5rem', gap: '0.15rem' }
+        : undefined;
+    const compactThumbBoxStyle = isCompact
+        ? { width: '90px', minWidth: '90px', height: '90px', borderRadius: '8px' }
+        : undefined;
+    const compactMetaInfoRowStyle = isCompact
+        ? { paddingBottom: '0.05rem', marginBottom: '0.05rem' }
+        : undefined;
+    const compactTitleStyle = isCompact
+        ? { margin: '0.2rem 0' }
+        : undefined;
+    const compactMetaRowStyle = isCompact
+        ? { paddingTop: '0.25rem', gap: '0.25rem', marginTop: '0' }
+        : undefined;
+
     return (
         <div>
-            <StyledMainContainer isFlash={!!(post && post.flash)}>
-                <ThumbVoteContainer>
-                    <StyledThumbBox>
+            <StyledMainContainer isFlash={!!(post && post.flash)} style={compactContainerStyle}>
+                <ThumbVoteContainer style={compactThumbVoteStyle}>
+                    <StyledThumbBox style={compactThumbBoxStyle}>
                         {(() => {
                             const pickPlaceholder = () => {
                                 try {
@@ -1409,16 +1444,40 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             })()}
                         </MobileCardSquare>
                     </MobileCardWrapper>
-                    <MetaInfoRow>
+                    <MetaInfoRow style={compactMetaInfoRowStyle}>
                         <MetaInfoRowLeft>
                             <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
                             <MetaSeparator>·</MetaSeparator>
                             {renderAuthorMeta() || <span>@Anonymous</span>}
                             <MetaSeparator>·</MetaSeparator>
-                            <TooltipContainer>
-                                <span>{elapsed} ago</span>
-                                <TooltipText>{formatTimeStamp(post.timestamp)}</TooltipText>
-                            </TooltipContainer>
+                            <TimeWrapper
+                                ref={timeRef}
+                                onMouseEnter={() => {
+                                    if (timeRef.current) {
+                                        const rect = timeRef.current.getBoundingClientRect();
+                                        setTimeTooltipPosition({
+                                            top: rect.top - 8,
+                                            left: rect.left + rect.width / 2
+                                        });
+                                        setTimeTooltipOpen(true);
+                                    }
+                                }}
+                                onMouseLeave={() => setTimeTooltipOpen(false)}
+                            >
+                                {elapsed} ago
+                            </TimeWrapper>
+                            {timeTooltipOpen && ReactDOM.createPortal(
+                                <TimeTooltip
+                                    style={{
+                                        top: timeTooltipPosition.top,
+                                        left: timeTooltipPosition.left,
+                                        transform: 'translate(-50%, -100%)'
+                                    }}
+                                >
+                                    {formatTimeStamp(post.timestamp)}
+                                </TimeTooltip>,
+                                document.body
+                            )}
                             {post && post.tag ? (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
@@ -1447,6 +1506,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'similar' && 'similar'}
                                             {post.feed_bucket === 'liked' && 'liked'}
                                             {post.feed_bucket === 'discovery' && 'discover'}
+                                            {post.feed_bucket === 'popular' && 'popular'}
+                                            {post.feed_bucket === 'discussion' && 'discussion'}
                                             {post.feed_bucket === 'second_chance' && '2nd chance'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>
@@ -1456,10 +1517,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             onMouseEnter={() => setFeedTooltipOpen(true)}
                                             onMouseLeave={() => setFeedTooltipOpen(false)}
                                         >
-                                            <FeedDebugRow>
-                                                <FeedDebugLabel>Bucket:</FeedDebugLabel>
-                                                <FeedDebugValue>{post.feed_bucket}</FeedDebugValue>
-                                            </FeedDebugRow>
+                                            {/* Show formula and score for magic2/3 */}
+                                            {post.feed_debug.score !== undefined && (
+                                                <>
+                                                    <FeedDebugRow style={{ marginBottom: '0.3rem' }}>
+                                                        <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
+                                                            {post.feed_debug.P !== undefined
+                                                                ? '(S + V + U + P) × R'
+                                                                : '(S + V + U) × R'}
+                                                        </FeedDebugValue>
+                                                    </FeedDebugRow>
+                                                    <FeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
+                                                        <FeedDebugLabel style={{ fontWeight: 'bold' }}>Score:</FeedDebugLabel>
+                                                        <FeedDebugValue style={{ fontSize: '1.1em' }}>{post.feed_debug.score?.toFixed(4) || '0'}</FeedDebugValue>
+                                                    </FeedDebugRow>
+                                                </>
+                                            )}
+                                            {/* Old magic formula */}
                                             {post.feed_debug.formula && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>Formula:</FeedDebugLabel>
@@ -1469,29 +1543,50 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 </FeedDebugRow>
                                             )}
                                             <FeedDebugRow>
-                                                <FeedDebugLabel>R (recency):</FeedDebugLabel>
-                                                <FeedDebugValue>{post.feed_debug.R?.toFixed(2) || '0.00'}</FeedDebugValue>
+                                                <FeedDebugLabel>S (similar users):</FeedDebugLabel>
+                                                <FeedDebugValue>{post.feed_debug.S?.toFixed(3) || '0.000'}</FeedDebugValue>
                                             </FeedDebugRow>
                                             <FeedDebugRow>
-                                                <FeedDebugLabel>V (points):</FeedDebugLabel>
-                                                <FeedDebugValue>{post.feed_debug.V?.toFixed(2) || '0.00'} [{post.feed_debug.points ?? 0}]</FeedDebugValue>
+                                                <FeedDebugLabel>V (votes):</FeedDebugLabel>
+                                                <FeedDebugValue>{post.feed_debug.V?.toFixed(3) || '0.000'} [{post.feed_debug.points ?? 0} pts]</FeedDebugValue>
                                             </FeedDebugRow>
-                                            <FeedDebugRow>
-                                                <FeedDebugLabel>C (comments):</FeedDebugLabel>
-                                                <FeedDebugValue>{post.feed_debug.C?.toFixed(2) || '0.00'} [{post.feed_debug.comments || 0}]</FeedDebugValue>
-                                            </FeedDebugRow>
-                                            {post.feed_bucket === 'similar' && (
+                                            {/* magic2/3: U for unique commenters */}
+                                            {post.feed_debug.U !== undefined && (
                                                 <FeedDebugRow>
-                                                    <FeedDebugLabel>S (similarity):</FeedDebugLabel>
-                                                    <FeedDebugValue>{post.feed_debug.S?.toFixed(2) || '0.00'}</FeedDebugValue>
+                                                    <FeedDebugLabel>U (unique commenters):</FeedDebugLabel>
+                                                    <FeedDebugValue>{post.feed_debug.U?.toFixed(3) || '0.000'} [{post.feed_debug.unique_commenters ?? 0}]</FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
+                                            {/* magic3: P for preference boost */}
+                                            {post.feed_debug.P !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>P (your prefs):</FeedDebugLabel>
+                                                    <FeedDebugValue>{post.feed_debug.P?.toFixed(3) || '0.000'} [t={post.feed_debug.t_pref ?? 0}+a={post.feed_debug.a_pref ?? 0}]</FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
+                                            {/* old magic: C for comments */}
+                                            {post.feed_debug.C !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>C (comments):</FeedDebugLabel>
+                                                    <FeedDebugValue>{post.feed_debug.C?.toFixed(3) || '0.000'} [{post.feed_debug.comments || 0}]</FeedDebugValue>
                                                 </FeedDebugRow>
                                             )}
                                             <FeedDebugRow>
-                                                <FeedDebugLabel>Prefs:</FeedDebugLabel>
+                                                <FeedDebugLabel>R (recency):</FeedDebugLabel>
                                                 <FeedDebugValue>
-                                                    t={post.feed_debug.t_pref ?? 0} + a={post.feed_debug.a_pref ?? 0}
+                                                    {post.feed_debug.R?.toFixed(4) || '0.0000'}
+                                                    {post.feed_debug.age_hours !== undefined && ` [${post.feed_debug.age_hours}h ago]`}
                                                 </FeedDebugValue>
                                             </FeedDebugRow>
+                                            {/* Only show Prefs row for old magic (magic2/3 show it inline with P) */}
+                                            {post.feed_debug.P === undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>Prefs:</FeedDebugLabel>
+                                                    <FeedDebugValue>
+                                                        t={post.feed_debug.t_pref ?? 0} + a={post.feed_debug.a_pref ?? 0}
+                                                    </FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
                                             <FeedDebugExplanation>
                                                 {post.feed_debug.reason}
                                             </FeedDebugExplanation>
@@ -1561,14 +1656,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
                             {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
                             {post.feed_bucket === 'liked' && (post.feed_debug?.reason || 'Liked topic/author')}
-                            {post.feed_bucket === 'discovery' && 'Discovery'}
+                            {post.feed_bucket === 'discovery' && (post.feed_debug?.reason || 'Discovery')}
+                            {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
+                            {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
                         </FeedReasonLine>
                     )}
-                    <HideOnMobileTitle>
+                    <HideOnMobileTitle style={compactTitleStyle}>
                         {title}
                     </HideOnMobileTitle>
-                    <MetaRow>
+                    <MetaRow style={compactMetaRowStyle}>
                         <VoteInline>
                             <VoteSection inline state={state} post={post} updatePost={updatePost} />
                             <MetaSeparatorAction>•</MetaSeparatorAction>
@@ -1640,4 +1737,5 @@ export default memo(CardView, (prevProps, nextProps) => {
         prevProps.state?.publicKey === nextProps.state?.publicKey
     );
 });
+
 

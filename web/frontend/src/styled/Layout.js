@@ -123,16 +123,19 @@ export const ModernPostFeed = styled.div`
  * 
  * Cards inside this grid should have margin: 0 (no horizontal margins).
  * The parent ModernPostFeed handles horizontal spacing.
+ * 
+ * Gap is controlled via CSS custom properties (--card-gap, --card-gap-mobile)
+ * which are set by CardView based on the compact mode setting.
  */
 export const PostGrid = styled.div`
     display: flex;
     flex-direction: column;
-    gap: 1.5rem;
-    margin-top: 1rem;
+    gap: var(--card-gap, 1.5rem);
+    margin-top: var(--card-margin-top, 1rem);
 
     @media (max-width: 600px) {
-        gap: 0.5rem;
-        margin-top: 0.5rem;
+        gap: var(--card-gap-mobile, 0.5rem);
+        margin-top: var(--card-margin-top-mobile, 0.5rem);
     }
 `;
 

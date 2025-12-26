@@ -6,13 +6,15 @@ import { createGlobalStyle } from 'styled-components'
 export const GlobalStyle = createGlobalStyle`
 
   /* Base resets and responsive typography */
+  /* Root font-size scaled to ~90% of original (14px base instead of 16px) */
+  /* This makes the entire UI more compact without changing any component code */
   html {
     box-sizing: border-box;
     font-family: 'Noto Sans';
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
-    font-size: clamp(16px, 1vw + 0.5rem, 24px);
+    font-size: clamp(14px, 0.9vw + 0.5rem, 22px);
     min-height: 100vh;
     background-color: 
       ${({ theme }) => (theme && theme.colors && theme.colors.bg) ? theme.colors.bg : '#1A1A1A'};
