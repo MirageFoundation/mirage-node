@@ -69,6 +69,27 @@ const ExplanationText = styled.div`
     line-height: 1.4;
 `;
 
+const CheckboxLabel = styled.label`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.85rem;
+`;
+
+const CheckboxLabelMultiline = styled.label`
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.85rem;
+`;
+
+const HelperText = styled.span`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.75rem;
+`;
+
 
 export default function SettingsView({ state }) {
     const location = useLocation();
@@ -280,7 +301,7 @@ export default function SettingsView({ state }) {
                                 <Label style={{ whiteSpace: 'normal' }}>Show content with tags:</Label>
                                 <ValueBox>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                        <CheckboxLabel>
                                             <input
                                                 type="checkbox"
                                                 checked={showTagSensitive}
@@ -293,8 +314,8 @@ export default function SettingsView({ state }) {
                                                 style={{ width: '16px', height: '16px' }}
                                             />
                                             Sensitive
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                        </CheckboxLabel>
+                                        <CheckboxLabel>
                                             <input
                                                 type="checkbox"
                                                 checked={showTagPorn}
@@ -307,8 +328,8 @@ export default function SettingsView({ state }) {
                                                 style={{ width: '16px', height: '16px' }}
                                             />
                                             Porn
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                        </CheckboxLabel>
+                                        <CheckboxLabel>
                                             <input
                                                 type="checkbox"
                                                 checked={showTagViolence}
@@ -321,8 +342,8 @@ export default function SettingsView({ state }) {
                                                 style={{ width: '16px', height: '16px' }}
                                             />
                                             Violence
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                        </CheckboxLabel>
+                                        <CheckboxLabel>
                                             <input
                                                 type="checkbox"
                                                 checked={showTagGore}
@@ -335,8 +356,8 @@ export default function SettingsView({ state }) {
                                                 style={{ width: '16px', height: '16px' }}
                                             />
                                             Gore
-                                        </label>
-                                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                        </CheckboxLabel>
+                                        <CheckboxLabel>
                                             <input
                                                 type="checkbox"
                                                 checked={showTagDeath}
@@ -349,7 +370,7 @@ export default function SettingsView({ state }) {
                                                 style={{ width: '16px', height: '16px' }}
                                             />
                                             Death
-                                        </label>
+                                        </CheckboxLabel>
                                     </div>
                                 </ValueBox>
                             </Row>
@@ -357,7 +378,7 @@ export default function SettingsView({ state }) {
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Blur sensitive media:</Label>
                                 <ValueBox>
-                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                    <CheckboxLabelMultiline>
                                         <input
                                             type="checkbox"
                                             checked={blurSensitiveMedia}
@@ -370,7 +391,7 @@ export default function SettingsView({ state }) {
                                             style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }}
                                         />
                                         Blur tagged sensitive media when the post has images or video.
-                                    </label>
+                                    </CheckboxLabelMultiline>
                                 </ValueBox>
                             </Row>
 
@@ -390,9 +411,9 @@ export default function SettingsView({ state }) {
                                             <option value="-50">-50</option>
                                             <option value="0">Never</option>
                                         </ThemeSelect>
-                                        <span style={{ color: '#ccc', fontSize: '0.75rem' }}>
+                                        <HelperText>
                                             Collapse comments at or below this score.
-                                        </span>
+                                        </HelperText>
                                     </div>
                                 </ValueBox>
                             </Row>
@@ -413,9 +434,9 @@ export default function SettingsView({ state }) {
                                             <option value="50">50</option>
                                             <option value="100">100</option>
                                         </ThemeSelect>
-                                        <span style={{ color: '#ccc', fontSize: '0.75rem' }}>
+                                        <HelperText>
                                             Topics shown in sidebar before "show more".
-                                        </span>
+                                        </HelperText>
                                     </div>
                                 </ValueBox>
                             </Row>
@@ -436,9 +457,9 @@ export default function SettingsView({ state }) {
                                             <option value="50">50</option>
                                             <option value="100">100</option>
                                         </ThemeSelect>
-                                        <span style={{ color: '#ccc', fontSize: '0.75rem' }}>
+                                        <HelperText>
                                             People shown in sidebar before "show more".
-                                        </span>
+                                        </HelperText>
                                     </div>
                                 </ValueBox>
                             </Row>
@@ -466,9 +487,9 @@ export default function SettingsView({ state }) {
                                                 <option value="-5">-5</option>
                                                 <option value="-10">-10</option>
                                             </ThemeSelect>
-                                            <span style={{ color: '#ccc', fontSize: '0.8rem', maxWidth: '260px', lineHeight: 1.4 }}>
+                                            <HelperText style={{ maxWidth: '260px', lineHeight: 1.4 }}>
                                                 Hide comments at or below this net score (client-side).
-                                            </span>
+                                            </HelperText>
                                         </div>
                                     </div>
                                 </ValueBox>
@@ -477,7 +498,7 @@ export default function SettingsView({ state }) {
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Hide posts you downvote:</Label>
                                 <ValueBox>
-                                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', color: '#ccc', fontSize: '0.85rem' }}>
+                                    <CheckboxLabelMultiline>
                                         <input
                                             type="checkbox"
                                             checked={hideDownvotedPosts}
@@ -490,7 +511,7 @@ export default function SettingsView({ state }) {
                                             style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }}
                                         />
                                         Immediately hide any post you downvote (Home feed only).
-                                    </label>
+                                    </CheckboxLabelMultiline>
                                 </ValueBox>
                             </Row>
 
