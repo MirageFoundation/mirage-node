@@ -304,9 +304,10 @@ class MessageProcessor:
                 if prev_vote != 0:
                     reverse_delta = -1.0 if prev_vote > 0 else 1.0
 
-                    # Reverse topic preference
-                    root_topic, _ = self.db.get_root_topic_for_post(target)
-                    if root_topic and owner:
+                    # Reverse topic preference - only for root posts, not comments
+                    root_topic, root_post_id = self.db.get_root_topic_for_post(target)
+                    is_root_post = root_post_id and target == root_post_id
+                    if root_topic and owner and is_root_post:
                         try:
                             self.db.update_preference(owner, "topic", root_topic, reverse_delta, ts)
                             logger.debug(
@@ -457,8 +458,10 @@ class MessageProcessor:
                 user_weight = 1.0 if raw_direction > 0 else (COMMUNITY_VOTE_BASELINE * raw_direction)
 
         # Update per-user topic preference weights for personalization.
-        # Handle vote changes: if previous vote was different, reverse it first then apply new.
-        if owner and root_topic:
+        # Only update topic prefs when voting on ROOT posts, not comments.
+        # Voting on a comment reflects opinion of the commenter, not the topic.
+        is_root_post = root_post_id and target == root_post_id
+        if owner and root_topic and is_root_post:
             try:
                 new_delta = 1.0 if raw_direction > 0 else -1.0
                 # If there was a previous vote and it's different, calculate the net delta
