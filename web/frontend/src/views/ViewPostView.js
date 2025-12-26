@@ -887,6 +887,29 @@ function ViewPostView({ state, updatePost }) {
     const [subToggleTick, setSubToggleTick] = useState(0);
     useEffect(() => { }, [subToggleTick]);
 
+    // Capture "opened from feed" info synchronously (before effects) so the Back button can
+    // reliably return to the originating feed route (including /t/:topic).
+    const openedFromFeedInfoRef = useRef(null);
+    if (openedFromFeedInfoRef.current === null) {
+        openedFromFeedInfoRef.current = (() => {
+            try {
+                if (typeof window === 'undefined' || !window.sessionStorage) return { opened: false, topic: null };
+                const raw = window.sessionStorage.getItem('mirage_post_nav_source');
+                if (!raw) return { opened: false, topic: null };
+                const parsed = JSON.parse(raw);
+                if (parsed?.source !== 'feed') return { opened: false, topic: null };
+                const at = Number(parsed?.at || 0);
+                if (!Number.isFinite(at) || at <= 0) return { opened: false, topic: null };
+                const ageMs = Date.now() - at;
+                if (ageMs < 0 || ageMs > 10000) return { opened: false, topic: null };
+                const topic = typeof parsed?.topic === 'string' ? parsed.topic : null;
+                return { opened: true, topic: topic || null };
+            } catch (_) {
+                return { opened: false, topic: null };
+            }
+        })();
+    }
+
     // Mobile detection for focused reply mode
     const [isMobile, setIsMobile] = useState(() => {
         if (typeof window === 'undefined') return false;
@@ -913,21 +936,7 @@ function ViewPostView({ state, updatePost }) {
     // If this post wasn't opened from the feed, clear any stale "came from feed" flag.
     // We only want feed restoration for browser-back when the user navigated feed -> view_post.
     useEffect(() => {
-        const openedFromFeed = (() => {
-            try {
-                const raw = sessionStorage.getItem('mirage_post_nav_source');
-                if (!raw) return false;
-                const parsed = JSON.parse(raw);
-                if (parsed?.source !== 'feed') return false;
-                const at = Number(parsed?.at || 0);
-                if (!Number.isFinite(at) || at <= 0) return false;
-                const ageMs = Date.now() - at;
-                if (ageMs < 0 || ageMs > 10000) return false;
-                return true;
-            } catch (_) {
-                return false;
-            }
-        })();
+        const openedFromFeed = openedFromFeedInfoRef.current?.opened === true;
 
         try {
             sessionStorage.removeItem('mirage_post_nav_source');
@@ -942,9 +951,9 @@ function ViewPostView({ state, updatePost }) {
 
     const goBackToFeed = () => {
         try {
-            // If we have browser history and came from search/profile/etc, use browser back
+            // Prefer browser back when we actually navigated here from a feed (/home, /following, /t/:topic).
+            // This preserves scroll restoration logic in MainView.
             if (typeof window !== 'undefined' && window.history.length > 1) {
-                // Check if we should use browser back (e.g., came from search or profile)
                 try {
                     const cameFrom = window.sessionStorage.getItem('mirage_post_referrer');
                     if (cameFrom === 'search' || cameFrom === 'profile') {
@@ -953,16 +962,43 @@ function ViewPostView({ state, updatePost }) {
                         return;
                     }
                 } catch (_) { }
+
+                if (openedFromFeedInfoRef.current?.opened === true) {
+                    navigate(-1);
+                    return;
+                }
             }
 
             const last = Storage.load('last_feed_route', '/home');
-            const target = (last === '/following') ? '/following' : '/home';
+            const fallback = (typeof last === 'string' && last.startsWith('/')) ? last : '/home';
+            const target = fallback;
+
+            const inferTopicIntent = (route) => {
+                try {
+                    if (openedFromFeedInfoRef.current?.topic) return openedFromFeedInfoRef.current.topic;
+                    if (route === '/home') return 'home';
+                    if (route === '/following') return 'following';
+                    if (!route.startsWith('/t/')) return null;
+
+                    const withoutPrefix = route.slice(3); // after "/t/"
+                    const segment = withoutPrefix.split('?')[0].split('#')[0].split('/')[0];
+                    const trimmed = String(segment || '').trim();
+                    if (!trimmed) return null;
+                    return decodeURIComponent(trimmed);
+                } catch (_) {
+                    return null;
+                }
+            };
+
+            const intendedTopic = inferTopicIntent(target);
             try {
                 if (typeof window !== 'undefined' && window.sessionStorage) {
-                    window.sessionStorage.setItem('mirage_restore_feed', JSON.stringify({
-                        topic: (target === '/following') ? 'following' : 'home',
-                        at: Date.now(),
-                    }));
+                    if (intendedTopic) {
+                        window.sessionStorage.setItem('mirage_restore_feed', JSON.stringify({
+                            topic: intendedTopic,
+                            at: Date.now(),
+                        }));
+                    }
                 }
             } catch (_) { }
             navigate(target, { replace: true });

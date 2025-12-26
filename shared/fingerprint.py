@@ -97,6 +97,9 @@ class FingerprintMatch:
     
     # Individual attribute matches with weights
     matches: Dict[str, float] = field(default_factory=dict)  # {attr: weight}
+
+    # Matched attribute values (as strings). Note: some fields are hashes by design.
+    matched_values: Dict[str, str] = field(default_factory=dict)  # {attr: value_str}
     
     # Summary
     total_weight: float = 0.0
@@ -484,6 +487,7 @@ def compare_fingerprints(
             if val_a == val_b:
                 # Match!
                 match.matches[attr] = weight
+                match.matched_values[attr] = val_a
                 total_weight += weight
                 
                 # Set flags for key matches
@@ -557,11 +561,27 @@ def format_match_table(match: FingerprintMatch) -> List[str]:
     
     Returns lines for a markdown table showing all matching attributes.
     """
+    def _format_value(attr: str, value: str) -> str:
+        if not value:
+            return "-"
+        # Redact hash-like values and other sensitive-ish fields by showing only a prefix.
+        hash_like = (
+            attr.endswith("_hash")
+            or attr in {"ip_hash", "canvas_hash"}
+        )
+        if hash_like:
+            return f"`{value[:12]}...`"
+        # Keep tables readable
+        if len(value) > 80:
+            return f"`{value[:80]}...`"
+        return f"`{value}`"
+
     lines = []
-    lines.append("| Attribute | Weight | Rarity |")
-    lines.append("|-----------|--------|--------|")
+    lines.append("| Attribute | Value | Weight | Rarity |")
+    lines.append("|-----------|-------|--------|--------|")
     
     for attr, weight in match.top_matches(20):
+        value_str = _format_value(attr, match.matched_values.get(attr, ""))
         if weight >= 6.0:
             rarity = "RARE"
         elif weight >= 4.0:
@@ -570,7 +590,7 @@ def format_match_table(match: FingerprintMatch) -> List[str]:
             rarity = "common"
         else:
             rarity = "very common"
-        lines.append(f"| {attr} | {weight:.1f} | {rarity} |")
+        lines.append(f"| {attr} | {value_str} | {weight:.1f} | {rarity} |")
     
     lines.append("")
     lines.append(f"**Total Score: {match.score:.0%}** (weight: {match.total_weight:.1f} / {match.max_possible_weight:.1f})")

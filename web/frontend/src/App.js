@@ -245,13 +245,23 @@ function RouteTracker({ children }) {
     }, [location.pathname]);
 
     // Track the last feed route for deterministic in-app "Back" behavior.
+    // This is used when a post is opened directly (no history) and we need a reasonable
+    // place to send the user back to.
     React.useEffect(() => {
-        const raw = location.pathname;
-        const path = raw === '/' ? '/home' : raw;
-        if (path === '/home' || path === '/following') {
-            try { Storage.save('last_feed_route', path); } catch (_) { }
-        }
-    }, [location.pathname]);
+        const pathname = location.pathname;
+        const search = location.search || '';
+        const path = pathname === '/' ? '/home' : pathname;
+        const full = `${path}${search}`;
+
+        const isFeedRoute =
+            path === '/home' ||
+            path === '/following' ||
+            path.startsWith('/t/');
+
+        if (!isFeedRoute) return;
+
+        try { Storage.save('last_feed_route', full); } catch (_) { }
+    }, [location.pathname, location.search]);
 
     return children;
 }
