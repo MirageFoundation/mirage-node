@@ -186,12 +186,10 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
         localPendingRef.current.add(key);
         forceUpdate(n => n + 1);
 
-        // Determine current direction: localStorage > state.posts > API response > post.direction
-        const ownVotes = Storage.load('votes', {});
+        // Determine current direction: state.posts > API response > post.direction
+        // (Do NOT read localStorage on every vote/render; API already returns user_vote and state is updated optimistically.)
         let current;
-        if (typeof ownVotes[key] === 'number') {
-            current = ownVotes[key];
-        } else if (state.posts && state.posts[postIdValue] && typeof state.posts[postIdValue].direction === 'number') {
+        if (state.posts && state.posts[postIdValue] && typeof state.posts[postIdValue].direction === 'number') {
             current = state.posts[postIdValue].direction;
         } else {
             const apiUserVote = postObj?.user_vote ?? postObj?.my_vote ?? postObj?.userVote ?? postObj?.myVote;
@@ -210,13 +208,18 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
             updatePost(postIdValue, { direction: newDir });
         }
 
-        // Save to localStorage immediately for instant feedback
+        // Persist a small recent vote cache for "reload before indexing catches up"
         try {
-            const votes = Storage.load('votes', {}) || {};
-            votes[key] = newDir;
-            Storage.save('votes', votes);
+            Storage.setVote(key, newDir, 100);
             forceUpdate(n => n + 1);
         } catch (_) { /* noop */ }
+
+        // Dispatch event for downvotes so MainView can hide the post
+        if (newDir === -1) {
+            window.dispatchEvent(new CustomEvent('postDownvoted', {
+                detail: { postId: postIdValue, direction: newDir }
+            }));
+        }
 
         // Show toast for PoW progress (only for free users)
         const userLevel = Number(Storage.load('user_level', '0') || 0);
@@ -236,14 +239,8 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
                 if (typeof updatePost === 'function') {
                     updatePost(postIdValue, { direction: current });
                 }
-                // Revert localStorage
-                const votes = Storage.load('votes', {}) || {};
-                if (current === 0) {
-                    delete votes[key];
-                } else {
-                    votes[key] = current;
-                }
-                Storage.save('votes', votes);
+                // Revert recent vote cache
+                Storage.setVote(key, current, 100);
             } catch (_) { /* noop */ }
         } finally {
             localPendingRef.current.delete(key);
@@ -255,13 +252,9 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
         const key = String(post.post_id).toLowerCase();
         const hasPendingVote = isPending(post.post_id) || localPendingRef.current.has(key);
 
-        // Direction priority: localStorage > state.posts > API response (user_vote) > post.direction
-        // localStorage is checked first for instant optimistic updates when voting
-        const ownVotes = Storage.load('votes', {});
         let direction;
-        if (typeof ownVotes[key] === 'number') {
-            direction = ownVotes[key];
-        } else if (state.posts && typeof state.posts[post.post_id]?.direction === 'number') {
+        // Direction priority: state.posts > API response (user_vote) > post.direction
+        if (state.posts && typeof state.posts[post.post_id]?.direction === 'number') {
             direction = state.posts[post.post_id].direction;
         } else if (hasPendingVote) {
             direction = 0;

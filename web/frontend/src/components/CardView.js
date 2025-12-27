@@ -1199,38 +1199,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         return p ? String(p).toLowerCase() : 'still_resolving';
     })();
 
-    if (post && post.content && (post.content.startsWith("http://") || post.content.startsWith("https://"))) {
-        const firstUrl = sanitizeUrlForLink(extractFirstUrl(post.content));
-        if (isLikelyImageUrl(firstUrl) || isLikelyVideoUrl(firstUrl)) {
-            // For safe images/videos: open the comment view with this post as root
-            title = (<StyledLink to={`/view_post?post_id=${targetPostId}`}>{post.title}</StyledLink>);
-        } else {
-            // Non-media: keep external link behavior
-            const href = firstUrl || `/view_post?post_id=${targetPostId}`;
-            title = <StyledLink to={href.startsWith('http') ? href : `/view_post?post_id=${targetPostId}`} target={href.startsWith('http') ? "_blank" : undefined} rel={href.startsWith('http') ? "noopener noreferrer" : undefined}>{post.title}</StyledLink>
-        }
-    } else if (post) {
+    // All card title clicks go to the post view page - external links are available there
+    if (post) {
         title = (<StyledLink to={`/view_post?post_id=${targetPostId}`}>{post.title}</StyledLink>);
     }
 
-    // Compute click-through behavior for thumbnails to match the title behavior
-    let thumbTo = `/view_post?post_id=${targetPostId}`;
-    let thumbTarget = undefined;
-    let thumbRel = undefined;
-    if (post && post.content && (post.content.startsWith("http://") || post.content.startsWith("https://"))) {
-        const hrefCandidate = firstLinkInContent || `/view_post?post_id=${targetPostId}`;
-        if (isDirectImage || isPrimaryVideo) {
-            thumbTo = `/view_post?post_id=${targetPostId}`;
-        } else {
-            if (hrefCandidate && hrefCandidate.startsWith('http')) {
-                thumbTo = hrefCandidate;
-                thumbTarget = "_blank";
-                thumbRel = "noopener noreferrer";
-            } else {
-                thumbTo = `/view_post?post_id=${targetPostId}`;
-            }
-        }
-    }
+    // All thumbnail clicks go to the post view page - external links are available there
+    const thumbTo = `/view_post?post_id=${targetPostId}`;
+    const thumbTarget = undefined;
+    const thumbRel = undefined;
 
     const hasMedia = !!(thumbSrc || thumbBlurSrc || isDirectImage || isPrimaryVideo);
     const shouldBlurMedia = !!(blurSensitiveMedia && post && post.tag && String(post.tag).trim() && hasMedia);

@@ -603,7 +603,17 @@ class App extends Component {
                                     if (!v || !v.target) continue;
                                     votes[String(v.target).toLowerCase()] = Number(v.direction || 0);
                                 }
-                                Storage.save('votes', votes);
+                                // Keep only a small cache; API provides user_vote for fetched items.
+                                // This is just to preserve quick highlight across reloads before indexing catches up.
+                                try {
+                                    const keys = Object.keys(votes);
+                                    const pruned = {};
+                                    const keep = keys.slice(-100);
+                                    for (const k of keep) pruned[k] = votes[k];
+                                    Storage.save('votes', pruned);
+                                } catch (_) {
+                                    Storage.save('votes', votes);
+                                }
                                 // Update existing posts in state with vote directions
                                 this.applyVotesToExistingPosts();
                             }

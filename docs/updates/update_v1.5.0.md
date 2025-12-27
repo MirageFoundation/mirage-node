@@ -106,5 +106,5 @@ Key changes since the last production release:
   - Canonical bytes for relay signatures have changed; see `ante_metasig.go`, `shared/canon.py`, and `web/backend/pow.py` for the exact format.
 - Tooling and deployment:
   - `deploy/deploy.sh` gained a `--build-only` mode for producing tarballs without deploying.
-  - `scripts/deploy_all_prod.sh` now defaults to the dev tarball, enforces a fresh build (last 10 minutes), requires typing `confirm` before running, and rotates the dev tarball into the prod tarball after a successful deploy.
+  - Added safer multi-host deployment workflow by reusing a single pre-built image tarball across servers.
   - Tmux configuration is bundled via `deploy/templates/tmux.conf` inside the Docker image.

@@ -70,19 +70,75 @@ const ExplanationText = styled.div`
 `;
 
 const CheckboxLabel = styled.label`
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    /* Inline (shrink-to-content) so empty space to the right isn't clickable */
+    display: inline-grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.5rem;
+    align-items: flex-start;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-size: 0.85rem;
+    line-height: 1.25;
+    white-space: normal;
+    max-width: 100%;
+    cursor: pointer;
+    user-select: none;
+
+    /* Hover affordance: only highlight the checkbox itself (not the whole row) */
+    &:hover input[type="checkbox"] {
+        border-color: ${({ theme }) => theme?.colors?.borderStrong || theme?.colors?.border || 'rgba(255,255,255,0.28)'};
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+    }
 `;
 
-const CheckboxLabelMultiline = styled.label`
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: 0.85rem;
+const CheckboxInput = styled.input.attrs({ type: 'checkbox' })`
+    /* Use a custom checkbox so alignment doesn't shift at different browser zoom levels */
+    appearance: none;
+    -webkit-appearance: none;
+    width: 0.75rem;
+    height: 0.75rem;
+    flex: 0 0 0.75rem;
+    margin: 0; /* avoid browser default checkbox margins that cause misalignment */
+    /* Align with the first line of text (line-height is 1.25) */
+    margin-top: 0.18rem;
+    border-radius: 0.25rem;
+    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(255,255,255,0.18)'};
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    box-sizing: border-box;
+    display: inline-block;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+
+    &:hover {
+        border-color: ${({ theme }) => theme?.colors?.borderStrong || theme?.colors?.border || 'rgba(255,255,255,0.28)'};
+    }
+
+    &:focus {
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+    }
+
+    &:checked {
+        background: #3b82f6;
+        border-color: #3b82f6;
+    }
+
+    &:checked::after {
+        content: '';
+        width: 0.32em;
+        height: 0.58em;
+        border: solid #fff;
+        border-width: 0 0.18em 0.18em 0;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -58%) rotate(45deg);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 `;
 
 const HelperText = styled.span`
@@ -283,15 +339,13 @@ export default function SettingsView({ state }) {
                                 <Label>Full width:</Label>
                                 <ValueBox>
                                     <CheckboxLabel>
-                                        <input
-                                            type="checkbox"
+                                        <CheckboxInput
                                             checked={fullWidthMode}
                                             onChange={(e) => {
                                                 const val = !!e.target.checked;
                                                 setFullWidthMode(val);
                                                 Storage.save('full_width_mode', val);
                                             }}
-                                            style={{ width: '16px', height: '16px' }}
                                         />
                                         Expand cards to full screen width
                                     </CheckboxLabel>
@@ -303,8 +357,7 @@ export default function SettingsView({ state }) {
                                 <ValueBox>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                         <CheckboxLabel>
-                                            <input
-                                                type="checkbox"
+                                            <CheckboxInput
                                                 checked={showTagSensitive}
                                                 onChange={(e) => {
                                                     const val = !!e.target.checked;
@@ -312,13 +365,11 @@ export default function SettingsView({ state }) {
                                                     Storage.save('show_tag_sensitive', val);
                                                     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { showTagSensitive: val } }));
                                                 }}
-                                                style={{ width: '16px', height: '16px' }}
                                             />
                                             Sensitive
                                         </CheckboxLabel>
                                         <CheckboxLabel>
-                                            <input
-                                                type="checkbox"
+                                            <CheckboxInput
                                                 checked={showTagPorn}
                                                 onChange={(e) => {
                                                     const val = !!e.target.checked;
@@ -326,13 +377,11 @@ export default function SettingsView({ state }) {
                                                     Storage.save('show_tag_porn', val);
                                                     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { showTagPorn: val } }));
                                                 }}
-                                                style={{ width: '16px', height: '16px' }}
                                             />
                                             Porn
                                         </CheckboxLabel>
                                         <CheckboxLabel>
-                                            <input
-                                                type="checkbox"
+                                            <CheckboxInput
                                                 checked={showTagViolence}
                                                 onChange={(e) => {
                                                     const val = !!e.target.checked;
@@ -340,13 +389,11 @@ export default function SettingsView({ state }) {
                                                     Storage.save('show_tag_violence', val);
                                                     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { showTagViolence: val } }));
                                                 }}
-                                                style={{ width: '16px', height: '16px' }}
                                             />
                                             Violence
                                         </CheckboxLabel>
                                         <CheckboxLabel>
-                                            <input
-                                                type="checkbox"
+                                            <CheckboxInput
                                                 checked={showTagGore}
                                                 onChange={(e) => {
                                                     const val = !!e.target.checked;
@@ -354,13 +401,11 @@ export default function SettingsView({ state }) {
                                                     Storage.save('show_tag_gore', val);
                                                     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { showTagGore: val } }));
                                                 }}
-                                                style={{ width: '16px', height: '16px' }}
                                             />
                                             Gore
                                         </CheckboxLabel>
                                         <CheckboxLabel>
-                                            <input
-                                                type="checkbox"
+                                            <CheckboxInput
                                                 checked={showTagDeath}
                                                 onChange={(e) => {
                                                     const val = !!e.target.checked;
@@ -368,7 +413,6 @@ export default function SettingsView({ state }) {
                                                     Storage.save('show_tag_death', val);
                                                     window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { showTagDeath: val } }));
                                                 }}
-                                                style={{ width: '16px', height: '16px' }}
                                             />
                                             Death
                                         </CheckboxLabel>
@@ -379,9 +423,8 @@ export default function SettingsView({ state }) {
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Blur sensitive media:</Label>
                                 <ValueBox>
-                                    <CheckboxLabelMultiline>
-                                        <input
-                                            type="checkbox"
+                                    <CheckboxLabel>
+                                        <CheckboxInput
                                             checked={blurSensitiveMedia}
                                             onChange={(e) => {
                                                 const val = !!e.target.checked;
@@ -389,10 +432,9 @@ export default function SettingsView({ state }) {
                                                 Storage.save('blur_sensitive_media', val);
                                                 window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { blurSensitiveMedia: val } }));
                                             }}
-                                            style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }}
                                         />
-                                        Blur tagged sensitive media when the post has images or video.
-                                    </CheckboxLabelMultiline>
+                                        Blur tagged sensitive media (images/videos)
+                                    </CheckboxLabel>
                                 </ValueBox>
                             </Row>
 
@@ -413,7 +455,7 @@ export default function SettingsView({ state }) {
                                             <option value="0">Never</option>
                                         </ThemeSelect>
                                         <HelperText>
-                                            Collapse comments at or below this score.
+                                            Collapse comments at or below this score
                                         </HelperText>
                                     </div>
                                 </ValueBox>
@@ -436,7 +478,7 @@ export default function SettingsView({ state }) {
                                             <option value="100">100</option>
                                         </ThemeSelect>
                                         <HelperText>
-                                            Topics shown in sidebar before "show more".
+                                            Topics shown in sidebar before "show more"
                                         </HelperText>
                                     </div>
                                 </ValueBox>
@@ -459,7 +501,7 @@ export default function SettingsView({ state }) {
                                             <option value="100">100</option>
                                         </ThemeSelect>
                                         <HelperText>
-                                            People shown in sidebar before "show more".
+                                            People shown in sidebar before "show more"
                                         </HelperText>
                                     </div>
                                 </ValueBox>
@@ -468,9 +510,8 @@ export default function SettingsView({ state }) {
                             <Row>
                                 <Label style={{ whiteSpace: 'normal' }}>Hide posts you downvote:</Label>
                                 <ValueBox>
-                                    <CheckboxLabelMultiline>
-                                        <input
-                                            type="checkbox"
+                                    <CheckboxLabel>
+                                        <CheckboxInput
                                             checked={hideDownvotedPosts}
                                             onChange={(e) => {
                                                 const val = !!e.target.checked;
@@ -478,10 +519,9 @@ export default function SettingsView({ state }) {
                                                 Storage.save('hide_downvoted_posts', val);
                                                 window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { hideDownvotedPosts: val } }));
                                             }}
-                                            style={{ width: '16px', height: '16px', flexShrink: 0, marginTop: '2px' }}
                                         />
-                                        Immediately hide any post you downvote (Home feed only).
-                                    </CheckboxLabelMultiline>
+                                        Immediately hide downvoted posts
+                                    </CheckboxLabel>
                                 </ValueBox>
                             </Row>
 

@@ -3162,21 +3162,7 @@ class TransactionHandler {
                             }
                             // Persist own vote highlight so arrows reflect immediately on future loads
                             try {
-                                const key = String(transaction.target || '').trim().toLowerCase();
-                                if (key) {
-                                    const votes = Storage.load('votes', {}) || {};
-                                    votes[key] = Number(transaction.direction) || 0;
-                                    const keys = Object.keys(votes);
-                                    if (keys.length > 1000) {
-                                        const pruned = {};
-                                        const slice = keys.slice(-950);
-                                        for (const k of slice) pruned[k] = votes[k];
-                                        pruned[key] = votes[key];
-                                        Storage.save('votes', pruned);
-                                    } else {
-                                        Storage.save('votes', votes);
-                                    }
-                                }
+                                Storage.setVote(String(transaction.target || '').trim(), Number(transaction.direction) || 0, 100);
                             } catch (_) { }
                         } catch (_) { }
                     }

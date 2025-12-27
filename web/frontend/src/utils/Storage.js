@@ -9,6 +9,53 @@ class Storage {
         }
     }
 
+    /**
+     * Persist a small, recency-ordered map of the viewer's own votes.
+     *
+     * Why: reading/parsing a huge JSON blob on every render is expensive.
+     * We only need a small recent cache for "reload before indexing catches up"
+     * cases; the API already returns user_vote for fetched posts/comments.
+     */
+    static setVote(targetId, direction, maxEntries = 100) {
+        try {
+            const key = String(targetId || '').trim().toLowerCase();
+            if (!key) return;
+            const dir = Number(direction) || 0;
+
+            const votes = this.load('votes', {}) || {};
+
+            // Update recency ordering (delete + reinsert)
+            if (Object.prototype.hasOwnProperty.call(votes, key)) {
+                delete votes[key];
+            }
+            if (dir !== 0) {
+                votes[key] = dir;
+            }
+
+            const keys = Object.keys(votes);
+            if (keys.length > maxEntries) {
+                const pruned = {};
+                const keep = keys.slice(-maxEntries);
+                for (const k of keep) pruned[k] = votes[k];
+                this.save('votes', pruned);
+            } else {
+                this.save('votes', votes);
+            }
+        } catch (_) { /* noop */ }
+    }
+
+    static getVote(targetId, defaultDir = null) {
+        try {
+            const key = String(targetId || '').trim().toLowerCase();
+            if (!key) return defaultDir;
+            const votes = this.load('votes', {}) || {};
+            const v = votes[key];
+            return typeof v === 'number' ? v : defaultDir;
+        } catch (_) {
+            return defaultDir;
+        }
+    }
+
 
     static load(key, defaultValue) {
         if (typeof window !== 'undefined' && window.localStorage) {

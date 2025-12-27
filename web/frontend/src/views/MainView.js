@@ -699,10 +699,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { cardSize: newSize } }));
     };
     const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
-        const val = Storage.load('hide_downvoted_posts', false);
-        return val === true ? true : false;
+        const val = Storage.load('hide_downvoted_posts', true);
+        return val === false ? false : true;
     });
-    const [hiddenDownvotedSet, setHiddenDownvotedSet] = useState(() => new Set());
+    const hideDownvotedPostsRef = useRef(hideDownvotedPosts);
+    useEffect(() => { hideDownvotedPostsRef.current = hideDownvotedPosts; }, [hideDownvotedPosts]);
+
     const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
     const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
         // Consume any pending highlight on mount
@@ -788,6 +790,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const dir = Number(detail?.direction);
             if (!pid || dir >= 0) return;
 
+            // Only hide if the setting is enabled AND we are on the Home feed
+            // The setting explicitly says "(Home feed only)", so we shouldn't animate on other feeds
+            // where the post will reappear anyway.
+            const isHome = currentTopicRef.current === 'home';
+            if (!hideDownvotedPostsRef.current || !isHome) return;
+
             // First, add to hiding set to trigger animation
             setHidingPostsSet((prev) => {
                 if (prev.has(pid)) return prev;
@@ -796,14 +804,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 return next;
             });
 
-            // After animation completes (300ms), actually hide the post
+            // After fade animation completes, permanently hide for this session
             setTimeout(() => {
-                setHiddenDownvotedSet((prev) => {
-                    if (prev.has(pid)) return prev;
-                    const next = new Set(prev);
-                    next.add(pid);
-                    return next;
-                });
+                try {
+                    if (typeof updatePost === 'function') {
+                        updatePost(pid, { hidden_client: true });
+                    }
+                } catch (_) { /* noop */ }
+                try {
+                    setStableOrder((prev) => prev.filter((id) => String(id || '').toLowerCase() !== pid));
+                } catch (_) { /* noop */ }
                 setHidingPostsSet((prev) => {
                     if (!prev.has(pid)) return prev;
                     const next = new Set(prev);
@@ -917,27 +927,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 ? topLevel
                 : topLevel.filter(p => matchTopic(p.topic));
 
-            // Hide posts the viewer downvoted immediately (Home only, client-side)
-            if (isHomeFeed && hideDownvotedPosts && hiddenDownvotedSet.size > 0) {
-                filtered = filtered.filter((p) => !hiddenDownvotedSet.has(String(p?.post_id || '').toLowerCase()));
-            }
-
-            // Optionally hide posts the viewer downvoted (Home only, client-side)
-            if (isHomeFeed && hideDownvotedPosts) {
-                const ownVotes = Storage.load('votes', {});
-                filtered = filtered.filter((p) => {
-                    const postKey = String(p?.post_id || '').toLowerCase();
-                    // Check local storage first (most up-to-date)
-                    const storedVote = ownVotes[postKey];
-                    if (typeof storedVote === 'number' && storedVote < 0) return false;
-                    // Fall back to backend field if present
-                    const uv = Number(
-                        p?.user_vote ?? p?.my_vote ?? p?.myVote ?? p?.userVote ?? NaN
-                    );
-                    if (!Number.isFinite(uv)) return true;
-                    return uv >= 0;
-                });
-            }
+            // Note: Downvote filtering is handled in render phase to avoid stale closure issues
 
             // Home feed: softly prioritize user's posts with a 60-minute decay (applies to both modes)
             if (isHomeFeed) {
@@ -1432,6 +1422,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const postsArray = Object.values(state.posts || {});
         const isTopLevelPost = (p) => {
             if (!p) return false;
+            if (p.hidden_client) return false;
             const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
             const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
             const topicVal = String(p.topic || '').trim().toLowerCase();
@@ -1678,8 +1669,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const postsArray = Object.values(state.posts || {});
 
             // Only include top-level posts (exclude comments or partial objects, and deleted posts)
-            const isTopLevelPost = (p) => {
+        const isTopLevelPost = (p) => {
                 if (!p || p.deleted) return false;
+            if (p.hidden_client) return false;
                 const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();
@@ -1702,7 +1694,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 // Build a stable ordered list of posts
                 const postsById = {};
                 for (const p of filteredPosts) {
-                    if (p && p.post_id && !p.deleted) {
+                    if (p && p.post_id && !p.deleted && !p.hidden_client) {
                         postsById[p.post_id] = p;
                     }
                 }
@@ -1717,16 +1709,15 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                 // Hide posts the viewer downvoted (Home only, client-side)
                 if (displayTopic === 'home' && hideDownvotedPosts) {
-                    const ownVotes = Storage.load('votes', {});
                     orderedPosts = orderedPosts.filter((p) => {
                         const postKey = String(p?.post_id || '').toLowerCase();
                         // If post is animating out, keep it in the list for now
                         if (hidingPostsSet.has(postKey)) return true;
-                        // Check hiddenDownvotedSet (animation completed)
-                        if (hiddenDownvotedSet.has(postKey)) return false;
-                        // Check local storage (for previous session downvotes)
-                        const storedVote = ownVotes[postKey];
-                        if (typeof storedVote === 'number' && storedVote < 0) return false;
+                        // Prefer in-memory/state direction; backend provides user_vote on fetch.
+                        const dir = Number(
+                            p?.direction ?? p?.user_vote ?? p?.my_vote ?? p?.myVote ?? p?.userVote ?? 0
+                        );
+                        if (Number.isFinite(dir) && dir < 0) return false;
                         return true;
                     });
                 }

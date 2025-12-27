@@ -9,7 +9,7 @@ import MobileHeader from '../components/MobileHeader';
 import CardView from '../components/CardView';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
-import { ContentGrid, ModernPostFeed, AnimatedCard } from '../styled/Layout';
+import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from '../styled/Layout';
 
 const SectionHeader = styled.div`
     font-size: 0.85rem;
@@ -393,38 +393,40 @@ export default function SearchResultsView({ state }) {
                             {posts.length > 0 && (
                                 <>
                                     <SectionHeader>Posts matching "{displayQuery}"</SectionHeader>
-                                    {posts.map((post, index) => {
-                                        const postObj = {
-                                            post_id: post.post_id,
-                                            user_id: post.user_id,
-                                            username: post.username,
-                                            timestamp: post.timestamp,
-                                            title: post.title,
-                                            content: post.content,
-                                            topic: post.topic,
-                                            tag: post.tag,
-                                            thumbnail: post.thumbnail,
-                                            points: post.points,
-                                            comments: post.comments,
-                                            direction: post.user_vote,
-                                        };
-                                        return (
-                                            <AnimatedCard 
-                                                key={post.post_id} 
-                                                style={{ animationDelay: `${index * 30}ms` }}
-                                                onClick={() => {
-                                                    try {
-                                                        window.sessionStorage.setItem('mirage_post_referrer', 'search');
-                                                    } catch (_) { }
-                                                }}
-                                            >
-                                                <CardView
-                                                    post={postObj}
-                                                    state={state}
-                                                />
-                                            </AnimatedCard>
-                                        );
-                                    })}
+                                    <PostGrid>
+                                        {posts.map((post, index) => {
+                                            const postObj = {
+                                                post_id: post.post_id,
+                                                user_id: post.user_id,
+                                                username: post.username,
+                                                timestamp: post.timestamp,
+                                                title: post.title,
+                                                content: post.content,
+                                                topic: post.topic,
+                                                tag: post.tag,
+                                                thumbnail: post.thumbnail,
+                                                points: post.points,
+                                                comments: post.comments,
+                                                direction: post.user_vote,
+                                            };
+                                            return (
+                                                <AnimatedCard 
+                                                    key={post.post_id} 
+                                                    style={{ animationDelay: `${index * 30}ms` }}
+                                                    onClick={() => {
+                                                        try {
+                                                            window.sessionStorage.setItem('mirage_post_referrer', 'search');
+                                                        } catch (_) { }
+                                                    }}
+                                                >
+                                                    <CardView
+                                                        post={postObj}
+                                                        state={state}
+                                                    />
+                                                </AnimatedCard>
+                                            );
+                                        })}
+                                    </PostGrid>
                                     {hasMorePosts && (
                                         <LoadMoreButton>
                                             <Button
