@@ -19,9 +19,9 @@ export const darkColors = {
     headerBg: '#303640',
 
     // === Border Colors ===
-    border: '#393E46',                // Default border
-    borderSubtle: '#2d333c',          // Low-elevation borders
-    borderStrong: '#4a5058',          // High-emphasis borders
+    border: '#9ca3af',                // Default border (brightened for visibility in dark mode)
+    borderSubtle: '#6b7280',          // Low-elevation borders
+    borderStrong: '#d1d5db',          // High-emphasis borders
     borderFocus: '#DFD0B8',           // Focus ring color (neutral light)
 
     // === Text Colors ===

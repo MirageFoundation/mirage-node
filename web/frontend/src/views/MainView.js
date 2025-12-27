@@ -824,7 +824,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         };
         window.addEventListener('postDownvoted', handler);
         return () => window.removeEventListener('postDownvoted', handler);
-    }, []);
+    }, [updatePost]);
 
     // Clear flash animation after it completes
     useEffect(() => {

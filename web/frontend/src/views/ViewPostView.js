@@ -222,9 +222,8 @@ const RootTitleRow = styled.div`
 
 const TitleDivider = styled.div`
     height: 1px;
-    background: ${({ theme }) => theme?.colors?.cardBorder || '#2f343d'};
+    background: ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     margin: 0.5rem 0;
-    opacity: 0.5;
 `;
 
 // Reuse the same visual style as topic links in the feed
@@ -283,7 +282,7 @@ const MetaInfoRow = styled.div`
     gap: 0.35rem;
     margin-bottom: 0.35rem;
     padding-bottom: 0.35rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-size: 0.65rem;
     font-weight: 600;
@@ -326,7 +325,7 @@ const MobileRootMeta = styled.div`
         gap: 0;
         margin-bottom: 0.35rem;
         padding-bottom: 0.35rem;
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
         color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
         font-size: 0.65rem;
         font-weight: 600;
@@ -427,7 +426,7 @@ const MenuContainer = styled.div`
 const MenuDropdown = styled.div`
     position: fixed;
     background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
     min-width: 180px;
@@ -454,7 +453,7 @@ const MenuItem = styled.button`
     }
 
     &:not(:last-child) {
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     }
 
     &[data-danger="true"] {
@@ -502,7 +501,7 @@ const StyledReply = styled.div`
     width: 100%;
     padding: 0.75rem;
     background: ${({ theme }) => theme?.colors?.panelAlt || '#2A2E33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     border-radius: 10px;
 `;
 
@@ -529,7 +528,7 @@ const MobileReplyHeader = styled.div`
     display: flex;
     align-items: center;
     padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
     position: sticky;
     top: 0;
@@ -632,7 +631,7 @@ const MetaRow = styled.div`
     gap: 0.5rem;
     margin-top: 0.5rem;
     padding-top: 0.5rem;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#9ca3af'};
     font-size: 0.7rem;
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};

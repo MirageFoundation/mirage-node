@@ -541,7 +541,7 @@ const MetaInfoRow = styled.div`
     gap: 0.35rem;
     margin-top: 0.0rem;
     padding-bottom: 0.2rem;
-    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#6b7280'};
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-size: 0.60rem;
     font-weight: 600;
@@ -758,7 +758,7 @@ const MenuItem = styled.button`
     }
 
     &:not(:last-child) {
-        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+        border-bottom: 1px solid ${({ theme }) => theme?.colors?.border || '#6b7280'};
     }
 
     &[data-danger="true"] {
