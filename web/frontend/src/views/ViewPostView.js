@@ -952,6 +952,11 @@ function ViewPostView({ state, updatePost }) {
         try {
             // Prefer browser back when we actually navigated here from a feed (/home, /following, /t/:topic).
             // This preserves scroll restoration logic in MainView.
+            if (openedFromFeedInfoRef.current?.opened === true) {
+                navigate(-1);
+                return;
+            }
+
             if (typeof window !== 'undefined' && window.history.length > 1) {
                 try {
                     const cameFrom = window.sessionStorage.getItem('mirage_post_referrer');
@@ -961,11 +966,6 @@ function ViewPostView({ state, updatePost }) {
                         return;
                     }
                 } catch (_) { }
-
-                if (openedFromFeedInfoRef.current?.opened === true) {
-                    navigate(-1);
-                    return;
-                }
             }
 
             const last = Storage.load('last_feed_route', '/home');

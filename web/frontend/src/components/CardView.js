@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, memo } from "react";
 import ReactDOM from "react-dom";
 import styled from "styled-components"
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import VoteSection from "./VoteSection";
 import InlineMedia from "./InlineMedia";
 import Button from "./Button";
@@ -839,7 +839,47 @@ const formatTimeStamp = (utcTimestamp) => {
     return `${isoDate} ${isoTime}`;
 };
 
+const markViewPostOpenedFromFeed = () => {
+    try {
+        if (typeof window === 'undefined' || !window.sessionStorage) return;
+        const pathname = String(window.location?.pathname || '');
+
+        // Only stamp feed markers when the user is currently on a feed route.
+        // This ensures "Back" from ViewPostView returns to the same feed position without refetching.
+        let topic = null;
+        if (pathname === '/' || pathname === '/home') {
+            topic = 'home';
+        } else if (pathname === '/following') {
+            topic = 'following';
+        } else if (pathname.startsWith('/t/')) {
+            const withoutPrefix = pathname.slice(3); // after "/t/"
+            const segment = withoutPrefix.split('?')[0].split('#')[0].split('/')[0];
+            const trimmed = String(segment || '').trim();
+            if (trimmed) {
+                try {
+                    topic = decodeURIComponent(trimmed);
+                } catch (_) {
+                    topic = trimmed;
+                }
+            }
+        }
+
+        if (!topic) return;
+
+        // Save scroll position under the same key scheme used by MainView:
+        // getFeedKey(topic, 'scroll') -> `feed_scroll_${topic}`.
+        try {
+            window.sessionStorage.setItem(`feed_scroll_${topic}`, String(window.scrollY || 0));
+        } catch (_) { }
+
+        const at = Date.now();
+        window.sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({ source: 'feed', topic: topic, at }));
+        window.sessionStorage.setItem('mirage_came_from_feed', JSON.stringify({ topic: topic, at }));
+    } catch (_) { }
+};
+
 function CardView({ state, post, updatePost, showContent = false, footer = null }) {
+    const navigate = useNavigate();
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [shareCopied, setShareCopied] = useState(false);
@@ -993,14 +1033,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setMenuOpen(false);
         if (!post || !post.post_id) return;
         const targetPostId = post.post_id;
-        window.location.href = `/view_post?post_id=${targetPostId}&edit=true`;
+        markViewPostOpenedFromFeed();
+        navigate(`/view_post?post_id=${encodeURIComponent(targetPostId)}&edit=true`);
     };
 
     const handleDonate = () => {
         setMenuOpen(false);
         if (!post || !post.post_id) return;
         const targetPostId = post.post_id;
-        window.location.href = `/view_post?post_id=${targetPostId}`;
+        markViewPostOpenedFromFeed();
+        navigate(`/view_post?post_id=${encodeURIComponent(targetPostId)}`);
     };
 
     const handleBlockPost = () => {
