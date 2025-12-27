@@ -2,9 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import styled from 'styled-components';
 
-// NOTE: This is a *public* client-side key (it will be embedded into the frontend bundle at build time).
-// We still keep it out of git so it can be rotated without code changes.
-const GIPHY_API_KEY = (process.env.REACT_APP_GIPHY_API_KEY || '').trim();
+// Giphy API key - use environment variable if set, otherwise fall back to public beta key
+const GIPHY_API_KEY = (process.env.REACT_APP_GIPHY_API_KEY || 'dc6zaTOxFJmzC').trim();
 const GIPHY_SEARCH_URL = 'https://api.giphy.com/v1/gifs/search';
 const GIPHY_TRENDING_URL = 'https://api.giphy.com/v1/gifs/trending';
 
