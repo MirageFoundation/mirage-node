@@ -70,6 +70,7 @@ Compact card mode (selectable from the feed info bar) has been significantly imp
 
 - **Tighter card padding**: Reduced internal spacing on all sides
 - **Smaller gaps between cards**: Cards stack closer together
+- **Consistent spacing**: Gap between info bar and first card now matches gap between cards
 - **Reduced internal margins**: Less whitespace around titles, meta info, and action rows
 - **Thumbnail alignment fix**: Thumbnails now properly align with the top of text content
 - **More breathing room**: Slightly increased bottom padding to avoid cramped action rows
@@ -144,3 +145,4 @@ Clicking a post card (title or thumbnail) now always opens the post view page in
 - **Follow button stability**: Follow/Unfollow no longer changes size on hover
 - **Vote preference accuracy**: Comment votes now only affect author preference, not topic preference
 - **Removed unused setting**: "Hide negative comments" option has been removed
+- **Markdown rendering**: Fixed rendering issues with GitHub Flavored Markdown

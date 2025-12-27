@@ -131,8 +131,8 @@ export const ModernPostFeed = styled.div`
 export const PostGrid = styled.div`
     display: flex;
     flex-direction: column;
-    gap: var(--card-gap, 1.5rem);
-    margin-top: var(--card-margin-top, 1rem);
+    gap: var(--card-gap, 1.25rem);
+    margin-top: var(--card-margin-top, 1.25rem);
 
     @media (max-width: 600px) {
         gap: var(--card-gap-mobile, 0.5rem);

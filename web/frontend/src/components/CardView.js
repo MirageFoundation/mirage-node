@@ -910,13 +910,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, []);
 
     // Set CSS custom properties for card gap based on compact mode
+    // margin-top should equal gap for consistent spacing between info bar and cards
     useEffect(() => {
         const isCompactMode = cardSize === 'compact';
         const root = document.documentElement;
-        root.style.setProperty('--card-gap', isCompactMode ? '0.5rem' : '1.5rem');
-        root.style.setProperty('--card-gap-mobile', isCompactMode ? '0.25rem' : '0.5rem');
-        root.style.setProperty('--card-margin-top', isCompactMode ? '0.35rem' : '1rem');
-        root.style.setProperty('--card-margin-top-mobile', isCompactMode ? '0.2rem' : '0.5rem');
+        const gap = isCompactMode ? '0.5rem' : '1.0rem';
+        const gapMobile = isCompactMode ? '0.25rem' : '0.5rem';
+        root.style.setProperty('--card-gap', gap);
+        root.style.setProperty('--card-gap-mobile', gapMobile);
+        root.style.setProperty('--card-margin-top', gap);
+        root.style.setProperty('--card-margin-top-mobile', gapMobile);
     }, [cardSize]);
 
     // Ensure flash happens only once per post
