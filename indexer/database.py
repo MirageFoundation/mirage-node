@@ -392,6 +392,20 @@ class DatabaseManager:
                     """
                 )
 
+                # supply_history - tracks total supply over time for burn/mint charts
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS supply_history (
+                        height BIGINT PRIMARY KEY,
+                        total_supply BIGINT NOT NULL,
+                        created_at BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_supply_history_created_at ON supply_history(created_at DESC)"
+                )
+
                 # topic_content_stats: per-topic content labels derived from post tags
                 cur.execute(
                     """
@@ -1625,6 +1639,37 @@ class DatabaseManager:
                 rows = cur.fetchall()
                 return [{"height": r[0], "difficulty": r[1], "msg_count": r[2], "timestamp": r[3]} for r in rows]
 
+    def upsert_supply(self, height: int, total_supply: int, created_at: int) -> None:
+        """Record total supply at a given block height (sampled hourly)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO supply_history(height, total_supply, created_at)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT (height) DO UPDATE SET
+                        total_supply = EXCLUDED.total_supply,
+                        created_at = EXCLUDED.created_at
+                    """,
+                    (int(height), int(total_supply), int(created_at)),
+                )
+
+    def get_supply_history(self, since_ts: int) -> list[dict]:
+        """Get supply history since a timestamp. Returns list of {height, total_supply, timestamp}."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT height, total_supply, created_at
+                    FROM supply_history
+                    WHERE created_at >= %s
+                    ORDER BY height ASC
+                    """,
+                    (int(since_ts),),
+                )
+                rows = cur.fetchall()
+                return [{"height": r[0], "total_supply": r[1], "timestamp": r[2]} for r in rows]
+
     def _compute_all_user_similarities(self, cur) -> None:
         """
         One-time migration: compute initial similarity scores for all users with enough preferences.
@@ -1762,4 +1807,3 @@ class DatabaseManager:
         logger.info(
             f"v1.6.3 similarity migration: Completed. Cached {total_cached} similarity entries for {len(users_with_prefs)} users"
         )
-

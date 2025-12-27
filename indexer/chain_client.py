@@ -368,3 +368,19 @@ class ChainClient:
         except Exception as e:
             logger.warning("Failed to query difficulty info: %s", e)
             return {"difficulty": 10, "msg_count": 0}
+
+    def get_total_supply(self) -> int:
+        """Get total supply of umirage tokens via gRPC."""
+        try:
+            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
+            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = bank_query_pb2_grpc.QueryStub(channel)
+                req = bank_query_pb2.QuerySupplyOfRequest(denom="umirage")
+                resp = stub.SupplyOf(req, timeout=GRPC_TIMEOUT)
+                amt = (resp.amount.amount if resp and resp.amount else "0") or "0"
+                return int(amt)
+        except Exception as e:
+            logger.warning("Failed to query total supply: %s", e)
+            return 0

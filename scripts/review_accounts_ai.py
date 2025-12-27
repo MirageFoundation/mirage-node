@@ -64,9 +64,8 @@ DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "user-analysis")
 LOOKBACK_DAYS = 90
 
 # Evidence detail levels
-MAX_RECENT_POSTS_TARGET_FILE = 50
-MAX_RECENT_POSTS_TARGET_AI = 12
-MAX_RECENT_POSTS_MATCH_FILE = 5
+MAX_RECENT_POSTS = 10  # Same for target and matches
+MAX_RECENT_VOTES = 25
 MAX_MATCHES_WITH_POST_SAMPLES = 5  # per severity bucket (CRITICAL/HIGH)
 
 # ChatGPT API key - will be prompted if not in environment
@@ -78,17 +77,12 @@ CHATGPT_API_KEY = os.environ.get("CHATGPT_API_KEY", "")
 # so it is shown as evidence but does NOT drive severity categories.
 CRITICAL_FP_SCORE = 0.5  # Fingerprint combo score
 HIGH_FP_SCORE = 0.3
-CRITICAL_PREF_SIM = 0.7
-HIGH_PREF_SIM = 0.5
+CRITICAL_PREF_SIM = 0.9
+HIGH_PREF_SIM = 0.7
 
 # Minimum scores to include in output (very low - we want everything notable)
 MIN_FP_SCORE_TO_SHOW = 0.1
 MIN_PREF_SIM_TO_SHOW = 0.1
-
-# Display thresholds for the "Other Notable Matches" section.
-# We keep matching broad, but we only *display* notables when there is meaningful fingerprint overlap.
-MIN_FP_SCORE_TO_DISPLAY_NOTABLE = 0.15
-MIN_FP_WEIGHT_TO_DISPLAY_NOTABLE = 8.0
 
 
 # =============================================================================
@@ -200,10 +194,13 @@ class AccountMatch:
         HIGH = strong suspicion but not definitive:
           - Same IP on VPN/datacenter/mobile (shared infrastructure)
           - Same IP without metadata (older fingerprints, can't verify)
-          - Same canvas (can be shared on Safari/Mac, but suspicious)
           - Total FP weight >= 60 (moderate fingerprint overlap)
 
         NOTABLE = worth investigating but weak signal
+
+        NOTE: Canvas hash is NOT treated specially. It's shared by all users with
+        the same browser/GPU/OS stack (e.g., all Safari M1 users). It contributes
+        to total_weight like any other attribute based on its actual rarity.
 
         When no_fingerprint=True (--no-fingerprint mode):
           - Use preference similarity as primary signal
@@ -225,7 +222,8 @@ class AccountMatch:
         # Get total entropy-weighted score
         total_weight = self.fp_match.total_weight if self.fp_match else 0.0
 
-        # Same IP handling - consider metadata context
+        # Same IP handling - the ONLY attribute that gets special treatment
+        # IP is the only truly identifying signal on its own
         if self.same_ip:
             if self.ip_has_metadata:
                 # We have IP context - use it smartly
@@ -244,21 +242,16 @@ class AccountMatch:
                 self.severity = "HIGH"
             return
 
-        # Very high total weight = CRITICAL (many rare attributes match)
-        # 100+ weight requires multiple rare/uncommon matches beyond just canvas+webgl+ua
+        # Everything else is based purely on total entropy-weighted score
+        # This includes canvas, webgl, screen, timezone, etc. - all weighted by rarity
         if total_weight >= 100:
+            # Very high weight = CRITICAL (many rare attributes match)
             self.severity = "CRITICAL"
-        # Same canvas = HIGH (can be shared on same browser/GPU, but suspicious)
-        elif self.same_canvas:
-            self.severity = "HIGH"
-        # Moderate total weight = HIGH (meaningful fingerprint overlap)
         elif total_weight >= 60:
+            # Moderate weight = HIGH (meaningful fingerprint overlap)
             self.severity = "HIGH"
-        # Strong percentage match = HIGH (many attributes match, even if common)
-        elif self.fp_score >= CRITICAL_FP_SCORE:
-            self.severity = "HIGH"
-        # Lower weight with at least one high-entropy match = NOTABLE
         elif total_weight >= 30 and self.fp_match and self.fp_match.has_device_match:
+            # Lower weight but has at least one high-entropy match = NOTABLE
             self.severity = "NOTABLE"
         else:
             self.severity = "NOTABLE"
@@ -285,6 +278,9 @@ class TargetEvidence:
     # Recent posts (unbiased facts) for the target and select matches
     recent_posts: List[Dict[str, Any]] = field(default_factory=list)
     match_recent_posts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+
+    # Recent votes for the target
+    recent_votes: List[Dict[str, Any]] = field(default_factory=list)
 
     # AI verdict (filled after ChatGPT call)
     verdict: str = ""
@@ -658,12 +654,58 @@ def load_recent_posts_for_addresses(
     return dict(posts_by_user)
 
 
-def augment_evidence_with_recent_posts(
+def load_recent_votes_for_address(
+    cur,
+    owner: str,
+    since_ts: int,
+    max_votes: int,
+) -> List[Dict[str, Any]]:
+    """Load recent votes for a single owner.
+
+    Returns list of vote dicts ordered newest-first.
+    """
+    owner = owner.lower()
+    cur.execute(
+        """
+        SELECT v.target, v.user_vote, v.created_at,
+               COALESCE(p.title, ''), COALESCE(p.content, ''),
+               COALESCE(p.topic, ''), COALESCE(p.root_topic, ''),
+               LOWER(p.owner)
+        FROM votes v
+        LEFT JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
+        WHERE LOWER(v.owner) = %s AND v.created_at >= %s
+        ORDER BY v.created_at DESC
+        LIMIT %s
+        """,
+        (owner, since_ts, max_votes),
+    )
+
+    votes = []
+    for row in cur.fetchall():
+        target, user_vote, created_at, title, content, topic, root_topic, post_owner = row
+        text = (title or content or "").strip()
+        if len(text) > 100:
+            text = text[:100] + "..."
+        votes.append(
+            {
+                "target": target,
+                "vote": "upvote" if user_vote > 0 else "downvote",
+                "created_at": int(created_at or 0),
+                "post_topic": (root_topic or topic or "").strip(),
+                "post_owner": post_owner or "",
+                "post_preview": text,
+            }
+        )
+
+    return votes
+
+
+def augment_evidence_with_activity(
     cur,
     evidence: TargetEvidence,
     since_ts: int,
 ) -> None:
-    """Attach recent posts for the target and a small sample for CRITICAL/HIGH matches."""
+    """Attach recent posts and votes for the target and a small sample for CRITICAL/HIGH matches."""
     # Target posts
     owners: List[str] = [evidence.address]
 
@@ -679,13 +721,21 @@ def augment_evidence_with_recent_posts(
         cur=cur,
         owners=owners,
         since_ts=since_ts,
-        max_posts_per_user=max(MAX_RECENT_POSTS_TARGET_FILE, MAX_RECENT_POSTS_MATCH_FILE),
+        max_posts_per_user=MAX_RECENT_POSTS,
     )
 
-    evidence.recent_posts = posts.get(evidence.address.lower(), [])[:MAX_RECENT_POSTS_TARGET_FILE]
+    evidence.recent_posts = posts.get(evidence.address.lower(), [])[:MAX_RECENT_POSTS]
 
     for addr in critical_addrs + high_addrs:
-        evidence.match_recent_posts[addr.lower()] = posts.get(addr.lower(), [])[:MAX_RECENT_POSTS_MATCH_FILE]
+        evidence.match_recent_posts[addr.lower()] = posts.get(addr.lower(), [])[:MAX_RECENT_POSTS]
+
+    # Load recent votes for target
+    evidence.recent_votes = load_recent_votes_for_address(
+        cur=cur,
+        owner=evidence.address,
+        since_ts=since_ts,
+        max_votes=MAX_RECENT_VOTES,
+    )
 
 
 # =============================================================================
@@ -1119,10 +1169,9 @@ def generate_evidence_markdown(
         lines.append("*No notable matches found.*")
         lines.append("")
     else:
-        # Group by severity
+        # Group by severity (only show CRITICAL/HIGH, skip NOTABLE noise)
         critical = [m for m in evidence.matches if m.severity == "CRITICAL"]
         high = [m for m in evidence.matches if m.severity == "HIGH"]
-        notable = [m for m in evidence.matches if m.severity == "NOTABLE"]
         pref_similar = [m for m in evidence.matches if m.pref_sim >= HIGH_PREF_SIM]
 
         if critical:
@@ -1218,8 +1267,8 @@ def generate_evidence_markdown(
             lines.append("### HIGH Severity Matches")
             lines.append("")
             lines.append(
-                "Suspicious but not definitive. Includes: same canvas alone (can be shared on same browser/GPU platform), "
-                "or strong FP score without multiple high-entropy matches."
+                "Suspicious but not definitive. Includes: same IP on VPN/datacenter/mobile, "
+                "or fingerprint weight >= 60 (combination of multiple matching attributes)."
             )
             lines.append("")
             lines.append("| Username | Address | FP Score | FP Weight | Pref Sim | Flags |")
@@ -1261,41 +1310,7 @@ def generate_evidence_markdown(
                 lines.append(f"| ... and {len(pref_similar) - 100} more | | | | |")
             lines.append("")
 
-        if notable:
-            notable_display = [
-                m
-                for m in notable
-                if (
-                    m.fp_score >= MIN_FP_SCORE_TO_DISPLAY_NOTABLE
-                    or (m.fp_match and m.fp_match.has_device_match)
-                    or (m.fp_match and m.fp_match.total_weight >= MIN_FP_WEIGHT_TO_DISPLAY_NOTABLE)
-                )
-            ]
-            omitted = len(notable) - len(notable_display)
-
-            lines.append("### Other Notable Fingerprint Matches")
-            lines.append("")
-            lines.append(
-                "This section is restricted to matches with meaningful fingerprint overlap. "
-                "Very low-signal matches are omitted to avoid noise."
-            )
-            if omitted > 0:
-                lines.append(f"Low-signal matches omitted: {omitted}")
-            lines.append("")
-
-            if not notable_display:
-                lines.append("*No additional notable fingerprint matches.*")
-                lines.append("")
-            else:
-                lines.append("| Username | FP Score | FP Weight | Pref Sim |")
-                lines.append("|----------|----------|----------:|----------|")
-                for m in notable_display[:50]:  # Limit display for readability
-                    pref_str = f"{m.pref_sim:.0%} ({m.pref_shared})" if m.pref_shared > 0 else "-"
-                    fp_weight = m.fp_match.total_weight if m.fp_match else 0.0
-                    lines.append(f"| {m.match_username} | {m.fp_score:.0%} | {fp_weight:.1f} | {pref_str} |")
-                if len(notable_display) > 50:
-                    lines.append(f"| ... and {len(notable_display) - 50} more | | | |")
-            lines.append("")
+        # Note: NOTABLE matches are omitted - only CRITICAL/HIGH are shown
 
     # Recent posts for the target (unbiased facts)
     lines.append("## Recent Posts (Target)")
@@ -1304,7 +1319,7 @@ def generate_evidence_markdown(
         lines.append("*No recent posts found in the lookback window.*")
         lines.append("")
     else:
-        for i, p in enumerate(evidence.recent_posts[:MAX_RECENT_POSTS_TARGET_FILE], 1):
+        for i, p in enumerate(evidence.recent_posts[:MAX_RECENT_POSTS], 1):
             ts = format_ts(p.get("created_at", 0))
             topic = p.get("topic") or "none"
             votes = f"+{p.get('upvotes', 0)}/-{p.get('downvotes', 0)}"
@@ -1326,6 +1341,27 @@ def generate_evidence_markdown(
                 lines.append("")
                 lines.append(f"> {content.replace(chr(10), chr(10)+'> ')}")
             lines.append("")
+
+    # Recent votes for the target
+    lines.append("## Recent Votes (Target)")
+    lines.append("")
+    if not evidence.recent_votes:
+        lines.append("*No recent votes found in the lookback window.*")
+        lines.append("")
+    else:
+        lines.append("| # | Time | Vote | Topic | Post Owner | Preview |")
+        lines.append("|---|------|------|-------|------------|---------|")
+        for i, v in enumerate(evidence.recent_votes, 1):
+            ts = format_ts(v.get("created_at", 0))
+            vote_type = v.get("vote", "?")
+            vote_emoji = "👍" if vote_type == "upvote" else "👎"
+            topic = v.get("post_topic") or "-"
+            post_owner = v.get("post_owner") or "-"
+            preview = v.get("post_preview") or "-"
+            if len(preview) > 60:
+                preview = preview[:60] + "..."
+            lines.append(f"| {i} | {ts} | {vote_emoji} | #{topic} | {post_owner} | {preview} |")
+        lines.append("")
 
     # AI Verdict placeholder
     lines.append("---")
@@ -1441,6 +1477,7 @@ def generate_evidence_json(evidence: TargetEvidence) -> Dict[str, Any]:
     }
 
     result["recent_posts"] = evidence.recent_posts
+    result["recent_votes"] = evidence.recent_votes
     result["match_recent_posts"] = evidence.match_recent_posts
 
     return result
@@ -1455,18 +1492,18 @@ CHATGPT_SYSTEM_PROMPT = """You are a fraud detection expert analyzing user accou
 Your task is to determine if accounts are REAL users or GAMING (sockpuppets / fake accounts).
 
 Key signals to look for:
-1. SAME IP HASH - Strength depends on IP TYPE:
+1. SAME IP HASH - The ONLY truly identifying signal on its own. Strength depends on IP TYPE:
    - 🏠 Residential IP = VERY suspicious (CRITICAL) - real users rarely share residential IPs
    - 📱 Mobile carrier IP = LESS suspicious (HIGH) - CGNAT means many users share mobile IPs
    - ⚠️ VPN/Datacenter IP = LESS suspicious (HIGH) - many users share VPN exit nodes
    - No metadata = UNCERTAIN (HIGH) - older fingerprints without IP lookup data
-2. SAME CANVAS HASH - Browser fingerprint match, BUT can be legitimately shared by different users
-   on the same browser/GPU platform (e.g., all Safari/Mac users may share canvas hash).
-   Canvas alone is NOT definitive - only suspicious when combined with other signals.
-3. HIGH FINGERPRINT COMBO SCORE (3+ high-entropy attributes) - Rare attribute combinations matching = strong evidence
-4. PREFERENCE SIMILARITY - Same voting patterns can be correlated for real users in the same community.
+2. HIGH FINGERPRINT WEIGHT (combination of attributes) - The system uses entropy-weighted scoring.
+   Each attribute contributes based on its rarity. Canvas, WebGL, screen size, etc. are all
+   weighted by how common they are. A high total weight (60+) means multiple rare attributes match.
+   Note: Canvas hash alone is NOT suspicious - it's shared by all users with same browser/GPU/OS.
+3. PREFERENCE SIMILARITY - Same voting patterns can be correlated for real users in the same community.
    Treat preference similarity as SUPPORTING evidence only unless paired with device/fingerprint evidence.
-5. COORDINATED ACTIVITY - Same timezone, same topics, same timing
+4. COORDINATED ACTIVITY - Same timezone, same topics, same timing
 
 Signs of a REAL user:
 - Organic posting patterns (varied times, topics)
@@ -1680,7 +1717,7 @@ def generate_ai_evidence_markdown(
     if not evidence.recent_posts:
         lines.append("No posts.")
     else:
-        for p in evidence.recent_posts[:MAX_RECENT_POSTS_TARGET_AI]:
+        for p in evidence.recent_posts[:MAX_RECENT_POSTS]:
             ts = format_ts(p.get("created_at", 0))
             topic = p.get("topic") or "none"
             is_comment = bool(p.get("target"))
@@ -1868,10 +1905,10 @@ def main():
                 )
 
                 # Attach recent posts (target + small sample for CRITICAL/HIGH matches)
-                augment_evidence_with_recent_posts(cur, evidence, since_ts)
+                augment_evidence_with_activity(cur, evidence, since_ts)
 
-                # Generate markdown for AI (condensed snapshot)
-                ai_md = generate_ai_evidence_markdown(evidence, users, all_fps)
+                # Generate full markdown for AI analysis
+                ai_md = generate_evidence_markdown(evidence, users, all_fps)
 
                 # Get AI verdict
                 if CHATGPT_API_KEY:
@@ -1974,7 +2011,9 @@ def main():
     if multi_clusters:
         summary_lines.append("## Clusters (CRITICAL Connections)")
         summary_lines.append("")
-        summary_lines.append("Accounts connected by CRITICAL-level signals (same residential IP, or FP weight ≥100).")
+        summary_lines.append(
+            "Accounts connected by CRITICAL-level signals: same residential IP, or fingerprint weight >= 100 (many rare attributes matching)."
+        )
         summary_lines.append("Each cluster likely represents the same person.")
         summary_lines.append("")
         for i, cluster_addrs in enumerate(multi_clusters, 1):

@@ -44,10 +44,8 @@ export const sortPosts = (posts, sortBy) => {
     const cmp = (a, b) => {
         switch (sortBy) {
             case 'magic':
-            case 'magic2':
-            case 'magic3':
             case 'hot': {
-                // Server-side sorted for magic/magic2; client fallback uses hot score
+                // Server-side sorted for magic; client fallback uses hot score
                 const scoreA = calculateHotScoreForPost(a);
                 const scoreB = calculateHotScoreForPost(b);
                 if (scoreA !== scoreB) return scoreB - scoreA;

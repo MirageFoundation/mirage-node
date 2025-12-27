@@ -682,9 +682,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return false;
     });
     const [homeSortMode, setHomeSortMode] = useState(() => {
-        const mode = Storage.load('home_sort_mode', 'magic');
-        // Valid modes: magic, magic2, magic3, newest
-        return ['magic', 'magic2', 'magic3', 'newest'].includes(mode) ? mode : 'magic';
+        const defaultMode = 'magic';
+        let mode = Storage.load('home_sort_mode', defaultMode);
+
+        // Migrate deprecated/unknown modes to the new unified mode.
+        // Magic is now the only algo mode.
+        if (mode !== 'magic' && mode !== 'newest') {
+            mode = defaultMode;
+            Storage.save('home_sort_mode', mode);
+        }
+
+        return mode;
     });
     const [cardSize, setCardSize] = useState(() => {
         try {
@@ -1379,7 +1387,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [urlTopic, location.pathname]);
 
-    // Refetch when homeSortMode changes (magic/magic2/newest toggle)
+    // Refetch when homeSortMode changes (magic/newest toggle)
     const prevHomeSortModeRef = useRef(homeSortMode);
     useEffect(() => {
         // Only trigger if homeSortMode actually changed (not on mount)
@@ -1789,9 +1797,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                                 Storage.save('home_sort_mode', mode);
                                             }}
                                         >
-                                            <option value="magic">Magic 1</option>
-                                            <option value="magic2">Magic 2</option>
-                                            <option value="magic3">Magic 3</option>
+                                            <option value="magic">Magic</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
                                         <HomeFeedModeSelect
@@ -1890,9 +1896,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                                 Storage.save('home_sort_mode', mode);
                                             }}
                                         >
-                                            <option value="magic">Magic 1</option>
-                                            <option value="magic2">Magic 2</option>
-                                            <option value="magic3">Magic 3</option>
+                                            <option value="magic">Magic</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
                                         <HomeFeedModeSelect
@@ -1927,9 +1931,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                                 Storage.save('home_sort_mode', mode);
                                             }}
                                         >
-                                            <option value="magic">Magic 1</option>
-                                            <option value="magic2">Magic 2</option>
-                                            <option value="magic3">Magic 3</option>
+                                            <option value="magic">Magic</option>
                                             <option value="newest">Newest</option>
                                         </HomeFeedModeSelect>
                                         <HomeFeedModeSelect

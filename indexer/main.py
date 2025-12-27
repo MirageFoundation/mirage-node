@@ -498,6 +498,14 @@ class Indexer:
                             self.db.upsert_difficulty(height, info["difficulty"], info["msg_count"], int(time.time()))
                         except Exception as diff_err:
                             logger.warning("Failed to record difficulty at height %s: %s", height, diff_err)
+                        # Record supply every 200 blocks (aligns with mint interval)
+                        if height % 200 == 0:
+                            try:
+                                supply = self.chain.get_total_supply()
+                                if supply > 0:
+                                    self.db.upsert_supply(height, supply, int(time.time()))
+                            except Exception as supply_err:
+                                logger.warning("Failed to record supply at height %s: %s", height, supply_err)
         except Exception as e:
             logger.error("Error processing message: %s", e, exc_info=True)
 

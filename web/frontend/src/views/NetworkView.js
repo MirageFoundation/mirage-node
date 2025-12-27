@@ -49,6 +49,7 @@ const ValueBox = styled.div`
     overflow-x: auto;
 `;
 
+
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
@@ -159,6 +160,11 @@ const AccountBalance = styled.span`
     white-space: nowrap;
 `;
 
+const ChartWrapper = styled.div`
+    width: 100%;
+    max-width: 600px;
+`;
+
 const ChartContainer = styled.div`
     width: 100%;
     height: 120px;
@@ -199,11 +205,13 @@ const LegendDot = styled.span`
 function DifficultyChart({ history }) {
     if (!history || history.length < 2) {
         return (
-            <ChartContainer>
-                <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
-                    (chart available after more data is collected)
-                </Mono>
-            </ChartContainer>
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (chart available after more data is collected)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
         );
     }
 
@@ -244,7 +252,7 @@ function DifficultyChart({ history }) {
     const hoursAgo = Math.round((Date.now() / 1000 - minTs) / 3600);
 
     return (
-        <>
+        <ChartWrapper>
             <ChartLegend>
                 <LegendItem><LegendDot color="#667eea" /> Difficulty</LegendItem>
                 <LegendItem><LegendDot color="#48bb78" /> Msgs/Window</LegendItem>
@@ -291,7 +299,155 @@ function DifficultyChart({ history }) {
                 <span>{hoursAgo}h ago</span>
                 <span>now</span>
             </ChartLabel>
-        </>
+        </ChartWrapper>
+    );
+}
+
+function BurnMintChart({ history, mintInterval, mintQuantity }) {
+    if (!history || history.length < 2) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (chart available after more data is collected)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
+
+    const width = 400;
+    const height = 100;
+    const padding = { top: 10, right: 35, bottom: 5, left: 30 };
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+
+    // Calculate minted and burned per interval (in umirage)
+    const data = [];
+    for (let i = 1; i < history.length; i++) {
+        const prev = history[i - 1];
+        const curr = history[i];
+        const heightDiff = curr.height - prev.height;
+        const supplyDiff = curr.total_supply - prev.total_supply;
+
+        // Minted = number of mint intervals * mint_quantity
+        const mintEvents = Math.floor(heightDiff / mintInterval);
+        const minted = mintEvents * mintQuantity;
+
+        // Burned = minted - supply_increase (if supply decreased, burned > minted)
+        const burned = minted - supplyDiff;
+
+        data.push({
+            timestamp: curr.timestamp,
+            minted: Math.max(0, minted),
+            burned: Math.max(0, burned),
+        });
+    }
+
+    if (data.length < 1) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (not enough data yet)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
+
+    // Cumulative totals over the period (in umirage), convert to MIRAGE for display
+    const totalMintedUmirage = data.reduce((sum, d) => sum + d.minted, 0);
+    const totalBurnedUmirage = data.reduce((sum, d) => sum + d.burned, 0);
+    const totalMinted = totalMintedUmirage / 1_000_000;
+    const totalBurned = totalBurnedUmirage / 1_000_000;
+
+    // Find max for scaling (still in umirage for chart calculations)
+    const maxMinted = Math.max(...data.map(d => d.minted), 1);
+    const maxBurned = Math.max(...data.map(d => d.burned), 1);
+    const maxY = Math.max(maxMinted, maxBurned);
+    const maxYMirage = maxY / 1_000_000;
+
+    const minTs = data[0].timestamp;
+    const maxTs = data[data.length - 1].timestamp;
+    const tsRange = maxTs - minTs || 1;
+
+    // Minted line (green)
+    const mintedPoints = data.map((d) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
+        const y = padding.top + chartHeight - (d.minted / maxY) * chartHeight;
+        return `${x},${y}`;
+    }).join(' ');
+
+    // Burned line (red/orange)
+    const burnedPoints = data.map((d) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
+        const y = padding.top + chartHeight - (d.burned / maxY) * chartHeight;
+        return `${x},${y}`;
+    }).join(' ');
+
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+
+    // Format MIRAGE amounts for display
+    const formatMirageAmount = (mirage) => {
+        if (mirage >= 1000000) return (mirage / 1000000).toFixed(1) + 'M';
+        if (mirage >= 1000) return (mirage / 1000).toFixed(1) + 'K';
+        if (mirage >= 1) return mirage.toFixed(1);
+        if (mirage >= 0.01) return mirage.toFixed(2);
+        return mirage.toFixed(4);
+    };
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color="#48bb78" /> Minted ({formatMirageAmount(totalMinted)})</LegendItem>
+                <LegendItem><LegendDot color="#f56565" /> Burned ({formatMirageAmount(totalBurned)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    {/* Grid lines */}
+                    <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+                    <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+                    <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+
+                    {/* Y-axis labels (in MIRAGE) */}
+                    <text x={padding.left - 5} y={padding.top + 4} fill="#888" fontSize="8" textAnchor="end">{formatMirageAmount(maxYMirage)}</text>
+                    <text x={padding.left - 5} y={height - padding.bottom} fill="#888" fontSize="8" textAnchor="end">0</text>
+
+                    {/* Minted area fill (green, behind) */}
+                    <polygon
+                        fill="rgba(72, 187, 120, 0.15)"
+                        points={`${padding.left},${height - padding.bottom} ${mintedPoints} ${width - padding.right},${height - padding.bottom}`}
+                    />
+
+                    {/* Burned area fill (red, behind) */}
+                    <polygon
+                        fill="rgba(245, 101, 101, 0.15)"
+                        points={`${padding.left},${height - padding.bottom} ${burnedPoints} ${width - padding.right},${height - padding.bottom}`}
+                    />
+
+                    {/* Minted line (green) */}
+                    <polyline
+                        fill="none"
+                        stroke="#48bb78"
+                        strokeWidth="1.5"
+                        points={mintedPoints}
+                    />
+
+                    {/* Burned line (red) */}
+                    <polyline
+                        fill="none"
+                        stroke="#f56565"
+                        strokeWidth="1.5"
+                        points={burnedPoints}
+                    />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
     );
 }
 
@@ -332,6 +488,7 @@ export default function NetworkView({ state }) {
     const [serverBalance, setServerBalance] = useState(null);
     const [copiedAddress, setCopiedAddress] = useState(null);
     const [circulationStats, setCirculationStats] = useState({ total_supply: null, top_accounts: [] });
+    const [supplyHistory, setSupplyHistory] = useState({ history: [], mint_interval: 200, mint_quantity: 100000 });
 
     // Update tab when URL changes
     useEffect(() => {
@@ -420,6 +577,26 @@ export default function NetworkView({ state }) {
         };
         fetchCirculationStats();
         const interval = setInterval(fetchCirculationStats, 60000);
+        return () => { cancelled = true; clearInterval(interval); };
+    }, []);
+
+    // Fetch supply history for burn/mint chart
+    useEffect(() => {
+        let cancelled = false;
+        const fetchSupplyHistory = async () => {
+            try {
+                const data = await Api.get('get_supply_history', undefined, { timeoutMs: 15000 });
+                if (!cancelled && data) {
+                    setSupplyHistory({
+                        history: Array.isArray(data.history) ? data.history : [],
+                        mint_interval: data.mint_interval || 200,
+                        mint_quantity: data.mint_quantity || 100000,
+                    });
+                }
+            } catch (_) { }
+        };
+        fetchSupplyHistory();
+        const interval = setInterval(fetchSupplyHistory, 60000);
         return () => { cancelled = true; clearInterval(interval); };
     }, []);
 
@@ -530,6 +707,16 @@ export default function NetworkView({ state }) {
                                         <SectionLabel>History:</SectionLabel>
                                         <ValueBox>
                                             <DifficultyChart history={cfg.difficulty_history} />
+                                        </ValueBox>
+                                    </SectionRow>
+                                    <SectionRow>
+                                        <SectionLabel>Tokenomics:</SectionLabel>
+                                        <ValueBox>
+                                            <BurnMintChart
+                                                history={supplyHistory.history}
+                                                mintInterval={supplyHistory.mint_interval}
+                                                mintQuantity={supplyHistory.mint_quantity}
+                                            />
                                         </ValueBox>
                                     </SectionRow>
                                     <SectionRow>

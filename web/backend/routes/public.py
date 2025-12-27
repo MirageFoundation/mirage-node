@@ -750,6 +750,10 @@ def _get_following_feed(
     if not viewer_lower or viewer_lower == "guest":
         return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
 
+    sort_mode = (sort_mode or "magic").strip().lower()
+    if sort_mode not in ("magic", "newest"):
+        raise ValueError(f"unsupported sort mode: {sort_mode}")
+
     cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_topics = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
 
@@ -819,10 +823,30 @@ def _get_following_feed(
         pts = float(vote_totals.get(pid, 0.0) or 0.0)
         comments = int(comment_counts.get(pid, 0) or 0)
 
+        author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
+        topic_lower = (post.get("topic") or "").strip().lower()
+        is_own_post = author_lower == viewer_lower
+        in_followed_topic = topic_lower in followed_topics if topic_lower else False
+        by_followed_user = author_lower in followed_users if author_lower else False
+
+        if not (is_own_post or in_followed_topic or by_followed_user):
+            raise RuntimeError(
+                f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]} topic={topic_lower}"
+            )
+
         R = _log_recency(ts)
         V = _log_signed(pts)
         C = _log_comments(comments)
         score = (V + C) * R
+
+        if is_own_post:
+            reason = "Your post"
+        elif in_followed_topic and by_followed_user:
+            reason = "From a followed topic and user"
+        elif in_followed_topic:
+            reason = "From a followed topic"
+        else:
+            reason = "From a followed user"
 
         post["_score"] = score
         post["points"] = pts
@@ -834,7 +858,7 @@ def _get_following_feed(
         post["user_weight"] = user_weight_map.get(pid, 0.0)
         post["feed_debug"] = {
             "bucket": "following",
-            "reason": "following",
+            "reason": reason,
             "score": round(score, 2),
             "formula": f"(V:{V:.2f} + C:{C:.2f}) * R:{R:.2f} = {score:.2f}",
             "R": round(R, 2),
@@ -880,206 +904,39 @@ def _get_home_feed(
     sort_mode: str = "magic",
 ) -> dict:
     """
-    Similarity-based home feed algorithm.
+    Home feed.
 
-    Magic mode uses bucketed scoring, then interleaves bucket lists.
-
-    Bucket scores:
-    - liked/discovery/second_chance: (log_community_net_vote + log_comments) * log_recency
-    - similar: similarity * log_recency
-
-    Newest mode is chronological.
+    Sort modes:
+    - magic: Magic (unified score + reasons)
+    - newest: chronological ordering with the same debug breakdown
     """
-    from similarity import get_or_compute_similarities
-
     viewer_lower = viewer.strip().lower() if viewer else ""
+    sort_mode = (sort_mode or "magic").strip().lower()
+    if sort_mode not in ("magic", "newest"):
+        raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    # Guest users get a simple chronological feed
+    # Guest users:
+    # - newest: chronological
+    # - otherwise: Magic3-style scoring (no personalization; votes + unique commenters + recency)
     if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+        if sort_mode == "newest":
+            return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
 
-    # Dispatch to magic2/magic3 algorithm if requested
-    if sort_mode == "magic2":
-        return _get_home_feed_magic2(
-            cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags
-        )
-    if sort_mode == "magic3":
-        return _get_home_feed_magic3(
-            cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags
-        )
-
-    # 1. Load user preferences
-    topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
-
-    # 2. Get similar users (cached or computed on-demand)
-    similar_users = get_or_compute_similarities(cur, viewer_lower)
-    sim_lookup = {u[0]: u[1] for u in similar_users}  # addr -> similarity
-    similar_addrs = set(sim_lookup.keys())
-
-    # 3. Load candidate posts (generous limit for deep pagination)
-    max_candidates = max(500, limit * page * 3)
-    candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
+    # Logged-in users always use Magic (unified score).
+    return _get_home_feed_magic(
+        cur,
+        viewer_lower,
+        limit,
+        page,
+        blocked_posts,
+        blocked_users,
+        allowed_tags,
+        sort_mode=sort_mode,
     )
 
-    if not candidates:
-        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # 4. Load which posts similar users have upvoted
-    post_ids = [c["post_id"] for c in candidates]
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
-
-    # 5. Load points, comment counts, and viewer's votes for scoring
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
-        cur, post_ids, blocked_posts, blocked_users, viewer_lower
-    )
-
-    # 6. Score each post
-    similar_posts = []  # Posts with similarity signals (S > 0.1)
-    liked_posts = []  # Posts from liked topics/authors (no similarity)
-    discovery_posts = []  # Posts without similarity or preference
-    second_chance_posts = []  # Disliked posts (get a second chance)
-    for post in candidates:
-        score, debug = _score_home_post(
-            post, topic_prefs, author_prefs, sim_lookup, similar_upvotes, comment_counts, vote_totals
-        )
-        post["_score"] = score
-        post["feed_debug"] = debug
-        post["points"] = vote_totals.get(post["post_id"], 0.0)
-        post["comments"] = comment_counts.get(post["post_id"], 0)
-        post["children"] = []
-        post["feed_type"] = "home"
-        post["user_vote"] = user_votes.get(post["post_id"], 0)
-        post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
-
-        # Separate into buckets (skip hidden posts entirely)
-        # Order: hidden -> second_chance -> liked -> similar -> discovery
-        MIN_SIMILAR_SCORE = 0.001
-        if post.get("_is_severely_disliked"):
-            continue
-        elif post.get("_is_disliked"):
-            second_chance_posts.append(post)
-        elif post.get("_is_liked"):
-            liked_posts.append(post)
-        elif debug.get("S", 0) > 0.05 and score >= MIN_SIMILAR_SCORE:
-            similar_posts.append(post)
-        else:
-            discovery_posts.append(post)
-
-    # 7. Sort each list by score
-    similar_posts.sort(key=lambda p: -p["_score"])
-    liked_posts.sort(key=lambda p: -p["_score"])
-    discovery_posts.sort(key=lambda p: -p["_score"])
-    second_chance_posts.sort(key=lambda p: -p["_score"])
-
-    # 8. Handle "newest" mode: all posts (including second_chance), sorted chronologically
-    if sort_mode == "newest":
-        # Combine all buckets, sorted by timestamp
-        all_posts = similar_posts + liked_posts + discovery_posts + second_chance_posts
-        all_posts.sort(key=lambda p: -(p.get("timestamp") or 0))
-        interleaved = all_posts
-    else:
-        # 8b. Interleave (magic mode):
-        # - Every 3rd post is similar
-        # - Every 4th post is discovery
-        # - Every 10th post is second_chance
-        # - Default is liked
-        SIMILAR_INTERVAL = 3
-        DISCOVERY_INTERVAL = 4
-        SECOND_CHANCE_INTERVAL = 10
-        TOPIC_GAP = 4
-
-        interleaved = []
-        recent_topics = []
-        sim_idx = 0
-        liked_idx = 0
-        disc_idx = 0
-        sc_idx = 0
-        position = 0
-
-        while (
-            sim_idx < len(similar_posts)
-            or liked_idx < len(liked_posts)
-            or disc_idx < len(discovery_posts)
-            or sc_idx < len(second_chance_posts)
-        ):
-            post = None
-
-            # Every 10th is second_chance (highest priority)
-            if position > 0 and position % SECOND_CHANCE_INTERVAL == 0 and sc_idx < len(second_chance_posts):
-                post = second_chance_posts[sc_idx]
-                sc_idx += 1
-                post["feed_bucket"] = "second_chance"
-                post["feed_debug"]["bucket"] = "second_chance"
-                # Keep original reason (shows why disliked)
-            # Every 4th is discovery
-            elif position > 0 and position % DISCOVERY_INTERVAL == 0 and disc_idx < len(discovery_posts):
-                post = discovery_posts[disc_idx]
-                disc_idx += 1
-                post["feed_bucket"] = "discovery"
-                post["feed_debug"]["bucket"] = "discovery"
-                post["feed_debug"]["reason"] = "discovery"
-            # Every 3rd is similar
-            elif position > 0 and position % SIMILAR_INTERVAL == 0 and sim_idx < len(similar_posts):
-                post = similar_posts[sim_idx]
-                sim_idx += 1
-            # Default is liked
-            elif liked_idx < len(liked_posts):
-                post = liked_posts[liked_idx]
-                liked_idx += 1
-            # Fallback to similar
-            elif sim_idx < len(similar_posts):
-                post = similar_posts[sim_idx]
-                sim_idx += 1
-            # Fallback to discovery
-            elif disc_idx < len(discovery_posts):
-                post = discovery_posts[disc_idx]
-                disc_idx += 1
-                post["feed_bucket"] = "discovery"
-                post["feed_debug"]["bucket"] = "discovery"
-                post["feed_debug"]["reason"] = "discovery"
-            # Fallback to second_chance
-            elif sc_idx < len(second_chance_posts):
-                post = second_chance_posts[sc_idx]
-                sc_idx += 1
-                post["feed_bucket"] = "second_chance"
-                post["feed_debug"]["bucket"] = "second_chance"
-                # Keep original reason (shows why disliked)
-            else:
-                break
-
-            # Topic diversity check
-            topic_lower = (post.get("topic") or "").strip().lower()
-            if topic_lower in recent_topics[-TOPIC_GAP:]:
-                continue  # Skip, will try next
-
-            recent_topics.append(topic_lower)
-            interleaved.append(post)
-            position += 1
-
-    # 9. Paginate
-    start = (page - 1) * limit
-    end = start + limit
-    page_posts = interleaved[start:end] if start < len(interleaved) else []
-    has_more = len(interleaved) > end
-
-    # Clean up internal fields
-    for post in page_posts:
-        post.pop("_score", None)
-        post.pop("_is_severely_disliked", None)
-        post.pop("_is_disliked", None)
-        post.pop("_is_liked", None)
-
-    return {
-        "posts": page_posts,
-        "total": len(interleaved),
-        "page": page,
-        "limit": limit,
-        "has_more": has_more,
-    }
-
-
-def _get_home_feed_magic2(
+def _get_home_feed_magic(
     cur,
     viewer: str,
     limit: int,
@@ -1087,115 +944,10 @@ def _get_home_feed_magic2(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    sort_mode: str = "magic",
 ) -> dict:
     """
-    Simplified magic2 feed algorithm.
-
-    Single unified score based on:
-    - Similar users who upvoted the post
-    - Unique commenters (distinct users, not total comments)
-    - Votes with softer compression (sqrt instead of log)
-    - Aggressive exponential recency decay
-
-    No bucket interleaving - just rank by final score.
-    """
-    import math
-    import time
-    from similarity import get_or_compute_similarities
-
-    viewer_lower = viewer.strip().lower() if viewer else ""
-
-    # 1. Load user preferences (for hide threshold only)
-    topic_prefs, author_prefs = _load_user_preferences(cur, viewer_lower)
-
-    # 2. Get similar users (cached or computed on-demand)
-    similar_users = get_or_compute_similarities(cur, viewer_lower)
-    sim_lookup = {u[0]: u[1] for u in similar_users}  # addr -> similarity
-    similar_addrs = set(sim_lookup.keys())
-
-    # 3. Load candidate posts
-    max_candidates = max(500, limit * page * 3)
-    candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
-    )
-
-    if not candidates:
-        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
-
-    # 4. Load which posts similar users have upvoted
-    post_ids = [c["post_id"] for c in candidates]
-    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
-
-    # 5. Load stats: vote totals, unique commenters, viewer's votes
-    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
-        cur, post_ids, blocked_posts, blocked_users, viewer_lower
-    )
-    unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
-
-    # 6. Score each post with magic2 algorithm
-    now_ts = int(time.time())
-    scored_posts = []
-
-    for post in candidates:
-        score, debug, should_hide = _score_magic2(
-            post,
-            sim_lookup,
-            similar_upvotes,
-            unique_commenters,
-            vote_totals,
-            topic_prefs,
-            author_prefs,
-            now_ts,
-        )
-
-        if should_hide:
-            continue
-
-        post["_score"] = score
-        post["feed_debug"] = debug
-        post["points"] = vote_totals.get(post["post_id"], 0.0)
-        post["comments"] = comment_counts.get(post["post_id"], 0)
-        post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
-        post["children"] = []
-        post["feed_type"] = "home"
-        post["feed_bucket"] = debug.get("bucket", "magic2")
-        post["user_vote"] = user_votes.get(post["post_id"], 0)
-        post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
-        scored_posts.append(post)
-
-    # 7. Sort by score descending
-    scored_posts.sort(key=lambda p: -p["_score"])
-
-    # 8. Paginate
-    start = (page - 1) * limit
-    end = start + limit
-    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
-    has_more = len(scored_posts) > end
-
-    # Clean up internal fields
-    for post in page_posts:
-        post.pop("_score", None)
-
-    return {
-        "posts": page_posts,
-        "total": len(scored_posts),
-        "page": page,
-        "limit": limit,
-        "has_more": has_more,
-    }
-
-
-def _get_home_feed_magic3(
-    cur,
-    viewer: str,
-    limit: int,
-    page: int,
-    blocked_posts: set[str],
-    blocked_users: set[str],
-    allowed_tags: set[str],
-) -> dict:
-    """
-    Magic3 feed algorithm - magic2 + preference boost.
+    Magic feed algorithm.
 
     Single unified score: (S + V + U + P) × R
 
@@ -1206,7 +958,6 @@ def _get_home_feed_magic3(
     - P = preference boost from topic/author prefs (sqrt scaling)
     - R = recency decay (exponential)
     """
-    import math
     import time
     from similarity import get_or_compute_similarities
 
@@ -1239,12 +990,12 @@ def _get_home_feed_magic3(
     )
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
 
-    # 6. Score each post with magic3 algorithm
+    # 6. Score each post with Magic algorithm
     now_ts = int(time.time())
     scored_posts = []
 
     for post in candidates:
-        score, debug, should_hide = _score_magic3(
+        score, debug, should_hide = _score_magic(
             post,
             sim_lookup,
             similar_upvotes,
@@ -1265,13 +1016,20 @@ def _get_home_feed_magic3(
         post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
         post["children"] = []
         post["feed_type"] = "home"
-        post["feed_bucket"] = debug.get("bucket", "magic3")
+        post["feed_bucket"] = debug["bucket"]
         post["user_vote"] = user_votes.get(post["post_id"], 0)
         post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
         scored_posts.append(post)
 
-    # 7. Sort by score descending
-    scored_posts.sort(key=lambda p: -p["_score"])
+    sort_mode = (sort_mode or "magic").strip().lower()
+    if sort_mode not in ("magic", "newest"):
+        raise ValueError(f"unsupported sort mode: {sort_mode}")
+
+    if sort_mode == "newest":
+        scored_posts.sort(key=lambda p: -(p.get("timestamp") or 0))
+    else:
+        # 7. Sort by score descending
+        scored_posts.sort(key=lambda p: -p["_score"])
 
     # 8. Paginate
     start = (page - 1) * limit
@@ -1292,7 +1050,7 @@ def _get_home_feed_magic3(
     }
 
 
-def _score_magic3(
+def _score_magic(
     post: dict,
     sim_lookup: dict[str, float],
     similar_upvotes: dict[str, list[str]],
@@ -1389,109 +1147,6 @@ def _score_magic3(
         "V": round(V, 3),
         "U": round(U, 3),
         "P": round(P, 3),
-        "R": round(R, 4),
-        "age_hours": round(age_hours, 1),
-        "points": round(net_vote, 1),
-        "unique_commenters": unique_count,
-        "t_pref": round(topic_pref, 1),
-        "a_pref": round(author_pref, 1),
-        "source": post.get("_source", "unknown"),
-    }
-
-    return score, debug, False
-
-
-def _score_magic2(
-    post: dict,
-    sim_lookup: dict[str, float],
-    similar_upvotes: dict[str, list[str]],
-    unique_commenters: dict[str, int],
-    vote_totals: dict[str, float],
-    topic_prefs: dict[str, float],
-    author_prefs: dict[str, float],
-    now_ts: int,
-) -> tuple[float, dict, bool]:
-    """
-    Simplified magic2 scoring.
-
-    Score = (S + V + U) * R
-
-    Where:
-    - S = similarity boost from similar users who upvoted (capped at 2.0)
-    - V = sqrt(net_votes) * 0.5 (softer compression than log)
-    - U = sqrt(unique_commenters) * 0.3
-    - R = 1 / (1 + (age_hours/24)^1.585) — gentle decay: 12h=0.75, 24h=0.5, 48h=0.25
-
-    Returns (score, debug_info, should_hide).
-    """
-    import math
-
-    SIM_CAP = 2.0
-    HIDE_THRESHOLD = -5.0
-
-    pid = post["post_id"]
-    author = post["author"]
-    topic_lower = (post.get("topic") or "").strip().lower()
-    timestamp = post.get("timestamp", 0)
-
-    # Check user preference for topic/author - hide severely disliked content
-    topic_pref = topic_prefs.get(topic_lower, 0)
-    author_pref = author_prefs.get(author, 0)
-    combined_pref = topic_pref + author_pref
-
-    if combined_pref <= HIDE_THRESHOLD:
-        return 0.0, {}, True
-
-    # S = Similarity boost: sum of similarities from users who upvoted this post
-    upvoters = similar_upvotes.get(pid, [])
-    raw_sim = sum(sim_lookup.get(v, 0) for v in upvoters)
-    S = min(raw_sim, SIM_CAP)
-
-    # V = Vote score: sqrt compression (softer than log)
-    net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
-    V = math.sqrt(max(0, net_vote)) * 0.5
-
-    # U = Unique commenter score
-    unique_count = unique_commenters.get(pid, 0)
-    U = math.sqrt(unique_count) * 0.3
-
-    # R = Recency: inverse polynomial decay (gentler than exponential)
-    # 12h=0.75, 24h=0.50, 48h=0.25
-    age_hours = max(0, (now_ts - timestamp) / 3600)
-    R = 1 / (1 + (age_hours / 24) ** 1.585)
-
-    # Final score
-    score = (S + V + U) * R
-
-    # Determine the primary reason for showing this post
-    if S > 0.3 and S >= V and S >= U:
-        reason = "Similar users liked this"
-        bucket = "similar"
-    elif topic_pref > 0 or author_pref > 0:
-        if topic_pref > 0 and author_pref > 0:
-            reason = "You like this topic and author"
-        elif topic_pref > 0:
-            reason = "You like this topic"
-        else:
-            reason = "You like this author"
-        bucket = "liked"
-    elif V >= U and net_vote >= 3:
-        reason = "Popular post"
-        bucket = "popular"
-    elif U > 0:
-        reason = "Active discussion"
-        bucket = "discussion"
-    else:
-        reason = "Fresh content"
-        bucket = "discovery"
-
-    debug = {
-        "bucket": bucket,
-        "reason": reason,
-        "score": round(float(score), 4),
-        "S": round(S, 3),
-        "V": round(V, 3),
-        "U": round(U, 3),
         "R": round(R, 4),
         "age_hours": round(age_hours, 1),
         "points": round(net_vote, 1),
@@ -1880,6 +1535,88 @@ def _get_guest_feed(
     return {
         "posts": feed,
         "total": len(candidates),
+        "page": page,
+        "limit": limit,
+        "has_more": has_more,
+    }
+
+
+def _get_guest_feed_magic(
+    cur,
+    limit: int,
+    page: int,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    allowed_tags: set[str],
+) -> dict:
+    """
+    Guest home feed, Magic-style:
+    - No personalization (no similarity, no prefs)
+    - Score = (V + U) × R where:
+      - V = sqrt(net_votes) × 0.5
+      - U = sqrt(unique_commenters) × 0.3
+      - R = gentle recency decay (same as Magic)
+    """
+    import time
+
+    max_candidates = max(500, limit * page * 3)
+    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags)
+
+    if not candidates:
+        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+
+    post_ids = [c["post_id"] for c in candidates]
+    vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+
+    now_ts = int(time.time())
+    sim_lookup: dict[str, float] = {}
+    similar_upvotes: dict[str, list[str]] = {}
+    topic_prefs: dict[str, float] = {}
+    author_prefs: dict[str, float] = {}
+
+    scored_posts = []
+    for post in candidates:
+        pid = post["post_id"]
+        post["_source"] = "guest"
+        score, debug, should_hide = _score_magic(
+            post,
+            sim_lookup,
+            similar_upvotes,
+            unique_commenters,
+            vote_totals,
+            topic_prefs,
+            author_prefs,
+            now_ts,
+        )
+        if should_hide:
+            continue
+
+        post["_score"] = score
+        post["feed_debug"] = debug
+        post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
+        post["comments"] = int(comment_counts.get(pid, 0) or 0)
+        post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+        post["children"] = []
+        post["feed_type"] = "home"
+        post["feed_bucket"] = debug["bucket"]
+        post["user_vote"] = 0
+        post["user_weight"] = 0.0
+        scored_posts.append(post)
+
+    scored_posts.sort(key=lambda p: -float(p.get("_score", 0.0)))
+
+    start = (page - 1) * limit
+    end = start + limit
+    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
+    has_more = len(scored_posts) > end
+
+    for p in page_posts:
+        p.pop("_score", None)
+
+    return {
+        "posts": page_posts,
+        "total": len(scored_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
@@ -2431,6 +2168,69 @@ def get_network_stats():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_network_stats.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+# Cache for supply history (30 second TTL)
+_supply_history_cache: Dict[str, Any] = {"data": None, "expires": 0}
+
+
+def _get_cached_supply_history() -> list:
+    """Get supply history for last 7 days with 30 second cache."""
+    now = int(time.time())
+    if _supply_history_cache["data"] is not None and _supply_history_cache["expires"] > now:
+        return _supply_history_cache["data"]
+
+    # Query last 7 days
+    since_ts = now - (7 * 24 * 3600)
+    conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT height, total_supply, created_at
+            FROM supply_history
+            WHERE created_at >= %s
+            ORDER BY height ASC
+            """,
+            (since_ts,),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    history = [{"height": r[0], "total_supply": r[1], "timestamp": r[2]} for r in rows]
+
+    _supply_history_cache["data"] = history
+    _supply_history_cache["expires"] = now + 30  # 30 second cache
+    return history
+
+
+@public_bp.route("/api/get_supply_history")
+def get_supply_history():
+    """Get supply history for burn/mint chart (7 days)."""
+    rid = next_request_id()
+    log_event(rid, "get_supply_history.begin")
+    try:
+        if _is_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+
+        history = _get_cached_supply_history()
+
+        # Get mint params for calculations
+        p = load_params(require_runtime().node_id, force=False)
+        mint_interval = int(p["mint_interval"])
+        mint_quantity = int(p["mint_quantity"])
+
+        resp = {
+            "history": history,
+            "mint_interval": mint_interval,
+            "mint_quantity": mint_quantity,
+        }
+        log_event(rid, "get_supply_history.ok", count=len(history))
+        return jsonify(resp)
+    except Exception as e:
+        log_event(rid, "get_supply_history.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -3472,6 +3272,13 @@ def get_posts():
         feed = request.args.get("feed", default=None, type=str)
         feed = (feed or "").strip().lower()
         sort_mode = (request.args.get("by", default="", type=str) or "").strip().lower()
+
+        # Only supported sort modes.
+        # Magic 1/2/3 were removed; Magic is now the only algo mode.
+        if sort_mode and sort_mode not in ("magic", "newest"):
+            return jsonify({"error": f"unsupported sort mode: {sort_mode}"}), 400
+
+        sort_mode = sort_mode or "magic"
         if feed in ("home", "following"):
             try:
                 log_event(
@@ -3481,7 +3288,7 @@ def get_posts():
                     address=(address[:12] + "...") if address else "",
                     page=page,
                     limit=limit,
-                    by=sort_mode or "magic",
+                    by=sort_mode,
                 )
             except Exception:
                 pass
@@ -3497,7 +3304,7 @@ def get_posts():
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
                     seed=int(time.time() // 60),
-                    sort_mode=sort_mode or "magic",
+                    sort_mode=sort_mode,
                 )
             else:
                 resp = _get_following_feed(
@@ -3508,7 +3315,7 @@ def get_posts():
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
-                    sort_mode=sort_mode or "magic",
+                    sort_mode=sort_mode,
                 )
 
             # Add inbox timestamp for notification badge (only if user is logged in)
@@ -3541,7 +3348,7 @@ def get_posts():
 
         # Fetch paginated posts
         # Determine sort order based on sort_mode
-        if sort_mode in ("magic", "magic2", "magic3"):
+        if sort_mode == "magic":
             # Magic sort: score by (votes + comments) * recency
             # Using a simpler formula for topic feeds than home feed
             order_clause = """
@@ -3734,6 +3541,21 @@ def get_posts():
             user_votes = {}
             user_weight_map = {}
 
+        # Attach feed metadata for topic/global feeds so the frontend can always show a reason chip.
+        is_magic_topic_feed = sort_mode == "magic"
+        topic_lower = (topic or "").strip().lower()
+        is_global_topic_feed = (not topic_lower) or (topic_lower == "all")
+        topic_feed_type = "all" if is_global_topic_feed else "topic"
+        topic_feed_bucket = "popular" if is_magic_topic_feed else "newest"
+        if is_global_topic_feed:
+            topic_feed_reason = (
+                "Global feed (hot)" if is_magic_topic_feed else "Global feed (newest)"
+            )
+        else:
+            topic_feed_reason = (
+                f"#{topic_lower} feed (hot)" if is_magic_topic_feed else f"#{topic_lower} feed (newest)"
+            )
+
         result = []
         for row in rows:
             (
@@ -3752,6 +3574,23 @@ def get_posts():
                 thumbnail,
             ) = row
             pid = (txhash or "").lower()
+            ts_int = int(ts) if ts is not None else 0
+            pts = float(vote_totals.get(pid, 0) or 0)
+            comments = int(comment_counts.get(pid, 0) or 0)
+            now_ts = int(time.time())
+            age_hours = max(0.0, (now_ts - ts_int) / 3600.0) if ts_int else 0.0
+            # Match topic-feed SQL ordering score:
+            # magic: (points + 2*comments) / (age_hours + 2)^1.2
+            # newest: monotonic recency score 1 / (age_hours + 2)^1.2 (same ordering as timestamp)
+            denom = (age_hours + 2.0) ** 1.2
+            R = (1.0 / denom) if denom > 0 else 0.0
+            Q = pts + (comments * 2.0)
+            score = (Q * R) if is_magic_topic_feed else R
+            formula = (
+                f"(P:{pts:.1f} + 2*C:{comments}) / (age_h+2)^1.2 = {score:.6f}"
+                if is_magic_topic_feed
+                else f"1 / (age_h+2)^1.2 = {score:.6f}"
+            )
             result.append(
                 {
                     "post_id": pid,
@@ -3767,11 +3606,24 @@ def get_posts():
                     "edited": bool(edited_at),
                     "edited_at": int(edited_at or 0),
                     "thumbnail": thumbnail,
-                    "points": vote_totals.get(pid, 0),
-                    "comments": comment_counts.get(pid, 0),
+                    "points": pts,
+                    "comments": comments,
                     "user_vote": user_votes.get(pid, 0),
                     "user_weight": user_weight_map.get(pid, 0.0),
                     "children": [],
+                    "feed_type": topic_feed_type,
+                    "feed_bucket": topic_feed_bucket,
+                    "feed_debug": {
+                        "bucket": topic_feed_bucket,
+                        "reason": topic_feed_reason,
+                        "score": round(float(score), 6),
+                        "formula": formula,
+                        "R": round(float(R), 6),
+                        "Q": round(float(Q), 3),
+                        "age_hours": round(float(age_hours), 2),
+                        "points": round(float(pts), 1),
+                        "comments": comments,
+                    },
                 }
             )
 

@@ -1537,7 +1537,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     <TagBadge $tag={post.tag}>{post.tag}</TagBadge>
                                 </>
                             ) : null}
-                            {post && post.feed_type === 'home' && post.feed_bucket && post.feed_bucket !== 'guest' && (
+                            {post && post.feed_bucket && post.feed_bucket !== 'guest' && (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
                                     <FeedReasonWrapper
@@ -1562,6 +1562,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'popular' && 'popular'}
                                             {post.feed_bucket === 'discussion' && 'discussion'}
                                             {post.feed_bucket === 'second_chance' && '2nd chance'}
+                                            {post.feed_bucket === 'newest' && 'new'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>
                                     {feedTooltipOpen && post.feed_debug && ReactDOM.createPortal(
@@ -1570,7 +1571,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             onMouseEnter={() => setFeedTooltipOpen(true)}
                                             onMouseLeave={() => setFeedTooltipOpen(false)}
                                         >
-                                            {/* Show formula and score for magic2/3 */}
+                                            {/* Show formula and score for Magic */}
                                             {post.feed_debug.score !== undefined && (
                                                 <>
                                                     <FeedDebugRow style={{ marginBottom: '0.3rem' }}>
@@ -1603,14 +1604,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <FeedDebugLabel>V (votes):</FeedDebugLabel>
                                                 <FeedDebugValue>{post.feed_debug.V?.toFixed(3) || '0.000'} [{post.feed_debug.points ?? 0} pts]</FeedDebugValue>
                                             </FeedDebugRow>
-                                            {/* magic2/3: U for unique commenters */}
+                                            {/* U for unique commenters */}
                                             {post.feed_debug.U !== undefined && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>U (unique commenters):</FeedDebugLabel>
                                                     <FeedDebugValue>{post.feed_debug.U?.toFixed(3) || '0.000'} [{post.feed_debug.unique_commenters ?? 0}]</FeedDebugValue>
                                                 </FeedDebugRow>
                                             )}
-                                            {/* magic3: P for preference boost */}
+                                            {/* P for preference boost */}
                                             {post.feed_debug.P !== undefined && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>P (your prefs):</FeedDebugLabel>
@@ -1631,7 +1632,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     {post.feed_debug.age_hours !== undefined && ` [${post.feed_debug.age_hours}h ago]`}
                                                 </FeedDebugValue>
                                             </FeedDebugRow>
-                                            {/* Only show Prefs row for old magic (magic2/3 show it inline with P) */}
+                                            {/* Only show Prefs row for older debug formats (Magic shows it inline with P) */}
                                             {post.feed_debug.P === undefined && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>Prefs:</FeedDebugLabel>
@@ -1704,7 +1705,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </MenuContainer>
                     </MetaInfoRow>
-                    {post && post.feed_type === 'home' && post.feed_bucket && (
+                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && (
                         <FeedReasonLine>
                             {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
                             {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
@@ -1713,6 +1714,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
                             {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
+                            {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
+                            {post.feed_debug && typeof post.feed_debug.score === 'number' && (
+                                <span style={{ opacity: 0.75, marginLeft: '0.4rem' }}>
+                                    score {post.feed_debug.score}
+                                </span>
+                            )}
                         </FeedReasonLine>
                     )}
                     {hasMediaModeContent ? (
