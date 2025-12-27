@@ -1751,10 +1751,15 @@ export default memo(CardView, (prevProps, nextProps) => {
         prevPost.post_id === nextPost.post_id &&
         prevPost.upvotes === nextPost.upvotes &&
         prevPost.downvotes === nextPost.downvotes &&
+        prevPost.points === nextPost.points &&
+        prevPost.direction === nextPost.direction &&
+        prevPost.user_vote === nextPost.user_vote &&
         prevPost.comment_count === nextPost.comment_count &&
         prevPost.title === nextPost.title &&
         prevPost.content === nextPost.content &&
         prevPost.deleted === nextPost.deleted &&
+        prevPost.collapsed === nextPost.collapsed &&
+        prevPost.flash === nextPost.flash &&
         prevProps.state?.username === nextProps.state?.username &&
         prevProps.state?.publicKey === nextProps.state?.publicKey
     );

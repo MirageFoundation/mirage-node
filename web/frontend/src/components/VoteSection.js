@@ -164,7 +164,6 @@ const StyledCollapseToggle = styled.span`
 
 function VoteSection({ state, post, updatePost, showToggle = true, inline = false }) {
     const { isPending } = usePendingVotes();
-    const [, forceUpdate] = useState(0);
     const localPendingRef = useRef(new Set());
 
     const handleVote = async (postObj, direction) => {
@@ -184,7 +183,6 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
             return;
         }
         localPendingRef.current.add(key);
-        forceUpdate(n => n + 1);
 
         // Determine current direction: state.posts > API response > post.direction
         // (Do NOT read localStorage on every vote/render; API already returns user_vote and state is updated optimistically.)
@@ -211,7 +209,6 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
         // Persist a small recent vote cache for "reload before indexing catches up"
         try {
             Storage.setVote(key, newDir, 100);
-            forceUpdate(n => n + 1);
         } catch (_) { /* noop */ }
 
         // Dispatch event for downvotes so MainView can hide the post
@@ -244,20 +241,19 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
             } catch (_) { /* noop */ }
         } finally {
             localPendingRef.current.delete(key);
-            forceUpdate(n => n + 1);
         }
     };
 
     const displayVoteArea = (post) => {
         const key = String(post.post_id).toLowerCase();
+        // Only use global pending for button disable state, not for direction display
         const hasPendingVote = isPending(post.post_id) || localPendingRef.current.has(key);
 
         let direction;
         // Direction priority: state.posts > API response (user_vote) > post.direction
+        // Don't reset to 0 during pending - trust the optimistic update in state.posts
         if (state.posts && typeof state.posts[post.post_id]?.direction === 'number') {
             direction = state.posts[post.post_id].direction;
-        } else if (hasPendingVote) {
-            direction = 0;
         } else {
             const apiUserVote = post?.user_vote ?? post?.my_vote ?? post?.userVote ?? post?.myVote;
             if (apiUserVote !== undefined && apiUserVote !== null && Number.isFinite(Number(apiUserVote))) {
