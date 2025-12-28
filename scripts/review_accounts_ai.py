@@ -689,7 +689,7 @@ def load_recent_votes_for_address(
         votes.append(
             {
                 "target": target,
-                "vote": "upvote" if user_vote > 0 else "downvote",
+                "weight": int(user_vote) if user_vote else 0,
                 "created_at": int(created_at or 0),
                 "post_topic": (root_topic or topic or "").strip(),
                 "post_owner": post_owner or "",
@@ -883,7 +883,8 @@ def compare_all_users(
         pref_sim, pref_shared = compute_preference_similarity(target_prefs, other_prefs)
 
         # Decide if this match is notable enough to include
-        is_notable = same_ip or same_canvas or fp_score >= MIN_FP_SCORE_TO_SHOW or pref_sim >= MIN_PREF_SIM_TO_SHOW
+        # Canvas is NOT a notable signal on its own (shared by all users with same browser/GPU/OS)
+        is_notable = same_ip or fp_score >= MIN_FP_SCORE_TO_SHOW or pref_sim >= MIN_PREF_SIM_TO_SHOW
 
         if is_notable:
             match = AccountMatch(
@@ -1198,8 +1199,6 @@ def generate_evidence_markdown(
                             flags.append(f"**SAME IP** (🏠 Residential{f' - {m.ip_country}' if m.ip_country else ''})")
                     else:
                         flags.append("**SAME IP** (⚠️ no metadata - older fingerprint)")
-                if m.same_canvas:
-                    flags.append("**SAME CANVAS**")
                 if m.fp_score >= CRITICAL_FP_SCORE:
                     flags.append(f"FP: {m.fp_score:.0%}")
                 if m.pref_sim >= CRITICAL_PREF_SIM:
@@ -1277,8 +1276,6 @@ def generate_evidence_markdown(
                 flags = []
                 if m.same_ip:
                     flags.append("IP")
-                if m.same_canvas:
-                    flags.append("Canvas")
                 flags_str = ", ".join(flags) if flags else "-"
                 pref_str = f"{m.pref_sim:.0%} ({m.pref_shared})" if m.pref_shared > 0 else "-"
                 fp_weight = m.fp_match.total_weight if m.fp_match else 0.0
@@ -1301,8 +1298,6 @@ def generate_evidence_markdown(
                 device_flags = []
                 if m.same_ip:
                     device_flags.append("IP")
-                if m.same_canvas:
-                    device_flags.append("Canvas")
                 device_str = ", ".join(device_flags) if device_flags else "-"
                 pref_str = f"{m.pref_sim:.0%}"
                 lines.append(f"| {m.match_username} | {pref_str} | {m.pref_shared} | {m.fp_score:.0%} | {device_str} |")
@@ -1349,18 +1344,18 @@ def generate_evidence_markdown(
         lines.append("*No recent votes found in the lookback window.*")
         lines.append("")
     else:
-        lines.append("| # | Time | Vote | Topic | Post Owner | Preview |")
-        lines.append("|---|------|------|-------|------------|---------|")
+        lines.append("| # | Time | Weight | Topic | Post Owner | Preview |")
+        lines.append("|---|------|--------|-------|------------|---------|")
         for i, v in enumerate(evidence.recent_votes, 1):
             ts = format_ts(v.get("created_at", 0))
-            vote_type = v.get("vote", "?")
-            vote_emoji = "👍" if vote_type == "upvote" else "👎"
+            weight = v.get("weight", 0)
+            weight_str = f"+{weight}" if weight > 0 else str(weight)
             topic = v.get("post_topic") or "-"
             post_owner = v.get("post_owner") or "-"
             preview = v.get("post_preview") or "-"
             if len(preview) > 60:
                 preview = preview[:60] + "..."
-            lines.append(f"| {i} | {ts} | {vote_emoji} | #{topic} | {post_owner} | {preview} |")
+            lines.append(f"| {i} | {ts} | {weight_str} | #{topic} | {post_owner} | {preview} |")
         lines.append("")
 
     # AI Verdict placeholder
@@ -1693,8 +1688,6 @@ def generate_ai_evidence_markdown(
                             flags.append(f"SAME_IP(Residential,{m.ip_country or '?'})")
                     else:
                         flags.append("SAME_IP(no_metadata)")
-                if m.same_canvas:
-                    flags.append("SAME_CANVAS")
                 if m.fp_match:
                     flags.append(f"FP={m.fp_match.score:.0%} weight={m.fp_match.total_weight:.1f}")
                     if m.fp_match.has_device_match:
