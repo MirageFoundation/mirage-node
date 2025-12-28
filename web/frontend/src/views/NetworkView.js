@@ -322,8 +322,11 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
 
-    // Calculate minted and burned per interval (in umirage)
+    // Calculate cumulative minted and burned over time (in umirage)
     const data = [];
+    let cumulativeMinted = 0;
+    let cumulativeBurned = 0;
+
     for (let i = 1; i < history.length; i++) {
         const prev = history[i - 1];
         const curr = history[i];
@@ -332,15 +335,18 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
 
         // Minted = number of mint intervals * mint_quantity
         const mintEvents = Math.floor(heightDiff / mintInterval);
-        const minted = mintEvents * mintQuantity;
+        const minted = Math.max(0, mintEvents * mintQuantity);
 
         // Burned = minted - supply_increase (if supply decreased, burned > minted)
-        const burned = minted - supplyDiff;
+        const burned = Math.max(0, minted - supplyDiff);
+
+        cumulativeMinted += minted;
+        cumulativeBurned += burned;
 
         data.push({
             timestamp: curr.timestamp,
-            minted: Math.max(0, minted),
-            burned: Math.max(0, burned),
+            minted: cumulativeMinted,
+            burned: cumulativeBurned,
         });
     }
 
@@ -356,30 +362,26 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
         );
     }
 
-    // Cumulative totals over the period (in umirage), convert to MIRAGE for display
-    const totalMintedUmirage = data.reduce((sum, d) => sum + d.minted, 0);
-    const totalBurnedUmirage = data.reduce((sum, d) => sum + d.burned, 0);
-    const totalMinted = totalMintedUmirage / 1_000_000;
-    const totalBurned = totalBurnedUmirage / 1_000_000;
+    // Final totals (in MIRAGE for display)
+    const totalMinted = cumulativeMinted / 1_000_000;
+    const totalBurned = cumulativeBurned / 1_000_000;
 
-    // Find max for scaling (still in umirage for chart calculations)
-    const maxMinted = Math.max(...data.map(d => d.minted), 1);
-    const maxBurned = Math.max(...data.map(d => d.burned), 1);
-    const maxY = Math.max(maxMinted, maxBurned);
+    // Find max for scaling - use the final cumulative values
+    const maxY = Math.max(cumulativeMinted, cumulativeBurned, 1);
     const maxYMirage = maxY / 1_000_000;
 
     const minTs = data[0].timestamp;
     const maxTs = data[data.length - 1].timestamp;
     const tsRange = maxTs - minTs || 1;
 
-    // Minted line (green)
+    // Minted line (green) - cumulative, should steadily increase
     const mintedPoints = data.map((d) => {
         const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
         const y = padding.top + chartHeight - (d.minted / maxY) * chartHeight;
         return `${x},${y}`;
     }).join(' ');
 
-    // Burned line (red/orange)
+    // Burned line (red) - cumulative, steps up when burns happen
     const burnedPoints = data.map((d) => {
         const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
         const y = padding.top + chartHeight - (d.burned / maxY) * chartHeight;

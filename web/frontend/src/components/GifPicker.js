@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import styled from 'styled-components';
 
-// Giphy API key - use environment variable if set, otherwise fall back to public beta key
-const GIPHY_API_KEY = (process.env.REACT_APP_GIPHY_API_KEY || 'dc6zaTOxFJmzC').trim();
+// Giphy API key - use environment variable if set, otherwise fall back to default key
+const GIPHY_API_KEY = (process.env.REACT_APP_GIPHY_API_KEY || 'YEDuQCmeTLIqvbYzUnA7QTILBOA8JbQO').trim();
 const GIPHY_SEARCH_URL = 'https://api.giphy.com/v1/gifs/search';
 const GIPHY_TRENDING_URL = 'https://api.giphy.com/v1/gifs/trending';
 

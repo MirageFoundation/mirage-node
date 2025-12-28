@@ -184,7 +184,6 @@ export const AnimatedCard = styled.div`
     /* Apply hiding animation when hiding prop is true (takes precedence) */
     ${({ $hiding }) => $hiding && `
         animation: slideUpHide 0.25s ease-out forwards !important;
-        pointer-events: none;
         overflow: hidden;
     `}
 

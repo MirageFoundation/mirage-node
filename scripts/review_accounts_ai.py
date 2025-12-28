@@ -81,8 +81,8 @@ CRITICAL_PREF_SIM = 0.9
 HIGH_PREF_SIM = 0.7
 
 # Minimum scores to include in output (very low - we want everything notable)
-MIN_FP_SCORE_TO_SHOW = 0.1
-MIN_PREF_SIM_TO_SHOW = 0.1
+MIN_FP_SCORE_TO_SHOW = 0.4
+MIN_PREF_SIM_TO_SHOW = 0.4
 
 
 # =============================================================================
