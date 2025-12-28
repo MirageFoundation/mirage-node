@@ -26,7 +26,28 @@ This release also pushes transparency to the surface: posts don’t just appear 
 ### Network: burn vs mint chart
 
 - Added a burn/mint chart based on recent supply history
+- Chart now shows **cumulative totals** over time (burned and minted accumulate as lines)
 - New backend endpoint for chart data: `GET /api/get_supply_history` (7-day window, cached)
+
+---
+
+### Mobile UI improvements
+
+- **Score display hidden on mobile** (screens ≤600px) for cleaner card layout
+- **Compact mode disabled on mobile** - compact option hidden from card size selector, automatically switches to large mode
+- **"Fresh content" reasoning** now appears below media in media mode (matches large mode positioning)
+
+---
+
+### Sockpuppet detection improvements (admin tool)
+
+- **Removed canvas hash as special indicator** - canvas is shared by all users with same browser/GPU/OS, now only contributes via entropy-weighted scoring
+- **IP is now the only standalone critical indicator** - residential IP = CRITICAL, VPN/mobile/datacenter IP = HIGH
+- **Added recent votes** (up to 25) to evidence output with vote weights (+1, -1, etc.)
+- **Cleaned up output** - removed NOTABLE matches section, only show CRITICAL/HIGH severity matches
+- **Preference similarity thresholds** - increased to 70% for display, 90% for critical flag
+- **Standardized recent posts** to 10 for all (target and matches)
+- **Full markdown sent to ChatGPT** instead of abbreviated version for better analysis
 
 ---
 
@@ -40,4 +61,5 @@ This release also pushes transparency to the surface: posts don’t just appear 
 
 - **API**: `GET /api/get_supply_history` returns `history` plus mint params for client-side burn/mint calculations
 - **Indexer**: new `supply_history` table and periodic sampling of total supply
+- **Scripts**: `scripts/review_accounts_ai.py` - improved sockpuppet detection with better fingerprint weighting and vote analysis
 

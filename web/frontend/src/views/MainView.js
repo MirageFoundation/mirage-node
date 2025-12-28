@@ -529,6 +529,55 @@ const EmptyHomeMessage = () => (
 // Session storage key helpers for feed state preservation (keyed by topic)
 const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
 
+// In-memory (per-tab) feed cache to avoid sessionStorage quota issues on long feeds.
+// This cache survives SPA navigation (feed -> view_post -> back), but not a full page refresh.
+const getFeedMemCache = () => {
+    try {
+        if (typeof window === 'undefined') return null;
+        if (!window.__MIRAGE_FEED_MEM_CACHE__) {
+            window.__MIRAGE_FEED_MEM_CACHE__ = {};
+        }
+        return window.__MIRAGE_FEED_MEM_CACHE__;
+    } catch (_) {
+        return null;
+    }
+};
+
+const getMemKey = (topic) => {
+    try {
+        return encodeURIComponent(String(topic || '').trim());
+    } catch (_) {
+        return String(topic || '');
+    }
+};
+
+const readMemFeedState = (topic) => {
+    try {
+        const cache = getFeedMemCache();
+        if (!cache) return null;
+        const key = getMemKey(topic);
+        const v = cache[key];
+        if (!v || typeof v !== 'object') return null;
+        return v;
+    } catch (_) {
+        return null;
+    }
+};
+
+const writeMemFeedState = (topic, patch) => {
+    try {
+        const cache = getFeedMemCache();
+        if (!cache) return;
+        const key = getMemKey(topic);
+        const prev = (cache[key] && typeof cache[key] === 'object') ? cache[key] : {};
+        cache[key] = {
+            ...prev,
+            ...patch,
+            at: Date.now(),
+        };
+    } catch (_) { }
+};
+
 const readSavedOrder = (topic) => {
     try {
         const savedOrder = sessionStorage.getItem(getFeedKey(topic, 'order'));
@@ -537,6 +586,40 @@ const readSavedOrder = (topic) => {
         return Array.isArray(parsed) ? parsed : null;
     } catch (_) {
         return null;
+    }
+};
+
+const isTopLevelPostForFeed = (p) => {
+    if (!p) return false;
+    const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
+    const hasTopic = typeof p.topic === 'string' && String(p.topic).trim().length > 0;
+    if (!hasTitle || !hasTopic) return false;
+    const topicVal = String(p.topic || '').trim().toLowerCase();
+    const isReserved = ['all', 'home', 'following'].includes(topicVal);
+    return !isReserved;
+};
+
+const hasAnyCachedPostsForTopic = (topic, postsObj) => {
+    try {
+        if (!postsObj || typeof postsObj !== 'object') return false;
+        const ids = Object.keys(postsObj);
+        if (ids.length === 0) return false;
+        const t = String(topic || '').trim();
+        const tLower = t.toLowerCase();
+
+        const values = Object.values(postsObj);
+
+        // "all", "home", "following" all render top-level posts across topics.
+        if (tLower === 'all' || tLower === 'home' || tLower === 'following') {
+            return values.some(isTopLevelPostForFeed);
+        }
+
+        return values.some((p) => {
+            if (!isTopLevelPostForFeed(p)) return false;
+            return String(p.topic || '').trim().toLowerCase() === tLower;
+        });
+    } catch (_) {
+        return false;
     }
 };
 
@@ -582,24 +665,28 @@ const clearCameFromFeedFlag = () => {
     try { sessionStorage.removeItem('mirage_came_from_feed'); } catch (_) { }
 };
 
-// Check if current page load is a refresh (F5)
-const isPageRefresh = () => {
-    try {
-        const navEntries = performance.getEntriesByType('navigation');
-        if (navEntries.length > 0) {
-            return navEntries[0].type === 'reload';
-        }
-    } catch (_) { }
-    return false;
+// Track if we've seen the first SPA navigation (to distinguish page refresh from back nav).
+// On true page refresh (F5), this starts as false and the first POP is the refresh.
+// After ANY navigation within the SPA, we set this to true, so subsequent POPs are back navigations.
+let __hasHadFirstSpaNavigation = false;
+
+// Check if this is the very first page load (before any SPA navigation happened)
+const isInitialPageLoad = () => {
+    return !__hasHadFirstSpaNavigation;
+};
+
+// Mark that we've had at least one SPA navigation
+const markSpaNavigationOccurred = () => {
+    __hasHadFirstSpaNavigation = true;
 };
 
 // Helper to detect back/forward navigation
 // Returns true for POP navigations (back button, navigate(-1), browser back/forward)
-// but NOT for page refresh (F5) - we handle that separately
+// but NOT for the initial page load (where POP just means "loaded directly")
 const getIsBackNavigation = (navigationType) => {
     if (navigationType !== 'POP') return false;
-    // Page refresh triggers POP but we don't want to restore pagination state
-    if (isPageRefresh()) return false;
+    // On the very first load, POP just means we landed here (not a back nav)
+    if (isInitialPageLoad()) return false;
     return true;
 };
 
@@ -616,7 +703,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
     // For browser back button: only restore if we came from a view_post that was opened from the feed
     const cameFromViewPostRef = useRef(isBackNavigation && checkCameFromViewPost());
-    const shouldRestoreFeedState = cameFromViewPostRef.current || restoreFeedIntentRef.current === true;
+    const shouldAttemptRestore =
+        isBackNavigation ||
+        restoreFeedIntentRef.current === true ||
+        cameFromViewPostRef.current === true;
+    const shouldRestoreFeedState = shouldAttemptRestore;
+
+    // Mark that we've navigated within the SPA (so subsequent POPs are back navigations)
+    useEffect(() => {
+        markSpaNavigationOccurred();
+    }, []);
 
     // Clear the restore intent after we've consumed it (in effect to avoid StrictMode double-render issues)
     useEffect(() => {
@@ -643,6 +739,11 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [stableOrder, setStableOrder] = useState(() => {
         if (!shouldRestoreFeedState) return [];
         try {
+            const mem = readMemFeedState(urlTopic);
+            const memOrder = mem && Array.isArray(mem.order) ? mem.order : null;
+            if (memOrder && memOrder.length > 0) return memOrder;
+        } catch (_) { }
+        try {
             const savedOrder = sessionStorage.getItem(getFeedKey(urlTopic, 'order'));
             if (savedOrder) {
                 return JSON.parse(savedOrder);
@@ -655,9 +756,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [isLoading, setIsLoading] = useState(() => {
         if (!shouldRestoreFeedState) return true;
         try {
-            const order = readSavedOrder(urlTopic);
-            if (!order || order.length === 0) return true;
-            if (state.posts && order.some(id => state.posts[id])) return false;
+            const memOrder = readMemFeedState(urlTopic)?.order;
+            const order = readSavedOrder(urlTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            if (order && order.length > 0 && state.posts && order.some((id) => state.posts[id])) return false;
+            if (hasAnyCachedPostsForTopic(urlTopic, state.posts)) return false;
         } catch (_) { }
         return true;
     });
@@ -665,6 +767,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Only restore currentPage on back navigation
     const [currentPage, setCurrentPage] = useState(() => {
         if (!shouldRestoreFeedState) return 1;
+        try {
+            const memPage = Number(readMemFeedState(urlTopic)?.page || 0);
+            if (Number.isFinite(memPage) && memPage > 0) return Math.floor(memPage);
+        } catch (_) { }
         try {
             const savedPage = sessionStorage.getItem(getFeedKey(urlTopic, 'page'));
             if (savedPage) return parseInt(savedPage, 10) || 1;
@@ -675,6 +781,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Only restore hasMorePosts on back navigation
     const [hasMorePosts, setHasMorePosts] = useState(() => {
         if (!shouldRestoreFeedState) return false;
+        try {
+            const memHasMore = readMemFeedState(urlTopic)?.hasMore;
+            if (typeof memHasMore === 'boolean') return memHasMore;
+        } catch (_) { }
         try {
             const savedHasMore = sessionStorage.getItem(getFeedKey(urlTopic, 'hasmore'));
             if (savedHasMore) return savedHasMore === 'true';
@@ -742,7 +852,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const afterSetPostsRef = useRef(0);
     const topicsLoadedRef = useRef(false); // Track if we've attempted to load topics from API
     const isMountedRef = useRef(true); // Track if component is mounted
-    const forceHardRefreshRef = useRef(isPageRefresh()); // Bypass debounce on page refresh
+    const forceHardRefreshRef = useRef(isInitialPageLoad()); // Bypass debounce on initial page load
 
     // First-visit welcome card: show on front page until dismissed (only for guests)
     const [showWelcomeCard, setShowWelcomeCard] = useState(() => {
@@ -921,13 +1031,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             const hasPostsForTopic = Object.values(state.posts).some(
                                 (p) => p && String(p.topic || '').toLowerCase() === topicLower
                             );
-                            if (!hasPostsForTopic) {
-                                // No cached posts for this topic - fetch fresh
-                            } else {
+                            if (hasPostsForTopic) {
                                 // Cached posts exist and are recent - show them, don't refetch
                                 setIsLoading(false);
                                 return;
                             }
+                            // No cached posts for this topic - fetch fresh
                         } else {
                             // Home/following/all feeds - use normal cache behavior
                             setIsLoading(false);
@@ -1391,40 +1500,29 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     useEffect(() => {
         window.getPosts = getPosts;  // Expose getPosts globally
-        // Do not clear stableOrder here; keep rendering previous topic until new data arrives
         let cancelled = false;
 
-        // Only skip fetch on back/restore when we have cached data.
-        // On direct navigation (clicking links), always fetch fresh.
-        const shouldRestore = isBackNavigation || restoreFeedIntentRef.current === true;
-        if (shouldRestore) {
-            let shouldSkipFetch = false;
-            try {
-                const order = readSavedOrder(urlTopic);
-                // We have cached order AND we have posts in state for these IDs
-                if (order && order.length > 0 && state.posts && Object.keys(state.posts).length > 0) {
-                    const hasPostsForOrder = order.some(id => state.posts[id]);
-                    if (hasPostsForOrder) shouldSkipFetch = true;
-                }
-            } catch (_) { }
+        // On back navigation, skip fetch if we have cached data
+        if (shouldRestoreFeedState) {
+            const memOrder = readMemFeedState(urlTopic)?.order;
+            const order = readSavedOrder(urlTopic) || (Array.isArray(memOrder) ? memOrder : null);
+            const hasPostsForOrder = !!(order && order.length > 0 && state.posts && order.some((id) => state.posts[id]));
+            const hasPostsForTopic = hasAnyCachedPostsForTopic(urlTopic, state.posts);
 
-            if (shouldSkipFetch) {
+            if (hasPostsForOrder || hasPostsForTopic) {
                 // Back navigation with cached data - don't fetch
+                if (!cancelled && isMountedRef.current) {
+                    setIsLoading(false);
+                    setIsLoadingMore(false);
+                    loadMoreLockRef.current = false;
+                }
                 return;
             }
         }
 
         const timeoutId = setTimeout(() => {
             if (cancelled || !isMountedRef.current) return;
-            try {
-                // Always use the urlTopic from the route - don't let preferred_topic override it
-                // This ensures that refreshing preserves the current route
-                getPosts(urlTopic);
-            } catch (_) {
-                if (!cancelled && isMountedRef.current) {
-                    getPosts(urlTopic);
-                }
-            }
+            getPosts(urlTopic);
         }, 50);
         return () => {
             cancelled = true;
@@ -1519,6 +1617,13 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             sessionStorage.setItem(getFeedKey(urlTopic, 'page'), String(currentPage));
             sessionStorage.setItem(getFeedKey(urlTopic, 'hasmore'), String(hasMorePosts));
         } catch (_) { }
+        try {
+            writeMemFeedState(urlTopic, {
+                order: stableOrder,
+                page: currentPage,
+                hasMore: hasMorePosts,
+            });
+        } catch (_) { }
     }, [urlTopic, stableOrder, currentPage, hasMorePosts]);
 
     // Save scroll position before navigating away (keyed by current topic)
@@ -1526,6 +1631,11 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const saveScrollPosition = () => {
             try {
                 sessionStorage.setItem(getFeedKey(urlTopic, 'scroll'), String(window.scrollY || 0));
+            } catch (_) { }
+            try {
+                writeMemFeedState(urlTopic, {
+                    scroll: Number(window.scrollY || 0),
+                });
             } catch (_) { }
         };
 
@@ -1581,21 +1691,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (stableOrder.length === 0) return;
 
         try {
-            const savedScroll = sessionStorage.getItem(getFeedKey(urlTopic, 'scroll'));
-            if (savedScroll) {
-                const scrollY = parseInt(savedScroll, 10);
-                if (scrollY > 0) {
-                    scrollRestoredRef.current = true;
-                    // Use multiple requestAnimationFrames to ensure DOM is fully rendered
-                    // This gives React time to commit all the post cards to the DOM
+            const savedScrollRaw = sessionStorage.getItem(getFeedKey(urlTopic, 'scroll'));
+            const fromSession = savedScrollRaw ? parseInt(savedScrollRaw, 10) : 0;
+            const fromMem = Number(readMemFeedState(urlTopic)?.scroll || 0);
+            const scrollY = (Number.isFinite(fromSession) && fromSession > 0)
+                ? fromSession
+                : ((Number.isFinite(fromMem) && fromMem > 0) ? fromMem : 0);
+
+            if (scrollY > 0) {
+                scrollRestoredRef.current = true;
+                // Use multiple requestAnimationFrames to ensure DOM is fully rendered
+                // This gives React time to commit all the post cards to the DOM
+                requestAnimationFrame(() => {
                     requestAnimationFrame(() => {
                         requestAnimationFrame(() => {
-                            requestAnimationFrame(() => {
-                                window.scrollTo(0, scrollY);
-                            });
+                            window.scrollTo(0, scrollY);
                         });
                     });
-                }
+                });
             }
         } catch (_) { }
     }, [urlTopic, stableOrder.length]);
@@ -1723,9 +1836,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const postsArray = Object.values(state.posts || {});
 
             // Only include top-level posts (exclude comments or partial objects, and deleted posts)
-        const isTopLevelPost = (p) => {
+            const isTopLevelPost = (p) => {
                 if (!p || p.deleted) return false;
-            if (p.hidden_client) return false;
+                if (p.hidden_client) return false;
                 const hasTitle = typeof p.title === 'string' && p.title.trim().length > 0;
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();
