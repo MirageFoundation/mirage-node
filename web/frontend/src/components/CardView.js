@@ -592,6 +592,16 @@ const FeedReasonLine = styled.div`
     }
 `;
 
+// Score display - hidden on mobile
+const ScoreDisplay = styled.span`
+    opacity: 0.75;
+    margin-left: 0.4rem;
+
+    @media (max-width: 600px) {
+        display: none;
+    }
+`;
+
 const tagColors = {
     porn: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' }, // pink
     violence: { bg: 'rgba(185, 28, 28, 0.18)', border: 'rgba(185, 28, 28, 0.50)', text: '#b91c1c' }, // deep red
@@ -1197,6 +1207,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         } catch (_) { return ''; }
     })();
 
+
     const isDirectImage = isLikelyImageUrl(firstLinkInContent);
     const isPrimaryVideo = isLikelyVideoUrl(firstLinkInContent);
     const YOUTUBE_THUMB_ZOOM = 1.3;
@@ -1290,8 +1301,22 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     if (hideTeaser) return null;
 
+    // Check if mobile (disable compact mode on mobile)
+    const isMobile = (() => {
+        try {
+            if (typeof window !== 'undefined' && window.matchMedia) {
+                return window.matchMedia('(max-width: 600px)').matches;
+            }
+            if (typeof window !== 'undefined') {
+                return window.innerWidth <= 600;
+            }
+        } catch (_) { }
+        return false;
+    })();
+
     // Compact mode: smaller thumb + tighter spacing on desktop (>600px)
-    const isCompact = cardSize === 'compact';
+    // Disabled on mobile
+    const isCompact = !isMobile && cardSize === 'compact';
     // Media mode: hide thumbnails, show full media below title
     const isMediaMode = cardSize === 'media';
     // Check if post has actual media content to display in media mode
@@ -1705,7 +1730,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             )}
                         </MenuContainer>
                     </MetaInfoRow>
-                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && (
+                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && !hasMediaModeContent && (
                         <FeedReasonLine>
                             {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
                             {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
@@ -1716,9 +1741,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
                             {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
                             {post.feed_debug && typeof post.feed_debug.score === 'number' && (
-                                <span style={{ opacity: 0.75, marginLeft: '0.4rem' }}>
+                                <ScoreDisplay>
                                     score {post.feed_debug.score}
-                                </span>
+                                </ScoreDisplay>
                             )}
                         </FeedReasonLine>
                     )}
@@ -1735,6 +1760,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <MediaModeContainer $blur={shouldBlurMedia}>
                             <InlineMedia url={pickInlineMediaUrl(firstLinkInContent)} variant="root_post" autoPlay />
                         </MediaModeContainer>
+                    )}
+                    {post && post.feed_bucket && post.feed_bucket !== 'guest' && hasMediaModeContent && (
+                        <FeedReasonLine>
+                            {post.feed_bucket === 'following' && (post.feed_debug?.reason || 'Following')}
+                            {post.feed_bucket === 'similar' && (post.feed_debug?.reason || 'Similar taste match')}
+                            {post.feed_bucket === 'liked' && (post.feed_debug?.reason || 'Liked topic/author')}
+                            {post.feed_bucket === 'discovery' && (post.feed_debug?.reason || 'Discovery')}
+                            {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
+                            {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
+                            {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
+                            {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
+                            {post.feed_debug && typeof post.feed_debug.score === 'number' && (
+                                <ScoreDisplay>
+                                    score {post.feed_debug.score}
+                                </ScoreDisplay>
+                            )}
+                        </FeedReasonLine>
                     )}
                     <MetaRow style={compactMetaRowStyle}>
                         <VoteInline>

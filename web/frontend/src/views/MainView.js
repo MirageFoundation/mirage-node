@@ -720,6 +720,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return pendingId ? new Set([pendingId]) : new Set();
     });
     const [isLoadingMore, setIsLoadingMore] = useState(false);
+    const [isMobile, setIsMobile] = useState(() => {
+        try {
+            if (typeof window !== 'undefined' && window.matchMedia) {
+                return window.matchMedia('(max-width: 600px)').matches;
+            }
+            if (typeof window !== 'undefined') {
+                return window.innerWidth <= 600;
+            }
+        } catch (_) { }
+        return false;
+    });
     const location = useLocation();  // Call useLocation at the top level of the component
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
@@ -789,6 +800,41 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         window.addEventListener('settingsUpdated', handler);
         return () => window.removeEventListener('settingsUpdated', handler);
     }, []);
+
+    // Track mobile screen size to hide compact option
+    useEffect(() => {
+        const checkMobile = () => {
+            try {
+                if (typeof window !== 'undefined' && window.matchMedia) {
+                    const mobile = window.matchMedia('(max-width: 600px)').matches;
+                    setIsMobile(mobile);
+                    // If on mobile and compact is selected, switch to large
+                    if (mobile && cardSize === 'compact') {
+                        handleCardSizeChange('large');
+                    }
+                } else if (typeof window !== 'undefined') {
+                    const mobile = window.innerWidth <= 600;
+                    setIsMobile(mobile);
+                    if (mobile && cardSize === 'compact') {
+                        handleCardSizeChange('large');
+                    }
+                }
+            } catch (_) { }
+        };
+        checkMobile();
+        window.addEventListener('resize', checkMobile);
+        if (typeof window !== 'undefined' && window.matchMedia) {
+            const mediaQuery = window.matchMedia('(max-width: 600px)');
+            if (mediaQuery.addEventListener) {
+                mediaQuery.addEventListener('change', checkMobile);
+                return () => {
+                    window.removeEventListener('resize', checkMobile);
+                    mediaQuery.removeEventListener('change', checkMobile);
+                };
+            }
+        }
+        return () => window.removeEventListener('resize', checkMobile);
+    }, [cardSize]);
 
     // Track posts the viewer downvoted to hide with animation on Home
     useEffect(() => {
@@ -1805,7 +1851,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             onChange={(e) => handleCardSizeChange(e.target.value)}
                                         >
                                             <option value="large">Large</option>
-                                            <option value="compact">Compact</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
                                         <Button
@@ -1904,7 +1950,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             onChange={(e) => handleCardSizeChange(e.target.value)}
                                         >
                                             <option value="large">Large</option>
-                                            <option value="compact">Compact</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
                                     </HomeFeedModeInline>
@@ -1939,7 +1985,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             onChange={(e) => handleCardSizeChange(e.target.value)}
                                         >
                                             <option value="large">Large</option>
-                                            <option value="compact">Compact</option>
+                                            {!isMobile && <option value="compact">Compact</option>}
                                             <option value="media">Media</option>
                                         </HomeFeedModeSelect>
                                     </HomeFeedModeInline>
