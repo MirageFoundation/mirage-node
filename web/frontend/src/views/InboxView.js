@@ -213,6 +213,7 @@ export default function InboxView({ state }) {
     };
 
     const handleMarkOneAsRead = (e, reply) => {
+        e.preventDefault();
         e.stopPropagation();
         Storage.addViewedReplyId(reply.reply_id);
         const newViewedIds = Storage.getViewedReplyIds();
