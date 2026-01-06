@@ -1092,38 +1092,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
             // Note: Downvote filtering is handled in render phase to avoid stale closure issues
 
-            // Home feed: softly prioritize user's posts with a 60-minute decay (applies to both modes)
-            if (isHomeFeed) {
-                const viewerAddressLower = String(viewerAddress || '').toLowerCase();
-                const nowSec = Math.floor(Date.now() / 1000);
-                const MAX_AGE_SEC = 60 * 60; // 60 minutes
-                const decayMap = new Map();
-                const prioritized = [];
-                const rest = [];
-                for (const p of filtered) {
-                    const author = String(p?.author || p?.user_id || '').toLowerCase();
-                    let ts = Number(p?.timestamp || 0);
-                    if (ts > 1e12) ts = Math.floor(ts / 1000); // normalize ms to seconds
-                    const age = nowSec - ts;
-                    const decay = 1 - Math.min(Math.max(age, 0), MAX_AGE_SEC) / MAX_AGE_SEC; // 1 -> 0 over 60m
-                    decayMap.set(p.post_id, decay);
-                    if (viewerAddressLower && viewerAddressLower !== 'guest' && author === viewerAddressLower && decay > 0) {
-                        prioritized.push(p);
-                    } else {
-                        rest.push(p);
-                    }
-                }
-                prioritized.sort((a, b) => {
-                    const da = decayMap.get(a.post_id) ?? 0;
-                    const db = decayMap.get(b.post_id) ?? 0;
-                    if (db !== da) return db - da;
-                    const ta = Number(a?.timestamp || 0);
-                    const tb = Number(b?.timestamp || 0);
-                    return tb - ta;
-                });
-                filtered = [...prioritized, ...rest];
-            }
-
             const sortedOnce = (isHomeFeed || isFollowingFeed)
                 ? filtered
                 : sortPosts(filtered, sortBy);
@@ -1304,7 +1272,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                     setCurrentPage(1);
                     setHasMorePosts(false);
                     setStableOrder([]);
-                    getPosts(urlTopic, null, 1);
                     getPosts(urlTopic, null, 1);
                 } catch (_) { /* noop */ }
             }
@@ -1888,40 +1855,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         return true;
                     });
                 }
-            }
-        }
-
-        // Final client-side pinning: softly prioritize your posts on home with 60-minute decay
-        if (urlTopic === 'home' && orderedPosts.length > 0) {
-            const viewerAddressLower = String(viewerAddress || '').toLowerCase();
-            if (viewerAddressLower && viewerAddressLower !== 'guest') {
-                const nowSec = Math.floor(Date.now() / 1000);
-                const MAX_AGE_SEC = 60 * 60;
-                const decayMap = new Map();
-                const pinned = [];
-                const rest = [];
-                for (const p of orderedPosts) {
-                    const author = String(p?.author || p?.user_id || '').toLowerCase();
-                    let ts = Number(p?.timestamp || 0);
-                    if (ts > 1e12) ts = Math.floor(ts / 1000);
-                    const age = nowSec - ts;
-                    const decay = 1 - Math.min(Math.max(age, 0), MAX_AGE_SEC) / MAX_AGE_SEC;
-                    decayMap.set(p.post_id, decay);
-                    if (author === viewerAddressLower && decay > 0) {
-                        pinned.push(p);
-                    } else {
-                        rest.push(p);
-                    }
-                }
-                pinned.sort((a, b) => {
-                    const da = decayMap.get(a.post_id) ?? 0;
-                    const db = decayMap.get(b.post_id) ?? 0;
-                    if (db !== da) return db - da;
-                    const ta = Number(a?.timestamp || 0);
-                    const tb = Number(b?.timestamp || 0);
-                    return tb - ta;
-                });
-                orderedPosts = [...pinned, ...rest];
             }
         }
 
