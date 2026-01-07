@@ -1472,7 +1472,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         window.getPosts = getPosts;  // Expose getPosts globally
         let cancelled = false;
 
-        // On back navigation, skip fetch if we have cached data
+        // On back navigation (POP), restore from cache if available
         if (shouldRestoreFeedState) {
             const memOrder = readMemFeedState(urlTopic)?.order;
             const order = readSavedOrder(urlTopic) || (Array.isArray(memOrder) ? memOrder : null);
@@ -1490,6 +1490,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             }
         }
 
+        // For forward navigation (clicking links), ALWAYS fetch fresh
+        // Force bypass debounce - this is a user-initiated navigation
+        forceHardRefreshRef.current = true;
+        setStableOrder([]);  // Clear stale order
+        setIsLoading(true);
+        
         const timeoutId = setTimeout(() => {
             if (cancelled || !isMountedRef.current) return;
             getPosts(urlTopic);
