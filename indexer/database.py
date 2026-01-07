@@ -1336,7 +1336,7 @@ class DatabaseManager:
                 )
 
     def update_profile_level(self, owner: str, level: int, updated_at: int) -> bool:
-        """Update only the level field for an existing profile."""
+        """Update only the level field for an existing profile (used for expiration/downgrade)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 if level == 0:
@@ -1355,6 +1355,22 @@ class DatabaseManager:
                         """,
                         (int(level), int(updated_at), owner),
                     )
+                return cur.rowcount > 0
+
+    def update_profile_subscription(
+        self, owner: str, level: int, subscription_expiry: int, updated_at: int
+    ) -> bool:
+        """Update level and subscription_expiry for a profile (used for renewals)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE profiles
+                    SET level=%s, subscription_expiry=%s, updated_at=%s
+                    WHERE LOWER(owner) = LOWER(%s)
+                    """,
+                    (int(level), int(subscription_expiry), int(updated_at), owner),
+                )
                 return cur.rowcount > 0
 
     def upsert_profile_full(

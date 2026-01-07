@@ -2385,9 +2385,41 @@ def get_config():
 
 def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
     """Get peer information including IP and on-chain validator moniker."""
+    def _normalize_moniker(moniker: str) -> str:
+        m = (moniker or "").strip()
+        if not m:
+            return ""
+
+        if m.startswith("http://") or m.startswith("https://"):
+            return m
+
+        if any(ch.isspace() for ch in m) or "/" in m:
+            return m
+
+        host = m
+        if ":" in host:
+            maybe_host, maybe_port = host.rsplit(":", 1)
+            if maybe_host and maybe_port.isdigit():
+                host = maybe_host
+
+        host = host.strip(".")
+        if host.count(".") < 1:
+            return m
+
+        labels = host.split(".")
+        for label in labels:
+            if not label or len(label) > 63:
+                return m
+            if label[0] == "-" or label[-1] == "-":
+                return m
+            if not re.fullmatch(r"[A-Za-z0-9-]+", label):
+                return m
+
+        return f"https://{m}"
+
     return {
         "ip": peer["ip"],
-        "moniker": peer.get("moniker", ""),
+        "moniker": _normalize_moniker(peer.get("moniker", "")),
     }
 
 
@@ -5055,15 +5087,21 @@ def get_stats():
             total_all = all_non_deleted + deleted_all
             stats["delete_rate"] = deleted_all / max(total_all, 1)
 
-            # User cohorts
+            # User cohorts - subscribers by tier
             cur.execute(
                 """
-                SELECT COUNT(*) FROM profiles
-                WHERE subscription_expiry > %s
+                SELECT level, COUNT(*) FROM profiles
+                WHERE subscription_expiry > %s AND level > 0 AND level < 100
+                GROUP BY level
+                ORDER BY level
                 """,
                 (now,),
             )
-            stats["subscribers"] = cur.fetchone()[0] or 0
+            subscribers_by_tier = {row[0]: row[1] for row in cur.fetchall()}
+            stats["subscribers"] = sum(subscribers_by_tier.values())
+            stats["subscribers_tier_1"] = subscribers_by_tier.get(1, 0)
+            stats["subscribers_tier_2"] = subscribers_by_tier.get(2, 0)
+            stats["subscribers_tier_3"] = subscribers_by_tier.get(3, 0)
 
             seven_days_ago = now - (7 * 86400)
             cur.execute(

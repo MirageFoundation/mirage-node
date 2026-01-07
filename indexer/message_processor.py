@@ -1196,6 +1196,22 @@ class MessageProcessor:
         except Exception as e:
             logger.error("Error updating profile level for %s: %s", addr, e, exc_info=True)
 
+    def update_profile_subscription(self, addr: str, level: int, subscription_expiry: int, ts: int):
+        """Update profile level and subscription_expiry from renewal events (EndBlock)."""
+        try:
+            updated = self.db.update_profile_subscription(addr, level, subscription_expiry, ts)
+            if updated:
+                logger.info(
+                    "Updated profile subscription for %s: level=%d, expiry=%d",
+                    addr,
+                    level,
+                    subscription_expiry,
+                )
+            else:
+                logger.warning("No profile found to update subscription for %s", addr)
+        except Exception as e:
+            logger.error("Error updating profile subscription for %s: %s", addr, e, exc_info=True)
+
     def _query_chain_profile(self, addr: str) -> dict | None:
         """Query the chain for a profile's current state."""
         try:

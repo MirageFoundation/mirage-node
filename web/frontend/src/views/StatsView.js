@@ -272,12 +272,36 @@ export default function StatsView() {
                             <Row>
                                 <Label>
                                     Subscribers
-                                    <InfoIcon data-tooltip="Profiles with active subscription">
+                                    <InfoIcon data-tooltip="Profiles with active subscription (all tiers)">
                                         ?
                                     </InfoIcon>
                                 </Label>
                                 <ValueBox>
                                     <Mono>{formatNumber(stats.subscribers || 0)}</Mono>
+                                </ValueBox>
+                            </Row>
+                            <Row style={{ paddingLeft: '1rem' }}>
+                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
+                                    Tier 1
+                                </Label>
+                                <ValueBox>
+                                    <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_1 || 0)}</Mono>
+                                </ValueBox>
+                            </Row>
+                            <Row style={{ paddingLeft: '1rem' }}>
+                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
+                                    Tier 2
+                                </Label>
+                                <ValueBox>
+                                    <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_2 || 0)}</Mono>
+                                </ValueBox>
+                            </Row>
+                            <Row style={{ paddingLeft: '1rem' }}>
+                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
+                                    Tier 3
+                                </Label>
+                                <ValueBox>
+                                    <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_3 || 0)}</Mono>
                                 </ValueBox>
                             </Row>
 

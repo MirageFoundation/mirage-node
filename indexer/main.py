@@ -277,13 +277,23 @@ class Indexer:
                 attrs = {a["key"]: a.get("value", "") for a in event.get("attributes", [])}
                 address = attrs.get("address", "")
                 level_str = attrs.get("level", "0")
+                new_expiry_str = attrs.get("new_expiry", "0")
                 if address:
                     try:
                         level = int(level_str)
                     except ValueError:
                         level = 0
-                    logger.info("Subscription renewed for %s (level: %d)", address, level)
-                    self.processor.update_profile_level(address, level, ts)
+                    try:
+                        new_expiry = int(new_expiry_str)
+                    except ValueError:
+                        new_expiry = 0
+                    logger.info(
+                        "Subscription renewed for %s (level: %d, new_expiry: %d)",
+                        address,
+                        level,
+                        new_expiry,
+                    )
+                    self.processor.update_profile_subscription(address, level, new_expiry, ts)
 
     def _process_governance_events(self, result_obj: dict, ts: int, height: int):
         """Process governance events for passed proposals."""
