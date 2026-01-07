@@ -54,6 +54,23 @@ class ChainClient:
         else:
             return base_rpc.replace(":26657", ":9090")
 
+    @staticmethod
+    def _derive_rest_url(jsonrpc_url: str) -> str:
+        """Derive REST API URL from RPC URL (same host, port 1317)."""
+        base_rpc = jsonrpc_url
+        for path in ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]:
+            if path in base_rpc:
+                base_rpc = base_rpc.replace(path, "")
+        if "://" in base_rpc:
+            protocol, rest = base_rpc.split("://", 1)
+            if ":" in rest:
+                host, _ = rest.rsplit(":", 1)
+                return f"http://{host}:1317"
+            else:
+                return f"http://{rest}:1317"
+        else:
+            return base_rpc.replace(":26657", ":1317")
+
     def get_status(self) -> dict:
         """Get chain status."""
         r = requests.get(f"{self.jsonrpc_url}/status", timeout=HTTP_TIMEOUT_SHORT)
@@ -102,43 +119,78 @@ class ChainClient:
 
     def list_profiles_subspace(self) -> list[dict]:
         """
-        List all profiles stored in the chain KV by scanning the 'profiles/' subspace.
-        Requires ABCI subspace support at path /store/core/subspace.
+        List all profiles stored in the chain KV.
+        Tries ABCI subspace query first, falls back to REST API pagination.
         Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, is_moderator, biography, avatar, banner }
         """
+        # Try ABCI subspace query first
+        try:
+            results = self._list_profiles_via_abci()
+            if results:
+                logger.info("Fetched %d profiles via ABCI subspace", len(results))
+                return results
+        except Exception as e:
+            logger.debug("ABCI subspace query failed: %s, trying REST API", e)
+
+        # Fall back to REST API
+        results = self._list_profiles_via_rest()
+        logger.info("Fetched %d profiles via REST API", len(results))
+        return results
+
+    def _list_profiles_via_abci(self) -> list[dict]:
+        """List profiles via ABCI subspace query."""
         prefix = "profiles/".encode()
         data_hex = prefix.hex()
-        # Tendermint requires the path to be a quoted JSON string in the URL
         path = _up.quote('"/store/core/subspace"')
         resp = self.abci_query(path, f"0x{data_hex}", timeout=HTTP_TIMEOUT_LONG)
-        try:
-            response = ((resp or {}).get("result") or {}).get("response") or {}
-            kvs = response.get("kvs") or response.get("Kvs") or []
-            results: list[dict] = []
-            import base64, json
 
-            for kv in kvs:
-                key_b64 = kv.get("key")
-                val_b64 = kv.get("value")
-                if not key_b64 or not val_b64:
-                    continue
-                key_bytes = base64.b64decode(key_b64)
-                key_str = key_bytes.decode("utf-8", errors="ignore")
-                if not key_str.startswith("profiles/"):
-                    continue
-                owner = key_str.split("/", 1)[1]
-                value_json = base64.b64decode(val_b64).decode("utf-8", errors="ignore")
-                try:
-                    prof = json.loads(value_json)
-                    prof["owner"] = owner
-                    results.append(prof)
-                except Exception:
-                    continue
-            if not results:
-                raise RuntimeError("profiles subspace scan returned no entries")
-            return results
-        except Exception as e:
-            raise RuntimeError(f"Failed to list profiles via subspace: {e}") from e
+        response = ((resp or {}).get("result") or {}).get("response") or {}
+        kvs = response.get("kvs") or response.get("Kvs") or []
+        results: list[dict] = []
+
+        for kv in kvs:
+            key_b64 = kv.get("key")
+            val_b64 = kv.get("value")
+            if not key_b64 or not val_b64:
+                continue
+            key_bytes = base64.b64decode(key_b64)
+            key_str = key_bytes.decode("utf-8", errors="ignore")
+            if not key_str.startswith("profiles/"):
+                continue
+            owner = key_str.split("/", 1)[1]
+            value_json = base64.b64decode(val_b64).decode("utf-8", errors="ignore")
+            try:
+                prof = json.loads(value_json)
+                prof["owner"] = owner
+                results.append(prof)
+            except Exception:
+                continue
+        return results
+
+    def _list_profiles_via_rest(self) -> list[dict]:
+        """List profiles via REST API with pagination."""
+        rest_url = self._derive_rest_url(self.jsonrpc_url)
+        profiles: list[dict] = []
+        next_key: str | None = None
+
+        while True:
+            url = f"{rest_url}/mirage/core/v1/profiles?pagination.limit=500"
+            if next_key:
+                url += f"&pagination.key={_up.quote(next_key)}"
+
+            r = requests.get(url, timeout=HTTP_TIMEOUT_LONG)
+            r.raise_for_status()
+            data = r.json()
+
+            page_profiles = data.get("profiles", [])
+            profiles.extend(page_profiles)
+
+            pagination = data.get("pagination") or {}
+            next_key = pagination.get("next_key")
+            if not next_key:
+                break
+
+        return profiles
 
     def tx_search(self, query: str, page: int = 1, per_page: int = 100, order_by: str = "asc") -> dict:
         """Search transactions."""

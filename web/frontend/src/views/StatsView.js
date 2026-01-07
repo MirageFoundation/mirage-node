@@ -9,6 +9,10 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 
+// Tier names and colors (same as SubscriptionView)
+const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];
+const TIER_COLORS = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
+
 const Row = styled.div`
     display: grid;
     grid-template-columns: 10rem minmax(0, 1fr);
@@ -281,24 +285,24 @@ export default function StatsView() {
                                 </ValueBox>
                             </Row>
                             <Row style={{ paddingLeft: '1rem' }}>
-                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
-                                    Tier 1
+                                <Label style={{ fontSize: '0.9em', color: TIER_COLORS[1] }}>
+                                    {TIER_NAMES[1]}
                                 </Label>
                                 <ValueBox>
                                     <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_1 || 0)}</Mono>
                                 </ValueBox>
                             </Row>
                             <Row style={{ paddingLeft: '1rem' }}>
-                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
-                                    Tier 2
+                                <Label style={{ fontSize: '0.9em', color: TIER_COLORS[2] }}>
+                                    {TIER_NAMES[2]}
                                 </Label>
                                 <ValueBox>
                                     <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_2 || 0)}</Mono>
                                 </ValueBox>
                             </Row>
                             <Row style={{ paddingLeft: '1rem' }}>
-                                <Label style={{ fontSize: '0.9em', opacity: 0.8 }}>
-                                    Tier 3
+                                <Label style={{ fontSize: '0.9em', color: TIER_COLORS[3] }}>
+                                    {TIER_NAMES[3]}
                                 </Label>
                                 <ValueBox>
                                     <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_3 || 0)}</Mono>
