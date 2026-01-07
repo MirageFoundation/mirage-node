@@ -394,7 +394,24 @@ def main():
 
     earliest, latest = get_height_range(rpc)
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=args.days)
-    start = find_start_height(rpc, cutoff, earliest, latest)
+    
+    # Check if requested range exceeds available blocks
+    earliest_time = get_block_time(rpc, earliest)
+    if cutoff < earliest_time:
+        # Requested time is before earliest available block - clamp to earliest
+        actual_days = (datetime.datetime.now(datetime.timezone.utc) - earliest_time).days
+        log({
+            "warning": "requested_range_exceeds_available_blocks",
+            "requested_days": args.days,
+            "available_days": actual_days,
+            "earliest_block_time": earliest_time.isoformat(),
+        })
+        start = earliest
+    else:
+        start = find_start_height(rpc, cutoff, earliest, latest)
+    
+    # Safety clamp - never go below earliest available block
+    start = max(start, earliest)
 
     log({
         "earliest_height": earliest,
