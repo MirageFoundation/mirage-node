@@ -1346,8 +1346,11 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             return;
         }
 
+        // Force fresh fetch on navigation (bypass debounce)
+        forceHardRefreshRef.current = true;
         setCurrentPage(1);
         setHasMorePosts(false);
+        setStableOrder([]); // Clear stale order to prevent flash of old content
         setIsLoading(true); // Show loading immediately when navigating
     }, [urlTopic, viewerAddress, homeSortMode, hideDownvotedPosts, isBackNavigation]);
 
@@ -1538,6 +1541,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Recompute stable order only when needed; skip if already set by latest fetch
     useEffect(() => {
         if (stableOrder.length > 0) return;
+        // Don't compute from possibly stale state.posts while loading fresh data
+        // This prevents showing old content briefly before the fetch completes
+        if (isLoading) return;
         const postsArray = Object.values(state.posts || {});
         const isTopLevelPost = (p) => {
             if (!p) return false;
@@ -1556,7 +1562,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             ? filtered
             : sortPosts(filtered, sortBy);
         setStableOrder(sortedOnce.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, sortBy, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet]);
+    }, [state.lastFetched, urlTopic, sortBy, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
