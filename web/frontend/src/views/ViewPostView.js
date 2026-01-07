@@ -596,7 +596,7 @@ const StyledSubmitButtonContainer = styled.div`
 
 const ReplyCounter = styled.span`
     font-size: 0.45rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    color: ${({ $warn, theme }) => $warn ? '#ff6b6b' : (theme?.colors?.subtleText || '#888')};
     line-height: 1.2;
     margin-left: 0.2rem;
     margin-top: -0.25em;
@@ -3056,7 +3056,7 @@ function ViewPostView({ state, updatePost }) {
                         </div>
                         <ReplyActionsRow>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto', alignSelf: 'flex-start' }}>
-                                <ReplyCounter style={{ color: replyText.length > limits.maxContent * 0.9 ? '#ff6b6b' : undefined }}>
+                                <ReplyCounter $warn={replyText.length > limits.maxContent * 0.9}>
                                     {replyText.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                 </ReplyCounter>
                             </div>

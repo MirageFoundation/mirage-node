@@ -1042,7 +1042,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                         />
                                         <ContentActionsRow>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto', alignSelf: 'flex-start' }}>
-                                                <ContentCounter style={{ color: contentValue.length > limits.maxContent * 0.9 ? '#ff6b6b' : undefined }}>
+                                                <ContentCounter $warn={contentValue.length > limits.maxContent * 0.9}>
                                                     {contentValue.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                                 </ContentCounter>
                                             </div>

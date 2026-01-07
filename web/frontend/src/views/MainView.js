@@ -700,9 +700,21 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const urlTopic = routeTopic || params.topic || "home"; // Get the topic from URL or prop
     const navigationType = useNavigationType(); // 'POP' = back/forward, 'PUSH'/'REPLACE' = direct nav
     const isBackNavigation = getIsBackNavigation(navigationType);
+
+    const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
     // For browser back button: only restore if we came from a view_post that was opened from the feed
     const cameFromViewPostRef = useRef(isBackNavigation && checkCameFromViewPost());
+
+    // If we are switching topics (and reusing component), we must invalidate any stale "restore" intents
+    // that were calculated for the previous topic.
+    if (currentTopicRef.current !== urlTopic) {
+        try {
+            restoreFeedIntentRef.current = false;
+            cameFromViewPostRef.current = false;
+        } catch (_) { }
+    }
+
     const shouldAttemptRestore =
         isBackNavigation ||
         restoreFeedIntentRef.current === true ||
@@ -842,7 +854,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return false;
     });
     const location = useLocation();  // Call useLocation at the top level of the component
-    const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
@@ -1004,8 +1015,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false) => {
         if (!isMountedRef.current) return;
 
-        const debouncingTime = 60; // in seconds
-
         if (topic === "")
             topic = "all";
 
@@ -1015,36 +1024,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (topic !== state.topic) {
             if (!isMountedRef.current) return;
             setTopic(topic);
-        } else {
-            // Skip debounce while paginating (infinite scroll)
-            const isPaginating = (currentPage > 1) || isLoadingMore;
-            const bypassDebounce = !!forceHardRefreshRef.current;
-            if (!isPaginating) {
-                if (!bypassDebounce && state.posts && Object.keys(state.posts).length > 0 && state.lastFetched) {
-                    const timeSinceLastFetch = Date.now() - state.lastFetched;
-                    if (timeSinceLastFetch < debouncingTime * 1000) {
-                        // For specific topics (not home/following/all), only use cache if we actually
-                        // have posts matching this topic. Otherwise fetch fresh data.
-                        const isSpecificTopic = !isHomeFeed && !isFollowingFeed && topic !== 'all';
-                        if (isSpecificTopic) {
-                            const topicLower = String(topic || '').toLowerCase();
-                            const hasPostsForTopic = Object.values(state.posts).some(
-                                (p) => p && String(p.topic || '').toLowerCase() === topicLower
-                            );
-                            if (hasPostsForTopic) {
-                                // Cached posts exist and are recent - show them, don't refetch
-                                setIsLoading(false);
-                                return;
-                            }
-                            // No cached posts for this topic - fetch fresh
-                        } else {
-                            // Home/following/all feeds - use normal cache behavior
-                            setIsLoading(false);
-                            return;
-                        }
-                    }
-                }
-            }
         }
 
         if (!isMountedRef.current) return;
@@ -1486,6 +1465,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                     setIsLoadingMore(false);
                     loadMoreLockRef.current = false;
                 }
+                try { console.log('[Feed] POP restore from cache:', urlTopic); } catch (_) { }
                 return;
             }
         }
@@ -1495,7 +1475,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         forceHardRefreshRef.current = true;
         setStableOrder([]);  // Clear stale order
         setIsLoading(true);
-        
+        try { console.log('[Feed] PUSH fetch fresh:', urlTopic); } catch (_) { }
+
         const timeoutId = setTimeout(() => {
             if (cancelled || !isMountedRef.current) return;
             getPosts(urlTopic);
