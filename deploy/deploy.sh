@@ -411,21 +411,43 @@ if [ "$MODE" = "init" ] || [ "$MODE" = "update-init" ]; then
 fi
 
 
+# For --update modes, read MONIKER from existing node.env if not explicitly provided
+if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
+  echo "==> Reading existing MONIKER from node.env..."
+  if [ "$IS_LOCAL" -eq 1 ]; then
+    EXISTING_MONIKER=$(grep -E '^MONIKER=' "$HOME/.mirage/config/node.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
+  else
+    EXISTING_MONIKER=$(ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "grep -E '^MONIKER=' ~/.mirage/config/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
+  fi
+  if [ -n "$EXISTING_MONIKER" ] && [ "$EXISTING_MONIKER" != "mirage-node" ]; then
+    MONIKER_VALUE="$EXISTING_MONIKER"
+    echo "    Using existing moniker: $MONIKER_VALUE"
+  fi
+fi
+
 PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
 if [ "$IS_LOCAL" -eq 1 ]; then
   ENV_ARGS=""
-  for f in backend node indexer frontend; do
+  for f in backend node indexer frontend secrets; do
     if [ -f "$HOME/.mirage/config/$f.env" ]; then
       ENV_ARGS="$ENV_ARGS --env-file $HOME/.mirage/config/$f.env"
     fi
   done
   MONIKER_ARG=""
+  HOSTNAME_ARG=""
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
+    HOSTNAME_ARG="--hostname $MONIKER_VALUE"
   fi
-  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" -v "$HOME/.hermes:/root/.hermes" mirage:prod
+  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" -v "$HOME/.hermes:/root/.hermes" mirage:prod
 else
-ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend; do if [ -f \$HOME/.mirage/config/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/config/\$f.env\"; fi; done; MONIKER_ARG=\"\"; if [ -n \"$MONIKER_VALUE\" ] && [ \"$MONIKER_VALUE\" != \"mirage-node\" ]; then MONIKER_ARG=\"-e MONIKER=\\\"$MONIKER_VALUE\\\"\"; fi; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped \$MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
+  MONIKER_ARG=""
+  HOSTNAME_ARG=""
+  if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
+    MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
+    HOSTNAME_ARG="--hostname $MONIKER_VALUE"
+  fi
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/config/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/config/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
 fi
 
 echo "==> Waiting briefly for container to become healthy..."
@@ -433,94 +455,46 @@ sleep 2
 
 # Ensure container is running and stable (handle restart loop) before docker exec
 echo "==> Waiting for container to be running and stable..."
+STABILITY_CHECK='
+set -euo pipefail
+consec=0
+for i in $(seq 1 60); do
+  st=$(docker inspect -f "{{.State.Status}}" mirage 2>/dev/null || echo "notfound")
+  echo "[$i/60] Container status: $st (consecutive stable checks: $consec)"
+  if [ "$st" = "restarting" ]; then
+    consec=0
+    echo "  -> Waiting for restart to complete..."
+    sleep 1
+    continue
+  elif [ "$st" = "running" ]; then
+    if docker exec mirage echo ready >/dev/null 2>&1; then
+      consec=$((consec+1))
+      echo "  -> Docker exec successful (need 3 consecutive)"
+      if [ "$consec" -ge 3 ]; then
+        echo "  -> Container is stable!"
+        exit 0
+      fi
+    else
+      echo "  -> Docker exec failed, resetting counter"
+      consec=0
+    fi
+  else
+    if [ "$st" != "notfound" ]; then
+      echo "  -> ERROR: Container status is $st (not running)"
+      docker logs --tail 20 mirage 2>&1 | sed "s/^/    /" || true
+    fi
+    consec=0
+  fi
+  sleep 1
+done
+echo "ERROR: Container not stable after 60s (last status: $st)" >&2
+docker logs --tail 100 mirage 2>&1 | tail -100 | sed "s/^/  /" >&2
+exit 1
+'
 if [ "$IS_LOCAL" -eq 1 ]; then
-  bash <<'EOS'
-set -euo pipefail
-consec=0
-for i in $(seq 1 60); do
-  st=$(docker inspect -f '{{.State.Status}}' mirage 2>/dev/null || echo "notfound")
-  echo "[$i/60] Container status: $st (consecutive stable checks: $consec)"
-  if [ "$st" = "restarting" ]; then
-    # Container is restarting - wait for it to stabilize
-    consec=0
-    echo "  -> Waiting for restart to complete..."
-    sleep 1
-    continue
-  elif [ "$st" = "running" ]; then
-    # Verify docker exec actually works
-    if docker exec mirage echo ready >/dev/null 2>&1; then
-      consec=$((consec+1))
-      echo "  -> Docker exec successful (need 3 consecutive)"
-      if [ "$consec" -ge 3 ]; then
-        echo "  -> Container is stable!"
-        exit 0
-      fi
-    else
-      echo "  -> Docker exec failed, resetting counter"
-      consec=0
-    fi
-  else
-    # Container is in error/exited state - show logs and fail
-    if [ "$st" != "notfound" ]; then
-      echo "  -> ERROR: Container status is '$st' (not running)"
-      echo "  -> Last 20 lines of logs:"
-      docker logs --tail 20 mirage 2>&1 | sed 's/^/    /' || true
-    fi
-    consec=0
-  fi
-  sleep 1
-done
-echo "ERROR: Container not stable after 60s (last status: $st, consecutive checks: $consec)" >&2
-if [ "$st" = "restarting" ] || [ "$st" = "exited" ] || [ "$st" = "dead" ]; then
-  echo "Container logs (last 100 lines):" >&2
-  docker logs --tail 100 mirage 2>&1 | tail -100 | sed 's/^/  /' >&2
-fi
-exit 1
-EOS
+  bash -c "$STABILITY_CHECK"
 else
-ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -s" <<'EOS'
-set -euo pipefail
-consec=0
-for i in $(seq 1 60); do
-  st=$(docker inspect -f '{{.State.Status}}' mirage 2>/dev/null || echo "notfound")
-  echo "[$i/60] Container status: $st (consecutive stable checks: $consec)"
-  if [ "$st" = "restarting" ]; then
-    # Container is restarting - wait for it to stabilize
-    consec=0
-    echo "  -> Waiting for restart to complete..."
-    sleep 1
-    continue
-  elif [ "$st" = "running" ]; then
-    # Verify docker exec actually works
-    if docker exec mirage echo ready >/dev/null 2>&1; then
-      consec=$((consec+1))
-      echo "  -> Docker exec successful (need 3 consecutive)"
-      if [ "$consec" -ge 3 ]; then
-        echo "  -> Container is stable!"
-        exit 0
-      fi
-    else
-      echo "  -> Docker exec failed, resetting counter"
-      consec=0
-    fi
-  else
-    # Container is in error/exited state - show logs and fail
-    if [ "$st" != "notfound" ]; then
-      echo "  -> ERROR: Container status is '$st' (not running)"
-      echo "  -> Last 20 lines of logs:"
-      docker logs --tail 20 mirage 2>&1 | sed 's/^/    /' || true
-    fi
-    consec=0
-  fi
-  sleep 1
-done
-echo "ERROR: Container not stable after 60s (last status: $st, consecutive checks: $consec)" >&2
-if [ "$st" = "restarting" ] || [ "$st" = "exited" ] || [ "$st" = "dead" ]; then
-  echo "Container logs (last 100 lines):" >&2
-  docker logs --tail 100 mirage 2>&1 | tail -100 | sed 's/^/  /' >&2
-fi
-exit 1
-EOS
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -c '$STABILITY_CHECK'"
 fi
 
 # On init only, create the validator if it doesn't exist yet (idempotent)

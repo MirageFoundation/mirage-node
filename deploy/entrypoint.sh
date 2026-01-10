@@ -39,12 +39,13 @@ for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DI
 done
 
 # Set container hostname to MONIKER or external IP (instead of random container ID)
+# Note: Replace dots with dashes in hostname (dots not allowed). Fails silently if no permissions.
 if [ -n "${MONIKER:-}" ]; then
-  hostname "$MONIKER"
+  hostname "${MONIKER//./-}" 2>/dev/null || true
 else
   EXTERNAL_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
   if [ -n "$EXTERNAL_IP" ]; then
-    hostname "$EXTERNAL_IP"
+    hostname "${EXTERNAL_IP//./-}" 2>/dev/null || true
   fi
 fi
 
