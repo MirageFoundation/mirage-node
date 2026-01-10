@@ -25,8 +25,8 @@ class MirageConfig:
 
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration by reading node HOME config files into sections."""
-        home_base = os.environ.get("MIRAGE_DATA_DIR", str(Path.home() / ".mirage"))
-        home = os.path.join(os.path.expanduser(home_base), "main")
+        home_base = str(Path.home() / ".mirage")
+        home = os.path.join(home_base, "main")
         # Allow explicit override of node home
         home = os.environ.get("MIRAGE_NODE_HOME", home)
         cfg_dir = os.path.join(home, "config")

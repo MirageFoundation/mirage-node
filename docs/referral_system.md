@@ -231,7 +231,7 @@ The daemon:
 - Updates `referral_rewarded_periods` for cap tracking
 - Sleeps for configured period between runs (default 24 hours)
 - Tracks last run time and period in `referral_state` table for resume capability and UI countdown
-- Period configurable via `--period` flag or `REFERRAL_PERIOD_SECONDS` env var
+- Period configurable via `--period` flag (default: 24 hours)
 
 ### `referrals/referral_analysis.py`
 

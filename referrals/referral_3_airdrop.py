@@ -56,7 +56,7 @@ CHAIN_ID = "mirage-1"
 DENOM = "umirage"
 DEFAULT_AIRDROP_FILE = SCRIPT_DIR / "airdrop_pending.csv"
 PAYOUT_HISTORY_FILE = SCRIPT_DIR / "payout_history.csv"
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+DB_URL = "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 
 
 def connect_db():

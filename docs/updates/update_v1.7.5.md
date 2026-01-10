@@ -32,7 +32,7 @@ Channel creation now requires explicit opt-in:
 
 ### IBC Health Monitoring
 
-New `scripts/check_ibc_health.sh` script for monitoring relayer status:
+New `scripts/check_hermes_status.sh` script for monitoring relayer status:
 
 - Checks if Hermes process is running
 - Verifies config file exists
@@ -44,10 +44,10 @@ New `scripts/check_ibc_health.sh` script for monitoring relayer status:
 Usage:
 ```bash
 # Manual check
-./scripts/check_ibc_health.sh
+./scripts/check_hermes_status.sh
 
 # With webhook alerts
-./scripts/check_ibc_health.sh --alert-webhook "https://hooks.slack.com/..."
+./scripts/check_hermes_status.sh --alert-webhook "https://hooks.slack.com/..."
 ```
 
 ---
@@ -67,7 +67,7 @@ Usage:
 
 ### New Scripts
 
-- `scripts/check_ibc_health.sh`: IBC relayer health monitoring with optional webhook alerts
+- `scripts/check_hermes_status.sh`: IBC relayer health monitoring with optional webhook alerts
 - `scripts/check_osmosis_balance.py`: Query MIRAGE token balances on Osmosis for debugging IBC transfers
 
 ---
@@ -90,5 +90,5 @@ PRs submitted to update the chain registry and Osmosis asset lists.
 If running a node with IBC enabled:
 
 1. The Hermes relayer should run continuously to keep IBC clients alive (trusting period is ~13 days)
-2. Use `check_ibc_health.sh` in a cron job to monitor status
+2. Use `check_hermes_status.sh` in a cron job to monitor status
 3. Ensure `~/.hermes` is mounted as a volume for persistence across container restarts

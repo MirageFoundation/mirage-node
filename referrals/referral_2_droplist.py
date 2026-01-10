@@ -39,7 +39,7 @@ import yaml
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ANALYSIS_DIR = SCRIPT_DIR / "analysis"
 DEFAULT_OUTPUT_FILE = SCRIPT_DIR / "airdrop_pending.csv"
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+DB_URL = "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 
 
 # =============================================================================

@@ -86,7 +86,7 @@ class Indexer:
         try:
             # Derive a stable lock directory under node home (not DB-specific)
             node_home = os.environ.get("MIRAGE_NODE_HOME") or os.path.join(
-                os.path.expanduser(str(os.environ.get("MIRAGE_DATA_DIR", str(Path.home() / ".mirage")))), "main"
+                str(Path.home() / ".mirage"), "main"
             )
             lock_dir = os.path.join(node_home, "data", "indexer")
             os.makedirs(lock_dir, exist_ok=True)
@@ -401,52 +401,41 @@ class Indexer:
         else:
             last_height = self.db.get_last_height()
             logger.info("Database last processed height: %s", last_height)
-            # Optional fast-start: if DB is empty, start at tip by default (configurable)
-            start_at_tip_env = str(os.environ.get("INDEXER_START_AT_TIP", "1")).strip().lower()
-            start_at_tip = start_at_tip_env in ("1", "true", "yes", "y")
-            # Optional clamp: process only the most recent N blocks (even if DB is far behind)
-            recent_window_raw = str(os.environ.get("INDEXER_RECENT_WINDOW", "") or "").strip()
-            try:
-                recent_window = int(recent_window_raw) if recent_window_raw else 0
-            except Exception:
-                recent_window = 0
-            if last_height <= 0 and start_at_tip:
-                start = current_height if current_height >= earliest else earliest
-                logger.info("DB empty and INDEXER_START_AT_TIP enabled: starting at tip %s", start)
-            elif recent_window > 0:
-                clamp_start = max(current_height - max(recent_window - 1, 0), earliest)
-                if last_height <= 0:
-                    start = clamp_start
-                    logger.info(
-                        "DB empty and INDEXER_RECENT_WINDOW=%s: starting from recent window at %s",
-                        recent_window,
-                        start,
-                    )
-                else:
-                    natural_start = last_height + 1
-                    if natural_start < clamp_start:
-                        logger.info(
-                            "Clamping catch-up: natural start %s -> %s (INDEXER_RECENT_WINDOW=%s)",
-                            natural_start,
-                            clamp_start,
-                            recent_window,
-                        )
-                        start = clamp_start
-                    else:
-                        start = natural_start
-                    if start < earliest:
-                        logger.info(
-                            "Adjusting start height from %s to earliest available %s due to pruning", start, earliest
-                        )
-                        start = earliest
+
+            # Max lookback (default 7 days, ~100,800 blocks at 6 sec/block)
+            # Values > 7 days unlikely to work due to aggressive node pruning
+            max_lookback_days = int(os.environ.get("INDEXER_MAX_LOOKBACK_DAYS", "7") or "7")
+            blocks_per_day = 14_400  # ~6 sec/block
+            max_lookback_blocks = max_lookback_days * blocks_per_day
+            max_lookback_height = max(current_height - max_lookback_blocks, 1)
+
+            if last_height > 0:
+                # Continue from where we left off
+                start = last_height + 1
             else:
-                start = last_height + 1 if last_height > 0 else earliest
-                if start < earliest:
-                    logger.info(
-                        "Adjusting start height from %s to earliest available %s due to pruning", start, earliest
-                    )
-                    start = earliest
-                logger.info("Starting from height %s (derived from database and pruning window)", start)
+                # Fresh DB: start from earliest available, but no more than 7 days back
+                start = max(earliest, max_lookback_height)
+
+            # Clamp to node's pruning window
+            if start < earliest:
+                logger.info(
+                    "Adjusting start height from %s to earliest available %s due to pruning",
+                    start,
+                    earliest,
+                )
+                start = earliest
+
+            # Clamp to max lookback
+            if start < max_lookback_height:
+                logger.info(
+                    "Clamping start height from %s to %s (max %d-day lookback)",
+                    start,
+                    max_lookback_height,
+                    max_lookback_days,
+                )
+                start = max_lookback_height
+
+            logger.info("Starting from height %s", start)
 
         end = current_height
 

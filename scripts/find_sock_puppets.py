@@ -51,7 +51,7 @@ from shared.fingerprint import (
 # CONFIGURATION
 # =============================================================================
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+DB_URL = "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 LOOKBACK_DAYS = 90
 
 # Score thresholds

@@ -61,14 +61,26 @@ from shared.fingerprint import (
 # CONFIGURATION
 # =============================================================================
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+DB_URL = "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "analysis")
 LOOKBACK_DAYS = 90
 
 
-# ChatGPT API key - will be prompted if not in environment
-CHATGPT_API_KEY = os.environ.get("CHATGPT_API_KEY", "")
+# OpenAI API key - loaded from ~/.mirage/config/secrets.env or prompted at runtime
+def _load_secrets():
+    """Load secrets from env file if present."""
+    secrets_file = os.path.join(os.path.expanduser("~/.mirage/config"), "secrets.env")
+    if os.path.exists(secrets_file):
+        with open(secrets_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip())
+
+_load_secrets()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # Referral-specific thresholds
 MIN_ACTIVITY_FOR_LEGIT = 5  # Minimum posts/comments for legitimate user
@@ -2216,14 +2228,14 @@ Be decisive. The reasoning field should explain your conclusion clearly."""
 
 def analyze_with_chatgpt(markdown_content: str) -> str:
     """Send the analysis to ChatGPT and get a verdict."""
-    if not CHATGPT_API_KEY:
+    if not OPENAI_API_KEY:
         return "\n\n---\n\n## AI Analysis\n\n*ChatGPT analysis skipped: No API key configured.*\n"
 
     try:
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {CHATGPT_API_KEY}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
         }
         data = {
             "model": "gpt-4o",
@@ -2367,15 +2379,15 @@ def main():
             print("")
 
             # Prompt for ChatGPT API key if not set
-            global CHATGPT_API_KEY
-            if not CHATGPT_API_KEY:
+            global OPENAI_API_KEY
+            if not OPENAI_API_KEY:
                 print("=" * 60)
-                print("Enter ChatGPT API key for AI analysis (or press Enter to skip):")
+                print("Enter OpenAI API key for AI analysis (or press Enter to skip):")
                 print("=" * 60)
                 try:
                     api_key = getpass.getpass("API Key: ").strip()
                     if api_key:
-                        CHATGPT_API_KEY = api_key
+                        OPENAI_API_KEY = api_key
                         print("API key set. AI analysis enabled.")
                     else:
                         print("No API key provided. AI analysis will be skipped.")

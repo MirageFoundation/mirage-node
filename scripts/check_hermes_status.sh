@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# IBC Health Check for Mirage <-> Osmosis
+# Hermes Status Check for Mirage <-> Osmosis
 #
-# Usage: ./check_ibc_health.sh [--alert-webhook URL]
+# Usage: ./check_hermes_status.sh [--alert-webhook URL]
 #
 # Checks:
 # 1. Is Hermes relayer running?
 # 2. Are IBC clients healthy (not expired/expiring soon)?
 # 3. Is the channel open?
+# 4. Are there pending/stuck packets?
+# 5. Are client updates happening? (prevents expiry)
+#
+# Alerts: Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in ~/.mirage/config/secrets.env
+#         Or use --alert-webhook for Slack-compatible webhooks
 #
 # Exit codes:
 #   0 = All healthy
@@ -15,6 +20,15 @@
 
 set -euo pipefail
 
+# Load secrets env file if present (for Telegram credentials)
+SECRETS_FILE="${HOME}/.mirage/config/secrets.env"
+if [ -f "$SECRETS_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$SECRETS_FILE"
+fi
+
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
 WEBHOOK_URL=""
 WARNING_DAYS=3  # Warn if client expires within this many days
 
@@ -80,14 +94,17 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
     if echo "$CLIENT_OUTPUT" | grep -q "07-tendermint"; then
         MIRAGE_CLIENT=$(echo "$CLIENT_OUTPUT" | grep -oE "07-tendermint-[0-9]+" | tail -1 || echo "")
         if [ -n "$MIRAGE_CLIENT" ]; then
-            # Check client state
-            CLIENT_STATE=$(hermes query client state --chain mirage-1 --client "$MIRAGE_CLIENT" 2>&1 || true)
-            if echo "$CLIENT_STATE" | grep -qi "expired\|frozen"; then
+            # Check client status (Active vs Expired/Frozen)
+            CLIENT_STATUS=$(hermes query client status --chain mirage-1 --client "$MIRAGE_CLIENT" 2>&1 || true)
+            if echo "$CLIENT_STATUS" | grep -q "SUCCESS Active"; then
+                echo -e "  ${GREEN}✓${NC} Mirage client $MIRAGE_CLIENT is Active"
+            elif echo "$CLIENT_STATUS" | grep -qi "expired\|frozen"; then
                 echo -e "  ${RED}✗${NC} Mirage client $MIRAGE_CLIENT is EXPIRED/FROZEN!"
                 STATUS="critical"
                 ISSUES+=("IBC client on Mirage is expired")
             else
-                echo -e "  ${GREEN}✓${NC} Mirage client $MIRAGE_CLIENT is active"
+                echo -e "  ${YELLOW}?${NC} Mirage client $MIRAGE_CLIENT status unknown"
+                echo "      $CLIENT_STATUS" | head -3
             fi
         fi
     else
@@ -112,6 +129,49 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
         fi
     else
         echo -e "  ${YELLOW}?${NC} No channels found"
+    fi
+    
+    # Check for pending packets (stuck relays)
+    echo ""
+    echo "Checking relay activity..."
+    if [ -n "$CHANNEL" ]; then
+        PENDING=$(hermes query packet pending --chain mirage-1 --port transfer --channel "$CHANNEL" 2>&1 || true)
+        UNRECEIVED=$(echo "$PENDING" | grep -oE "unreceived_packets: \[[0-9]" | head -1 || echo "")
+        UNACKED=$(echo "$PENDING" | grep -oE "unreceived_acks: \[[0-9]" | head -1 || echo "")
+        
+        if [ -n "$UNRECEIVED" ] || [ -n "$UNACKED" ]; then
+            echo -e "  ${YELLOW}!${NC} Pending packets detected - relay in progress or stuck"
+            # Extract counts for more detail
+            UNRECEIVED_COUNT=$(echo "$PENDING" | grep -oE "unreceived_packets: \[[^]]*\]" | grep -oE "[0-9]+" | wc -l || echo "0")
+            UNACKED_COUNT=$(echo "$PENDING" | grep -oE "unreceived_acks: \[[^]]*\]" | grep -oE "[0-9]+" | wc -l || echo "0")
+            echo "      Unreceived: $UNRECEIVED_COUNT, Unacked: $UNACKED_COUNT"
+        else
+            echo -e "  ${GREEN}✓${NC} No pending packets"
+        fi
+    fi
+    
+    # Check hermes log for recent activity (client updates keep the channel alive)
+    HERMES_LOG="/var/log/hermes.log"
+    if [ -f "$HERMES_LOG" ]; then
+        # Check for any client update in the last 24 hours
+        LAST_UPDATE=$(grep -i "client.*update\|UpdateClient" "$HERMES_LOG" 2>/dev/null | tail -1 || echo "")
+        if [ -z "$LAST_UPDATE" ]; then
+            # No client updates found in log - check log age
+            LOG_AGE_HOURS=$(( ($(date +%s) - $(stat -c %Y "$HERMES_LOG" 2>/dev/null || echo "0")) / 3600 ))
+            if [ "$LOG_AGE_HOURS" -gt 24 ]; then
+                echo -e "  ${YELLOW}!${NC} No client updates in log (log is ${LOG_AGE_HOURS}h old)"
+                if [ "$STATUS" = "healthy" ]; then
+                    STATUS="warning"
+                fi
+                ISSUES+=("No recent IBC client updates - expiry countdown may be active")
+            else
+                echo -e "  ${GREEN}✓${NC} Hermes log active (${LOG_AGE_HOURS}h old)"
+            fi
+        else
+            echo -e "  ${GREEN}✓${NC} Client updates found in log"
+        fi
+    else
+        echo -e "  ${YELLOW}?${NC} Hermes log not found at $HERMES_LOG"
     fi
 fi
 
@@ -138,14 +198,28 @@ if [ ${#ISSUES[@]} -gt 0 ]; then
 fi
 echo "═══════════════════════════════════════════════════════════════"
 
-# Send webhook alert if configured and not healthy
-if [ -n "$WEBHOOK_URL" ] && [ "$STATUS" != "healthy" ]; then
-    echo ""
-    echo "Sending alert to webhook..."
-    ALERT_MSG="IBC Health Alert [$STATUS]: ${ISSUES[*]}"
-    curl -s -X POST "$WEBHOOK_URL" \
-        -H "Content-Type: application/json" \
-        -d "{\"text\": \"$ALERT_MSG\"}" >/dev/null 2>&1 || true
+# Send alerts if configured and not healthy
+if [ "$STATUS" != "healthy" ]; then
+    ALERT_MSG="🚨 IBC Health Alert [$STATUS]: ${ISSUES[*]}"
+    
+    # Telegram alert
+    if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+        echo ""
+        echo "Sending Telegram alert..."
+        curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "text=${ALERT_MSG}" \
+            -d "parse_mode=HTML" >/dev/null 2>&1 || true
+    fi
+    
+    # Slack/generic webhook alert
+    if [ -n "$WEBHOOK_URL" ]; then
+        echo ""
+        echo "Sending webhook alert..."
+        curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"$ALERT_MSG\"}" >/dev/null 2>&1 || true
+    fi
 fi
 
 exit $EXIT_CODE

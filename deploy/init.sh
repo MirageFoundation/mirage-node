@@ -47,24 +47,25 @@ fi
 # Read persistent peers from template file
 # For local deployment, skip external peers to avoid validator set mismatches
 R="$ROOT_DIR/deploy/templates"
-PEERS_FILE="$R/peers.txt"
+PEERS_FILE="$R/persistent_peers.txt"
 if [ "${MIRAGE_MODE:-}" = "local" ] || [ "${SKIP_PEERS:-0}" = "1" ]; then
   echo "==> Local deployment detected, disabling peer connections"
   PERSISTENT_PEERS=""
   PEX_ENABLED="false"
   MAX_INBOUND_PEERS="0"
   MAX_OUTBOUND_PEERS="0"
-elif [ -f "$PEERS_FILE" ] && [ -s "$PEERS_FILE" ]; then
-  PERSISTENT_PEERS=$(cat "$PEERS_FILE" | tr '\n' ',' | sed 's/,$//' | tr -d ' \r')
-  PEX_ENABLED="true"
-  MAX_INBOUND_PEERS="40"
-  MAX_OUTBOUND_PEERS="10"
 else
-  echo "WARNING: peers.txt not found in templates, using empty peers list" >&2
-  PERSISTENT_PEERS=""
-  PEX_ENABLED="true"
-  MAX_INBOUND_PEERS="40"
-  MAX_OUTBOUND_PEERS="10"
+  # Read peers from file if it exists
+  if [ -f "$PEERS_FILE" ] && [ -s "$PEERS_FILE" ]; then
+    PERSISTENT_PEERS=$(cat "$PEERS_FILE" | tr '\n' ',' | sed 's/,$//' | tr -d ' \r')
+  else
+    echo "WARNING: persistent_peers.txt not found in templates, using empty peers list" >&2
+    PERSISTENT_PEERS=""
+  fi
+  # Use env values if set, otherwise use defaults
+  PEX_ENABLED="${PEX_ENABLED:-true}"
+  MAX_INBOUND_PEERS="${MAX_INBOUND_PEERS:-40}"
+  MAX_OUTBOUND_PEERS="${MAX_OUTBOUND_PEERS:-10}"
 fi
 
 export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBOUND_PEERS

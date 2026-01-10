@@ -58,7 +58,7 @@ from shared.fingerprint import (
 # CONFIGURATION
 # =============================================================================
 
-DB_URL = os.environ.get("DATABASE_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+DB_URL = "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUTPUT_DIR = os.path.join(SCRIPT_DIR, "user-analysis")
 LOOKBACK_DAYS = 90
@@ -68,8 +68,20 @@ MAX_RECENT_POSTS = 10  # Same for target and matches
 MAX_RECENT_VOTES = 25
 MAX_MATCHES_WITH_POST_SAMPLES = 5  # per severity bucket (CRITICAL/HIGH)
 
-# ChatGPT API key - will be prompted if not in environment
-CHATGPT_API_KEY = os.environ.get("CHATGPT_API_KEY", "")
+# OpenAI API key - loaded from ~/.mirage/config/secrets.env or prompted at runtime
+def _load_secrets():
+    """Load secrets from env file if present."""
+    secrets_file = os.path.join(os.path.expanduser("~/.mirage/config"), "secrets.env")
+    if os.path.exists(secrets_file):
+        with open(secrets_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, _, value = line.partition("=")
+                    os.environ.setdefault(key.strip(), value.strip())
+
+_load_secrets()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # Severity thresholds for categorization (display only, no filtering)
 # IMPORTANT: We treat device/fingerprint signals as primary for sockpuppet detection.
@@ -1530,7 +1542,7 @@ likely_real_anchor: |
 
 def analyze_with_chatgpt(evidence_markdown: str) -> Dict[str, str]:
     """Send evidence to ChatGPT and get verdict."""
-    if not CHATGPT_API_KEY:
+    if not OPENAI_API_KEY:
         return {
             "verdict": "REVIEW",
             "confidence": "LOW",
@@ -1543,7 +1555,7 @@ def analyze_with_chatgpt(evidence_markdown: str) -> Dict[str, str]:
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {CHATGPT_API_KEY}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
         }
         data = {
             "model": "gpt-4o",
@@ -1788,13 +1800,13 @@ def main():
     print("")
 
     # Prompt for API key if not set
-    global CHATGPT_API_KEY
-    if not CHATGPT_API_KEY:
-        print("Enter ChatGPT API key (or press Enter to skip AI analysis):")
+    global OPENAI_API_KEY
+    if not OPENAI_API_KEY:
+        print("Enter OpenAI API key (or press Enter to skip AI analysis):")
         try:
             api_key = getpass.getpass("API Key: ").strip()
             if api_key:
-                CHATGPT_API_KEY = api_key
+                OPENAI_API_KEY = api_key
                 print("API key set. AI analysis enabled.")
             else:
                 print("No API key provided. AI analysis will be skipped.")
@@ -1904,7 +1916,7 @@ def main():
                 ai_md = generate_evidence_markdown(evidence, users, all_fps)
 
                 # Get AI verdict
-                if CHATGPT_API_KEY:
+                if OPENAI_API_KEY:
                     print(f"      Analyzing with ChatGPT...")
                     verdict = analyze_with_chatgpt(ai_md)
                     evidence.verdict = verdict["verdict"]

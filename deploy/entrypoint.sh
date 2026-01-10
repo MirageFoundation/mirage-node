@@ -30,13 +30,23 @@ export PYTHONPATH="/opt/mirage"
 
 # Load persistent env files if present
 CONFIG_DIR="${HOME}/.mirage/config"
-for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DIR}/indexer.env" "${CONFIG_DIR}/frontend.env"; do
+for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DIR}/indexer.env" "${CONFIG_DIR}/frontend.env" "${CONFIG_DIR}/secrets.env"; do
   if [ -f "$envfile" ]; then
     set -a
     . "$envfile"
     set +a
   fi
 done
+
+# Set container hostname to MONIKER or external IP (instead of random container ID)
+if [ -n "${MONIKER:-}" ]; then
+  hostname "$MONIKER"
+else
+  EXTERNAL_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
+  if [ -n "$EXTERNAL_IP" ]; then
+    hostname "$EXTERNAL_IP"
+  fi
+fi
 
 # Ensure a default local Postgres URL if not provided
 if [ -z "${MIRAGE_INDEXER_DB_URL:-}" ]; then
@@ -276,6 +286,11 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee /var/log/hermes.log" C-m
+  # Add status monitor pane (50% bottom)
+  tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR"
+  tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
+  # Focus back on hermes pane
+  tmux select-pane -t "$SESSION:hermes.0"
 fi
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"

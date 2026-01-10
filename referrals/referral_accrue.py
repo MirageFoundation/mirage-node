@@ -34,7 +34,7 @@ MAX_DEPTH = 5
 MAX_LIFETIME_PERIODS = 10  # Lifetime cap per referee (total rewarded days)
 
 # Period configuration (in seconds)
-# Default: 86400 (1 day), can be overridden with --period or REFERRAL_PERIOD_SECONDS env var
+# Default: 86400 (1 day), can be overridden with --period flag
 DEFAULT_PERIOD_SECONDS = 86400
 STATE_KEY_LAST_RUN = "referral_accrue_last_run"
 STATE_KEY_PERIOD = "referral_accrue_period"
@@ -452,8 +452,8 @@ def main():
     parser.add_argument(
         "--period",
         type=int,
-        default=int(os.environ.get("REFERRAL_PERIOD_SECONDS", DEFAULT_PERIOD_SECONDS)),
-        help=f"Period in seconds (default: {DEFAULT_PERIOD_SECONDS}, env: REFERRAL_PERIOD_SECONDS)",
+        default=DEFAULT_PERIOD_SECONDS,
+        help=f"Period in seconds (default: {DEFAULT_PERIOD_SECONDS})",
     )
     args = parser.parse_args()
 

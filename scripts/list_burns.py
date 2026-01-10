@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_node_home():
-    home_base = os.environ.get("MIRAGE_DATA_DIR", os.path.expanduser("~/.mirage"))
+    home_base = os.path.expanduser("~/.mirage")
     home = os.path.join(home_base, "main")
     return os.environ.get("MIRAGE_NODE_HOME", home)
 
