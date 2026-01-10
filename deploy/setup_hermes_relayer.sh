@@ -278,9 +278,45 @@ MIRAGE_CHANNEL=""
 OSMOSIS_CHANNEL=""
 
 for chan in $CHANNEL_LIST; do
-    # Query channel details to find counterparty chain
+    # Query channel details to get connection and counterparty channel
     CHAN_INFO=$(hermes query channel end --chain mirage-1 --port transfer --channel "$chan" 2>&1 || true)
-    if echo "$CHAN_INFO" | grep -q "osmosis-1"; then
+    
+    # Skip if channel not in Open state
+    if ! echo "$CHAN_INFO" | grep -q "state: Open"; then
+        continue
+    fi
+    
+    # Extract connection ID from channel info
+    CONN_ID=$(echo "$CHAN_INFO" | grep -oE 'connection-[0-9]+' | head -1 || echo "")
+    if [ -z "$CONN_ID" ]; then
+        continue
+    fi
+    
+    # Query connection to get client ID
+    CONN_INFO=$(hermes query connection end --chain mirage-1 --connection "$CONN_ID" 2>&1 || true)
+    CLIENT_ID=$(echo "$CONN_INFO" | grep -oE '07-tendermint-[0-9]+' | head -1 || echo "")
+    if [ -z "$CLIENT_ID" ]; then
+        continue
+    fi
+    
+    # Query client state to get counterparty chain ID
+    CLIENT_INFO=$(hermes query client state --chain mirage-1 --client "$CLIENT_ID" 2>&1 || true)
+    
+    # Check if this channel connects to osmosis-1
+    if echo "$CLIENT_INFO" | grep -q "osmosis-1"; then
+        # Check if client is frozen (frozen_height is NOT None)
+        if echo "$CLIENT_INFO" | grep -q "frozen_height:" && ! echo "$CLIENT_INFO" | grep -q "frozen_height: None"; then
+            echo "    Skipping $chan: client $CLIENT_ID is frozen"
+            continue
+        fi
+        
+        # Verify client is within trusting period by checking status
+        CLIENT_STATUS=$(hermes query client status --chain mirage-1 --client "$CLIENT_ID" 2>&1 || true)
+        if echo "$CLIENT_STATUS" | grep -qi "Expired"; then
+            echo "    Skipping $chan: client $CLIENT_ID is expired"
+            continue
+        fi
+        
         MIRAGE_CHANNEL="$chan"
         # Extract counterparty channel ID
         OSMOSIS_CHANNEL=$(echo "$CHAN_INFO" | grep -oE 'channel-[0-9]+' | tail -1 || echo "")
@@ -476,11 +512,24 @@ echo "  miraged tx ibc-transfer transfer transfer $MIRAGE_CHANNEL <OSMO_ADDRESS>
 echo ""
 echo "==========================================="
 echo ""
-echo "NOTE: For Hermes to auto-start on future container restarts,"
-echo "      you must restart the container once:"
+echo "MANUAL LAUNCH (if Hermes stops):"
 echo ""
-echo "      docker restart mirage"
+echo "  # Start Hermes in foreground (for debugging):"
+echo "  hermes start"
 echo ""
-echo "      The entrypoint will then detect ~/.hermes/config.toml"
-echo "      and start Hermes automatically in a tmux window."
+echo "  # Start Hermes in background:"
+echo "  nohup hermes start > /var/log/hermes.log 2>&1 &"
+echo ""
+echo "  # Start in tmux (recommended for persistence):"
+echo "  tmux new-session -d -s hermes 'hermes start'"
+echo ""
+echo "==========================================="
+echo ""
+echo "AUTO-START: For Hermes to auto-start on container restarts,"
+echo "            restart the container once:"
+echo ""
+echo "            docker restart mirage"
+echo ""
+echo "            The entrypoint will then detect ~/.hermes/config.toml"
+echo "            and start Hermes automatically in a tmux window."
 echo ""
