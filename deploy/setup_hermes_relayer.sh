@@ -2,14 +2,73 @@
 set -euo pipefail
 
 # Fully automated Hermes IBC relayer setup for Mirage <-> Osmosis
-# Usage: ./setup_hermes_relayer.sh
-# You will be prompted to enter your 12-word mnemonic (hidden input)
+# Usage: ./setup_hermes_relayer.sh [--create-new-channel]
 #
+# Options:
+#   --create-new-channel  Allow creation of a NEW IBC channel (use with caution!)
+#
+# You will be prompted to enter your 12-word mnemonic (hidden input)
 # Data is stored in ~/.hermes (persisted via Docker volume mount)
 
 HERMES_VERSION="${HERMES_VERSION:-v1.10.4}"
-MIRAGE_CHANNEL="channel-0"
-OSMOSIS_CHANNEL="channel-108600"
+CREATE_NEW_CHANNEL=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --create-new-channel)
+            CREATE_NEW_CHANNEL=true
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [--create-new-channel]"
+            echo ""
+            echo "Options:"
+            echo "  --create-new-channel  Allow creation of a NEW IBC channel"
+            echo "                        (Only use if no valid channel exists!)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Use --help for usage information" >&2
+            exit 1
+            ;;
+    esac
+done
+
+
+# Verify volume mount is working (critical for persistence)
+echo "==> Verifying ~/.hermes persistence..."
+if [ -f /.dockerenv ]; then
+    # We're inside a container - check if ~/.hermes is a mount point
+    HERMES_DIR="$HOME/.hermes"
+    mkdir -p "$HERMES_DIR"
+    
+    # Write a test file and check if it persists on the host
+    TEST_FILE="$HERMES_DIR/.persistence_test_$$"
+    echo "test" > "$TEST_FILE"
+    
+    # Check mount info
+    if ! findmnt -n "$HERMES_DIR" >/dev/null 2>&1; then
+        echo ""
+        echo "WARNING: ~/.hermes does not appear to be a mounted volume!"
+        echo "         Config will be LOST when container restarts."
+        echo ""
+        echo "To fix: ensure deploy.sh mounts ~/.hermes as a volume:"
+        echo "  -v \$HOME/.hermes:/root/.hermes"
+        echo ""
+        read -p "Continue anyway? [y/N] " CONTINUE
+        if [ "${CONTINUE,,}" != "y" ]; then
+            rm -f "$TEST_FILE"
+            exit 1
+        fi
+    else
+        echo "    ✓ ~/.hermes is mounted (config will persist)"
+    fi
+    rm -f "$TEST_FILE"
+else
+    echo "    Running outside Docker - config will persist normally"
+fi
 
 # Read mnemonic securely
 echo -n "Enter 12-word mnemonic: "
@@ -54,7 +113,7 @@ misbehaviour = true
 enabled = false
 
 [mode.channels]
-enabled = false
+enabled = true
 
 [mode.packets]
 enabled = true
@@ -209,23 +268,93 @@ if [ "$MIRAGE_BAL" -lt "$MIN_MIRAGE" ] || [ "$OSMO_BAL" -lt "$MIN_OSMO" ]; then
     done
 fi
 
-# Check if channel already exists
+# Check if channel already exists or create new one
 echo ""
-echo "==> Checking for existing IBC channel..."
+echo "==> Checking for existing IBC channel to Osmosis..."
 
-EXISTING_CHANNELS=$(hermes query channels --chain mirage-1 2>&1 | grep -c "channel-" || echo "0")
+# Query existing channels and look for one connected to osmosis-1
+CHANNEL_OUTPUT=$(hermes query channels --chain mirage-1 2>&1 || true)
+MIRAGE_CHANNEL=$(echo "$CHANNEL_OUTPUT" | grep -B5 "counterparty_chain_id: osmosis-1" | grep -oE "channel-[0-9]+" | head -1 || echo "")
 
-if [ "$EXISTING_CHANNELS" -gt 0 ]; then
-    echo "    Channel already exists on mirage-1"
-    hermes query channels --chain mirage-1 2>&1 | grep -E "channel-|port_id|state" || true
+if [ -n "$MIRAGE_CHANNEL" ]; then
+    echo "    Found existing channel: $MIRAGE_CHANNEL"
+    # Get the counterparty channel on Osmosis
+    OSMOSIS_CHANNEL=$(hermes query channel end --chain mirage-1 --port transfer --channel "$MIRAGE_CHANNEL" 2>&1 | grep -oE "channel-[0-9]+" | tail -1 || echo "")
+    echo "    Counterparty on Osmosis: $OSMOSIS_CHANNEL"
 else
-    echo "    No channel found. Creating new IBC channel..."
+    echo ""
+    echo "    ╔══════════════════════════════════════════════════════════════╗"
+    echo "    ║                      NO CHANNEL FOUND                        ║"
+    echo "    ╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    
+    if [ "$CREATE_NEW_CHANNEL" != "true" ]; then
+        echo "    No IBC channel to Osmosis exists on this chain."
+        echo ""
+        echo "    If this is the FIRST TIME setting up IBC, run with:"
+        echo "        $0 --create-new-channel"
+        echo ""
+        echo "    If a channel SHOULD exist, check:"
+        echo "        1. Is the relayer wallet funded?"
+        echo "        2. Did the IBC client expire? (trusting period is ~14 days)"
+        echo "        3. Run 'hermes query channels --chain mirage-1' to debug"
+        echo ""
+        echo "    ⚠️  DO NOT create a new channel if one already exists!"
+        echo "       This will create DUPLICATE channels and break the Osmosis asset list."
+        echo ""
+        exit 1
+    fi
+    
+    echo "    ╔══════════════════════════════════════════════════════════════╗"
+    echo "    ║                    ⚠️  WARNING ⚠️                             ║"
+    echo "    ║                                                              ║"
+    echo "    ║  You are about to CREATE A NEW IBC CHANNEL.                  ║"
+    echo "    ║                                                              ║"
+    echo "    ║  This should ONLY be done if:                                ║"
+    echo "    ║    • This is the first-ever IBC setup for Mirage             ║"
+    echo "    ║    • The previous channel's clients have EXPIRED             ║"
+    echo "    ║                                                              ║"
+    echo "    ║  Creating duplicate channels will:                           ║"
+    echo "    ║    • Break the Osmosis asset list integration                ║"
+    echo "    ║    • Require updating the channel in osmosis-labs/assetlists ║"
+    echo "    ║    • Cause user confusion                                    ║"
+    echo "    ║                                                              ║"
+    echo "    ╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    read -p "    Type 'CREATE' to proceed with new channel creation: " CONFIRM_CREATE
+    if [ "$CONFIRM_CREATE" != "CREATE" ]; then
+        echo "    Aborted."
+        exit 1
+    fi
+    
+    echo ""
+    echo "==> Creating new IBC channel..."
     echo "    This will take 2-3 minutes and cost gas on both chains."
     echo ""
     
-    if hermes create channel --a-chain mirage-1 --b-chain osmosis-1 --a-port transfer --b-port transfer --new-client-connection --yes 2>&1; then
+    CREATE_OUTPUT=$(hermes create channel --a-chain mirage-1 --b-chain osmosis-1 --a-port transfer --b-port transfer --new-client-connection --yes 2>&1)
+    echo "$CREATE_OUTPUT"
+    
+    if echo "$CREATE_OUTPUT" | grep -q "SUCCESS"; then
         echo ""
         echo "==> IBC channel created successfully!"
+        # Extract channel IDs from creation output
+        MIRAGE_CHANNEL=$(echo "$CREATE_OUTPUT" | grep -oE "channel-[0-9]+" | head -1 || echo "channel-?")
+        OSMOSIS_CHANNEL=$(echo "$CREATE_OUTPUT" | grep -oE "channel-[0-9]+" | tail -1 || echo "channel-?")
+        echo ""
+        echo "    ╔══════════════════════════════════════════════════════════════╗"
+        echo "    ║  NEW CHANNEL CREATED - ACTION REQUIRED                       ║"
+        echo "    ╠══════════════════════════════════════════════════════════════╣"
+        echo "    ║  Mirage channel:  $MIRAGE_CHANNEL"
+        echo "    ║  Osmosis channel: $OSMOSIS_CHANNEL"
+        echo "    ║                                                              ║"
+        echo "    ║  You MUST update the Osmosis asset list:                     ║"
+        echo "    ║  1. Fork github.com/osmosis-labs/assetlists                  ║"
+        echo "    ║  2. Update osmosis-1/osmosis.zone_assets.json                ║"
+        echo "    ║  3. Change path to: transfer/$OSMOSIS_CHANNEL/umirage"
+        echo "    ║  4. Submit PR                                                ║"
+        echo "    ╚══════════════════════════════════════════════════════════════╝"
+        echo ""
     else
         echo ""
         echo "ERROR: Failed to create IBC channel. Check logs above."
@@ -233,6 +362,13 @@ else
     fi
 fi
 
+# Verify we have channel numbers
+if [ -z "$MIRAGE_CHANNEL" ] || [ -z "$OSMOSIS_CHANNEL" ]; then
+    echo "WARNING: Could not detect channel numbers automatically."
+    echo "         Check 'hermes query channels --chain mirage-1' manually."
+    MIRAGE_CHANNEL="${MIRAGE_CHANNEL:-channel-?}"
+    OSMOSIS_CHANNEL="${OSMOSIS_CHANNEL:-channel-?}"
+fi
 # Start the relayer
 echo ""
 echo "==> Setting up Hermes relayer..."
@@ -329,3 +465,12 @@ echo "To test IBC transfer from Mirage to Osmosis:"
 echo "  miraged tx ibc-transfer transfer transfer $MIRAGE_CHANNEL <OSMO_ADDRESS> 1000000umirage --from <KEY> --chain-id mirage-1 --fees 50000umirage"
 echo ""
 echo "==========================================="
+echo ""
+echo "NOTE: For Hermes to auto-start on future container restarts,"
+echo "      you must restart the container once:"
+echo ""
+echo "      docker restart mirage"
+echo ""
+echo "      The entrypoint will then detect ~/.hermes/config.toml"
+echo "      and start Hermes automatically in a tmux window."
+echo ""

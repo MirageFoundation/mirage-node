@@ -286,7 +286,7 @@ run_cmd '
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -qx mirage:prod; then
     docker rmi mirage:prod
   fi
-  docker system prune -f --volumes
+  docker system prune -f
 '
 
 echo "==> Loading image on remote..."

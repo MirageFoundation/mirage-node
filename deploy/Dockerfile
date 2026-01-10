@@ -118,6 +118,9 @@ COPY --from=builder /opt/mirage/deploy/derive_consensus_key.py /opt/mirage/deplo
 COPY --from=builder /opt/mirage/deploy/letsencrypt_register.sh /opt/mirage/deploy/letsencrypt_register.sh
 COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/deploy/enable_validator_mode.sh
 
+# IBC relayer setup
+COPY --from=builder /opt/mirage/deploy/setup_hermes_relayer.sh /opt/mirage/deploy/setup_hermes_relayer.sh
+
 # Set working directory
 WORKDIR /opt/mirage
 

@@ -340,6 +340,9 @@ function MobileBottomNav({ state }) {
     // Bottom-sheet profile menu visibility
     const [isProfileSheetOpen, setIsProfileSheetOpen] = useState(false);
 
+    // Track if an input/textarea is focused (keyboard is likely open)
+    const [isInputFocused, setIsInputFocused] = useState(false);
+
     const publicKey = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const hasPublicKey = !!publicKey;
@@ -428,6 +431,40 @@ function MobileBottomNav({ state }) {
             }
 
             if (rafId) cancelAnimationFrame(rafId);
+        };
+    }, [isMobile]);
+
+    // Track when text inputs are focused to hide bottom nav (keyboard open)
+    useEffect(() => {
+        if (!isMobile) return;
+
+        const handleFocusIn = (e) => {
+            const tag = e.target?.tagName?.toLowerCase();
+            const type = e.target?.type?.toLowerCase();
+            // Detect text inputs and textareas (not buttons, checkboxes, etc.)
+            const isTextInput = tag === 'textarea' ||
+                (tag === 'input' && ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type));
+            if (isTextInput) {
+                setIsInputFocused(true);
+            }
+        };
+
+        const handleFocusOut = (e) => {
+            const tag = e.target?.tagName?.toLowerCase();
+            const type = e.target?.type?.toLowerCase();
+            const isTextInput = tag === 'textarea' ||
+                (tag === 'input' && ['text', 'search', 'email', 'password', 'tel', 'url', 'number'].includes(type));
+            if (isTextInput) {
+                setIsInputFocused(false);
+            }
+        };
+
+        document.addEventListener('focusin', handleFocusIn);
+        document.addEventListener('focusout', handleFocusOut);
+
+        return () => {
+            document.removeEventListener('focusin', handleFocusIn);
+            document.removeEventListener('focusout', handleFocusOut);
         };
     }, [isMobile]);
 
@@ -546,8 +583,8 @@ function MobileBottomNav({ state }) {
         }
     };
 
-    // Don't render on desktop or hidden routes
-    if (!isMobile || shouldHide) return null;
+    // Don't render on desktop, hidden routes, or when keyboard is open
+    if (!isMobile || shouldHide || isInputFocused) return null;
 
     // If not signed in, Create button redirects to sign up
     const createLink = hasPublicKey
