@@ -272,14 +272,24 @@ fi
 echo ""
 echo "==> Checking for existing IBC channel to Osmosis..."
 
-# Query existing channels and look for one connected to osmosis-1
-CHANNEL_OUTPUT=$(hermes query channels --chain mirage-1 2>&1 || true)
-MIRAGE_CHANNEL=$(echo "$CHANNEL_OUTPUT" | grep -B5 "counterparty_chain_id: osmosis-1" | grep -oE "channel-[0-9]+" | head -1 || echo "")
+# Query existing channels and check each one's counterparty
+CHANNEL_LIST=$(hermes query channels --chain mirage-1 2>&1 | grep -oE 'channel-[0-9]+' || true)
+MIRAGE_CHANNEL=""
+OSMOSIS_CHANNEL=""
+
+for chan in $CHANNEL_LIST; do
+    # Query channel details to find counterparty chain
+    CHAN_INFO=$(hermes query channel end --chain mirage-1 --port transfer --channel "$chan" 2>&1 || true)
+    if echo "$CHAN_INFO" | grep -q "osmosis-1"; then
+        MIRAGE_CHANNEL="$chan"
+        # Extract counterparty channel ID
+        OSMOSIS_CHANNEL=$(echo "$CHAN_INFO" | grep -oE 'channel-[0-9]+' | tail -1 || echo "")
+        break
+    fi
+done
 
 if [ -n "$MIRAGE_CHANNEL" ]; then
     echo "    Found existing channel: $MIRAGE_CHANNEL"
-    # Get the counterparty channel on Osmosis
-    OSMOSIS_CHANNEL=$(hermes query channel end --chain mirage-1 --port transfer --channel "$MIRAGE_CHANNEL" 2>&1 | grep -oE "channel-[0-9]+" | tail -1 || echo "")
     echo "    Counterparty on Osmosis: $OSMOSIS_CHANNEL"
 else
     echo ""
