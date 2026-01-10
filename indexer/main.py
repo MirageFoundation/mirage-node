@@ -27,6 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from indexer.database import DatabaseManager
 from indexer.chain_client import ChainClient
 from indexer.message_processor import MessageProcessor, TYPE_URL_TO_PROTO
+from indexer.migrations import run_migrations
 from indexer.params import load_params as load_chain_params
 from indexer.settings import (
     SEEN_TXS_MAX_SIZE,
@@ -61,6 +62,12 @@ class Indexer:
 
         self.db = DatabaseManager(db_url)
         self.chain = ChainClient(jsonrpc_url)
+        
+        # Run pending migrations before processing begins
+        migration_count = run_migrations(self.db, self.chain)
+        if migration_count > 0:
+            logger.info(f"Completed {migration_count} migrations")
+        
         self.processor = MessageProcessor(
             self.db,
             self.chain,

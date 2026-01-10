@@ -426,50 +426,8 @@ class DatabaseManager:
                     "CREATE INDEX IF NOT EXISTS idx_topic_content_stats_topic_lower ON topic_content_stats(LOWER(topic))"
                 )
 
-                # ========== v1.6.3 Migration: Backfill missing profile created_at ==========
-                # Some profiles have created_at=0 due to older indexing. Set to Nov 1, 2025 UTC midnight.
-                # NOTE: Original migration incorrectly used 1730419200 (Nov 1, 2024). Fixed in v1.6.4.
-                cur.execute("SELECT value FROM meta WHERE key = 'migration_v1.6.3_profile_dates'")
-                if not cur.fetchone():
-                    # Nov 1, 2025 00:00:00 UTC = 1761955200
-                    default_created_at = 1761955200
-                    cur.execute(
-                        "UPDATE profiles SET created_at = %s WHERE created_at = 0 OR created_at IS NULL",
-                        (default_created_at,),
-                    )
-                    updated_count = cur.rowcount
-                    cur.execute(
-                        "INSERT INTO meta(key, value) VALUES('migration_v1.6.3_profile_dates', %s)",
-                        (f"completed:{updated_count}",),
-                    )
-                    logger.info(f"v1.6.3 migration: Updated {updated_count} profiles with default created_at")
-
-                # ========== v1.6.4 Migration: Fix incorrect profile created_at timestamps ==========
-                # The v1.6.3 migration incorrectly used 1730419200 (Nov 1, 2024) instead of
-                # 1761955200 (Nov 1, 2025). This migration fixes any profiles set to the wrong date,
-                # and also corrects any created_at that is before the launch date.
-                cur.execute("SELECT value FROM meta WHERE key = 'migration_v1.6.4_fix_created_at'")
-                if not cur.fetchone():
-                    # Nov 1, 2025 00:00:00 UTC = 1761955200 (earliest possible account creation)
-                    launch_timestamp = 1761955200
-                    # Fix any profile with created_at before launch date
-                    cur.execute(
-                        "UPDATE profiles SET created_at = %s WHERE created_at < %s AND created_at > 0",
-                        (launch_timestamp, launch_timestamp),
-                    )
-                    updated_count = cur.rowcount
-                    cur.execute(
-                        "INSERT INTO meta(key, value) VALUES('migration_v1.6.4_fix_created_at', %s)",
-                        (f"completed:{updated_count}",),
-                    )
-                    logger.info(f"v1.6.4 migration: Fixed {updated_count} profiles with pre-launch created_at")
-
-                # ========== v1.6.3 Migration: Initial similarity calculation for all users ==========
-                cur.execute("SELECT value FROM meta WHERE key = 'migration_v1.6.3_similarity'")
-                if not cur.fetchone():
-                    logger.info("v1.6.3 migration: Starting initial similarity calculation...")
-                    self._compute_all_user_similarities(cur)
-                    cur.execute("INSERT INTO meta(key, value) VALUES('migration_v1.6.3_similarity', 'completed')")
+                # NOTE: Data migrations have been moved to indexer/migrations/
+                # They run automatically on indexer startup via run_migrations()
 
                 # ========== Referral System Tables (prefixed for easy cleanup) ==========
                 # referral_links: who referred whom (immutable once set)
