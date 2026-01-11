@@ -13,7 +13,7 @@ set -euo pipefail
 # NOTE: The tmux hermes window startup code (near end of file) is duplicated
 #       in deploy/entrypoint.sh. If you change one, update the other!
 
-HERMES_VERSION="v1.10.4"
+HERMES_VERSION="v1.13.3"
 HERMES_HOME="${HOME}/.mirage/hermes"
 CREATE_NEW_CHANNEL=false
 
@@ -161,16 +161,16 @@ MNEMONIC_FILE=$(mktemp)
 echo "$MNEMONIC" > "$MNEMONIC_FILE"
 trap "rm -f $MNEMONIC_FILE" EXIT
 
-hermes --home "$HERMES_HOME" keys delete --chain mirage-1 --key-name relayer >/dev/null 2>&1 || true
-hermes --home "$HERMES_HOME" keys delete --chain osmosis-1 --key-name relayer >/dev/null 2>&1 || true
+hermes --config "$HERMES_HOME/config.toml" keys delete --chain mirage-1 --key-name relayer >/dev/null 2>&1 || true
+hermes --config "$HERMES_HOME/config.toml" keys delete --chain osmosis-1 --key-name relayer >/dev/null 2>&1 || true
 
-hermes --home "$HERMES_HOME" keys add --chain mirage-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
-hermes --home "$HERMES_HOME" keys add --chain osmosis-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
+hermes --config "$HERMES_HOME/config.toml" keys add --chain mirage-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
+hermes --config "$HERMES_HOME/config.toml" keys add --chain osmosis-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
 
 rm -f "$MNEMONIC_FILE"
 
-MIRAGE_ADDR=$(hermes --home "$HERMES_HOME" keys list --chain mirage-1 2>&1 | grep -oE 'mirage1[a-z0-9]+')
-OSMO_ADDR=$(hermes --home "$HERMES_HOME" keys list --chain osmosis-1 2>&1 | grep -oE 'osmo1[a-z0-9]+')
+MIRAGE_ADDR=$(hermes --config "$HERMES_HOME/config.toml" keys list --chain mirage-1 2>&1 | grep -oE 'mirage1[a-z0-9]+')
+OSMO_ADDR=$(hermes --config "$HERMES_HOME/config.toml" keys list --chain osmosis-1 2>&1 | grep -oE 'osmo1[a-z0-9]+')
 
 echo ""
 echo "==========================================="
@@ -201,7 +201,7 @@ check_balance() {
     local chain=$1
     local denom=$2
     local result
-    result=$(hermes --home "$HERMES_HOME" keys balance --chain "$chain" --key-name relayer 2>&1 | grep -oE "[0-9]+ $denom" | awk '{print $1}' || echo "0")
+    result=$(hermes --config "$HERMES_HOME/config.toml" keys balance --chain "$chain" --key-name relayer 2>&1 | grep -oE "[0-9]+ $denom" | awk '{print $1}' || echo "0")
     echo "${result:-0}"
 }
 
@@ -249,13 +249,13 @@ echo ""
 echo "==> Checking for existing IBC channel to Osmosis..."
 
 # Query existing channels and check each one's counterparty
-CHANNEL_LIST=$(hermes --home "$HERMES_HOME" query channels --chain mirage-1 2>&1 | grep -oE 'channel-[0-9]+' || true)
+CHANNEL_LIST=$(hermes --config "$HERMES_HOME/config.toml" query channels --chain mirage-1 2>&1 | grep -oE 'channel-[0-9]+' || true)
 MIRAGE_CHANNEL=""
 OSMOSIS_CHANNEL=""
 
 for chan in $CHANNEL_LIST; do
     # Query channel details to get connection and counterparty channel
-    CHAN_INFO=$(hermes --home "$HERMES_HOME" query channel end --chain mirage-1 --port transfer --channel "$chan" 2>&1 || true)
+    CHAN_INFO=$(hermes --config "$HERMES_HOME/config.toml" query channel end --chain mirage-1 --port transfer --channel "$chan" 2>&1 || true)
     
     # Skip if channel not in Open state
     if ! echo "$CHAN_INFO" | grep -q "state: Open"; then
@@ -269,14 +269,14 @@ for chan in $CHANNEL_LIST; do
     fi
     
     # Query connection to get client ID
-    CONN_INFO=$(hermes --home "$HERMES_HOME" query connection end --chain mirage-1 --connection "$CONN_ID" 2>&1 || true)
+    CONN_INFO=$(hermes --config "$HERMES_HOME/config.toml" query connection end --chain mirage-1 --connection "$CONN_ID" 2>&1 || true)
     CLIENT_ID=$(echo "$CONN_INFO" | grep -oE '07-tendermint-[0-9]+' | head -1 || echo "")
     if [ -z "$CLIENT_ID" ]; then
         continue
     fi
     
     # Query client state to get counterparty chain ID
-    CLIENT_INFO=$(hermes --home "$HERMES_HOME" query client state --chain mirage-1 --client "$CLIENT_ID" 2>&1 || true)
+    CLIENT_INFO=$(hermes --config "$HERMES_HOME/config.toml" query client state --chain mirage-1 --client "$CLIENT_ID" 2>&1 || true)
     if echo "$CLIENT_INFO" | grep -q "osmosis-1"; then
         MIRAGE_CHANNEL="$chan"
         # Extract counterparty channel ID
@@ -304,7 +304,7 @@ else
         echo "    If a channel SHOULD exist, check:"
         echo "        1. Is the relayer wallet funded?"
         echo "        2. Did the IBC client expire? (trusting period is ~14 days)"
-        echo "        3. Run 'hermes --home ~/.mirage/hermes query channels --chain mirage-1' to debug"
+        echo "        3. Run 'hermes --config ~/.mirage/hermes/config.toml query channels --chain mirage-1' to debug"
         echo ""
         echo "    ⚠️  DO NOT create a new channel if one already exists!"
         echo "       This will create DUPLICATE channels and break the Osmosis asset list."
@@ -339,7 +339,7 @@ else
     echo "    This will take 2-3 minutes and cost gas on both chains."
     echo ""
     
-    CREATE_OUTPUT=$(hermes --home "$HERMES_HOME" create channel --a-chain mirage-1 --b-chain osmosis-1 --a-port transfer --b-port transfer --new-client-connection --yes 2>&1)
+    CREATE_OUTPUT=$(hermes --config "$HERMES_HOME/config.toml" create channel --a-chain mirage-1 --b-chain osmosis-1 --a-port transfer --b-port transfer --new-client-connection --yes 2>&1)
     echo "$CREATE_OUTPUT"
     
     if echo "$CREATE_OUTPUT" | grep -q "SUCCESS"; then
@@ -372,7 +372,7 @@ fi
 # Verify we have channel numbers
 if [ -z "$MIRAGE_CHANNEL" ] || [ -z "$OSMOSIS_CHANNEL" ]; then
     echo "WARNING: Could not detect channel numbers automatically."
-    echo "         Check 'hermes --home ~/.mirage/hermes query channels --chain mirage-1' manually."
+    echo "         Check 'hermes --config ~/.mirage/hermes/config.toml query channels --chain mirage-1' manually."
     MIRAGE_CHANNEL="${MIRAGE_CHANNEL:-channel-?}"
     OSMOSIS_CHANNEL="${OSMOSIS_CHANNEL:-channel-?}"
 fi
@@ -397,7 +397,7 @@ if tmux has-session -t mirage 2>/dev/null; then
     
     # Create hermes window with the standard command from entrypoint
     tmux new-window -t "$SESSION" -n hermes -c /opt/mirage
-    tmux send-keys -t "$SESSION:hermes" "hermes --home \"$HERMES_HOME\" start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
+    tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
     
     # Add status monitor pane (50% bottom)
     # Set default window size for headless mode, then split
@@ -442,7 +442,7 @@ case "$SERVICE_MODE" in
         echo "Relayer running in tmux window 'hermes':"
         echo "  View:    tmux select-window -t mirage:hermes"
         echo "  Logs:    tail -f ~/.mirage/logs/hermes/hermes-\$(date -u +%Y-%m-%d).log"
-        echo "  Restart: tmux send-keys -t mirage:hermes C-c && sleep 1 && tmux send-keys -t mirage:hermes 'hermes --home ~/.mirage/hermes start' C-m"
+        echo "  Restart: tmux send-keys -t mirage:hermes C-c && sleep 1 && tmux send-keys -t mirage:hermes 'hermes --config ~/.mirage/hermes/config.toml start' C-m"
         ;;
     pending)
         echo "Relayer configured but NOT running."
