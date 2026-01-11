@@ -82,97 +82,19 @@ fi
 echo "==> Deriving relayer addresses..."
 mkdir -p "$HERMES_HOME/keys"
 
-cat > "$HERMES_HOME/config.toml" << 'CONFIG'
-[global]
-log_level = 'info'
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATE="$ROOT_DIR/deploy/templates/hermes/config.toml"
 
-[mode.clients]
-enabled = true
-refresh = true
-misbehaviour = true
+if [ ! -f "$TEMPLATE" ]; then
+    echo "ERROR: Hermes config template not found: $TEMPLATE" >&2
+    exit 1
+fi
 
-[mode.connections]
-enabled = false
-
-[mode.channels]
-enabled = true
-
-[mode.packets]
-enabled = true
-clear_interval = 100
-clear_on_start = true
-tx_confirmation = false
-
-[rest]
-enabled = false
-host = '127.0.0.1'
-port = 3000
-
-[telemetry]
-enabled = false
-host = '127.0.0.1'
-port = 3001
-
-[[chains]]
-id = 'mirage-1'
-type = 'CosmosSdk'
-rpc_addr = 'http://127.0.0.1:26657'
-grpc_addr = 'http://127.0.0.1:9090'
-event_source = { mode = 'push', url = 'ws://127.0.0.1:26657/websocket', batch_delay = '500ms' }
-rpc_timeout = '10s'
-trusted_node = false
-account_prefix = 'mirage'
-key_name = 'relayer'
-# Store keys under ~/.mirage/hermes/keys (use absolute path; Hermes does NOT expand $HOME here)
-key_store_folder = '/root/.mirage/hermes/keys'
-key_store_type = 'Test'
-store_prefix = 'ibc'
-default_gas = 100000
-max_gas = 4000000
-gas_multiplier = 1.2
-max_msg_num = 30
-max_tx_size = 180000
-clock_drift = '5s'
-max_block_time = '30s'
-trusting_period = '14days'
-trust_threshold = '2/3'
-gas_price = { price = 0.025, denom = 'umirage' }
-address_type = { derivation = 'cosmos' }
-
-[chains.packet_filter]
-policy = 'allow'
-list = [['transfer', 'channel-1']]
-
-[[chains]]
-id = 'osmosis-1'
-type = 'CosmosSdk'
-rpc_addr = 'https://rpc.osmosis.zone:443'
-grpc_addr = 'https://grpc.osmosis.zone:443'
-event_source = { mode = 'push', url = 'wss://rpc.osmosis.zone/websocket', batch_delay = '500ms' }
-rpc_timeout = '10s'
-trusted_node = false
-account_prefix = 'osmo'
-key_name = 'relayer'
-# Store keys under ~/.mirage/hermes/keys (use absolute path; Hermes does NOT expand $HOME here)
-key_store_folder = '/root/.mirage/hermes/keys'
-key_store_type = 'Test'
-store_prefix = 'ibc'
-default_gas = 300000
-max_gas = 10000000
-gas_multiplier = 1.3
-max_msg_num = 30
-max_tx_size = 180000
-clock_drift = '5s'
-max_block_time = '30s'
-trusting_period = '13days'
-trust_threshold = '2/3'
-gas_price = { price = 0.1, denom = 'uosmo' }
-address_type = { derivation = 'cosmos' }
-
-[chains.packet_filter]
-policy = 'allow'
-list = [['transfer', 'channel-108698']]
-CONFIG
+export HERMES_KEY_STORE_FOLDER="$HERMES_HOME/keys"
+if ! python3 "$ROOT_DIR/deploy/render_template.py" "$TEMPLATE" "$HERMES_HOME/config.toml"; then
+    echo "ERROR: Failed to render Hermes config" >&2
+    exit 1
+fi
 
 # Import keys to derive addresses
 MNEMONIC_FILE=$(mktemp)

@@ -107,4 +107,4 @@ Key changes since the last production release:
 - Tooling and deployment:
   - `deploy/deploy.sh` gained a `--build-only` mode for producing tarballs without deploying.
   - Added safer multi-host deployment workflow by reusing a single pre-built image tarball across servers.
-  - Tmux configuration is bundled via `deploy/templates/tmux.conf` inside the Docker image.
+  - Tmux configuration is bundled via `deploy/templates/tmux/tmux.conf` inside the Docker image.

@@ -51,3 +51,4 @@ max-txs = 5000
 [logging]
 format = "plain"
 level = "info"
+

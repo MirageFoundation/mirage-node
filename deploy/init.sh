@@ -42,7 +42,9 @@ fi
 
 # Peer configuration (from node.env)
 # For local testnet (SKIP_PEERS=1), disable peer connections to avoid validator set mismatches
-R="$ROOT_DIR/deploy/templates"
+R_ENV="$ROOT_DIR/deploy/templates/env"
+R_NODE="$ROOT_DIR/deploy/templates/node"
+R_CADDY="$ROOT_DIR/deploy/templates/caddy"
 if [ "${SKIP_PEERS:-0}" = "1" ]; then
   echo "==> Local testnet mode, disabling peer connections"
   PERSISTENT_PEERS=""
@@ -71,13 +73,13 @@ export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBO
 OUT="$NODE_HOME/config"
 mkdir -p "$OUT"
 
-python3 "$ROOT_DIR/deploy/render_template.py" "$R/config.toml" "$OUT/config.toml"
-python3 "$ROOT_DIR/deploy/render_template.py" "$R/app.toml" "$OUT/app.toml"
-python3 "$ROOT_DIR/deploy/render_template.py" "$R/client.toml" "$OUT/client.toml"
+python3 "$ROOT_DIR/deploy/render_template.py" "$R_NODE/config.toml" "$OUT/config.toml"
+python3 "$ROOT_DIR/deploy/render_template.py" "$R_NODE/app.toml" "$OUT/app.toml"
+python3 "$ROOT_DIR/deploy/render_template.py" "$R_NODE/client.toml" "$OUT/client.toml"
 
 # Caddyfile (HTTP only by default)
 mkdir -p /etc/caddy
-if ! python3 "$ROOT_DIR/deploy/render_template.py" "$R/Caddyfile" "/etc/caddy/Caddyfile"; then
+if ! python3 "$ROOT_DIR/deploy/render_template.py" "$R_CADDY/Caddyfile" "/etc/caddy/Caddyfile"; then
   echo "ERROR: Failed to render Caddyfile" >&2
   exit 1
 fi

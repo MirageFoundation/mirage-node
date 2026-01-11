@@ -153,7 +153,8 @@ def run_env_sync(config_dir: Path) -> None:
     from deploy.migrations._helpers import sync_all
 
     config_dir = Path(config_dir)
-    templates_dir = Path(__file__).parent.parent / "templates"
+    templates_root = Path(__file__).parent.parent / "templates"
+    templates_dir = templates_root / "env" if (templates_root / "env").exists() else templates_root
 
     if not templates_dir.exists():
         logger.warning(f"Templates directory not found: {templates_dir}")

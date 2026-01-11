@@ -42,7 +42,8 @@ def run(config_dir: Path, logger) -> str:
     results = []
     data_dir = config_dir.parent  # ~/.mirage
     main_dir = data_dir / "main"
-    templates_dir = Path(__file__).parent.parent / "templates"
+    templates_root = Path(__file__).parent.parent / "templates"
+    templates_dir = templates_root / "env" if (templates_root / "env").exists() else templates_root
 
     # =========================================================================
     # STEP 1: Move secrets to secrets.env

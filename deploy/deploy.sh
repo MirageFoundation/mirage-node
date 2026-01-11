@@ -292,7 +292,7 @@ if [ "$MODE" = "init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
   ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.mirage/env'
   # Copy env templates if they don't exist on remote
-  for f in "$(dirname "$0")/templates"/*.env; do
+  for f in "$(dirname "$0")/templates/env"/*.env; do
     if [ -f "$f" ]; then
       fname="$(basename "$f")"
       # Only copy if file doesn't exist on remote (preserve user customizations)

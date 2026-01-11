@@ -110,7 +110,7 @@ bash "$ROOT_DIR/deploy/init.sh"
 # This prevents issues where the Caddyfile might be missing or incorrect
 echo "==> Ensuring Caddyfile is correctly rendered..."
 mkdir -p /etc/caddy
-if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/Caddyfile" "/etc/caddy/Caddyfile"; then
+if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "/etc/caddy/Caddyfile"; then
   echo "ERROR: Failed to render Caddyfile" >&2
   exit 1
 fi
@@ -132,7 +132,7 @@ echo "==> Starting tmux session '$SESSION'..."
 tmux new-session -d -s "$SESSION" -c "$ROOT_DIR" -n caddy
 
 # Apply bundled tmux config
-TMUX_TEMPLATE="$ROOT_DIR/deploy/templates/tmux.conf"
+TMUX_TEMPLATE="$ROOT_DIR/deploy/templates/tmux/tmux.conf"
 if [ -f "$TMUX_TEMPLATE" ]; then
   cp "$TMUX_TEMPLATE" /etc/tmux.conf
   tmux source-file /etc/tmux.conf 2>/dev/null
