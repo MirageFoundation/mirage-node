@@ -42,7 +42,8 @@ mkdir -p "$CADDY_DIR" "$DATA_DIR"
 
 echo "==> Checking DNS A record..."
 HOST_IP=$(curl -sf https://api.ipify.org)
-DOMAIN_IP=$(getent ahostsv4 "$DOMAIN" | awk '{print $1; exit}')
+# Use external DNS (Cloudflare) to avoid Docker's internal DNS resolver
+DOMAIN_IP=$(dig +short "$DOMAIN" @1.1.1.1 A | head -1)
 echo "    Public IP (this host): ${HOST_IP}"
 echo "    ${DOMAIN} resolves to: ${DOMAIN_IP}"
 if [ "$HOST_IP" != "$DOMAIN_IP" ]; then

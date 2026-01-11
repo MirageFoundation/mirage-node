@@ -75,6 +75,7 @@ RUN apt-get update && apt-get install -y \
     coreutils \
     jq \
     procps \
+    dnsutils \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 
