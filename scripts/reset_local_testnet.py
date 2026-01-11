@@ -61,7 +61,7 @@ def stop_local_container():
     time.sleep(2)
     # Clear main directory using docker (files owned by root)
     home = str(Path.home())
-    run(["bash", "-lc", f"docker run --rm -v '{home}/.mirage:/data' alpine rm -rf /data/main 2>/dev/null || true"])
+    run(["bash", "-lc", f"docker run --rm -v '{home}/.mirage:/data' alpine rm -rf /data/node 2>/dev/null || true"])
     run(["bash", "-lc", "docker rm -f mirage 2>/dev/null || true"])
     status("Container stopped and removed")
 

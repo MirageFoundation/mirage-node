@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def get_node_home():
     home_base = os.path.expanduser("~/.mirage")
-    return os.path.join(home_base, "main")
+    return os.path.join(home_base, "node")
 
 
 def read_toml_simple(path):
