@@ -120,11 +120,11 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     Create a lightweight snapshot on the remote host by running export there.
     This avoids copying ~5GB of blockchain databases, reducing transfer to ~200MB.
 
-    The archive contains:
+    The archive contains (in main/snapshot/):
+    - miraged (production binary, ~150MB)
     - export.json (chain state export, ~50MB)
-    - bin/miraged (production binary, ~150MB)
-    - config/ (node configuration)
     - indexer.sql (PostgreSQL dump, ~20MB)
+    And main/config/ (node configuration)
     """
     conn = f"{ssh_user}@{source_host}"
     status(f"Connecting to source host: {conn}")
@@ -136,7 +136,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'mkdir -p /root/.mirage/main/bin && docker cp mirage:/opt/mirage/blockchain/miraged /root/.mirage/main/bin/miraged'",
+            f"ssh {conn} 'mkdir -p /root/.mirage/main/snapshot && docker cp mirage:/opt/mirage/blockchain/miraged /root/.mirage/main/snapshot/miraged'",
         ]
     )
 
@@ -145,7 +145,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} '/root/.mirage/main/bin/miraged export --home /root/.mirage/main --output-document /root/.mirage/main/export.json'",
+            f"ssh {conn} '/root/.mirage/main/snapshot/miraged export --home /root/.mirage/main --output-document /root/.mirage/main/snapshot/export.json'",
         ]
     )
 
@@ -155,30 +155,27 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
             "bash",
             "-lc",
             f"ssh {conn} 'docker start mirage >/dev/null 2>&1; sleep 5; "
-            f'docker exec mirage bash -c "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/main/indexer.sql" 2>/dev/null || true; '
+            f'docker exec mirage bash -c "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/main/snapshot/indexer.sql" 2>/dev/null || true; '
             f"docker stop --timeout 10 mirage || true'",
         ]
     )
 
     status("Creating lightweight remote archive...")
-    # Include indexer.sql only if it exists
     run(
         [
             "bash",
             "-lc",
             f"ssh {conn} 'cd /root/.mirage && tar czf /tmp/main.tgz "
-            "main/bin "
-            "main/config "
-            "main/export.json "
-            "$([ -f main/indexer.sql ] && echo main/indexer.sql)'",
+            "main/snapshot "
+            "main/config'",
         ]
     )
 
     status("Restarting remote container 'mirage'...")
     run(["bash", "-lc", f"ssh {conn} 'docker start mirage >/dev/null 2>&1 || true'"])
 
-    status("Cleaning up remote export file...")
-    run(["bash", "-lc", f"ssh {conn} 'rm -f /root/.mirage/main/export.json'"])
+    status("Cleaning up remote snapshot directory...")
+    run(["bash", "-lc", f"ssh {conn} 'rm -rf /root/.mirage/main/snapshot'"])
 
     ensure_mirage_tmp()
     date_name = time.strftime("%Y-%m-%d")
@@ -204,10 +201,11 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
     extract_dir.mkdir(parents=True)
     run(["bash", "-lc", f"tar xzf '{local_tar}' -C '{extract_dir}' --no-same-owner --no-same-permissions"])
     src_dir = extract_dir / "main"
+    snapshot_dir = src_dir / "snapshot"
     if not src_dir.exists():
         raise RuntimeError(f"Expected directory not found after extraction: {src_dir}")
 
-    export_json = src_dir / "export.json"
+    export_json = snapshot_dir / "export.json"
     if not export_json.exists():
         raise RuntimeError(f"export.json not found in snapshot: {export_json}")
 
@@ -220,15 +218,15 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
             "-lc",
             "docker exec mirage bash -lc '"
             "rm -rf /root/.mirage/main.clone; "
-            "mkdir -p /root/.mirage/main.clone /root/.mirage/main'",
+            "mkdir -p /root/.mirage/main.clone/bin /root/.mirage/main'",
         ]
     )
 
     status("Copying config and binary into container...")
     run(["bash", "-lc", f"docker cp '{src_dir}/config' mirage:/root/.mirage/main.clone/"])
-    run(["bash", "-lc", f"docker cp '{src_dir}/bin' mirage:/root/.mirage/main.clone/"])
+    run(["bash", "-lc", f"docker cp '{snapshot_dir}/miraged' mirage:/root/.mirage/main.clone/bin/miraged"])
 
-    indexer_sql = src_dir / "indexer.sql"
+    indexer_sql = snapshot_dir / "indexer.sql"
     if indexer_sql.exists():
         status("Copying PostgreSQL indexer dump...")
         run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/main.clone/indexer.sql"])
@@ -884,7 +882,7 @@ def main():
         [
             "bash",
             "-lc",
-            "docker exec mirage bash -lc 'rm -rf /root/.mirage/main/bin /root/.mirage/main/.mirage /root/.mirage/main.clone 2>/dev/null || true'",
+            "docker exec mirage bash -lc 'rm -rf /root/.mirage/main/snapshot /root/.mirage/main/.mirage /root/.mirage/main.clone 2>/dev/null || true'",
         ]
     )
 

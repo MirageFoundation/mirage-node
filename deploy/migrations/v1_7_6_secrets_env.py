@@ -7,7 +7,7 @@ Moves sensitive credentials from node.env/backend.env to secrets.env.
 import shutil
 from pathlib import Path
 
-from deploy.migrations.helpers import (
+from deploy.migrations._helpers import (
     parse_env_file,
     remove_keys_from_file,
     update_env_value,

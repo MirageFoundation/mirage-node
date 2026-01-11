@@ -6,7 +6,7 @@ Also updates MONIKER if it's the default 'mirage-node'.
 
 from pathlib import Path
 
-from deploy.migrations.helpers import parse_env_file, update_env_value
+from deploy.migrations._helpers import parse_env_file, update_env_value
 
 MIGRATION_KEY = "v1.7.6_domain_env"
 DESCRIPTION = "Move domain from .domain file to node.env"

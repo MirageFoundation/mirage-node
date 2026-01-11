@@ -321,3 +321,30 @@ def sync_all(templates_dir: Path, config_dir: Path, logger=None) -> dict:
     delete_legacy_files(config_dir, ["*.env.example"], logger)
 
     return overall
+
+
+def cleanup_node_temp_files(config_dir: Path, logger=None) -> int:
+    """
+    Clean up CometBFT temp files that accumulate on crash/restart.
+
+    Called on every deploy to prevent buildup.
+    Returns number of files cleaned.
+    """
+    import logging
+
+    if logger is None:
+        logger = logging.getLogger(__name__)
+
+    data_dir = config_dir.parent  # ~/.mirage
+    node_config_dir = data_dir / "main" / "config"
+
+    if not node_config_dir.exists():
+        return 0
+
+    temp_files = list(node_config_dir.glob("write-file-atomic-*"))
+    if temp_files:
+        for f in temp_files:
+            f.unlink()
+        logger.info(f"  Cleaned up {len(temp_files)} CometBFT temp files")
+
+    return len(temp_files)
