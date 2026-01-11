@@ -7,6 +7,7 @@ This migration:
 3. Cleans up legacy/orphaned files
 4. Moves ~/.hermes to ~/.mirage/hermes
 5. Adds packet_filter to Hermes config (only relay on channel-1)
+6. Sets Hermes `key_store_folder` per-chain to use ~/.mirage/hermes/keys
 
 All operations are idempotent - safe to run multiple times.
 """
@@ -222,7 +223,7 @@ def run(config_dir: Path, logger) -> str:
             results.append("moved hermes dir")
 
     # =========================================================================
-    # STEP 5: Update Hermes config (key_store_folder + packet_filter)
+    # STEP 5: Update Hermes config (packet_filter + per-chain key_store_folder)
     # =========================================================================
     logger.info("  Step 5: Hermes config updates")
 
@@ -232,14 +233,91 @@ def run(config_dir: Path, logger) -> str:
         content = hermes_config.read_text()
         modified = False
 
-        # Add key_store_folder if missing (so hermes finds keys in ~/.mirage/hermes/keys)
-        if "key_store_folder" not in content:
-            content = content.replace(
-                "[global]\nlog_level",
-                f"[global]\nkey_store_folder = '{data_dir}/hermes/keys'\nlog_level"
-            )
-            logger.info(f"    Added key_store_folder = '{data_dir}/hermes/keys'")
-            modified = True
+        # Remove INVALID key_store_folder placements from our prior attempt
+        # (top-level or [global]); valid placement is inside each [[chains]] block.
+        cleaned_lines = []
+        in_global = False
+        in_chain = False
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("[global]"):
+                in_global = True
+                in_chain = False
+            elif stripped.startswith("[[chains]]"):
+                in_chain = True
+                in_global = False
+            elif stripped.startswith("[") and not stripped.startswith("[[chains]]") and stripped != "[global]":
+                # any other section
+                in_chain = False
+                in_global = False
+
+            # Drop key_store_folder lines that are NOT inside a chain block
+            if stripped.startswith("key_store_folder") and not in_chain:
+                modified = True
+                continue
+            cleaned_lines.append(line)
+        content = "\n".join(cleaned_lines)
+
+        # Ensure each chain has key_store_folder (points to ~/.mirage/hermes/keys)
+        lines = content.split("\n")
+        new_lines = []
+        in_chain = False
+        saw_key_store = False
+        saw_key_name = False
+        current_chain_id = None
+
+        def _should_add_key_store(chain_id: str | None) -> str | None:
+            if chain_id == "mirage-1" or chain_id == "osmosis-1":
+                # NOTE: Hermes does not expand $HOME in this field in our environment,
+                # so we use an absolute path.
+                return "key_store_folder = '/root/.mirage/hermes/keys'"
+            return None
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("[[chains]]"):
+                # finalize previous chain (if missing)
+                if in_chain and not saw_key_store:
+                    ks = _should_add_key_store(current_chain_id)
+                    if ks:
+                        new_lines.append(ks)
+                        modified = True
+                # reset for new chain
+                in_chain = True
+                saw_key_store = False
+                saw_key_name = False
+                current_chain_id = None
+                new_lines.append(line)
+                continue
+
+            if in_chain:
+                if stripped.startswith("id ="):
+                    # e.g. id = 'mirage-1'
+                    current_chain_id = stripped.split("=", 1)[1].strip().strip("'").strip('"')
+                if stripped.startswith("key_store_folder"):
+                    saw_key_store = True
+                if stripped.startswith("key_name"):
+                    saw_key_name = True
+                    new_lines.append(line)
+                    # insert key_store_folder immediately after key_name if missing
+                    if not saw_key_store:
+                        ks = _should_add_key_store(current_chain_id)
+                        if ks:
+                            new_lines.append(ks)
+                            saw_key_store = True
+                            modified = True
+                    continue
+
+            new_lines.append(line)
+
+        # finalize last chain
+        if in_chain and not saw_key_store:
+            ks = _should_add_key_store(current_chain_id)
+            if ks:
+                new_lines.append(ks)
+                modified = True
+
+        content = "\n".join(new_lines)
 
         # Add packet_filter if missing (only relay on channel-1)
         if "packet_filter" not in content:

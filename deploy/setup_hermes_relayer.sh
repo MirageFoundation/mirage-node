@@ -13,7 +13,11 @@ set -euo pipefail
 # NOTE: The tmux hermes window startup code (near end of file) is duplicated
 #       in deploy/entrypoint.sh. If you change one, update the other!
 
-HERMES_VERSION="v1.13.3"
+# NOTE: The GitHub release tag we previously used (v1.13.3) currently downloads
+# a binary that reports itself as v1.13.2+bab3b80. This caused the setup script
+# to "reinstall" on every run due to version mismatch. Pin to the actual
+# reported version so the install check is stable.
+HERMES_VERSION="v1.13.2"
 HERMES_HOME="${HOME}/.mirage/hermes"
 CREATE_NEW_CHANNEL=false
 
@@ -119,6 +123,8 @@ rpc_timeout = '10s'
 trusted_node = false
 account_prefix = 'mirage'
 key_name = 'relayer'
+# Store keys under ~/.mirage/hermes/keys (use absolute path; Hermes does NOT expand $HOME here)
+key_store_folder = '/root/.mirage/hermes/keys'
 key_store_type = 'Test'
 store_prefix = 'ibc'
 default_gas = 100000
@@ -147,6 +153,8 @@ rpc_timeout = '10s'
 trusted_node = false
 account_prefix = 'osmo'
 key_name = 'relayer'
+# Store keys under ~/.mirage/hermes/keys (use absolute path; Hermes does NOT expand $HOME here)
+key_store_folder = '/root/.mirage/hermes/keys'
 key_store_type = 'Test'
 store_prefix = 'ibc'
 default_gas = 300000
@@ -166,19 +174,22 @@ policy = 'allow'
 list = [['transfer', 'channel-108698']]
 CONFIG
 
-# Set key_store_folder to our custom hermes home (variables don't expand in heredoc)
-sed -i "s|^\[global\]|\[global\]\nkey_store_folder = '$HERMES_HOME/keys'|" "$HERMES_HOME/config.toml"
-
 # Import keys to derive addresses
 MNEMONIC_FILE=$(mktemp)
 echo "$MNEMONIC" > "$MNEMONIC_FILE"
 trap "rm -f $MNEMONIC_FILE" EXIT
 
-hermes --config "$HERMES_HOME/config.toml" keys delete --chain mirage-1 --key-name relayer >/dev/null 2>&1 || true
-hermes --config "$HERMES_HOME/config.toml" keys delete --chain osmosis-1 --key-name relayer >/dev/null 2>&1 || true
+echo "    Adding mirage-1 key..."
+if ! hermes --config "$HERMES_HOME/config.toml" keys add --chain mirage-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" --overwrite; then
+    echo "ERROR: Failed to add mirage-1 key"
+    exit 1
+fi
 
-hermes --config "$HERMES_HOME/config.toml" keys add --chain mirage-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
-hermes --config "$HERMES_HOME/config.toml" keys add --chain osmosis-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" >/dev/null 2>&1
+echo "    Adding osmosis-1 key..."
+if ! hermes --config "$HERMES_HOME/config.toml" keys add --chain osmosis-1 --key-name relayer --hd-path "m/44'/118'/0'/0/0" --mnemonic-file "$MNEMONIC_FILE" --overwrite; then
+    echo "ERROR: Failed to add osmosis-1 key"
+    exit 1
+fi
 
 rm -f "$MNEMONIC_FILE"
 
@@ -394,26 +405,27 @@ echo ""
 echo "==> Starting Hermes relayer..."
 
 # Kill any existing hermes
-pkill -f "hermes start" 2>/dev/null || true
+# Stop any existing hermes process (may not be running)
+pkill -f "hermes start" || echo "    (no existing hermes process)"
 sleep 1
 
 HERMES_LOG_DIR="$HOME/.mirage/logs/hermes"
 mkdir -p "$HERMES_LOG_DIR"
 
-if tmux has-session -t mirage 2>/dev/null; then
+if tmux has-session -t mirage 2>&1; then
     # Docker mode with tmux session available - use tmux window
     echo "    Using tmux session 'mirage'..."
     SESSION="mirage"
     
     # Kill hermes window if it exists, then recreate
-    tmux kill-window -t "$SESSION:hermes" 2>/dev/null || true
+    tmux kill-window -t "$SESSION:hermes" 2>&1 || echo "    (no existing hermes window)"
     
     # Create hermes window with the standard command from entrypoint
     tmux new-window -t "$SESSION" -n hermes -c /opt/mirage
     tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
     
     sleep 2
-    if pgrep -f "hermes start" >/dev/null; then
+    if pgrep -f "hermes start" > /dev/null 2>&1; then
         echo "    Hermes is running in tmux window 'hermes'"
         SERVICE_MODE="tmux"
     else

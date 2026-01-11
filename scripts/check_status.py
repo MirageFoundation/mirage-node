@@ -787,6 +787,7 @@ def check_hermes() -> ServiceStatus:
                 "hermes",
                 "--config",
                 config_path,
+                "--json",
                 "query",
                 "channel",
                 "end",
@@ -801,14 +802,57 @@ def check_hermes() -> ServiceStatus:
             text=True,
             timeout=15,
         )
-        channel_open = "OPEN" in result.stdout
+        if result.returncode != 0:
+            return ServiceStatus(
+                name="Hermes IBC",
+                status=Status.WARN,
+                message="Query failed",
+                details={**base_details, "error": truncate((result.stderr or result.stdout).strip(), 40)},
+            )
+
+        # Hermes may print multiple JSON lines (e.g., a JSON log line + a JSON result line).
+        # Parse the last JSON object that contains a "result" field.
+        payload = None
+        for line in (result.stdout or "").splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict) and "result" in obj:
+                payload = obj
+
+        if not payload or not isinstance(payload.get("result"), dict):
+            return ServiceStatus(
+                name="Hermes IBC",
+                status=Status.WARN,
+                message="Bad JSON",
+                details={**base_details, "error": "Could not parse hermes JSON output"},
+            )
+
+        channel_state = payload["result"].get("state")
+        state_upper = (channel_state or "").upper()
+        channel_open = state_upper == "OPEN"
 
         if not channel_open:
-            return ServiceStatus(name="Hermes IBC", status=Status.ERROR, message="Channel closed", details=base_details)
+            return ServiceStatus(
+                name="Hermes IBC",
+                status=Status.ERROR,
+                message="Channel closed",
+                details={**base_details, "channel_state": channel_state or "unknown"},
+            )
 
-        # Extract connection ID from channel query (e.g., "connection_hops: [ 'connection-1' ]")
-        conn_match = re.search(r"connection-\d+", result.stdout)
-        connection_id = conn_match.group(0) if conn_match else None
+        # Extract connection ID from channel query JSON (preferred)
+        connection_id = None
+        hops = payload["result"].get("connection_hops")
+        if isinstance(hops, list) and hops:
+            connection_id = str(hops[0])
+        if not connection_id:
+            # Fallback to regex
+            conn_match = re.search(r"connection-\d+", result.stdout)
+            connection_id = conn_match.group(0) if conn_match else None
 
         if connection_id:
             # Get the client ID for this specific connection
@@ -867,7 +911,10 @@ def check_hermes() -> ServiceStatus:
                 base_details["client"] = client_id
 
         return ServiceStatus(
-            name="Hermes IBC", status=Status.OK, message="Running", details={**base_details, "channel_open": True}
+            name="Hermes IBC",
+            status=Status.OK,
+            message="Running",
+            details={**base_details, "channel_open": True, "channel_state": channel_state or "OPEN"},
         )
     except subprocess.TimeoutExpired:
         return ServiceStatus(name="Hermes IBC", status=Status.WARN, message="Query timeout", details=base_details)
