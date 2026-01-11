@@ -639,7 +639,7 @@ if __name__ == "__main__":
         from shared.logging_setup import configure_logging as _cfg
         import logging as _logging
 
-        _cfg(component="indexer", node_id=1, level=_logging.INFO)
+        _cfg(component="indexer", level=_logging.INFO)
     except Exception:
         pass
 
