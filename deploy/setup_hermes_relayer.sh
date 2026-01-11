@@ -9,6 +9,9 @@ set -euo pipefail
 #
 # You will be prompted to enter your 12-word mnemonic (hidden input)
 # Data is stored in ~/.hermes (persisted via Docker volume mount)
+#
+# NOTE: The tmux hermes window startup code (near end of file) is duplicated
+#       in deploy/entrypoint.sh. If you change one, update the other!
 
 HERMES_VERSION="v1.10.4"
 CREATE_NEW_CHANNEL=false
@@ -459,7 +462,10 @@ elif tmux has-session -t mirage 2>/dev/null; then
     tmux new-window -t "$SESSION" -n hermes -c /opt/mirage
     tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
     
-    # Try to add status monitor pane (may fail in headless mode)
+    # Add status monitor pane (50% bottom)
+    # Set default window size for headless mode, then split
+    tmux set-option -t "$SESSION:hermes" default-size 180x50 2>/dev/null || true
+    tmux resize-window -t "$SESSION:hermes" -x 180 -y 50 2>/dev/null || true
     if tmux split-window -t "$SESSION:hermes" -v -p 50 -c /opt/mirage 2>/dev/null; then
         tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
         tmux select-pane -t "$SESSION:hermes.0"

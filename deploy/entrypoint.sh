@@ -82,6 +82,9 @@ MONIKER="${MONIKER:-validator}"
 # Create centralized log directory structure
 mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy}
 
+# Clean up old log files (older than 30 days)
+find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
+
 # Export variables needed by init.sh and render_template.py
 export MONIKER CHAIN_ID LOGS_DIR
 
@@ -294,6 +297,8 @@ tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
 # IBC Relayer (seventh) - only if Hermes is configured
+# NOTE: This hermes startup code is duplicated in deploy/setup_hermes_relayer.sh
+#       If you change this, update the other file too!
 if [ -f "$HOME/.hermes/config.toml" ]; then
   # Install hermes if not present
   if ! command -v hermes >/dev/null 2>&1; then
@@ -307,7 +312,10 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
-  # Add status monitor pane (50% bottom) - may fail in headless mode, that's OK
+  # Add status monitor pane (50% bottom)
+  # Set default window size for headless mode, then split
+  tmux set-option -t "$SESSION:hermes" default-size 180x50 2>/dev/null || true
+  tmux resize-window -t "$SESSION:hermes" -x 180 -y 50 2>/dev/null || true
   if tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR" 2>/dev/null; then
     tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
     tmux select-pane -t "$SESSION:hermes.0"
