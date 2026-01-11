@@ -631,45 +631,107 @@ def check_indexer() -> ServiceStatus:
 
 
 def check_caddy() -> ServiceStatus:
-    """Check Caddy web server status."""
+    """Check Caddy web server status by actually making requests."""
+    domain = os.environ.get("DOMAIN", "")
+    
+    # Strip protocol from domain if present
+    clean_domain = domain
+    if clean_domain.startswith("https://"):
+        clean_domain = clean_domain[8:]
+    elif clean_domain.startswith("http://"):
+        clean_domain = clean_domain[7:]
+
+    # Check if process is running
     try:
-        # Check if process is running and get PID
         result = subprocess.run(["pgrep", "-x", "caddy"], capture_output=True, text=True)
         process_running = result.returncode == 0
-        pid = result.stdout.strip().split()[0] if process_running and result.stdout.strip() else None
+    except Exception:
+        process_running = False
 
-        if not process_running:
-            return ServiceStatus(name="Caddy", status=Status.ERROR, message="Not running", details={"running": False})
+    if not process_running:
+        return ServiceStatus(name="Caddy", status=Status.ERROR, message="Not running", details={"running": False})
 
-        # Check if HTTPS is configured (look for domain in Caddyfile)
-        https_enabled = False
-        domain = os.environ.get("DOMAIN", "")
-        if domain:
-            try:
-                with open("/etc/caddy/Caddyfile") as f:
-                    caddyfile = f.read()
-                    if domain in caddyfile and "tls" not in caddyfile.lower():
-                        # Domain present without explicit tls off = HTTPS auto
-                        https_enabled = True
-                    elif f"{domain} {{" in caddyfile:
-                        https_enabled = True
-            except Exception:
-                pass
+    # Actually test HTTP connectivity
+    http_ok = False
+    https_ok = False
+    http_status = None
+    https_status = None
+    response_ms = None
 
-        return ServiceStatus(
-            name="Caddy",
-            status=Status.OK,
-            message="Running",
-            details={
-                "running": True,
-                "https": https_enabled,
-                "domain": domain if domain else None,
-                "pid": pid,
-            },
-        )
-
+    # Test HTTP on localhost
+    try:
+        start = time.time()
+        resp = requests.get("http://127.0.0.1:80/api/get_parameters", timeout=5)
+        response_ms = int((time.time() - start) * 1000)
+        http_status = resp.status_code
+        http_ok = resp.status_code < 500  # 2xx, 3xx, 4xx are "working"
+    except requests.exceptions.ConnectionError:
+        http_status = "refused"
     except Exception as e:
-        return ServiceStatus(name="Caddy", status=Status.UNKNOWN, message=str(e)[:25], details={})
+        http_status = str(e)[:15]
+
+    # If DOMAIN is set, test HTTPS
+    if clean_domain:
+        try:
+            resp = requests.get(f"https://{clean_domain}/api/get_parameters", timeout=5, verify=True)
+            https_status = resp.status_code
+            https_ok = resp.status_code < 500
+        except requests.exceptions.SSLError as e:
+            https_status = "SSL error"
+        except requests.exceptions.ConnectionError:
+            https_status = "refused"
+        except Exception as e:
+            https_status = str(e)[:15]
+
+    details = {
+        "running": True,
+        "domain": clean_domain if clean_domain else None,
+        "http": http_status,
+        "https": https_status if clean_domain else None,
+        "response_ms": response_ms,
+    }
+
+    # Determine status
+    if clean_domain:
+        # If domain is set, HTTPS must work
+        if https_ok:
+            return ServiceStatus(
+                name="Caddy",
+                status=Status.OK,
+                message="HTTPS OK",
+                details=details,
+            )
+        elif http_ok:
+            # HTTP works but HTTPS doesn't - this is bad
+            return ServiceStatus(
+                name="Caddy",
+                status=Status.ERROR,
+                message="HTTPS failed",
+                details=details,
+            )
+        else:
+            return ServiceStatus(
+                name="Caddy",
+                status=Status.ERROR,
+                message="Not responding",
+                details=details,
+            )
+    else:
+        # No domain - just HTTP
+        if http_ok:
+            return ServiceStatus(
+                name="Caddy",
+                status=Status.OK,
+                message="HTTP OK",
+                details=details,
+            )
+        else:
+            return ServiceStatus(
+                name="Caddy",
+                status=Status.ERROR,
+                message="Not responding",
+                details=details,
+            )
 
 
 def check_referrals() -> ServiceStatus:
@@ -1048,10 +1110,31 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Caddy":
         if details.get("domain"):
             lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
-        if details.get("https"):
-            lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}✓ Active{Colors.RESET}")
-        elif details.get("running"):
-            lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.DIM}HTTP only{Colors.RESET}")
+        # Show HTTP status
+        http_val = details.get("http")
+        if http_val is not None:
+            if isinstance(http_val, int) and http_val < 400:
+                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}{http_val}{Colors.RESET}")
+            elif isinstance(http_val, int):
+                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_YELLOW}{http_val}{Colors.RESET}")
+            else:
+                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_RED}{http_val}{Colors.RESET}")
+        # Show HTTPS status if domain is set
+        https_val = details.get("https")
+        if https_val is not None:
+            if isinstance(https_val, int) and https_val < 400:
+                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val} ✓{Colors.RESET}")
+            elif isinstance(https_val, int):
+                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_YELLOW}{https_val}{Colors.RESET}")
+            else:
+                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_RED}{https_val}{Colors.RESET}")
+        elif not details.get("domain"):
+            lines.append(f"{bullet}{Colors.DIM}Mode:{Colors.RESET} HTTP only")
+        # Response time
+        if details.get("response_ms") is not None:
+            ms = details["response_ms"]
+            ms_color = Colors.BRIGHT_GREEN if ms < 100 else Colors.BRIGHT_YELLOW if ms < 500 else Colors.BRIGHT_RED
+            lines.append(f"{bullet}{Colors.DIM}Response:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
 
     elif status.name == "Referrals":
         if "links" in details:

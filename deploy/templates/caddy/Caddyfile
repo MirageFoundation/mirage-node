@@ -1,4 +1,4 @@
-:80 {
+${DOMAIN:-:80} {
 	encode zstd gzip
 
 	@api {
@@ -26,4 +26,3 @@
 		file_server
 	}
 }
-

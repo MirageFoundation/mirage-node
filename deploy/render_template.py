@@ -6,12 +6,21 @@ from pathlib import Path
 
 USAGE = "Usage: render_template.py <input_template> <output_file>"
 
-pattern = re.compile(r"\$\{([A-Z0-9_]+)\}")
+# Pattern supports:
+#   ${VAR}           - simple substitution (empty if not set)
+#   ${VAR:-default}  - use default if VAR is empty/unset
+pattern = re.compile(r"\$\{([A-Z0-9_]+)(?::-([^}]*))?\}")
+
 
 def render(text: str) -> str:
     def repl(m: re.Match) -> str:
         key = m.group(1)
-        return os.environ.get(key, "")
+        default = m.group(2)  # None if no default specified
+        value = os.environ.get(key, "")
+        if not value and default is not None:
+            return default
+        return value
+
     return pattern.sub(repl, text)
 
 

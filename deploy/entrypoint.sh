@@ -106,19 +106,33 @@ echo "Moniker:   $MONIKER"
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
 
-# ALWAYS ensure Caddyfile is rendered correctly (even if init already ran)
-# This prevents issues where the Caddyfile might be missing or incorrect
-echo "==> Ensuring Caddyfile is correctly rendered..."
+# Ensure Caddyfile exists and is correct
+# If DOMAIN is set and Caddyfile already has HTTPS config for that domain, don't overwrite
 mkdir -p /etc/caddy
-if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "/etc/caddy/Caddyfile"; then
-  echo "ERROR: Failed to render Caddyfile" >&2
-  exit 1
+CADDYFILE="/etc/caddy/Caddyfile"
+SHOULD_RENDER=1
+
+if [ -n "${DOMAIN:-}" ] && [ -f "$CADDYFILE" ]; then
+  # Check if existing Caddyfile already has HTTPS for this domain (not just :80)
+  if grep -q "^${DOMAIN}" "$CADDYFILE" 2>/dev/null; then
+    echo "==> Caddyfile already configured for $DOMAIN (HTTPS), keeping existing config"
+    SHOULD_RENDER=0
+  fi
 fi
+
+if [ "$SHOULD_RENDER" = "1" ]; then
+  echo "==> Rendering Caddyfile..."
+  if ! python3 "$ROOT_DIR/deploy/render_template.py" "$ROOT_DIR/deploy/templates/caddy/Caddyfile" "$CADDYFILE"; then
+    echo "ERROR: Failed to render Caddyfile" >&2
+    exit 1
+  fi
+fi
+
 # Verify Caddyfile contains expected content (API proxy)
-if ! grep -q "reverse_proxy.*127.0.0.1:5000" /etc/caddy/Caddyfile; then
+if ! grep -q "reverse_proxy.*127.0.0.1:5000" "$CADDYFILE"; then
   echo "ERROR: Caddyfile missing API proxy configuration" >&2
   echo "Caddyfile contents:" >&2
-  cat /etc/caddy/Caddyfile >&2
+  cat "$CADDYFILE" >&2
   exit 1
 fi
 echo "✓ Caddyfile verified"
@@ -250,11 +264,16 @@ ensure_local_postgres_db() {
 ensure_local_postgres_db
 
 # Auto-configure HTTPS if domain is set (from node.env)
+# Skip if Caddyfile already has HTTPS configured (www redirect indicates full HTTPS setup)
 if [ -n "${DOMAIN:-}" ]; then
-  echo "==> Domain configured: $DOMAIN"
-  echo "==> Configuring HTTPS automatically..."
-  sleep 2  # Give Caddy a moment to start
-  bash "$ROOT_DIR/deploy/letsencrypt_register.sh" --domain="$DOMAIN"
+  if grep -q "^www\.${DOMAIN}" "$CADDYFILE" 2>/dev/null; then
+    echo "==> HTTPS already configured for $DOMAIN (www redirect present)"
+  else
+    echo "==> Domain configured: $DOMAIN"
+    echo "==> Configuring HTTPS automatically..."
+    sleep 2  # Give Caddy a moment to start
+    bash "$ROOT_DIR/deploy/letsencrypt_register.sh" --domain="$DOMAIN"
+  fi
 fi
 
 # Node (second)
