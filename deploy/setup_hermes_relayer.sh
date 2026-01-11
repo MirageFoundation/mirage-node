@@ -387,43 +387,7 @@ sleep 1
 HERMES_LOG_DIR="$HOME/.mirage/logs/hermes"
 mkdir -p "$HERMES_LOG_DIR"
 
-# Check if systemd is available (not in Docker)
-if pidof systemd >/dev/null 2>&1; then
-    echo "    Using systemd..."
-    
-    cat > /etc/systemd/system/hermes.service << EOF
-[Unit]
-Description=Hermes IBC Relayer
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/hermes --home /root/.mirage/hermes start
-Restart=always
-RestartSec=5
-LimitNOFILE=65535
-Environment="HOME=/root"
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    systemctl daemon-reload
-    systemctl enable hermes >/dev/null 2>&1
-    systemctl stop hermes 2>/dev/null || true
-    systemctl start hermes
-    
-    sleep 3
-    if systemctl is-active --quiet hermes; then
-        echo "    Hermes service is running"
-        SERVICE_MODE="systemd"
-    else
-        echo "ERROR: Hermes service failed to start"
-        journalctl -u hermes --no-pager -n 20
-        exit 1
-    fi
-elif tmux has-session -t mirage 2>/dev/null; then
+if tmux has-session -t mirage 2>/dev/null; then
     # Docker mode with tmux session available - use tmux window
     echo "    Using tmux session 'mirage'..."
     SESSION="mirage"
@@ -474,12 +438,6 @@ echo "  Mirage:  $MIRAGE_CHANNEL (transfer)"
 echo "  Osmosis: $OSMOSIS_CHANNEL (transfer)"
 echo ""
 case "$SERVICE_MODE" in
-    systemd)
-        echo "Relayer Service (systemd):"
-        echo "  Status:  systemctl status hermes"
-        echo "  Logs:    journalctl -u hermes -f"
-        echo "  Restart: systemctl restart hermes"
-        ;;
     tmux)
         echo "Relayer running in tmux window 'hermes':"
         echo "  View:    tmux select-window -t mirage:hermes"
