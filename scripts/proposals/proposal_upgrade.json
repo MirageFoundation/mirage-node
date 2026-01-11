@@ -5,7 +5,7 @@
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
                 "name": "v1.7.7-tier-pricing",
-                "height": "T+50",
+                "height": "T+60",
                 "info": "Tier cost update (10/20/30 MIRAGE per 30 days) and Go log rotation removal"
             }
         }

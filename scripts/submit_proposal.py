@@ -14,8 +14,8 @@ import pexpect
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
-NODE_DIR = ROOT / "node"
-MIRAGED = NODE_DIR / "miraged"
+BLOCKCHAIN_DIR = ROOT / "blockchain"
+MIRAGED = BLOCKCHAIN_DIR / "miraged"
 
 KEYRING_BACKEND = "os"
 LOCAL_KEYRING_BACKEND = "test"
