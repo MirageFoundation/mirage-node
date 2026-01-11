@@ -277,10 +277,10 @@ ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.caddy ~/.mira
 
 # One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
 ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" '
-  if [ -d ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
+  if [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
     echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
     mv ~/.hermes ~/.mirage/hermes
-  elif [ -d ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
+  elif [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
     echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
     cp -a ~/.hermes/. ~/.mirage/hermes/
     rm -rf ~/.hermes

@@ -133,6 +133,10 @@ trust_threshold = '2/3'
 gas_price = { price = 0.025, denom = 'umirage' }
 address_type = { derivation = 'cosmos' }
 
+[chains.packet_filter]
+policy = 'allow'
+list = [['transfer', 'channel-1']]
+
 [[chains]]
 id = 'osmosis-1'
 type = 'CosmosSdk'
@@ -156,7 +160,14 @@ trusting_period = '13days'
 trust_threshold = '2/3'
 gas_price = { price = 0.1, denom = 'uosmo' }
 address_type = { derivation = 'cosmos' }
+
+[chains.packet_filter]
+policy = 'allow'
+list = [['transfer', 'channel-108698']]
 CONFIG
+
+# Set key_store_folder to our custom hermes home (variables don't expand in heredoc)
+sed -i "s|^\[global\]|\[global\]\nkey_store_folder = '$HERMES_HOME/keys'|" "$HERMES_HOME/config.toml"
 
 # Import keys to derive addresses
 MNEMONIC_FILE=$(mktemp)

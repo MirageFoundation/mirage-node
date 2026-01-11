@@ -5,6 +5,8 @@ This migration:
 1. Moves secrets to dedicated secrets.env file
 2. Moves domain from .domain file to node.env (updates MONIKER if default)
 3. Cleans up legacy/orphaned files
+4. Moves ~/.hermes to ~/.mirage/hermes
+5. Adds packet_filter to Hermes config (only relay on channel-1)
 
 All operations are idempotent - safe to run multiple times.
 """
@@ -199,7 +201,7 @@ def run(config_dir: Path, logger) -> str:
     old_hermes = home_dir / ".hermes"
     new_hermes = data_dir / "hermes"
 
-    if old_hermes.exists() and old_hermes.is_dir():
+    if old_hermes.exists() and old_hermes.is_dir() and not old_hermes.is_symlink():
         if new_hermes.exists():
             # Both exist - merge (copy files that don't exist in new location)
             for item in old_hermes.iterdir():
@@ -218,6 +220,64 @@ def run(config_dir: Path, logger) -> str:
             shutil.move(str(old_hermes), str(new_hermes))
             logger.info("    Moved ~/.hermes -> ~/.mirage/hermes")
             results.append("moved hermes dir")
+
+    # =========================================================================
+    # STEP 5: Update Hermes config (key_store_folder + packet_filter)
+    # =========================================================================
+    logger.info("  Step 5: Hermes config updates")
+
+    hermes_config = data_dir / "hermes" / "config.toml"
+
+    if hermes_config.exists():
+        content = hermes_config.read_text()
+        modified = False
+
+        # Add key_store_folder if missing (so hermes finds keys in ~/.mirage/hermes/keys)
+        if "key_store_folder" not in content:
+            content = content.replace(
+                "[global]\nlog_level",
+                f"[global]\nkey_store_folder = '{data_dir}/hermes/keys'\nlog_level"
+            )
+            logger.info(f"    Added key_store_folder = '{data_dir}/hermes/keys'")
+            modified = True
+
+        # Add packet_filter if missing (only relay on channel-1)
+        if "packet_filter" not in content:
+            lines = content.split("\n")
+            new_lines = []
+            current_chain = None
+
+            for line in lines:
+                new_lines.append(line)
+
+                # Track which chain we're in
+                if line.strip().startswith("id = 'mirage-1'"):
+                    current_chain = "mirage-1"
+                elif line.strip().startswith("id = 'osmosis-1'"):
+                    current_chain = "osmosis-1"
+                elif line.strip().startswith("[[chains]]"):
+                    current_chain = None
+
+                # Add packet_filter after address_type line
+                if "address_type" in line and current_chain:
+                    new_lines.append("")
+                    new_lines.append("[chains.packet_filter]")
+                    new_lines.append("policy = 'allow'")
+                    if current_chain == "mirage-1":
+                        new_lines.append("list = [['transfer', 'channel-1']]")
+                    elif current_chain == "osmosis-1":
+                        new_lines.append("list = [['transfer', 'channel-108698']]")
+                    current_chain = None
+
+            content = "\n".join(new_lines)
+            logger.info("    Added packet_filter (channel-1 <-> channel-108698)")
+            modified = True
+
+        if modified:
+            hermes_config.write_text(content)
+            results.append("hermes config updated")
+        else:
+            logger.info("    Hermes config already up to date")
 
     # =========================================================================
     # Summary
