@@ -171,21 +171,7 @@ func initRootCmd(
 		if err := validateAppConfig(cmd, args); err != nil {
 			return err
 		}
-		// Ensure log rotation is enabled for start command
-		// Resolve home from flag (optional), else env, else default
-		homeDir := ""
-		if cmd.Flags().Lookup(flags.FlagHome) != nil {
-			if hval, herr := cmd.Flags().GetString(flags.FlagHome); herr == nil && strings.TrimSpace(hval) != "" {
-				homeDir = hval
-			}
-		}
-		if strings.TrimSpace(homeDir) == "" {
-			homeDir = os.Getenv("MIRAGE_NODE_HOME")
-		}
-		if strings.TrimSpace(homeDir) == "" {
-			homeDir = app.DefaultNodeHome
-		}
-		_ = setupStdFileRotation(homeDir)
+		// Log rotation handled by shell (cronolog) in entrypoint.sh
 		if originalRunE != nil {
 			return originalRunE(cmd, args)
 		}

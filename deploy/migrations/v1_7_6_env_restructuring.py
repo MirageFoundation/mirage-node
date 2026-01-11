@@ -22,7 +22,7 @@ from deploy.migrations._helpers import (
     backup_env_files,
 )
 
-MIGRATION_KEY = "v1.7.6"
+MIGRATION_KEY = "v1.7.6-env-restructuring"
 DESCRIPTION = "Environment restructuring and cleanup"
 
 # Secret keys that should be moved to secrets.env

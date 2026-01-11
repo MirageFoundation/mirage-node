@@ -4,13 +4,13 @@ set -euo pipefail
 # Hard-coded wrapper: deploy a pre-built tarball to all production servers.
 #
 # Usage:
-#   scripts/deploy_all_prod.sh [--file <tarball>] [--init|--update|--update-init]
+#   scripts/deploy_all_prod.sh [--file <tarball>] [--init|--update]
 #
 # Arguments:
 #   --file <tarball>  Optional. Path to the Docker image tarball to deploy.
 #                     If not provided, REBUILDS deploy/mirage-docker-dev.tar.gz automatically.
 #
-# Default mode: --update-init
+# Default mode: --update
 #
 # Notes:
 # - This script is intentionally hard-coded to production hosts.
@@ -45,7 +45,7 @@ MODE=""
 TARBALL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --init|--update|--update-init)
+    --init|--update)
       MODE="$1"
       shift
       ;;
@@ -66,7 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${MODE}" ]]; then
-  MODE="--update-init"
+  MODE="--update"
 fi
 
 # Determine which tarball will be used and whether to rebuild

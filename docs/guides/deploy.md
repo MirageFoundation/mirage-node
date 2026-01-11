@@ -73,7 +73,7 @@ If you're just using an IP address, skip this step — your node will be accessi
 To update to the latest version:
 
 ```bash
-deploy/deploy.sh root@your-server --update-init
+deploy/deploy.sh root@your-server --update
 ```
 
 This rebuilds the image and restarts the container while preserving all your data and keys.

@@ -405,4 +405,57 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.7.7-tier-pricing: Tier cost update (10/20/30 MIRAGE per 30 days) + remove Go log rotation
+	// - Tier 1 (Trusted): 10 MIRAGE per 30 days
+	// - Tier 2 (Established): 20 MIRAGE per 30 days
+	// - Tier 3 (Distinguished): 30 MIRAGE per 30 days
+	// - Go-based log rotation removed (shell cronolog handles logging)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.7.7-tier-pricing",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.7.7-tier-pricing...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Update tier costs
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			changed := false
+
+			// Ensure we have at least 4 tiers
+			if len(params.Tiers) >= 4 {
+				// Tier 1: 10 MIRAGE (10_000_000 umirage)
+				if params.Tiers[1].PeriodFee != 10_000_000 {
+					params.Tiers[1].PeriodFee = 10_000_000
+					changed = true
+					sdkCtx.Logger().Info("v1.7.7-tier-pricing: set tier 1 period_fee", "value", 10_000_000)
+				}
+				// Tier 2: 20 MIRAGE (20_000_000 umirage)
+				if params.Tiers[2].PeriodFee != 20_000_000 {
+					params.Tiers[2].PeriodFee = 20_000_000
+					changed = true
+					sdkCtx.Logger().Info("v1.7.7-tier-pricing: set tier 2 period_fee", "value", 20_000_000)
+				}
+				// Tier 3: 30 MIRAGE (30_000_000 umirage)
+				if params.Tiers[3].PeriodFee != 30_000_000 {
+					params.Tiers[3].PeriodFee = 30_000_000
+					changed = true
+					sdkCtx.Logger().Info("v1.7.7-tier-pricing: set tier 3 period_fee", "value", 30_000_000)
+				}
+			}
+
+			if changed {
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, err
+				}
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.7.7-tier-pricing complete - tier costs updated, Go log rotation removed")
+			return toVM, nil
+		},
+	)
 }

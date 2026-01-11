@@ -141,7 +141,7 @@
                         "can_have_banner": false
                     },
                     {
-                        "period_fee": "300000",
+                        "period_fee": "10000000",
                         "max_followed_mods": "10",
                         "max_followed_users": "125",
                         "max_followed_topics": "250",
@@ -161,7 +161,7 @@
                         "can_have_banner": true
                     },
                     {
-                        "period_fee": "750000",
+                        "period_fee": "20000000",
                         "max_followed_mods": "25",
                         "max_followed_users": "500",
                         "max_followed_topics": "500",
@@ -181,7 +181,7 @@
                         "can_have_banner": true
                     },
                     {
-                        "period_fee": "1500000",
+                        "period_fee": "30000000",
                         "max_followed_mods": "50",
                         "max_followed_users": "1000",
                         "max_followed_topics": "1000",

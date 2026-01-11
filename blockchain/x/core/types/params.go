@@ -29,9 +29,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       false,
 			CanHaveBanner:       false,
 		},
-		// Level 1: Trusted
+		// Level 1: Trusted (10 MIRAGE per 30 days)
 		{
-			PeriodFee:           1_000_000,
+			PeriodFee:           10_000_000,
 			MaxFollowedMods:     10,
 			MaxFollowedUsers:    125,
 			MaxFollowedTopics:   250,
@@ -50,9 +50,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       true,
 			CanHaveBanner:       true,
 		},
-		// Level 2: Established
+		// Level 2: Established (20 MIRAGE per 30 days)
 		{
-			PeriodFee:           2_000_000,
+			PeriodFee:           20_000_000,
 			MaxFollowedMods:     25,
 			MaxFollowedUsers:    500,
 			MaxFollowedTopics:   500,
@@ -71,9 +71,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       true,
 			CanHaveBanner:       true,
 		},
-		// Level 3: Distinguished
+		// Level 3: Distinguished (30 MIRAGE per 30 days)
 		{
-			PeriodFee:           3_000_000,
+			PeriodFee:           30_000_000,
 			MaxFollowedMods:     50,
 			MaxFollowedUsers:    1000,
 			MaxFollowedTopics:   1000,
@@ -126,7 +126,7 @@ func DefaultParams() Params {
 		MaxTopicSize:    35,
 
 		// Subscription period in minutes (0 = one-time, 43200 = 30 days)
-		SubscriptionPeriod: 1440,
+		SubscriptionPeriod: 43200,
 
 		// Tier configurations
 		Tiers: DefaultTiers(),

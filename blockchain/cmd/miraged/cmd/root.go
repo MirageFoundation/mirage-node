@@ -2,13 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"cosmossdk.io/client/v2/autocli"
 	"cosmossdk.io/depinject"
@@ -240,126 +236,6 @@ func NewRootCmd() *cobra.Command {
 	}
 
 	return rootCmd
-}
-
-// setupStdFileRotation redirects process stdout/stderr to a daily rotated log file under the node home.
-func setupStdFileRotation(home string) error {
-	if home == "" {
-		return nil
-	}
-	logDir := filepath.Join(home, "logs")
-	_ = os.MkdirAll(logDir, 0o755)
-	base := filepath.Join(logDir, "node.log")
-
-	rl, err := newDailyRotator(base, 30)
-	if err != nil {
-		return err
-	}
-
-	redirect := func(dst **os.File) error {
-		r, w, err := os.Pipe()
-		if err != nil {
-			return err
-		}
-		// Replace the destination with the pipe writer
-		*dst = w
-		go func() {
-			_, _ = io.Copy(rl, r)
-			_ = r.Close()
-		}()
-		return nil
-	}
-
-	// Redirect both stdout and stderr
-	_ = redirect(&os.Stdout)
-	_ = redirect(&os.Stderr)
-	return nil
-}
-
-// dailyRotator writes to a file named base+".YYYY-MM-DD" and keeps a symlink at base.
-// It prunes log files older than keepDays days.
-type dailyRotator struct {
-	base     string
-	keepDays int
-	mu       sync.Mutex
-	curDate  string
-	f        *os.File
-}
-
-func newDailyRotator(base string, keepDays int) (*dailyRotator, error) {
-	dr := &dailyRotator{base: base, keepDays: keepDays}
-	if err := dr.rotateIfNeededLocked(time.Now().UTC()); err != nil {
-		return nil, err
-	}
-	return dr, nil
-}
-
-func (d *dailyRotator) Write(p []byte) (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	now := time.Now().UTC()
-	if err := d.rotateIfNeededLocked(now); err != nil {
-		return 0, err
-	}
-	if d.f == nil {
-		return 0, fmt.Errorf("log file not initialized")
-	}
-	return d.f.Write(p)
-}
-
-func (d *dailyRotator) rotateIfNeededLocked(now time.Time) error {
-	date := now.Format("2006-01-02")
-	if date == d.curDate && d.f != nil {
-		return nil
-	}
-	// Close old
-	if d.f != nil {
-		_ = d.f.Close()
-		d.f = nil
-	}
-	// Open new file
-	filename := d.base + "." + date
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return err
-	}
-	d.f = f
-	d.curDate = date
-	// Update symlink
-	_ = os.Remove(d.base)
-	_ = os.Symlink(filename, d.base)
-	// Prune old files
-	d.pruneLocked()
-	return nil
-}
-
-func (d *dailyRotator) pruneLocked() {
-	dir := filepath.Dir(d.base)
-	baseName := filepath.Base(d.base)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	var dates []string
-	for _, e := range entries {
-		name := e.Name()
-		if !strings.HasPrefix(name, baseName+".") {
-			continue
-		}
-		parts := strings.Split(name, ".")
-		ds := parts[len(parts)-1]
-		if len(ds) == 10 { // YYYY-MM-DD
-			dates = append(dates, ds)
-		}
-	}
-	sort.Strings(dates)
-	if len(dates) <= d.keepDays {
-		return
-	}
-	toDelete := dates[:len(dates)-d.keepDays]
-	for _, ds := range toDelete {
-		_ = os.Remove(filepath.Join(dir, baseName+"."+ds))
-	}
 }
 
 // ProvideClientContext creates and provides a fully initialized client.Context,
