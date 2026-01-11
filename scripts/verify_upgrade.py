@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Verify Mirage Node Upgrade (v1.7.8+)
+Verify Mirage Node Upgrade (v1.7.9+)
 
 Checks:
 1. Node Health: RPC reachable, not catching up (optional warn)
 2. Chain State: Tier pricing (10/20/30 MIRAGE) & subscription period (30 days)
 3. Directory Structure:
-   - ~/.mirage/node/ exists (new home)
-   - ~/.mirage/postgres/ exists (new postgres location)
-   - ~/.mirage/main/ is absent OR is a symlink (migration done)
+   - ~/.mirage/node/ exists (node home)
+   - ~/.mirage/postgres/ exists (postgres location)
+   - ~/.mirage/main/ does NOT exist (symlink removed in v1.7.9)
    - ~/.mirage/node/logs/ is absent (Go log rotation removed)
 4. Logging: Cronolog is writing to ~/.mirage/logs/node/miraged-YYYY-MM-DD.log
 """
@@ -71,13 +71,13 @@ def main() -> int:
     rpc = args.node.rstrip("/")
     miraged = _find_miraged()
     home_dir = Path.home() / ".mirage"
-    
+
     failures: list[str] = []
     warnings: list[str] = []
 
     print(f"=== Verifying Upgrade Status ({datetime.now().isoformat()}) ===\n")
 
-    # 1. Directory Structure (v1.7.8 restructuring)
+    # 1. Directory Structure (v1.7.8 restructuring + v1.7.9 symlink removal)
     print("-> Checking directory structure...")
     node_dir = home_dir / "node"
     main_dir = home_dir / "main"
@@ -93,13 +93,14 @@ def main() -> int:
     else:
         failures.append("~/.mirage/postgres/ directory missing")
 
-    if not main_dir.exists():
-        print("   [OK] ~/.mirage/main/ is absent (clean migration)")
-    elif main_dir.is_symlink():
-        target = main_dir.readlink()
-        print(f"   [OK] ~/.mirage/main/ is a symlink -> {target}")
+    # v1.7.9: main should NOT exist at all (symlink removed)
+    if main_dir.exists():
+        if main_dir.is_symlink():
+            failures.append("~/.mirage/main/ symlink still exists (v1.7.9 migration incomplete)")
+        else:
+            failures.append("~/.mirage/main/ is a real directory (should have been renamed to node/)")
     else:
-        failures.append("~/.mirage/main/ exists and is NOT a symlink (migration incomplete?)")
+        print("   [OK] ~/.mirage/main/ absent (symlink removed)")
 
     # 2. Go Logs Removal (v1.7.7 cleanup)
     old_logs = node_dir / "logs"
@@ -127,15 +128,15 @@ def main() -> int:
         status = _http_get_json(f"{rpc}/status")
         latest = status.get("result", {}).get("sync_info", {}).get("latest_block_height", "")
         catching = status.get("result", {}).get("sync_info", {}).get("catching_up", False)
-        
+
         print(f"   [OK] RPC reachable (Height: {latest})")
         if catching:
             warnings.append("Node is catching up (syncing)")
-        
+
         # Check params
         params = _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
         p = params.get("params", params)
-        
+
         # Subscription period
         sub_period = _as_int(p.get("subscription_period"))
         if sub_period == 43200:
@@ -149,7 +150,7 @@ def main() -> int:
             t1 = _as_int(tiers[1].get("period_fee"))
             t2 = _as_int(tiers[2].get("period_fee"))
             t3 = _as_int(tiers[3].get("period_fee"))
-            
+
             if t1 == 10_000_000 and t2 == 20_000_000 and t3 == 30_000_000:
                 print("   [OK] Tier fees: 10/20/30 MIRAGE")
             else:
@@ -164,13 +165,13 @@ def main() -> int:
     if warnings:
         for w in warnings:
             print(f"[WARN] {w}")
-    
+
     if failures:
         print("[FAIL] Verification failed with errors:")
         for f in failures:
             print(f"  - {f}")
         return 1
-    
+
     print("[PASS] All checks passed successfully.")
     return 0
 

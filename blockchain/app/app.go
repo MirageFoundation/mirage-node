@@ -137,7 +137,7 @@ func init() {
 	sdk.DefaultBondDenom = "umirage"
 
 	clienthelpers.EnvPrefix = Name
-	DefaultNodeHome = filepath.Join(os.Getenv("HOME"), ".mirage", "main")
+	DefaultNodeHome = filepath.Join(os.Getenv("HOME"), ".mirage", "node")
 }
 
 // AppConfig returns the default app config.

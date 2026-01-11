@@ -466,4 +466,24 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.7.9-node-home: DefaultNodeHome changed from "main" to "node"
+	// - Binary now uses ~/.mirage/node/ as default home directory
+	// - Migration removes the backward-compat ~/.mirage/main symlink
+	// - No on-chain state changes required
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.7.9-node-home",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.7.9-node-home...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.7.9-node-home complete - DefaultNodeHome is now ~/.mirage/node/")
+			return toVM, nil
+		},
+	)
 }
