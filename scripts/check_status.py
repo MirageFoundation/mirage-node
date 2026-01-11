@@ -22,12 +22,18 @@ import shutil
 import subprocess
 import sys
 import time
+import argparse
+import socket
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-import psycopg
+try:
+    import psycopg
+except Exception:  # pragma: no cover - environment dependent
+    psycopg = None
 import requests
 
 # Add parent directory for shared imports
@@ -125,6 +131,58 @@ STATUS_COLORS = {
     Status.ERROR: Colors.BRIGHT_RED,
     Status.UNKNOWN: Colors.BRIGHT_BLACK,
 }
+
+
+# Debug logging (opt-in: dashboard output must stay clean by default).
+_DEBUG_LOG_ENABLED = os.environ.get("MIRAGE_CHECK_STATUS_DEBUG", "").strip() == "1"
+_DEBUG_LOG_PATH = os.environ.get("MIRAGE_CHECK_STATUS_LOG", "/tmp/mirage_check_status.log").strip()
+
+# Node staleness thresholds:
+# If your chain should be producing blocks regularly, "last block: 1m ago" is bad.
+NODE_LAST_BLOCK_WARN_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_WARN_SECS", "15"))
+NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SECS", "60"))
+
+MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
+
+
+def debug_log(msg: str) -> None:
+    if not _DEBUG_LOG_ENABLED:
+        return
+    try:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        # Dashboard should never crash because logging failed.
+        pass
+
+
+def format_age_secs(age_secs: float) -> str:
+    if age_secs < 60:
+        return f"{int(age_secs)}s ago"
+    if age_secs < 3600:
+        return f"{int(age_secs / 60)}m ago"
+    return f"{int(age_secs / 3600)}h ago"
+
+
+def tcp_connect_ms(host: str, port: int, timeout_secs: float = 1.5) -> Optional[int]:
+    start = time.time()
+    try:
+        with socket.create_connection((host, port), timeout=timeout_secs):
+            pass
+        return int((time.time() - start) * 1000)
+    except Exception as e:
+        debug_log(f"tcp_connect_ms failed: host={host} port={port} err={e}")
+        return None
+
+
+def parse_host_port(addr: str) -> tuple[str, int]:
+    parts = (addr or "").strip().split(":")
+    if len(parts) != 2:
+        raise ValueError(f"bad addr: {addr!r} (expected host:port)")
+    host = parts[0].strip() or "127.0.0.1"
+    port = int(parts[1].strip())
+    return host, port
 
 
 @dataclass
@@ -314,24 +372,32 @@ def check_node() -> ServiceStatus:
         catching_up = sync_info.get("catching_up", True)
         chain_id = node_info.get("network", "?")
 
+        # RPC health probe (CometBFT /health should return 200 when healthy)
+        rpc_health_ok = None
+        rpc_health_ms = None
+        try:
+            start = time.time()
+            health_resp = requests.get("http://127.0.0.1:26657/health", timeout=2)
+            rpc_health_ms = int((time.time() - start) * 1000)
+            rpc_health_ok = health_resp.status_code == 200
+        except Exception as e:
+            debug_log(f"node: rpc /health failed: {e}")
+            rpc_health_ok = False
+
         # Calculate block age
         block_age = None
+        block_age_secs = None
         try:
             block_time = sync_info.get("latest_block_time", "")
             if block_time:
-                from datetime import datetime, timezone
-
                 # Parse ISO format timestamp
-                bt = datetime.fromisoformat(block_time.replace("Z", "+00:00").split(".")[0])
-                now = datetime.now(timezone.utc).replace(tzinfo=None)
-                age_secs = (now - bt.replace(tzinfo=None)).total_seconds()
-                if age_secs < 60:
-                    block_age = f"{int(age_secs)}s ago"
-                elif age_secs < 3600:
-                    block_age = f"{int(age_secs/60)}m ago"
-                else:
-                    block_age = f"{int(age_secs/3600)}h ago"
-        except Exception:
+                bt = datetime.fromisoformat(block_time.replace("Z", "+00:00"))
+                if bt.tzinfo is None:
+                    bt = bt.replace(tzinfo=timezone.utc)
+                block_age_secs = (datetime.now(timezone.utc) - bt).total_seconds()
+                block_age = format_age_secs(block_age_secs)
+        except Exception as e:
+            debug_log(f"node: failed to parse latest_block_time={block_time!r}: {e}")
             pass
 
         # Get peer count
@@ -339,7 +405,8 @@ def check_node() -> ServiceStatus:
         try:
             net_resp = requests.get("http://127.0.0.1:26657/net_info", timeout=2)
             peers = len(net_resp.json().get("result", {}).get("peers", []))
-        except Exception:
+        except Exception as e:
+            debug_log(f"node: net_info failed: {e}")
             pass
 
         details = {
@@ -348,12 +415,43 @@ def check_node() -> ServiceStatus:
             "peers": peers,
             "chain_id": chain_id,
             "block_age": block_age,
+            "block_age_secs": block_age_secs,
+            "rpc_health_ok": rpc_health_ok,
+            "rpc_health_ms": rpc_health_ms,
         }
 
-        if catching_up:
-            return ServiceStatus(name="Node", status=Status.WARN, message="Syncing", details=details)
+        status = Status.OK
+        message = "Running"
 
-        return ServiceStatus(name="Node", status=Status.OK, message="Running", details=details)
+        if catching_up:
+            status = Status.WARN
+            message = "Syncing"
+
+        # Even if CometBFT reports catching_up=false, a stale last block is still unhealthy.
+        if block_age_secs is not None:
+            if block_age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
+                status = Status.ERROR
+                message = "No new blocks"
+            elif block_age_secs >= NODE_LAST_BLOCK_WARN_SECS and status != Status.ERROR:
+                status = Status.WARN
+                message = "Slow blocks"
+
+        if peers == 0 and status == Status.OK:
+            status = Status.WARN
+            message = "No peers"
+
+        if rpc_health_ok is False and status == Status.OK:
+            status = Status.WARN
+            message = "RPC unhealthy"
+
+        debug_log(
+            "node: "
+            f"height={height} catching_up={catching_up} peers={peers} "
+            f"block_age_secs={block_age_secs} rpc_health_ok={rpc_health_ok} rpc_health_ms={rpc_health_ms} "
+            f"status={status.value} message={message}"
+        )
+
+        return ServiceStatus(name="Node", status=status, message=message, details=details)
     except requests.exceptions.ConnectionError:
         return ServiceStatus(name="Node", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
@@ -438,6 +536,11 @@ def check_validator() -> ServiceStatus:
                         except Exception:
                             pass
                         break
+            else:
+                debug_log(
+                    "validator: miraged staking validators failed: "
+                    f"rc={result.returncode} stderr={truncate((result.stderr or '').strip(), 120)!r}"
+                )
         except Exception:
             pass
 
@@ -479,6 +582,14 @@ def check_validator() -> ServiceStatus:
 def check_postgres() -> ServiceStatus:
     """Check PostgreSQL database status."""
     db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+
+    if psycopg is None:
+        return ServiceStatus(
+            name="PostgreSQL",
+            status=Status.ERROR,
+            message="psycopg missing",
+            details={"connected": False},
+        )
 
     try:
         with psycopg.connect(db_url, connect_timeout=3) as conn:
@@ -565,6 +676,24 @@ def check_backend() -> ServiceStatus:
         return ServiceStatus(name="Backend", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
         return ServiceStatus(name="Backend", status=Status.ERROR, message=str(e)[:25], details={})
+
+
+def check_grpc() -> ServiceStatus:
+    """Check chain gRPC port reachability (TCP connect + latency)."""
+    try:
+        host, port = parse_host_port(MIRAGE_GRPC_ADDR)
+    except Exception as e:
+        return ServiceStatus(name="gRPC", status=Status.ERROR, message="Bad addr", details={"addr": MIRAGE_GRPC_ADDR})
+
+    ms = tcp_connect_ms(host, port, timeout_secs=1.5)
+    if ms is None:
+        return ServiceStatus(
+            name="gRPC", status=Status.ERROR, message="Not reachable", details={"addr": MIRAGE_GRPC_ADDR}
+        )
+
+    return ServiceStatus(
+        name="gRPC", status=Status.OK, message="Listening", details={"addr": MIRAGE_GRPC_ADDR, "ms": ms}
+    )
 
 
 def check_indexer() -> ServiceStatus:
@@ -1072,7 +1201,34 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_YELLOW
             lines.append(f"{bullet}{Colors.DIM}Peers:{Colors.RESET} {peer_color}{peers}{Colors.RESET}")
         if details.get("block_age"):
-            lines.append(f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {details['block_age']}")
+            age_secs = details.get("block_age_secs")
+            age_human = details["block_age"]
+            if age_secs is None:
+                lines.append(
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_YELLOW}unknown{Colors.RESET}"
+                )
+            elif age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
+                lines.append(
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_RED}{age_human} ⚠{Colors.RESET}"
+                )
+            elif age_secs >= NODE_LAST_BLOCK_WARN_SECS:
+                lines.append(
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_YELLOW}{age_human} ⚠{Colors.RESET}"
+                )
+            else:
+                lines.append(
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_GREEN}{age_human}{Colors.RESET}"
+                )
+        if details.get("rpc_health_ok") is not None:
+            ok = details["rpc_health_ok"]
+            ms = details.get("rpc_health_ms")
+            if ok:
+                extra = f" ({ms}ms)" if isinstance(ms, int) else ""
+                lines.append(
+                    f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{extra}{Colors.RESET}"
+                )
+            else:
+                lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD ⚠{Colors.RESET}")
 
     elif status.name == "Validator":
         if details.get("moniker"):
@@ -1116,6 +1272,14 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             code = details["status_code"]
             code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
+
+    elif status.name == "gRPC":
+        addr = details.get("addr") or MIRAGE_GRPC_ADDR
+        lines.append(f"{bullet}{Colors.DIM}Addr:{Colors.RESET} {truncate(str(addr), 22)}")
+        ms = details.get("ms")
+        if isinstance(ms, int):
+            ms_color = Colors.BRIGHT_GREEN if ms < 50 else Colors.BRIGHT_YELLOW if ms < 200 else Colors.BRIGHT_RED
+            lines.append(f"{bullet}{Colors.DIM}Connect:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
 
     elif status.name == "Indexer":
         if details.get("height"):
@@ -1193,12 +1357,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     return lines
 
 
-def render_dashboard():
+def render_dashboard(refresh_secs: int):
     """Render the full dashboard."""
     term_width, term_height = get_terminal_size()
-
-    # Clear screen
-    print("\033[2J\033[H", end="")
 
     # Collect all statuses
     statuses = [
@@ -1206,6 +1367,7 @@ def render_dashboard():
         check_validator(),
         check_postgres(),
         check_backend(),
+        check_grpc(),
         check_indexer(),
         check_caddy(),
         check_referrals(),
@@ -1217,7 +1379,8 @@ def render_dashboard():
     display_statuses = [
         s
         for s in statuses
-        if s.status != Status.UNKNOWN or s.name in ("Node", "PostgreSQL", "Backend", "Indexer", "Caddy", "Referrals")
+        if s.status != Status.UNKNOWN
+        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Referrals")
     ]
 
     # Render header
@@ -1270,17 +1433,39 @@ def render_dashboard():
     print("\n".join(output))
 
     # Footer
-    footer = f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: 10s{Colors.RESET}"
+    footer = f"{Colors.DIM}Press Ctrl+C to exit • Auto-refresh: {refresh_secs}s{Colors.RESET}"
     print()
     print(center_text(footer, term_width))
 
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Mirage unified status dashboard")
+    parser.add_argument("--once", action="store_true", help="Render once and exit")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "10")),
+        help="Refresh interval in seconds (default: 10)",
+    )
+    parser.add_argument(
+        "--no-clear",
+        action="store_true",
+        help="Do not clear the screen before rendering",
+    )
+    args = parser.parse_args()
+
+    refresh_secs = max(1, int(args.interval))
+
     try:
         while True:
-            render_dashboard()
-            time.sleep(10)
+            if not args.no_clear:
+                # Clear screen
+                print("\033[2J\033[H", end="")
+            render_dashboard(refresh_secs=refresh_secs)
+            if args.once:
+                return
+            time.sleep(refresh_secs)
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)
