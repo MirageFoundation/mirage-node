@@ -7,28 +7,24 @@ NODE_HOME="$DATA_DIR/main"
 BIN="$ROOT_DIR/blockchain/miraged"
 CHAIN_ID="mirage-1"
 MARKER="$DATA_DIR/.initialized"
-MIGRATE="${MIGRATE_CONFIG:-0}"
 
-echo "==> Init: NODE_HOME=$NODE_HOME MIGRATE=$MIGRATE"
+echo "==> Init: NODE_HOME=$NODE_HOME"
 
 mkdir -p "$NODE_HOME" "$NODE_HOME/config" "$NODE_HOME/data"
 
-# Import validator key from seed on first init (idempotent)
+# Validator key must exist (imported by deploy.sh during --init)
 KEYRING_BACKEND="test"
-if [ "$MIGRATE" != "1" ]; then
-  if ! $BIN keys show validator --home "$NODE_HOME" --keyring-backend "$KEYRING_BACKEND" >/dev/null 2>&1; then
-    echo "ERROR: validator account key not found in keyring. Import it before startup." >&2
-    echo "Hint: The deploy script imports the mnemonic into the node volume during --init." >&2
-    exit 1
-  else
-    echo "==> Validator key already present in keyring"
-  fi
+if ! $BIN keys show validator --home "$NODE_HOME" --keyring-backend "$KEYRING_BACKEND" >/dev/null 2>&1; then
+  echo "ERROR: validator account key not found in keyring. Import it before startup." >&2
+  echo "Hint: The deploy script imports the mnemonic into the node volume during --init." >&2
+  exit 1
 fi
+echo "==> Validator key present"
 
-# Require consensus key to exist and never generate automatically
+# Consensus key must exist (derived by deploy.sh during --init)
 if [ ! -f "$NODE_HOME/config/priv_validator_key.json" ]; then
   echo "ERROR: Consensus key missing: $NODE_HOME/config/priv_validator_key.json" >&2
-  echo "Hint: On --init, the deploy script derives this from your mnemonic (index default 0) before start." >&2
+  echo "Hint: On --init, the deploy script derives this from your mnemonic." >&2
   exit 1
 fi
 echo "==> Consensus key present"
@@ -38,8 +34,8 @@ if [ ! -f "$NODE_HOME/data/priv_validator_state.json" ]; then
   echo '{"height":"0","round":0,"step":0}' > "$NODE_HOME/data/priv_validator_state.json"
 fi
 
-# Initialize default config state once (genesis and client.toml), but we will replace config files with templates below
-if [ "$MIGRATE" != "1" ] && [ ! -f "$NODE_HOME/config/genesis.json" ]; then
+# Initialize genesis if needed (only on first run)
+if [ ! -f "$NODE_HOME/config/genesis.json" ]; then
   echo "==> Running miraged init to create base config (genesis)..."
   $BIN init "validator" --chain-id "$CHAIN_ID" --home "$NODE_HOME"
 fi

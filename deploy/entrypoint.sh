@@ -78,7 +78,6 @@ LOGS_DIR="$DATA_DIR/logs"
 BIN="$ROOT_DIR/blockchain/miraged"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
-MIGRATE_CONFIG="${MIGRATE_CONFIG:-0}"
 
 # Create centralized log directory structure
 mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy}
@@ -95,11 +94,9 @@ echo "Node home: $NODE_HOME"
 echo "Logs dir:  $LOGS_DIR"
 echo "Moniker:   $MONIKER"
 
-# Run initialization if needed
-if [ ! -f "$DATA_DIR/.initialized" ] || [ "$MIGRATE_CONFIG" = "1" ]; then
-  echo "==> Running initialization (MIGRATE_CONFIG=$MIGRATE_CONFIG)..."
-  MIGRATE_CONFIG="$MIGRATE_CONFIG" bash "$ROOT_DIR/deploy/init.sh"
-fi
+# Run initialization (idempotent - safe to run every startup)
+echo "==> Running initialization..."
+bash "$ROOT_DIR/deploy/init.sh"
 
 # ALWAYS ensure Caddyfile is rendered correctly (even if init already ran)
 # This prevents issues where the Caddyfile might be missing or incorrect

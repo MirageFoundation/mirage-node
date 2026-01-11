@@ -196,6 +196,7 @@ def run_migrations(config_dir: Path) -> int:
             # Both exist - copy any missing files from old to new, then delete old
             logger.info(f"Merging {old_config_dir} -> {config_dir}")
             import shutil
+
             for item in old_config_dir.iterdir():
                 dest = config_dir / item.name
                 if not dest.exists():

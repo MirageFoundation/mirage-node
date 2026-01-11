@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Unified remote deployment script for Mirage
-# Usage: deploy/deploy.sh user@host [--init|--update|--update-init] [--file TARBALL] [--moniker VALUE]
+# Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE]
 #
 # Notes:
 # - Moniker defaults to "mirage-node" and can be overridden with --moniker
@@ -13,33 +13,24 @@ show_help() {
   cat <<EOF
 Unified Mirage Deployment
 
-Usage: deploy/deploy.sh user@host [--init|--update|--update-init] [--file TARBALL] [--moniker VALUE]
+Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE]
        deploy/deploy.sh --build-only [--file TARBALL]
 
 Arguments:
   user@host            SSH connection string (e.g., root@159.203.114.27)
 
 Modes (exactly one required, except for --build-only):
-  --init               First-time setup: build, upload, start container. Prompts for existing mnemonic and imports it before startup.
+  --init               First-time setup: build, upload, start container.
+                       Prompts for mnemonic and imports it before startup.
                        REQUIRES --moniker to be explicitly provided.
-  --update             Update image and restart container. Preserves data and configs.
-  --update-init        Update image and re-render initialization configs (preserves keys/state).
-  --build-only         Build Docker image and create tarball without deploying. No user@host required.
+  --update             Update image and restart container. Preserves data.
+                       Re-renders configs on startup (idempotent).
+  --build-only         Build Docker image and create tarball without deploying.
 
 Options:
   --file TARBALL       For deploy modes: skip build and use the provided tarball.
-                       For --build-only: specify output tarball path (default: deploy/mirage-docker-{dev|prod}.tar.gz)
+                       For --build-only: specify output tarball path.
   --moniker VALUE      Set CometBFT node moniker (default: mirage-node, REQUIRED for --init)
-
-Behavior:
-  - By default, builds Docker image locally and transfers it to remote.
-  - With --file, skips build and uses the provided tarball directly.
-  - Moniker defaults to "mirage-node".
-  - Domain/TLS: Configure HTTPS inside the container using:
-      docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com
-    Domain is persisted and will be automatically configured on subsequent deployments.
-  - Tmux config is bundled in the image from deploy/templates/tmux.conf.
-  - On --init, you will be prompted for a funded mnemonic; it is imported into the node volume before the container starts.
 
 Remote access:
   ssh user@host 'docker logs mirage'
@@ -70,7 +61,6 @@ while [ $# -gt 0 ]; do
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
-    --update-init) MODE="update-init" ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
       shift
@@ -130,7 +120,7 @@ if [ "$BUILD_ONLY" -eq 1 ]; then
 fi
 
 if [ -z "$MODE" ]; then
-  echo "ERROR: one of --init, --update, --update-init is required." >&2
+  echo "ERROR: one of --init or --update is required." >&2
   exit 1
 fi
 
@@ -215,16 +205,6 @@ if [ "$MODE" = "init" ]; then
   if test_file '~/.mirage/main/config/priv_validator_key.json'; then
     echo "ERROR: Found existing ~/.mirage/main/config/priv_validator_key.json on remote. Aborting to avoid accidental overwrite." >&2
     echo "If this server was previously used, provision a fresh server or remove the file manually with extreme caution." >&2
-    close_ssh_socket
-    exit 1
-  fi
-fi
-
-# Early sanity check for --update-init: consensus key MUST already exist on remote
-if [ "$MODE" = "update-init" ]; then
-  echo "==> Sanity check: remote consensus key must exist..."
-  if ! test_file '~/.mirage/main/config/priv_validator_key.json'; then
-    echo "ERROR: Missing ~/.mirage/main/config/priv_validator_key.json on remote. --update-init requires an existing consensus key." >&2
     close_ssh_socket
     exit 1
   fi
@@ -373,15 +353,12 @@ fi
 
 echo "==> Starting container..."
 EXTRA_ENVS=""
-if [ "$MODE" = "update-init" ]; then
-  EXTRA_ENVS="$EXTRA_ENVS -e MIGRATE_CONFIG=1"
-fi
 
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage; persist hermes IBC relayer data
 run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.hermes'
 
-# Initialize persistent config directory and seed env files if missing (for --init and --update-init)
-if [ "$MODE" = "init" ] || [ "$MODE" = "update-init" ]; then
+# Initialize persistent config directory and seed env files if missing (for --init)
+if [ "$MODE" = "init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
   run_cmd 'mkdir -p ~/.mirage/env'
   # Copy env templates if they don't exist on remote
@@ -398,8 +375,8 @@ if [ "$MODE" = "init" ] || [ "$MODE" = "update-init" ]; then
   done
   # Seed MIRAGE_INDEXER_DB_URL if missing or empty
   run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
-  # Persist moniker only during first-time init; do not overwrite during update-init
-  if [ "$MODE" = "init" ] && [ -n "$MONIKER_VALUE" ]; then
+  # Persist moniker during first-time init
+  if [ -n "$MONIKER_VALUE" ]; then
     run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"
   fi
 fi
@@ -505,8 +482,8 @@ if [ "$MODE" = "init" ]; then
   fi
 fi
 
-# For --update and --update-init: update validator moniker on-chain if it differs
-if [ "$MODE" = "update" ] || [ "$MODE" = "update-init" ]; then
+# For --update: update validator moniker on-chain if it differs
+if [ "$MODE" = "update" ]; then
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     echo "==> Checking if validator moniker needs update..."
     MONIKER_UPDATE_SCRIPT=$'# Ensure strict mode in container\nset -euo pipefail\ncd /opt/mirage\nVALOPER=$(/opt/mirage/blockchain/miraged keys show validator --home /root/.mirage/main --keyring-backend test --bech val -a 2>/dev/null || echo \"\")\nif [ -z \"$VALOPER\" ]; then\n  echo \"Validator not found, skipping moniker update\"\n  exit 0\nfi\nCURRENT=$(/opt/mirage/blockchain/miraged q staking validator \"$VALOPER\" --home /root/.mirage/main --node tcp://127.0.0.1:26657 -o json 2>/dev/null | jq -r \".validator.description.moniker // \\\"\\\"\" || echo \"\")\nif [ \"$CURRENT\" = \"${NEW_MONIKER:-}\" ]; then\n  echo \"Validator moniker already set to \\\"${NEW_MONIKER:-}\\\"\"\n  exit 0\nfi\necho \"Updating validator moniker from \\\"$CURRENT\\\" to \\\"${NEW_MONIKER:-}\\\"\"\n/opt/mirage/blockchain/miraged tx staking edit-validator --new-moniker=\"${NEW_MONIKER:-}\" \\\n  --from validator --home /root/.mirage/main --keyring-backend test \\\n  --chain-id mirage-1 --node tcp://127.0.0.1:26657 --gas auto --gas-adjustment 1.5 -y >/dev/null 2>&1 || true\n'
