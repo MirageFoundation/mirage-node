@@ -244,14 +244,15 @@ def sync_env_file(template_path: Path, config_path: Path, logger=None) -> dict:
             key = stripped.split("=", 1)[0].strip()
             seen_keys.add(key)
 
-            if key in existing_values:
-                # Preserve user's value
+            if key in existing_values and existing_values[key]:
+                # Preserve user's non-empty value
                 new_lines.append(f"{key}={existing_values[key]}\n")
                 stats["preserved"] += 1
             else:
-                # Use template default (new key)
+                # Use template default (new key or empty existing value)
                 new_lines.append(line)
-                stats["added"].append(key)
+                if key not in existing_values:
+                    stats["added"].append(key)
         else:
             new_lines.append(line)
 
