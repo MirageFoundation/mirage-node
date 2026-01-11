@@ -70,6 +70,7 @@ RUN apt-get update && apt-get install -y \
     tmux \
     nano \
     micro \
+    tree \
     curl \
     ca-certificates \
     coreutils \
@@ -79,6 +80,9 @@ RUN apt-get update && apt-get install -y \
     cronolog \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
+
+# Add shell aliases
+RUN echo "alias m='micro'" >> /etc/bash.bashrc
 
 # Install Caddy (fail-fast)
 RUN apt-get update && apt-get install -y caddy && rm -rf /var/lib/apt/lists/*

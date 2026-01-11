@@ -177,6 +177,11 @@ sed -i "s|^#*log_directory = .*|log_directory = '$PG_LOG_DIR'|" "$PG_CONF"
 if ! grep -q "^log_directory" "$PG_CONF"; then
   echo "log_directory = '$PG_LOG_DIR'" >> "$PG_CONF"
 fi
+# Set log filename to match our convention (postgres-YYYY-MM-DD.log)
+sed -i "s|^#*log_filename = .*|log_filename = 'postgres-%Y-%m-%d.log'|" "$PG_CONF"
+if ! grep -q "^log_filename" "$PG_CONF"; then
+  echo "log_filename = 'postgres-%Y-%m-%d.log'" >> "$PG_CONF"
+fi
 # Enable logging_collector so logs go to files
 sed -i "s|^#*logging_collector = .*|logging_collector = on|" "$PG_CONF"
 if ! grep -q "^logging_collector" "$PG_CONF"; then
@@ -184,7 +189,7 @@ if ! grep -q "^logging_collector" "$PG_CONF"; then
 fi
 
 tmux new-window -t "$SESSION" -n postgres -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:postgres" "pg_ctlcluster 16 main start && (for i in \$(seq 1 10); do PG_LOG=\$(ls -t $PG_LOG_DIR/postgresql-16-main*.log 2>/dev/null | head -1) && [ -n \"\$PG_LOG\" ] && tail -f \"\$PG_LOG\" && break; sleep 1; done) || echo 'PostgreSQL started (no log file found)'" C-m
+tmux send-keys -t "$SESSION:postgres" "pg_ctlcluster 16 main start && sleep 2 && tail -f $PG_LOG_DIR/postgres-\$(date -u +%Y-%m-%d).log" C-m
 
 # Wait for PostgreSQL readiness (hard fail) using a valid role
 echo '==> Waiting for PostgreSQL to become available...'
