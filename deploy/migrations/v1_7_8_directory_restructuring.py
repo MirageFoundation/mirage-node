@@ -62,7 +62,7 @@ def run(config_dir: Path, logger) -> str:
         else:
             logger.info(f"    Renaming: {old_main} -> {new_node}")
             shutil.move(str(old_main), str(new_node))
-            
+
             # Create symlink for backward compatibility
             try:
                 old_main.symlink_to(new_node)

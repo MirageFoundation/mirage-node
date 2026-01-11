@@ -233,13 +233,27 @@ else
 fi
 
 echo "==> Uploading image..."
-# Optimization: avoid re-uploading the tarball if the remote already has the exact same bytes.
-# This only skips the SCP step (we still load/restart as usual).
+# Optimization: avoid re-uploading the tarball if possible.
+# Priority: 1) Target has it, 2) Jump host has it (copy internally), 3) Upload from local
 LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
 REMOTE_SHA="$(run_ssh 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""')"
+
 if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
-  echo "==> Remote tarball hash matches, skipping upload."
+  echo "    Target already has matching tarball, skipping upload."
+elif [ -n "$PROXYJUMP" ]; then
+  # Check if jump host has the tarball (can copy internally, much faster)
+  JUMP_SHA="$(ssh "$PROXYJUMP" 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""' 2>/dev/null || echo "")"
+  if [ -n "$JUMP_SHA" ] && [ "$JUMP_SHA" = "$LOCAL_SHA" ]; then
+    echo "    Copying from jump host ($PROXYJUMP) to target..."
+    # Extract target host from REMOTE (user@host format)
+    TARGET_HOST="${REMOTE#*@}"
+    ssh "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz"
+  else
+    echo "    Uploading from local (jump host hash mismatch or missing)..."
+    run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
+  fi
 else
+  echo "    Uploading from local..."
   run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
 fi
 
