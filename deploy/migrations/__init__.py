@@ -34,7 +34,8 @@ def discover_migrations() -> list[tuple[str, str, any]]:
     package_dir = os.path.dirname(__file__)
     
     for _, module_name, _ in pkgutil.iter_modules([package_dir]):
-        if module_name.startswith("_"):
+        # Skip non-migration modules
+        if module_name.startswith("_") or module_name == "helpers":
             continue
         
         try:
@@ -149,7 +150,7 @@ def run_one_time_migrations(config_dir: Path) -> int:
 
 def run_env_sync(config_dir: Path) -> None:
     """Sync env files with latest templates."""
-    from deploy.migrations._sync_env_files import sync_all
+    from deploy.migrations.helpers import sync_all
     
     config_dir = Path(config_dir)
     templates_dir = Path(__file__).parent.parent / "templates"
