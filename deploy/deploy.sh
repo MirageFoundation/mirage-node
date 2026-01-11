@@ -257,7 +257,7 @@ run_ssh '
 '
 
 echo "==> Loading image on remote..."
-run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load && rm -f /tmp/mirage-docker.tar.gz'
+run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
 
 # For --init: enforce --moniker is provided
 if [ "$MODE" = "init" ]; then
