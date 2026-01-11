@@ -299,10 +299,24 @@ def require_runtime() -> Runtime:
     return _RUNTIME
 
 
-def assert_grpc_ready(timeout_s: float = 2.0) -> None:
+def assert_grpc_ready(timeout_s: float = 2.0, max_retries: int = 360, retry_interval: float = 10.0) -> None:
+    """Wait for gRPC to be ready, retrying for up to 1 hour by default."""
+    import logging
+    log = logging.getLogger(__name__)
     target = require_runtime().grpc_target
-    ch = _grpc.insecure_channel(target)
-    _grpc.channel_ready_future(ch).result(timeout=timeout_s)
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            ch = _grpc.insecure_channel(target)
+            _grpc.channel_ready_future(ch).result(timeout=timeout_s)
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                log.warning(f"gRPC not ready (attempt {attempt + 1}/{max_retries}): {e}")
+                import time
+                time.sleep(retry_interval)
+    raise RuntimeError(f"gRPC not ready after {max_retries} attempts: {last_error}")
 
 
 __all__ = [

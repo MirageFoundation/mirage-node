@@ -92,13 +92,13 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
 
 
 def load_params(
-    force: bool = False, max_retries: int = 60, retry_interval: float = 5.0
+    force: bool = False, max_retries: int = 360, retry_interval: float = 10.0
 ) -> Dict[str, Any]:
     """Load params from chain, waiting for chain to be available.
 
     Args:
         force: Force reload even if cached
-        max_retries: Max attempts to connect to chain (default 60 = 2 minutes)
+        max_retries: Max attempts to connect to chain (default 360 = 1 hour)
         retry_interval: Seconds between retries
 
     Raises:
