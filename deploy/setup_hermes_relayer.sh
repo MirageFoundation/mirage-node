@@ -402,11 +402,14 @@ if [ -z "$MIRAGE_CHANNEL" ] || [ -z "$OSMOSIS_CHANNEL" ]; then
 fi
 # Start the relayer
 echo ""
-echo "==> Setting up Hermes relayer..."
+echo "==> Starting Hermes relayer..."
 
 # Kill any existing hermes
 pkill -f "hermes start" 2>/dev/null || true
 sleep 1
+
+HERMES_LOG_DIR="$HOME/.mirage/logs/hermes"
+mkdir -p "$HERMES_LOG_DIR"
 
 # Check if systemd is available (not in Docker)
 if pidof systemd >/dev/null 2>&1; then
@@ -444,39 +447,42 @@ EOF
         journalctl -u hermes --no-pager -n 20
         exit 1
     fi
-else
-    echo "    Using background process (Docker mode)..."
+elif tmux has-session -t mirage 2>/dev/null; then
+    # Docker mode with tmux session available - use tmux window
+    echo "    Using tmux session 'mirage'..."
+    SESSION="mirage"
     
-    # Create a restart wrapper script with date-based logging
-    HERMES_LOG_DIR="$HOME/.mirage/logs/hermes"
-    mkdir -p "$HERMES_LOG_DIR"
-    cat > /usr/local/bin/hermes-runner.sh << RUNNER
-#!/usr/bin/env bash
-HERMES_LOG_DIR="$HERMES_LOG_DIR"
-while true; do
-    if command -v cronolog >/dev/null 2>&1; then
-        /usr/local/bin/hermes start 2>&1 | cronolog "\$HERMES_LOG_DIR/hermes-%Y-%m-%d.log"
-    else
-        HERMES_LOG="\$HERMES_LOG_DIR/hermes-\$(date -u +%Y-%m-%d).log"
-        /usr/local/bin/hermes start >> "\$HERMES_LOG" 2>&1
+    # Kill hermes window if it exists, then recreate
+    tmux kill-window -t "$SESSION:hermes" 2>/dev/null || true
+    
+    # Create hermes window with the standard command from entrypoint
+    tmux new-window -t "$SESSION" -n hermes -c /opt/mirage
+    tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
+    
+    # Try to add status monitor pane (may fail in headless mode)
+    if tmux split-window -t "$SESSION:hermes" -v -p 50 -c /opt/mirage 2>/dev/null; then
+        tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
+        tmux select-pane -t "$SESSION:hermes.0"
     fi
-    echo "\$(date): Hermes exited, restarting in 5s..." >> "\$HERMES_LOG_DIR/hermes-\$(date -u +%Y-%m-%d).log"
-    sleep 5
-done
-RUNNER
-    chmod +x /usr/local/bin/hermes-runner.sh
     
-    # Start in background
-    nohup /usr/local/bin/hermes-runner.sh > /dev/null 2>&1 &
-    
-    sleep 3
+    sleep 2
     if pgrep -f "hermes start" >/dev/null; then
-        echo "    Hermes is running (PID: $(pgrep -f 'hermes start'))"
-        SERVICE_MODE="background"
+        echo "    Hermes is running in tmux window 'hermes'"
+        SERVICE_MODE="tmux"
     else
-        echo "ERROR: Hermes failed to start. Check ~/.mirage/logs/hermes/hermes-$(date -u +%Y-%m-%d).log"
+        echo "ERROR: Hermes failed to start. Check tmux window or logs."
         exit 1
     fi
+else
+    # Docker mode without tmux - suggest restart
+    echo ""
+    echo "    ╔══════════════════════════════════════════════════════════════╗"
+    echo "    ║  Hermes configured! Restart container to start relayer.      ║"
+    echo "    ╚══════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "    Run: docker restart mirage"
+    echo ""
+    SERVICE_MODE="pending"
 fi
 
 echo ""
@@ -488,28 +494,26 @@ echo "IBC Channel:"
 echo "  Mirage:  $MIRAGE_CHANNEL (transfer)"
 echo "  Osmosis: $OSMOSIS_CHANNEL (transfer)"
 echo ""
-if [ "$SERVICE_MODE" = "systemd" ]; then
-    echo "Relayer Service (systemd):"
-    echo "  Status:  systemctl status hermes"
-    echo "  Logs:    journalctl -u hermes -f"
-    echo "  Restart: systemctl restart hermes"
-else
-    echo "Relayer Process (Docker mode):"
-    echo "  Status:  pgrep -a hermes"
-    echo "  Logs:    tail -f ~/.mirage/logs/hermes/hermes-\$(date -u +%Y-%m-%d).log"
-    echo "  Restart: pkill -f hermes-runner && /usr/local/bin/hermes-runner.sh &"
-fi
+case "$SERVICE_MODE" in
+    systemd)
+        echo "Relayer Service (systemd):"
+        echo "  Status:  systemctl status hermes"
+        echo "  Logs:    journalctl -u hermes -f"
+        echo "  Restart: systemctl restart hermes"
+        ;;
+    tmux)
+        echo "Relayer running in tmux window 'hermes':"
+        echo "  View:    tmux select-window -t mirage:hermes"
+        echo "  Logs:    tail -f ~/.mirage/logs/hermes/hermes-\$(date -u +%Y-%m-%d).log"
+        echo "  Restart: tmux send-keys -t mirage:hermes C-c && sleep 1 && tmux send-keys -t mirage:hermes 'hermes start' C-m"
+        ;;
+    pending)
+        echo "Relayer configured but NOT running."
+        echo "  Start:   docker restart mirage"
+        ;;
+esac
 echo ""
 echo "To test IBC transfer from Mirage to Osmosis:"
 echo "  miraged tx ibc-transfer transfer transfer $MIRAGE_CHANNEL <OSMO_ADDRESS> 1000000umirage --from <KEY> --chain-id mirage-1 --fees 50000umirage"
 echo ""
 echo "==========================================="
-echo ""
-echo "NOTE: For Hermes to auto-start on future container restarts,"
-echo "      you must restart the container once:"
-echo ""
-echo "      docker restart mirage"
-echo ""
-echo "      The entrypoint will then detect ~/.hermes/config.toml"
-echo "      and start Hermes automatically in a tmux window."
-echo ""

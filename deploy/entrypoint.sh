@@ -310,11 +310,11 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
-  # Add status monitor pane (50% bottom)
-  tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
-  # Focus back on hermes pane
-  tmux select-pane -t "$SESSION:hermes.0"
+  # Add status monitor pane (50% bottom) - may fail in headless mode, that's OK
+  if tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR" 2>/dev/null; then
+    tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
+    tmux select-pane -t "$SESSION:hermes.0"
+  fi
 fi
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
