@@ -299,8 +299,6 @@ if [ "$MODE" = "init" ]; then
       ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/env/$fname ]" 2>/dev/null || scp -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$f" "$REMOTE:~/.mirage/env/$fname"
     fi
   done
-  # Seed MIRAGE_INDEXER_DB_URL if missing or empty
-  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
   # Persist moniker during first-time init
   if [ -n "$MONIKER_VALUE" ]; then
     ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"

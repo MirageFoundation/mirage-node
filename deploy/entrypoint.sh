@@ -62,7 +62,7 @@ else
   fi
 fi
 
-# Ensure a default local Postgres URL if not provided
+# Safety fallback for DB URL (should already be set in indexer.env template)
 if [ -z "${MIRAGE_INDEXER_DB_URL:-}" ]; then
   export MIRAGE_INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 fi
