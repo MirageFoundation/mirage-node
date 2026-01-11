@@ -384,24 +384,18 @@ run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.hermes'
 if [ "$MODE" = "init" ] || [ "$MODE" = "update-init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
   run_cmd 'mkdir -p ~/.mirage/config'
-  # Upload example templates
-  for f in "$(dirname "$0")/templates"/*.env.example; do
+  # Copy env templates if they don't exist on remote
+  for f in "$(dirname "$0")/templates"/*.env; do
     if [ -f "$f" ]; then
-      copy_file "$f" "~/.mirage/config/$(basename "$f")"
+      fname="$(basename "$f")"
+      # Only copy if file doesn't exist on remote (preserve user customizations)
+      if [ "$IS_LOCAL" -eq 1 ]; then
+        [ -f "$HOME/.mirage/config/$fname" ] || cp "$f" "$HOME/.mirage/config/$fname"
+      else
+        ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/config/$fname ]" 2>/dev/null || copy_file "$f" "~/.mirage/config/$fname"
+      fi
     fi
   done
-  # Create .env copies if missing
-  run_cmd '
-    set -euo pipefail
-    mkdir -p ~/.mirage/config
-    for f in ~/.mirage/config/*.env.example; do
-      [ -e "$f" ] || continue
-      d="${f%.example}"
-      if [ ! -f "$d" ]; then
-        cp "$f" "$d"
-      fi
-    done
-  '
   # Seed MIRAGE_INDEXER_DB_URL if missing or empty
   run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/config/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
   # Persist moniker only during first-time init; do not overwrite during update-init

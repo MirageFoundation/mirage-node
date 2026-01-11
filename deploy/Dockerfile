@@ -108,6 +108,10 @@ COPY --from=builder /opt/mirage/deploy/entrypoint.sh /opt/mirage/deploy/entrypoi
 COPY --from=builder /opt/mirage/deploy/init.sh /opt/mirage/deploy/init.sh
 COPY --from=builder /opt/mirage/deploy/templates /opt/mirage/deploy/templates
 
+# Deploy migrations and env sync (run automatically on startup)
+COPY --from=builder /opt/mirage/deploy/__init__.py /opt/mirage/deploy/__init__.py
+COPY --from=builder /opt/mirage/deploy/migrations /opt/mirage/deploy/migrations
+
 # Template renderer
 COPY --from=builder /opt/mirage/deploy/render_template.py /opt/mirage/deploy/render_template.py
 

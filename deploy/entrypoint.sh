@@ -30,13 +30,26 @@ export PYTHONPATH="/opt/mirage"
 
 # Load persistent env files if present
 CONFIG_DIR="${HOME}/.mirage/config"
-for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DIR}/indexer.env" "${CONFIG_DIR}/frontend.env" "${CONFIG_DIR}/secrets.env"; do
-  if [ -f "$envfile" ]; then
-    set -a
-    . "$envfile"
-    set +a
-  fi
-done
+load_env_files() {
+  for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DIR}/indexer.env" "${CONFIG_DIR}/frontend.env" "${CONFIG_DIR}/secrets.env"; do
+    if [ -f "$envfile" ]; then
+      set -a
+      . "$envfile"
+      set +a
+    fi
+  done
+}
+load_env_files
+
+# Ensure config directory exists
+mkdir -p "$CONFIG_DIR"
+
+# Run deploy migrations (one-time migrations + env sync with templates)
+echo "==> Running deploy migrations..."
+python3 -m deploy.migrations --config-dir "$CONFIG_DIR" || true
+
+# Reload env files after migrations
+load_env_files
 
 # Set container hostname to MONIKER or external IP (instead of random container ID)
 # Note: Replace dots with dashes in hostname (dots not allowed). Fails silently if no permissions.

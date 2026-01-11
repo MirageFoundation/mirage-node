@@ -18,7 +18,7 @@ This project must **never** commit or publish:
 
 Notes:
 
-- `.env` and `.env.*` are gitignored. Use example files like `.env.example` and `deploy/templates/*.env.example`.
+- `.env` files in the repo root are gitignored. Template defaults live in `deploy/templates/*.env`.
 - For a quick local check, run a secret scanner from the repo root, for example:
   - `gitleaks detect --no-git --source .`
 
