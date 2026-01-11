@@ -184,12 +184,28 @@ def run_migrations(config_dir: Path) -> int:
     Returns:
         Number of one-time migrations that were run
     """
-    # Step 0: Rename config/ -> env/ if old directory exists
+    # Step 0: Migrate config/ -> env/ (one-time directory rename)
     config_dir = Path(config_dir)
     old_config_dir = config_dir.parent / "config"
-    if old_config_dir.exists() and old_config_dir.is_dir() and not config_dir.exists():
-        logger.info(f"Renaming {old_config_dir} -> {config_dir}")
-        old_config_dir.rename(config_dir)
+    if old_config_dir.exists() and old_config_dir.is_dir():
+        if not config_dir.exists():
+            # Simple rename
+            logger.info(f"Renaming {old_config_dir} -> {config_dir}")
+            old_config_dir.rename(config_dir)
+        else:
+            # Both exist - copy any missing files from old to new, then delete old
+            logger.info(f"Merging {old_config_dir} -> {config_dir}")
+            import shutil
+            for item in old_config_dir.iterdir():
+                dest = config_dir / item.name
+                if not dest.exists():
+                    if item.is_file():
+                        shutil.copy2(item, dest)
+                    elif item.is_dir():
+                        shutil.copytree(item, dest)
+            # Delete old config/ directory
+            shutil.rmtree(old_config_dir)
+            logger.info(f"Deleted old {old_config_dir}")
 
     # Step 1: Run one-time migrations
     count = run_one_time_migrations(config_dir)
