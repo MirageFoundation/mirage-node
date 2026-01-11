@@ -275,6 +275,18 @@ echo "==> Starting container..."
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage
 ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.caddy ~/.mirage'
 
+# One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" '
+  if [ -d ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
+    echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
+    mv ~/.hermes ~/.mirage/hermes
+  elif [ -d ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
+    echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
+    cp -a ~/.hermes/. ~/.mirage/hermes/
+    rm -rf ~/.hermes
+  fi
+'
+
 # Initialize persistent config directory and seed env files if missing (for --init)
 if [ "$MODE" = "init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
