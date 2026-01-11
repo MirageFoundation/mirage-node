@@ -73,7 +73,7 @@ if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
   exit 0
 fi
 
-# Database directories to sync (relative to ~/.mirage/main/data/)
+# Database directories to sync (relative to ~/.mirage/node/data/)
 DB_DIRS="application.db blockstore.db cs.wal evidence.db snapshots state.db tx_index.db"
 
 echo ""
@@ -82,7 +82,7 @@ ssh "$TARGET" 'docker stop mirage || true'
 
 echo ""
 echo "==> Step 2: Backup target's priv_validator_state.json"
-ssh "$TARGET" 'cp ~/.mirage/main/data/priv_validator_state.json /tmp/priv_validator_state.json.bak 2>/dev/null || echo "{\"height\":\"0\",\"round\":0,\"step\":0}" > /tmp/priv_validator_state.json.bak'
+ssh "$TARGET" 'cp ~/.mirage/node/data/priv_validator_state.json /tmp/priv_validator_state.json.bak 2>/dev/null || echo "{\"height\":\"0\",\"round\":0,\"step\":0}" > /tmp/priv_validator_state.json.bak'
 
 echo ""
 echo "==> Step 3: Stop source node briefly for consistent snapshot"
@@ -90,7 +90,7 @@ ssh "$SOURCE" 'docker exec mirage pkill -TERM miraged 2>/dev/null || true; sleep
 
 echo ""
 echo "==> Step 4: Create snapshot on source (databases only, excluding validator state)"
-ssh "$SOURCE" "cd ~/.mirage/main/data && tar --exclude='priv_validator_state.json' -czf /tmp/blockchain_data.tar.gz $DB_DIRS 2>/dev/null || tar -czf /tmp/blockchain_data.tar.gz $DB_DIRS"
+ssh "$SOURCE" "cd ~/.mirage/node/data && tar --exclude='priv_validator_state.json' -czf /tmp/blockchain_data.tar.gz $DB_DIRS 2>/dev/null || tar -czf /tmp/blockchain_data.tar.gz $DB_DIRS"
 
 echo ""
 echo "==> Step 5: Restart source node"
@@ -103,15 +103,15 @@ ssh "$SOURCE" "cat /tmp/blockchain_data.tar.gz" | ssh "$TARGET" "cat > /tmp/bloc
 
 echo ""
 echo "==> Step 7: Clear target's old data (preserving priv_validator_state.json backup)"
-ssh "$TARGET" "cd ~/.mirage/main/data && rm -rf $DB_DIRS"
+ssh "$TARGET" "cd ~/.mirage/node/data && rm -rf $DB_DIRS"
 
 echo ""
 echo "==> Step 8: Extract snapshot on target"
-ssh "$TARGET" 'cd ~/.mirage/main/data && tar -xzf /tmp/blockchain_data.tar.gz'
+ssh "$TARGET" 'cd ~/.mirage/node/data && tar -xzf /tmp/blockchain_data.tar.gz'
 
 echo ""
 echo "==> Step 9: Restore target's priv_validator_state.json"
-ssh "$TARGET" 'cp /tmp/priv_validator_state.json.bak ~/.mirage/main/data/priv_validator_state.json'
+ssh "$TARGET" 'cp /tmp/priv_validator_state.json.bak ~/.mirage/node/data/priv_validator_state.json'
 
 echo ""
 echo "==> Step 10: Cleanup temporary files"

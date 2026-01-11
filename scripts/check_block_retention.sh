@@ -5,7 +5,7 @@ set -e
 # Usage: ./check_block_retention.sh [RPC_URL]
 
 RPC_URL="${1:-http://127.0.0.1:26657}"
-HOME_DIR="${HOME_DIR:-$HOME/.mirage/main}"
+HOME_DIR="${HOME_DIR:-$HOME/.mirage/node}"
 DATA_DIR="$HOME_DIR/data"
 APP_TOML="$HOME_DIR/config/app.toml"
 

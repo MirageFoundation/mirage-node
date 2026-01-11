@@ -469,20 +469,50 @@ export default function SubscriptionView({ state }) {
     const autoRenewDisplayRef = useRef(false);
     const detailsPanelRef = useRef(null);
 
-    // Load static tiers from cached config
-    useEffect(() => {
+    const loadTierConfigFromStorage = () => {
         try {
             const configData = localStorage.getItem('configData');
-            if (configData) {
-                const cached = JSON.parse(configData);
-                if (Array.isArray(cached.tiers) && cached.tiers.length > 0) {
-                    setTierConfig(buildTierConfig(cached.tiers));
-                }
-                if (typeof cached.subscription_period === 'number') {
-                    setSubscriptionPeriodMinutes(Number(cached.subscription_period) || 0);
-                }
+            if (!configData) return;
+            const cached = JSON.parse(configData);
+            if (Array.isArray(cached.tiers) && cached.tiers.length > 0) {
+                setTierConfig(buildTierConfig(cached.tiers));
+            }
+            if (typeof cached.subscription_period === 'number') {
+                setSubscriptionPeriodMinutes(Number(cached.subscription_period) || 0);
             }
         } catch (_) { }
+    };
+
+    // Load tiers from cached config (and keep in sync with configUpdated events)
+    useEffect(() => {
+        loadTierConfigFromStorage();
+
+        const onConfigUpdated = () => {
+            loadTierConfigFromStorage();
+        };
+        window.addEventListener('configUpdated', onConfigUpdated);
+        return () => window.removeEventListener('configUpdated', onConfigUpdated);
+    }, []);
+
+    // Force-refresh chain config when visiting SubscriptionView to avoid stale tier pricing
+    useEffect(() => {
+        (async () => {
+            try {
+                const cfg = await Api.get(
+                    'get_config',
+                    { _cb: Date.now() },
+                    {
+                        timeoutMs: 10000,
+                        headers: {
+                            'Cache-Control': 'no-cache',
+                            'Pragma': 'no-cache',
+                        }
+                    }
+                );
+                if (!cfg || typeof cfg !== 'object') return;
+                try { transactionHandler.cacheConfigData(cfg); } catch (_) { }
+            } catch (_) { }
+        })();
     }, []);
 
     // Load user-specific subscription data

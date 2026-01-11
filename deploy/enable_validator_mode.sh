@@ -6,7 +6,7 @@ set -euo pipefail
 # 2) Restoring priv_validator_key.json (from disabled file if present)
 # 3) Restarting the node process (when run with --restart)
 
-NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/main}"
+NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/node}"
 LOGS_DIR="${HOME}/.mirage/logs"
 PV_STATE="$NODE_HOME/data/priv_validator_state.json"
 PV_KEY="$NODE_HOME/config/priv_validator_key.json"
@@ -60,7 +60,7 @@ EOF
     # Restart the node process inside tmux pane 0
     SESSION="${SESSION:-mirage}"
     BIN="${BIN:-/opt/mirage/blockchain/miraged}"
-    NODE_HOME="${NODE_HOME:-$HOME/.mirage/main}"
+    NODE_HOME="${NODE_HOME:-$HOME/.mirage/node}"
     
     # Kill miraged and tail processes
     tmux send-keys -t "$SESSION:mirage.0" C-c

@@ -460,7 +460,7 @@ def check_node() -> ServiceStatus:
 
 def check_validator() -> ServiceStatus:
     """Check validator status."""
-    node_home = os.environ.get("MIRAGE_NODE_HOME", os.path.expanduser("~/.mirage/main"))
+    node_home = os.environ.get("MIRAGE_NODE_HOME", os.path.expanduser("~/.mirage/node"))
     priv_val_key = os.path.join(node_home, "config", "priv_validator_key.json")
 
     if not os.path.exists(priv_val_key):

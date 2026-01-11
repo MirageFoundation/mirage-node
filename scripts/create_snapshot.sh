@@ -19,7 +19,7 @@ echo "==> Creating snapshot on ${CONN}..."
 ssh -o StrictHostKeyChecking=accept-new "$CONN" bash -s <<'REMOTE_SCRIPT'
 set -euo pipefail
 
-MAIN_DIR="$HOME/.mirage/main"
+MAIN_DIR="$HOME/.mirage/node"
 BACKUP_DIR="$HOME/.mirage/backup"
 
 if [ ! -d "$MAIN_DIR" ]; then

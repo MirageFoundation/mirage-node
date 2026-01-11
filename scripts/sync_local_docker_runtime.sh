@@ -31,7 +31,7 @@ RESTART_NODE="${RESTART_NODE:-0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-NODE_HOME="/root/.mirage/main"
+NODE_HOME="/root/.mirage/node"
 
 echo "==> Checking Docker container..."
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then

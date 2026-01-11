@@ -41,7 +41,9 @@ def run(config_dir: Path, logger) -> str:
     """Run the migration."""
     results = []
     data_dir = config_dir.parent  # ~/.mirage
-    main_dir = data_dir / "main"
+    # Support both old (main) and new (node) directory names
+    node_dir = data_dir / "node"
+    main_dir = node_dir if node_dir.exists() else data_dir / "main"
     templates_root = Path(__file__).parent.parent / "templates"
     templates_dir = templates_root / "env" if (templates_root / "env").exists() else templates_root
 
@@ -148,17 +150,17 @@ def run(config_dir: Path, logger) -> str:
         domain_file.unlink()
         removed.append(".domain")
 
-    # Old snapshot location (main/bin/)
+    # Old snapshot location (node/bin/ or main/bin/)
     old_bin_dir = main_dir / "bin"
     if old_bin_dir.exists():
         shutil.rmtree(old_bin_dir)
-        removed.append("main/bin/")
+        removed.append("node/bin/")
 
-    # Old snapshot location (main/indexer.sql)
+    # Old snapshot location (node/indexer.sql)
     old_indexer_sql = main_dir / "indexer.sql"
     if old_indexer_sql.exists():
         old_indexer_sql.unlink()
-        removed.append("main/indexer.sql")
+        removed.append("node/indexer.sql")
 
     # Legacy setup directory
     setup_dir = data_dir / "setup"
@@ -170,13 +172,13 @@ def run(config_dir: Path, logger) -> str:
     old_logs_dir = main_dir / "logs"
     if old_logs_dir.exists():
         shutil.rmtree(old_logs_dir)
-        removed.append("main/logs/")
+        removed.append("node/logs/")
 
     # Old miraged.log (new logs via cronolog)
     old_miraged_log = main_dir / "miraged.log"
     if old_miraged_log.exists():
         old_miraged_log.unlink()
-        removed.append("main/miraged.log")
+        removed.append("node/miraged.log")
 
     # Dead marker file (.validator_auto_enabled)
     validator_marker = main_dir / ".validator_auto_enabled"
@@ -188,7 +190,7 @@ def run(config_dir: Path, logger) -> str:
     old_indexer_dir = main_dir / "data" / "indexer"
     if old_indexer_dir.exists():
         shutil.rmtree(old_indexer_dir)
-        removed.append("main/data/indexer/")
+        removed.append("node/data/indexer/")
 
     if removed:
         results.append(f"removed {len(removed)} legacy items")

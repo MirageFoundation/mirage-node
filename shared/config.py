@@ -26,7 +26,7 @@ class MirageConfig:
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration by reading node HOME config files into sections."""
         home_base = str(Path.home() / ".mirage")
-        home = os.path.join(home_base, "main")
+        home = os.path.join(home_base, "node")
         cfg_dir = os.path.join(home, "config")
 
         def _read_toml(path: str) -> Dict[str, Any]:
@@ -145,7 +145,7 @@ class MirageConfig:
 
     def get_node_config(self) -> Dict[str, Any]:
         """Return node configuration."""
-        home_path = os.path.join(str(Path.home() / ".mirage"), "main")
+        home_path = os.path.join(str(Path.home() / ".mirage"), "node")
         p2p = int(self.get("ports", "p2p", default=26656))
         rpc = int(self.get("ports", "rpc", default=26657))
         rest = int(self.get("ports", "rest", default=1317))

@@ -19,7 +19,7 @@ MIRAGED = BLOCKCHAIN_DIR / "miraged"
 
 KEYRING_BACKEND = "os"
 LOCAL_KEYRING_BACKEND = "test"
-LOCAL_KEYRING_HOME = "/root/.mirage/main"
+LOCAL_KEYRING_HOME = "/root/.mirage/node"
 LOCAL_CONTAINER = "mirage"
 
 # Account names

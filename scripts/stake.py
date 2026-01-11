@@ -90,7 +90,7 @@ def main():
         print(f"Binary not found: {bin_path}", file=sys.stderr)
         sys.exit(1)
 
-    home = os.path.expanduser("~/.mirage/main")
+    home = os.path.expanduser("~/.mirage/node")
 
     if not os.path.exists(home):
         print(f"Node home not found: {home}", file=sys.stderr)

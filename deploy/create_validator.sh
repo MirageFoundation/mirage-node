@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: deploy/create_validator.sh
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
-NODE_HOME="${MIRAGE_NODE_HOME:-/root/.mirage/main}"
+NODE_HOME="${MIRAGE_NODE_HOME:-/root/.mirage/node}"
 BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
 MONIKER="${MONIKER:-validator}"
 RPC_URL="${RPC_URL:-http://127.0.0.1:26657}"

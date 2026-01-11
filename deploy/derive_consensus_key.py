@@ -85,7 +85,7 @@ def main():
         if a == "--home" and i + 1 < len(sys.argv):
             home = sys.argv[i + 1]
     if not home:
-        print("Usage: derive_consensus_key.py --home /root/.mirage/main", file=sys.stderr)
+        print("Usage: derive_consensus_key.py --home /root/.mirage/node", file=sys.stderr)
         sys.exit(1)
 
     # Read mnemonic from stdin

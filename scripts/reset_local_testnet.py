@@ -136,7 +136,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'mkdir -p /root/.mirage/main/snapshot && docker cp mirage:/opt/mirage/blockchain/miraged /root/.mirage/main/snapshot/miraged'",
+            f"ssh {conn} 'mkdir -p /root/.mirage/node/snapshot && docker cp mirage:/opt/mirage/blockchain/miraged /root/.mirage/node/snapshot/miraged'",
         ]
     )
 
@@ -145,7 +145,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} '/root/.mirage/main/snapshot/miraged export --home /root/.mirage/main --output-document /root/.mirage/main/snapshot/export.json'",
+            f"ssh {conn} '/root/.mirage/node/snapshot/miraged export --home /root/.mirage/node --output-document /root/.mirage/node/snapshot/export.json'",
         ]
     )
 
@@ -155,7 +155,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
             "bash",
             "-lc",
             f"ssh {conn} 'docker start mirage >/dev/null 2>&1; sleep 5; "
-            f'docker exec mirage bash -c "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/main/snapshot/indexer.sql" 2>/dev/null || true; '
+            f'docker exec mirage bash -c "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/node/snapshot/indexer.sql" 2>/dev/null || true; '
             f"docker stop --timeout 10 mirage || true'",
         ]
     )
@@ -175,7 +175,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     run(["bash", "-lc", f"ssh {conn} 'docker start mirage >/dev/null 2>&1 || true'"])
 
     status("Cleaning up remote snapshot directory...")
-    run(["bash", "-lc", f"ssh {conn} 'rm -rf /root/.mirage/main/snapshot'"])
+    run(["bash", "-lc", f"ssh {conn} 'rm -rf /root/.mirage/node/snapshot'"])
 
     ensure_mirage_tmp()
     date_name = time.strftime("%Y-%m-%d")
@@ -210,28 +210,28 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
         raise RuntimeError(f"export.json not found in snapshot: {export_json}")
 
     status("Preparing target directories inside container...")
-    # Only reset the staging clone; leave /root/.mirage/main (and its postgres data)
+    # Only reset the staging clone; leave /root/.mirage/node and /root/.mirage/postgres
     # under control of the entrypoint and this script.
     run(
         [
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
-            "rm -rf /root/.mirage/main.clone; "
-            "mkdir -p /root/.mirage/main.clone/bin /root/.mirage/main'",
+            "rm -rf /root/.mirage/node.clone; "
+            "mkdir -p /root/.mirage/node.clone/bin /root/.mirage/node'",
         ]
     )
 
     status("Copying config and binary into container...")
-    run(["bash", "-lc", f"docker cp '{src_dir}/config' mirage:/root/.mirage/main.clone/"])
-    run(["bash", "-lc", f"docker cp '{snapshot_dir}/miraged' mirage:/root/.mirage/main.clone/bin/miraged"])
+    run(["bash", "-lc", f"docker cp '{src_dir}/config' mirage:/root/.mirage/node.clone/"])
+    run(["bash", "-lc", f"docker cp '{snapshot_dir}/miraged' mirage:/root/.mirage/node.clone/bin/miraged"])
 
     indexer_sql = snapshot_dir / "indexer.sql"
     if indexer_sql.exists():
         status("Copying PostgreSQL indexer dump...")
-        run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/main.clone/indexer.sql"])
+        run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/node.clone/indexer.sql"])
 
-    run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/main.clone || true"])
+    run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/node.clone || true"])
 
     local_export = MIRAGE_TMP / "export.json"
     shutil.copy(export_json, local_export)
@@ -249,13 +249,13 @@ def restore_indexer_database():
     # Use a small shell script inside the container to avoid complex quoting here
     script = """#!/bin/bash
 set -e
-DUMP_FILE="/root/.mirage/main.clone/indexer.sql"
+DUMP_FILE="/root/.mirage/node.clone/indexer.sql"
 if [ ! -f "$DUMP_FILE" ]; then
     echo "No indexer dump found, skipping"
     exit 0
 fi
 
-PG_DATA_DIR="/root/.mirage/main/data/postgres"
+PG_DATA_DIR="/root/.mirage/postgres"
 if [ ! -d "$PG_DATA_DIR" ]; then
     echo "Postgres data dir missing at $PG_DATA_DIR; cannot restore"
     exit 0
@@ -302,9 +302,9 @@ def generate_random_mnemonic() -> str:
 def scrub_consensus_key():
     status("Generating new local consensus key...")
     mnemonic = generate_random_mnemonic()
-    cmd = "python3 /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/main"
+    cmd = "python3 /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/node"
     run(["bash", "-lc", f"echo '{mnemonic}' | docker exec -i mirage bash -lc \"{cmd}\""])
-    run(["bash", "-lc", "docker exec mirage chmod 600 /root/.mirage/main/config/priv_validator_key.json"])
+    run(["bash", "-lc", "docker exec mirage chmod 600 /root/.mirage/node/config/priv_validator_key.json"])
     status("Consensus key generated")
 
 
@@ -313,20 +313,20 @@ def ensure_test_keys():
 
     def _create_key(name: str):
         m = generate_random_mnemonic()
-        cmd = f"echo '{m}' | /opt/mirage/blockchain/miraged keys add {name} --recover --home /root/.mirage/main --keyring-backend test >/dev/null 2>&1 || true"
+        cmd = f"echo '{m}' | /opt/mirage/blockchain/miraged keys add {name} --recover --home /root/.mirage/node --keyring-backend test >/dev/null 2>&1 || true"
         run(["bash", "-lc", f'docker exec mirage bash -lc "{cmd}"'])
 
     _create_key("validator")
     _create_key("faucet")
 
     # Fix keyring permissions so host user can access (Docker creates as root with 700)
-    run(["bash", "-lc", "docker exec mirage chmod -R 755 /root/.mirage/main/keyring-test"])
+    run(["bash", "-lc", "docker exec mirage chmod -R 755 /root/.mirage/node/keyring-test"])
 
     val_addr = run(
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator -a --home /root/.mirage/main --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -334,7 +334,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator --bech val -a --home /root/.mirage/main --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator --bech val -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -342,7 +342,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show faucet -a --home /root/.mirage/main --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show faucet -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -365,7 +365,7 @@ def reinitialize_postgres():
     status("Reinitializing PostgreSQL...")
     script = """#!/bin/bash
 set -e
-PG_DATA_DIR="/root/.mirage/main/data/postgres"
+PG_DATA_DIR="/root/.mirage/postgres"
 PG_LOG_DIR="/root/.mirage/logs/postgres"
 
 pkill -9 postgres 2>/dev/null || true
@@ -376,7 +376,7 @@ rm -rf /var/lib/postgresql/16/main 2>/dev/null || true
 rm -rf "$PG_DATA_DIR"
 
 mkdir -p "$PG_DATA_DIR" "$PG_LOG_DIR"
-chmod o+x /root /root/.mirage /root/.mirage/main /root/.mirage/main/data /root/.mirage/logs
+chmod o+x /root /root/.mirage /root/.mirage/node /root/.mirage/node/data /root/.mirage/logs
 chown postgres:postgres "$PG_DATA_DIR" "$PG_LOG_DIR"
 chmod 700 "$PG_DATA_DIR"
 chmod 755 "$PG_LOG_DIR"
@@ -408,7 +408,7 @@ su - postgres -c "psql -c \\"CREATE DATABASE mirage OWNER mirage;\\""
 
 
 def read_priv_validator_pubkey_b64() -> str:
-    raw = run(["bash", "-lc", "docker exec mirage cat /root/.mirage/main/config/priv_validator_key.json"], capture=True)
+    raw = run(["bash", "-lc", "docker exec mirage cat /root/.mirage/node/config/priv_validator_key.json"], capture=True)
     data = json.loads(raw)
     b64 = str(((data.get("pub_key") or {}).get("value") or "")).strip()
     if not b64:
@@ -441,7 +441,7 @@ def load_profiles_from_indexer_db() -> list:
     script = """
 import json, re, time
 
-dump_file = "/root/.mirage/main.clone/indexer.sql"
+dump_file = "/root/.mirage/node.clone/indexer.sql"
 
 def parse_copy_data(content, table_name, columns):
     \"\"\"Parse COPY data from pg_dump output.\"\"\"
@@ -697,13 +697,13 @@ def transform_to_single_validator(
 
 
 def write_working_genesis(genesis_json: str):
-    status("Writing genesis to /root/.mirage/main/config/genesis.json ...")
+    status("Writing genesis to /root/.mirage/node/config/genesis.json ...")
     ensure_mirage_tmp()
     tmp = Path(tempfile.mkdtemp(prefix="genesis-", dir=str(MIRAGE_TMP)))
     local_path = tmp / "genesis.json"
     with open(local_path, "w", encoding="utf-8") as f:
         f.write(genesis_json)
-    run(["bash", "-lc", f"docker cp '{local_path}' mirage:/root/.mirage/main/config/genesis.json"])
+    run(["bash", "-lc", f"docker cp '{local_path}' mirage:/root/.mirage/node/config/genesis.json"])
     shutil.rmtree(tmp, ignore_errors=True)
 
     status("Copying config files from main.clone ...")
@@ -712,9 +712,9 @@ def write_working_genesis(genesis_json: str):
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
-            "mkdir -p /root/.mirage/main/config; "
+            "mkdir -p /root/.mirage/node/config; "
             "for f in app.toml config.toml client.toml; do "
-            "  cp -n /root/.mirage/main.clone/config/$f /root/.mirage/main/config/ 2>/dev/null || true; "
+            "  cp -n /root/.mirage/node.clone/config/$f /root/.mirage/node/config/ 2>/dev/null || true; "
             "done'",
         ]
     )
@@ -725,7 +725,7 @@ def write_working_genesis(genesis_json: str):
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
-            'cfg="/root/.mirage/main/config/config.toml"; '
+            'cfg="/root/.mirage/node/config/config.toml"; '
             'sed -i "/^\\[rpc\\]/,/^\\[/{s/^laddr *= *.*/laddr = \\"tcp:\\/\\/0.0.0.0:26657\\"/}" "$cfg"; '
             'sed -i "/^\\[p2p\\]/,/^\\[/{s/^pex *= *.*/pex = false/}" "$cfg"; '
             'sed -i "/^\\[p2p\\]/,/^\\[/{s/^persistent_peers *= *.*/persistent_peers = \\"\\"/}" "$cfg"; '
@@ -734,8 +734,8 @@ def write_working_genesis(genesis_json: str):
             'sed -i "/^\\[consensus\\]/,/^\\[/{s/^create_empty_blocks *= *.*/create_empty_blocks = true/}" "$cfg"; '
             'sed -i "/^\\[consensus\\]/,/^\\[/{s/^create_empty_blocks_interval *= *.*/create_empty_blocks_interval = \\"2s\\"/}" "$cfg"; '
             'sed -i "/^\\[consensus\\]/,/^\\[/{s/^timeout_commit *= *.*/timeout_commit = \\"2s\\"/}" "$cfg"; '
-            'sed -i "s/^chain-id *= *.*/chain-id = \\"mirage-1\\"/" /root/.mirage/main/config/client.toml; '
-            'sed -i "s/^keyring-backend *= *.*/keyring-backend = \\"test\\"/" /root/.mirage/main/config/client.toml || true\'',
+            'sed -i "s/^chain-id *= *.*/chain-id = \\"mirage-1\\"/" /root/.mirage/node/config/client.toml; '
+            'sed -i "s/^keyring-backend *= *.*/keyring-backend = \\"test\\"/" /root/.mirage/node/config/client.toml || true\'',
         ]
     )
 
@@ -747,17 +747,17 @@ def write_working_genesis(genesis_json: str):
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
-            "mkdir -p /root/.mirage/main/data && "
-            "cd /root/.mirage/main/data && "
+            "mkdir -p /root/.mirage/node/data && "
+            "cd /root/.mirage/node/data && "
             "find . -mindepth 1 -maxdepth 1 ! -name postgres -exec rm -rf {} \\; ; "
-            "mkdir -p /root/.mirage/main/data/cs.wal /root/.mirage/logs'",
+            "mkdir -p /root/.mirage/node/data/cs.wal /root/.mirage/logs'",
         ]
     )
     run(
         [
             "bash",
             "-lc",
-            'docker exec mirage bash -lc \'echo "{\\"height\\": \\"0\\", \\"round\\": 0, \\"step\\": 0}" > /root/.mirage/main/data/priv_validator_state.json\'',
+            'docker exec mirage bash -lc \'echo "{\\"height\\": \\"0\\", \\"round\\": 0, \\"step\\": 0}" > /root/.mirage/node/data/priv_validator_state.json\'',
         ]
     )
     reinitialize_postgres()
@@ -773,12 +773,12 @@ def write_working_genesis(genesis_json: str):
         [
             "bash",
             "-lc",
-            "docker exec mirage bash -lc 'cp /root/.mirage/main.clone/bin/miraged /opt/mirage/blockchain/miraged && chmod +x /opt/mirage/blockchain/miraged'",
+            "docker exec mirage bash -lc 'cp /root/.mirage/node.clone/bin/miraged /opt/mirage/blockchain/miraged && chmod +x /opt/mirage/blockchain/miraged'",
         ]
     )
 
     status("Starting node in tmux ...")
-    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/main" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
+    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
 
     status("Waiting for RPC ...")
@@ -814,7 +814,7 @@ def write_working_genesis(genesis_json: str):
     run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true"])
     time.sleep(2)  # Wait for node to stabilize
     initial_height = run(
-        ["bash", "-lc", "docker exec mirage jq -r .initial_height /root/.mirage/main/config/genesis.json"],
+        ["bash", "-lc", "docker exec mirage jq -r .initial_height /root/.mirage/node/config/genesis.json"],
         capture=True,
     ).strip()
     run(
@@ -882,13 +882,13 @@ def main():
         [
             "bash",
             "-lc",
-            "docker exec mirage bash -lc 'rm -rf /root/.mirage/main/snapshot /root/.mirage/main/.mirage /root/.mirage/main.clone 2>/dev/null || true'",
+            "docker exec mirage bash -lc 'rm -rf /root/.mirage/node/snapshot /root/.mirage/node/.mirage /root/.mirage/node.clone 2>/dev/null || true'",
         ]
     )
 
     status("Local testnet reset: COMPLETE")
     print("Summary:")
-    print("  - Working home: /root/.mirage/main")
+    print("  - Working home: /root/.mirage/node")
     print("  - Validator:", val_addr)
     print("  - Valoper:", valoper)
     print("  - Faucet:", faucet_addr)

@@ -2377,7 +2377,13 @@ def get_config():
             "validator_moniker": validator_moniker,
         }
         log_event(rid, "get_config.ok")
-        return jsonify(resp)
+        out = jsonify(resp)
+        # Prevent browser/CDN caching: frontend already does its own localStorage caching and should
+        # be able to force-refresh tier pricing immediately after on-chain updates.
+        out.headers["Cache-Control"] = "no-store, max-age=0"
+        out.headers["Pragma"] = "no-cache"
+        out.headers["Expires"] = "0"
+        return out
     except Exception as e:
         log_event(rid, "get_config.err", error=str(e))
         return jsonify({"error": str(e)}), 500

@@ -25,7 +25,7 @@ if [ -z "${BIN:-}" ]; then
   fi
 fi
 
-NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/main}"
+NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/node}"
 RPC="${RPC:-tcp://127.0.0.1:26657}"
 STATUS="BOND_STATUS_BONDED"  # BOND_STATUS_BONDED | BOND_STATUS_UNBONDING | BOND_STATUS_UNBONDED | (empty => all)
 

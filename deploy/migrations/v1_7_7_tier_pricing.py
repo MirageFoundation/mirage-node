@@ -2,7 +2,7 @@
 Migration: v1.7.7-tier-pricing - Tier cost update and Go log rotation removal
 
 This migration:
-1. Cleans up ~/.mirage/main/logs/ directory (Go log rotation was removed from miraged)
+1. Cleans up ~/.mirage/node/logs/ directory (Go log rotation was removed from miraged)
 
 Chain-side changes (via upgrade handler):
 - Tier 1 (Trusted): 10 MIRAGE per 30 days
@@ -28,7 +28,9 @@ def run(config_dir: Path, logger) -> str:
     """Run the migration."""
     results = []
     data_dir = config_dir.parent  # ~/.mirage
-    main_dir = data_dir / "main"
+    # Support both old (main) and new (node) directory names
+    node_dir = data_dir / "node"
+    main_dir = node_dir if node_dir.exists() else data_dir / "main"
 
     # Remove old Go-based logs directory (node.log.* files)
     # This may have been recreated by the old binary since v1.7.6
@@ -36,8 +38,8 @@ def run(config_dir: Path, logger) -> str:
     if old_logs_dir.exists():
         file_count = sum(1 for _ in old_logs_dir.iterdir())
         shutil.rmtree(old_logs_dir)
-        logger.info(f"    Removed main/logs/ ({file_count} files)")
-        results.append(f"removed main/logs/ ({file_count} files)")
+        logger.info(f"    Removed node/logs/ ({file_count} files)")
+        results.append(f"removed node/logs/ ({file_count} files)")
 
     if results:
         return "; ".join(results)

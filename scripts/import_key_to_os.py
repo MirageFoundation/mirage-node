@@ -31,7 +31,7 @@ def main():
     list_cmd = [
         "ssh",
         remote_host,
-        "docker exec mirage /opt/mirage/blockchain/miraged keys list --keyring-backend test --home /root/.mirage/main --output json",
+        "docker exec mirage /opt/mirage/blockchain/miraged keys list --keyring-backend test --home /root/.mirage/node --output json",
     ]
 
     result = subprocess.run(list_cmd, capture_output=True, text=True)
@@ -75,7 +75,7 @@ def main():
             ssh_cmd = [
                 "ssh",
                 remote_host,
-                f"docker exec mirage /opt/mirage/blockchain/miraged keys export {remote_key_name} --keyring-backend test --home /root/.mirage/main --unsafe --unarmored-hex -y",
+                f"docker exec mirage /opt/mirage/blockchain/miraged keys export {remote_key_name} --keyring-backend test --home /root/.mirage/node --unsafe --unarmored-hex -y",
             ]
 
             result = subprocess.run(ssh_cmd, capture_output=True, text=True)

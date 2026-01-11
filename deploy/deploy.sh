@@ -188,8 +188,8 @@ run_scp() {
 # Early sanity check for --init: consensus key must NOT already exist on remote
 if [ "$MODE" = "init" ]; then
   echo "==> Sanity check: remote consensus key must not exist..."
-  if run_ssh "test -f ~/.mirage/main/config/priv_validator_key.json"; then
-    echo "ERROR: Found existing ~/.mirage/main/config/priv_validator_key.json on remote. Aborting to avoid accidental overwrite." >&2
+  if run_ssh "test -f ~/.mirage/node/config/priv_validator_key.json"; then
+    echo "ERROR: Found existing ~/.mirage/node/config/priv_validator_key.json on remote. Aborting to avoid accidental overwrite." >&2
     echo "If this server was previously used, provision a fresh server or remove the file manually with extreme caution." >&2
     close_ssh_socket
     exit 1
@@ -281,7 +281,7 @@ if [ "$MODE" = "init" ]; then
     exit 1
   fi
   # Ensure data dirs exist on remote
-  run_ssh 'mkdir -p ~/.mirage/main/config ~/.caddy'
+  run_ssh 'mkdir -p ~/.mirage/node/config ~/.caddy'
   # Prompt for consensus derivation index (default 0)
   read -p "Consensus derivation index [0] (default 0; do not change unless rotating): " CONS_INDEX
   CONS_INDEX="${CONS_INDEX:-0}"
@@ -290,7 +290,7 @@ if [ "$MODE" = "init" ]; then
     exit 1
   fi
   # Double-check consensus key doesn't exist on remote (sanity check before deriving)
-  if run_ssh "test -f ~/.mirage/main/config/priv_validator_key.json"; then
+  if run_ssh "test -f ~/.mirage/node/config/priv_validator_key.json"; then
     echo "ERROR: Consensus key already exists on remote. Aborting to avoid overwrite." >&2
     exit 1
   fi
@@ -299,18 +299,18 @@ if [ "$MODE" = "init" ]; then
   if ! echo "$MNEMONIC" | run_ssh "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
     --entrypoint python3 \
     -v ~/.mirage:/root/.mirage \
-      mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/main"; then
+      mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/node"; then
   echo "ERROR: Failed to derive consensus key." >&2
   exit 1
   fi
   # Set correct permissions on remote
-  run_ssh 'chmod 600 ~/.mirage/main/config/priv_validator_key.json'
+  run_ssh 'chmod 600 ~/.mirage/node/config/priv_validator_key.json'
   echo "✓ Consensus key derived (index $CONS_INDEX)."
   # Import using a one-shot container into the mounted volume to avoid storing the mnemonic as an env var
   if ! echo "$MNEMONIC" | run_ssh "docker run --rm -i \
     --entrypoint /bin/sh \
     -v ~/.mirage:/root/.mirage \
-      mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/main --keyring-backend test >/dev/null 2>&1'"; then
+      mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test >/dev/null 2>&1'"; then
   echo "ERROR: Failed to import mnemonic into keyring volume." >&2
   exit 1
   fi
@@ -429,7 +429,7 @@ fi
 if [ "$MODE" = "update" ]; then
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     echo "==> Checking if validator moniker needs update..."
-    MONIKER_UPDATE_SCRIPT=$'# Ensure strict mode in container\nset -euo pipefail\ncd /opt/mirage\nVALOPER=$(/opt/mirage/blockchain/miraged keys show validator --home /root/.mirage/main --keyring-backend test --bech val -a 2>/dev/null || echo \"\")\nif [ -z \"$VALOPER\" ]; then\n  echo \"Validator not found, skipping moniker update\"\n  exit 0\nfi\nCURRENT=$(/opt/mirage/blockchain/miraged q staking validator \"$VALOPER\" --home /root/.mirage/main --node tcp://127.0.0.1:26657 -o json 2>/dev/null | jq -r \".validator.description.moniker // \\\"\\\"\" || echo \"\")\nif [ \"$CURRENT\" = \"${NEW_MONIKER:-}\" ]; then\n  echo \"Validator moniker already set to \\\"${NEW_MONIKER:-}\\\"\"\n  exit 0\nfi\necho \"Updating validator moniker from \\\"$CURRENT\\\" to \\\"${NEW_MONIKER:-}\\\"\"\n/opt/mirage/blockchain/miraged tx staking edit-validator --new-moniker=\"${NEW_MONIKER:-}\" \\\n  --from validator --home /root/.mirage/main --keyring-backend test \\\n  --chain-id mirage-1 --node tcp://127.0.0.1:26657 --gas auto --gas-adjustment 1.5 -y >/dev/null 2>&1 || true\n'
+    MONIKER_UPDATE_SCRIPT=$'# Ensure strict mode in container\nset -euo pipefail\ncd /opt/mirage\nVALOPER=$(/opt/mirage/blockchain/miraged keys show validator --home /root/.mirage/node --keyring-backend test --bech val -a 2>/dev/null || echo \"\")\nif [ -z \"$VALOPER\" ]; then\n  echo \"Validator not found, skipping moniker update\"\n  exit 0\nfi\nCURRENT=$(/opt/mirage/blockchain/miraged q staking validator \"$VALOPER\" --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null | jq -r \".validator.description.moniker // \\\"\\\"\" || echo \"\")\nif [ \"$CURRENT\" = \"${NEW_MONIKER:-}\" ]; then\n  echo \"Validator moniker already set to \\\"${NEW_MONIKER:-}\\\"\"\n  exit 0\nfi\necho \"Updating validator moniker from \\\"$CURRENT\\\" to \\\"${NEW_MONIKER:-}\\\"\"\n/opt/mirage/blockchain/miraged tx staking edit-validator --new-moniker=\"${NEW_MONIKER:-}\" \\\n  --from validator --home /root/.mirage/node --keyring-backend test \\\n  --chain-id mirage-1 --node tcp://127.0.0.1:26657 --gas auto --gas-adjustment 1.5 -y >/dev/null 2>&1 || true\n'
     echo "$MONIKER_UPDATE_SCRIPT" | run_ssh "docker exec -e NEW_MONIKER=\"$MONIKER_VALUE\" -i mirage bash -seuo pipefail"
   fi
 fi

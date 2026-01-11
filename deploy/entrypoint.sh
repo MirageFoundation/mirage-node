@@ -78,7 +78,7 @@ fi
 : "${BACKEND_PORT:=5000}"
 
 DATA_DIR="${HOME}/.mirage"
-NODE_HOME="$DATA_DIR/main"
+NODE_HOME="$DATA_DIR/node"
 LOGS_DIR="$DATA_DIR/logs"
 BIN="$ROOT_DIR/blockchain/miraged"
 CHAIN_ID="mirage-1"
@@ -156,8 +156,8 @@ fi
 tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee >(cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\")" C-m
 
 # PostgreSQL (start early)
-# Data lives directly on persistent volume at ~/.mirage/main/data/postgres
-PG_DATA_DIR="$DATA_DIR/main/data/postgres"
+# Data lives directly on persistent volume at ~/.mirage/postgres
+PG_DATA_DIR="$DATA_DIR/postgres"
 PG_LOG_DIR="$LOGS_DIR/postgres"
 
 # Ensure postgres user can traverse to and write to log directory
@@ -171,7 +171,7 @@ if [ ! -f "$PG_DATA_DIR/PG_VERSION" ]; then
   pg_dropcluster 16 main 2>/dev/null || true
   mkdir -p "$PG_DATA_DIR"
   # Ensure postgres user can traverse parent directories (including $HOME which is /root)
-  chmod o+x "$HOME" "$DATA_DIR" "$DATA_DIR/main" "$DATA_DIR/main/data" 2>/dev/null || true
+  chmod o+x "$HOME" "$DATA_DIR" 2>/dev/null || true
   chown postgres:postgres "$PG_DATA_DIR"
   chmod 700 "$PG_DATA_DIR"
   pg_createcluster 16 main --datadir="$PG_DATA_DIR" --locale=C.UTF-8
@@ -181,7 +181,7 @@ else
   CURRENT_DATADIR=$(pg_lsclusters -h 2>/dev/null | awk '/^16 *main/ {print $6}')
   if [ "$CURRENT_DATADIR" != "$PG_DATA_DIR" ]; then
     echo "==> Pointing PostgreSQL cluster to $PG_DATA_DIR..."
-    chmod o+x "$HOME" "$DATA_DIR" "$DATA_DIR/main" "$DATA_DIR/main/data" "$LOGS_DIR" 2>/dev/null || true
+    chmod o+x "$HOME" "$DATA_DIR" "$LOGS_DIR" 2>/dev/null || true
     pg_ctlcluster 16 main stop 2>/dev/null || true
     # Update postgresql.conf to point to new data and log directories
     sed -i "s|^data_directory = .*|data_directory = '$PG_DATA_DIR'|" /etc/postgresql/16/main/postgresql.conf
