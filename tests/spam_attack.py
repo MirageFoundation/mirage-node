@@ -43,29 +43,9 @@ from shared.canon import (
 )
 
 # Defaults
-DEFAULT_BACKEND = os.environ.get("MIRAGE_BACKEND", "http://127.0.0.1:80").rstrip("/")
+DEFAULT_BACKEND = "http://127.0.0.1:80"
 DEFAULT_WORKERS = 10
 DEFAULT_DURATION = 60  # seconds
-
-
-# Load env file for seeds
-def _load_env_file() -> None:
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.exists(env_path):
-        return
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-    except Exception:
-        pass
-
-
-_load_env_file()
 
 
 # Generate random seeds for spam workers (each worker gets unique wallet)

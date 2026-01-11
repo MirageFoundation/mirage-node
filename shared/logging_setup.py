@@ -66,12 +66,7 @@ def log_dir_for_component(component: str) -> str:
     New structure: ~/.mirage/logs/<component>/
     Components: node, indexer, backend, postgres, hermes, caddy, referrals, deploy
     """
-    # Prefer explicit override
-    override = os.environ.get("MIRAGE_LOG_DIR")
-    if override:
-        return os.path.abspath(os.path.expanduser(override))
-
-    # New structure: ~/.mirage/logs/<component>/
+    # ~/.mirage/logs/<component>/
     base_dir = os.path.expanduser("~/.mirage/logs")
     return os.path.join(base_dir, component)
 

@@ -85,9 +85,7 @@ class Indexer:
         self._lock_file = None
         try:
             # Derive a stable lock directory under node home (not DB-specific)
-            node_home = os.environ.get("MIRAGE_NODE_HOME") or os.path.join(
-                str(Path.home() / ".mirage"), "main"
-            )
+            node_home = os.path.join(str(Path.home() / ".mirage"), "main")
             lock_dir = os.path.join(node_home, "data", "indexer")
             os.makedirs(lock_dir, exist_ok=True)
             lock_path = os.path.join(lock_dir, ".indexer.lock")

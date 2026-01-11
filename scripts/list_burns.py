@@ -32,8 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def get_node_home():
     home_base = os.path.expanduser("~/.mirage")
-    home = os.path.join(home_base, "main")
-    return os.environ.get("MIRAGE_NODE_HOME", home)
+    return os.path.join(home_base, "main")
 
 
 def read_toml_simple(path):
@@ -492,8 +491,7 @@ def main():
         except Exception as e:
             return [{"error": str(e), "height": h}]
 
-    workers = int(os.environ.get("MIRAGE_BURN_SCAN_WORKERS", "8"))
-    workers = max(1, min(32, workers))
+    workers = 8  # Parallel workers for burn scanning
 
     scanned = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:

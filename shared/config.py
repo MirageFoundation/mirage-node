@@ -27,8 +27,6 @@ class MirageConfig:
         """Load configuration by reading node HOME config files into sections."""
         home_base = str(Path.home() / ".mirage")
         home = os.path.join(home_base, "main")
-        # Allow explicit override of node home
-        home = os.environ.get("MIRAGE_NODE_HOME", home)
         cfg_dir = os.path.join(home, "config")
 
         def _read_toml(path: str) -> Dict[str, Any]:
@@ -149,8 +147,7 @@ class MirageConfig:
         """Return single-node configuration (ignores node_id)."""
         if node_id < 1:
             node_id = 1
-        # Determine node home: explicit env wins, else ~/.mirage/main
-        home_path = os.environ.get("MIRAGE_NODE_HOME") or os.path.join(str(Path.home() / ".mirage"), "main")
+        home_path = os.path.join(str(Path.home() / ".mirage"), "main")
         p2p = int(self.get("ports", "p2p", default=26656))
         rpc = int(self.get("ports", "rpc", default=26657))
         rest = int(self.get("ports", "rest", default=1317))

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import getpass
 import json
 import subprocess
 import sys
@@ -596,7 +597,7 @@ def main():
     if not validator_accounts:
         print(f"\n==> No validator keys found in keyring")
         print(f"==> Enter seed phrase for '{VALIDATOR_ACCOUNT}' account (will be used to vote):")
-        validator_seed = input("Seed: ").strip()
+        validator_seed = getpass.getpass("Seed: ").strip()
         if not validator_seed:
             print("ERROR: Validator seed is required", file=sys.stderr)
             return 1
@@ -609,7 +610,7 @@ def main():
     if not key_exists(FAUCET_ACCOUNT):
         print(f"\n==> Key '{FAUCET_ACCOUNT}' not found in keyring")
         print(f"==> Enter seed phrase for '{FAUCET_ACCOUNT}' account (will be used to submit proposal):")
-        faucet_seed = input("Seed: ").strip()
+        faucet_seed = getpass.getpass("Seed: ").strip()
         if not faucet_seed:
             print("ERROR: Faucet seed is required", file=sys.stderr)
             return 1

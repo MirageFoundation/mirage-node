@@ -64,7 +64,7 @@ MIN_GAS_PRICE = 0.025
 RPC_URL = ""
 
 # Default RPC
-DEFAULT_RPC = os.environ.get("MIRAGE_RPC", "http://127.0.0.1:26657")
+DEFAULT_RPC = "http://127.0.0.1:26657"
 
 
 def _now_ms() -> int:
@@ -80,9 +80,6 @@ def _lb_bytes(lb_hex: str) -> bytes:
         return lb_hex.encode("utf-8")
 
 
-# Test seeds (same as backend tests)
-SEED_FREE = "love eye this patrol immense finish giant pottery hood toy wrist month"
-SEED_SUBSCRIBER = "borrow breeze ramp dinosaur oyster bridge license turkey vague student health blanket"
 
 
 @dataclass
@@ -1453,8 +1450,8 @@ def neg_delete_not_owner(seed: str, foreign_post_tx: str) -> TestResult:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage RPC Attack Tests - Direct chain interaction")
     parser.add_argument("--rpc", default=DEFAULT_RPC, help="Tendermint RPC URL (default: http://127.0.0.1:26657)")
-    parser.add_argument("--seed-free", default=SEED_FREE, help="Free-tier test seed")
-    parser.add_argument("--seed-subscriber", default=SEED_SUBSCRIBER, help="Subscriber test seed")
+    parser.add_argument("--seed-free", required=True, help="Mnemonic seed for free user wallet")
+    parser.add_argument("--seed-subscriber", required=True, help="Mnemonic seed for subscriber wallet")
     args = parser.parse_args()
 
     global RPC_URL

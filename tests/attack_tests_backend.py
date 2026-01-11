@@ -50,36 +50,7 @@ from shared.canon import (  # noqa: E402
 )
 
 # Defaults
-DEFAULT_BACKEND = os.environ.get("MIRAGE_BACKEND", "http://127.0.0.1:80").rstrip("/")
-
-
-# Global seeds (no CLI flags) - can be overridden via tests/.env
-def _load_env_file() -> None:
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if not os.path.exists(env_path):
-        return
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-    except Exception:
-        pass
-
-
-_load_env_file()
-
-SEED_FREE = os.environ.get(
-    "FREE_SEED",
-    "love eye this patrol immense finish giant pottery hood toy wrist month",
-)
-SEED_SUBSCRIBER = os.environ.get(
-    "SUBSCRIBER_SEED",
-    "borrow breeze ramp dinosaur oyster bridge license turkey vague student health blanket",
-)
+DEFAULT_BACKEND = "http://127.0.0.1:80"
 
 
 @dataclass
@@ -2827,11 +2798,11 @@ def neg_username_invalid(backend: str, seed: str, username: str, label: str) -> 
         return TestResult(name=name, passed=False, error=str(e))
 
 
-def pos_free_username_prefixed(backend: str) -> TestResult:
+def pos_free_username_prefixed(backend: str, seed_free: str) -> TestResult:
     """Free user sets username without Anon-, chain should prefix with 'Anon-'."""
     name = "Free: username is prefixed by Anon-"
     try:
-        wallet = create_wallet_from_seed(SEED_FREE)
+        wallet = create_wallet_from_seed(seed_free)
         addr = str(wallet.address())
         last, diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
@@ -2867,11 +2838,11 @@ def pos_free_username_prefixed(backend: str) -> TestResult:
         return TestResult(name=name, passed=False, error=str(e))
 
 
-def pos_free_username_prefixed_once(backend: str) -> TestResult:
+def pos_free_username_prefixed_once(backend: str, seed_free: str) -> TestResult:
     """Free user sets username with Anon- prefix; chain should not double-prefix."""
     name = "Free: username prefixed only once"
     try:
-        wallet = create_wallet_from_seed(SEED_FREE)
+        wallet = create_wallet_from_seed(seed_free)
         addr = str(wallet.address())
         last, diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
@@ -3824,11 +3795,13 @@ def sub_stress_reserve_downgrade(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage Backend Attack Tests")
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
+    parser.add_argument("--seed-free", required=True, help="Mnemonic seed for free user wallet")
+    parser.add_argument("--seed-subscriber", required=True, help="Mnemonic seed for subscriber wallet")
     args = parser.parse_args()
 
     backend = str(args.backend).rstrip("/")
-    seed_free = SEED_FREE
-    seed_sub = SEED_SUBSCRIBER
+    seed_free = args.seed_free
+    seed_sub = args.seed_subscriber
 
     print(f"Backend: {backend}")
     try:
@@ -3903,10 +3876,10 @@ def main() -> int:
     all_results.append(r)
     _print_result(r)
     # Free username prefix behavior
-    r = pos_free_username_prefixed(backend)
+    r = pos_free_username_prefixed(backend, seed_free)
     all_results.append(r)
     _print_result(r)
-    r = pos_free_username_prefixed_once(backend)
+    r = pos_free_username_prefixed_once(backend, seed_free)
     all_results.append(r)
     _print_result(r)
 

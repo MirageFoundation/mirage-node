@@ -93,18 +93,18 @@ def main():
     if not mnemonic:
         print("Empty mnemonic on stdin", file=sys.stderr)
         sys.exit(1)
-    passphrase = os.environ.get("BIP39_PASSPHRASE", "")
-
-    # Derivation index (rotation)
-    idx_str = os.environ.get("MIRAGE_DERIVATION_INDEX", "0").strip()
-    try:
-        idx = int(idx_str)
-    except ValueError:
-        print("MIRAGE_DERIVATION_INDEX must be an integer", file=sys.stderr)
-        sys.exit(1)
-    if idx < 0:
-        print("MIRAGE_DERIVATION_INDEX must be >= 0", file=sys.stderr)
-        sys.exit(1)
+    # Parse CLI arguments: [passphrase] [index]
+    passphrase = sys.argv[1] if len(sys.argv) > 1 else ""
+    idx = 0
+    if len(sys.argv) > 2:
+        try:
+            idx = int(sys.argv[2])
+        except ValueError:
+            print("Derivation index must be an integer", file=sys.stderr)
+            sys.exit(1)
+        if idx < 0:
+            print("Derivation index must be >= 0", file=sys.stderr)
+            sys.exit(1)
 
     # Path: m/44'/118'/1'/i'
     path = f"m/44'/118'/1'/{idx}'"
