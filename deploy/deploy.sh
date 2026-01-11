@@ -321,8 +321,9 @@ MONIKER_ARG=""
 HOSTNAME_ARG=""
 if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-  # Replace dots with dashes for valid hostname
-  HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
+  # Strip protocol and replace invalid chars for valid hostname
+  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
+  HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi
 ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
 

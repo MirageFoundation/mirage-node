@@ -300,23 +300,60 @@ def check_node() -> ServiceStatus:
         data = resp.json()
         result = data.get("result", {})
         sync_info = result.get("sync_info", {})
+        node_info = result.get("node_info", {})
         
         height = sync_info.get("latest_block_height", "?")
         catching_up = sync_info.get("catching_up", True)
+        chain_id = node_info.get("network", "?")
+        
+        # Calculate block age
+        block_age = None
+        try:
+            block_time = sync_info.get("latest_block_time", "")
+            if block_time:
+                from datetime import datetime, timezone
+                # Parse ISO format timestamp
+                bt = datetime.fromisoformat(block_time.replace("Z", "+00:00").split(".")[0])
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                age_secs = (now - bt.replace(tzinfo=None)).total_seconds()
+                if age_secs < 60:
+                    block_age = f"{int(age_secs)}s ago"
+                elif age_secs < 3600:
+                    block_age = f"{int(age_secs/60)}m ago"
+                else:
+                    block_age = f"{int(age_secs/3600)}h ago"
+        except Exception:
+            pass
+        
+        # Get peer count
+        peers = 0
+        try:
+            net_resp = requests.get("http://127.0.0.1:26657/net_info", timeout=2)
+            peers = len(net_resp.json().get("result", {}).get("peers", []))
+        except Exception:
+            pass
+        
+        details = {
+            "height": height,
+            "syncing": catching_up,
+            "peers": peers,
+            "chain_id": chain_id,
+            "block_age": block_age,
+        }
         
         if catching_up:
             return ServiceStatus(
                 name="Node",
                 status=Status.WARN,
                 message="Syncing",
-                details={"height": height, "syncing": True}
+                details=details
             )
         
         return ServiceStatus(
             name="Node",
             status=Status.OK,
             message="Running",
-            details={"height": height, "syncing": False}
+            details=details
         )
     except requests.exceptions.ConnectionError:
         return ServiceStatus(
@@ -380,8 +417,12 @@ def check_validator() -> ServiceStatus:
                 voting_power = int(v.get("voting_power", 0))
                 break
         
-        # Get on-chain validator moniker by matching consensus pubkey
+        # Get on-chain validator info by matching consensus pubkey
         moniker = None
+        jailed = False
+        tokens = None
+        total_tokens = 0
+        power_pct = None
         try:
             result = subprocess.run(
                 [
@@ -394,35 +435,58 @@ def check_validator() -> ServiceStatus:
             )
             if result.returncode == 0:
                 val_data = json.loads(result.stdout)
+                # Calculate total bonded tokens across all validators
+                for v in val_data.get("validators", []):
+                    try:
+                        total_tokens += int(v.get("tokens", "0"))
+                    except Exception:
+                        pass
+                # Find our validator
                 for v in val_data.get("validators", []):
                     if v.get("consensus_pubkey", {}).get("value") == local_pubkey:
                         moniker = v.get("description", {}).get("moniker")
+                        jailed = v.get("jailed", False)
+                        # Tokens (convert from smallest unit)
+                        tok = v.get("tokens", "0")
+                        try:
+                            tokens = int(tok) // 1_000_000  # Convert from umirage
+                            if total_tokens > 0:
+                                power_pct = (int(tok) / total_tokens) * 100
+                        except Exception:
+                            pass
                         break
         except Exception:
             pass
+        
+        base_details = {
+            "configured": True,
+            "moniker": moniker,
+            "tokens": tokens,
+            "power_pct": power_pct,
+            "voting_power": voting_power,
+        }
+        
+        if jailed:
+            return ServiceStatus(
+                name="Validator",
+                status=Status.ERROR,
+                message="JAILED",
+                details={**base_details, "active": False, "jailed": True}
+            )
         
         if in_set:
             return ServiceStatus(
                 name="Validator",
                 status=Status.OK,
                 message="Active",
-                details={
-                    "configured": True,
-                    "active": True,
-                    "voting_power": voting_power,
-                    "moniker": moniker,
-                }
+                details={**base_details, "active": True, "voting_power": voting_power}
             )
         else:
             return ServiceStatus(
                 name="Validator",
                 status=Status.ERROR,
                 message="Not in active set",
-                details={
-                    "configured": True,
-                    "active": False,
-                    "moniker": moniker,
-                }
+                details={**base_details, "active": False}
             )
     
     except Exception as e:
@@ -444,14 +508,39 @@ def check_postgres() -> ServiceStatus:
     try:
         with psycopg.connect(db_url, connect_timeout=3) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
+                # Get table count
+                cur.execute(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    "WHERE table_schema = 'public'"
+                )
+                tables = cur.fetchone()[0]
+                
+                # Get database size
+                cur.execute("SELECT pg_size_pretty(pg_database_size(current_database()))")
+                size = cur.fetchone()[0]
+                
+                # Get active connections
+                cur.execute(
+                    "SELECT COUNT(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database()"
+                )
+                connections = cur.fetchone()[0]
+                
+                # Get version (short)
+                cur.execute("SHOW server_version")
+                version = cur.fetchone()[0].split()[0]  # e.g., "15.4"
         
         return ServiceStatus(
             name="PostgreSQL",
             status=Status.OK,
             message="Connected",
-            details={"connected": True}
+            details={
+                "connected": True,
+                "tables": tables,
+                "size": size,
+                "connections": connections,
+                "version": version,
+            }
         )
     except Exception as e:
         err_msg = str(e)
@@ -473,21 +562,45 @@ def check_postgres() -> ServiceStatus:
 def check_backend() -> ServiceStatus:
     """Check backend API status."""
     try:
-        # Try the chain params endpoint first (most reliable)
-        resp = requests.get("http://127.0.0.1:5000/api/chain/params", timeout=3)
-        if resp.status_code == 200:
+        # Count gunicorn workers first
+        workers = 0
+        try:
+            result = subprocess.run(
+                ["pgrep", "-c", "-f", "gunicorn.*factory:app"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                workers = int(result.stdout.strip())
+        except Exception:
+            pass
+        
+        # Try the parameters endpoint (simple GET that should always work)
+        start = time.time()
+        resp = requests.get("http://127.0.0.1:5000/api/get_parameters", timeout=3)
+        response_ms = int((time.time() - start) * 1000)
+        
+        if resp.status_code >= 400:
             return ServiceStatus(
                 name="Backend",
-                status=Status.OK,
-                message="Running",
-                details={"status_code": resp.status_code}
+                status=Status.ERROR,
+                message=f"HTTP {resp.status_code}",
+                details={
+                    "status_code": resp.status_code,
+                    "response_ms": response_ms,
+                    "workers": workers,
+                }
             )
-        # Any response means the server is running
+        
         return ServiceStatus(
             name="Backend",
             status=Status.OK,
             message="Running",
-            details={"status_code": resp.status_code}
+            details={
+                "status_code": resp.status_code,
+                "response_ms": response_ms,
+                "workers": workers,
+            }
         )
     except requests.exceptions.ConnectionError:
         return ServiceStatus(
@@ -547,41 +660,42 @@ def check_indexer() -> ServiceStatus:
         
         lag = chain_height - indexer_height
         
+        # Determine rate indicator
+        if lag <= 0:
+            rate = "caught up"
+        elif lag <= 10:
+            rate = "~1 blk/s"
+        else:
+            rate = "syncing..."
+        
+        base_details = {
+            "running": True,
+            "height": indexer_height,
+            "node_height": chain_height,
+            "lag": lag,
+            "rate": rate,
+        }
+        
         if lag <= 10:
             return ServiceStatus(
                 name="Indexer",
                 status=Status.OK,
                 message="Synced",
-                details={
-                    "running": True,
-                    "height": indexer_height,
-                    "chain_height": chain_height,
-                    "lag": lag,
-                }
+                details=base_details
             )
         elif lag <= 100:
             return ServiceStatus(
                 name="Indexer",
                 status=Status.WARN,
                 message=f"Behind ({lag} blocks)",
-                details={
-                    "running": True,
-                    "height": indexer_height,
-                    "chain_height": chain_height,
-                    "lag": lag,
-                }
+                details=base_details
             )
         else:
             return ServiceStatus(
                 name="Indexer",
                 status=Status.WARN,
                 message=f"Catching up ({lag})",
-                details={
-                    "running": True,
-                    "height": indexer_height,
-                    "chain_height": chain_height,
-                    "lag": lag,
-                }
+                details=base_details
             )
     except Exception as e:
         return ServiceStatus(
@@ -595,13 +709,14 @@ def check_indexer() -> ServiceStatus:
 def check_caddy() -> ServiceStatus:
     """Check Caddy web server status."""
     try:
-        # Check if process is running
+        # Check if process is running and get PID
         result = subprocess.run(
             ["pgrep", "-x", "caddy"],
             capture_output=True,
             text=True
         )
         process_running = result.returncode == 0
+        pid = result.stdout.strip().split()[0] if process_running and result.stdout.strip() else None
         
         if not process_running:
             return ServiceStatus(
@@ -611,25 +726,32 @@ def check_caddy() -> ServiceStatus:
                 details={"running": False}
             )
         
-        # Try HTTP health check
-        try:
-            resp = requests.get("http://127.0.0.1:80/", timeout=3, allow_redirects=False)
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.OK,
-                message="Running",
-                details={
-                    "running": True,
-                    "status_code": resp.status_code,
-                }
-            )
-        except Exception:
-            return ServiceStatus(
-                name="Caddy",
-                status=Status.OK,
-                message="Running",
-                details={"running": True}
-            )
+        # Check if HTTPS is configured (look for domain in Caddyfile)
+        https_enabled = False
+        domain = os.environ.get("DOMAIN", "")
+        if domain:
+            try:
+                with open("/etc/caddy/Caddyfile") as f:
+                    caddyfile = f.read()
+                    if domain in caddyfile and "tls" not in caddyfile.lower():
+                        # Domain present without explicit tls off = HTTPS auto
+                        https_enabled = True
+                    elif f"{domain} {{" in caddyfile:
+                        https_enabled = True
+            except Exception:
+                pass
+        
+        return ServiceStatus(
+            name="Caddy",
+            status=Status.OK,
+            message="Running",
+            details={
+                "running": True,
+                "https": https_enabled,
+                "domain": domain if domain else None,
+                "pid": pid,
+            }
+        )
     
     except Exception as e:
         return ServiceStatus(
@@ -638,6 +760,74 @@ def check_caddy() -> ServiceStatus:
             message=str(e)[:25],
             details={}
         )
+
+
+def check_referrals() -> ServiceStatus:
+    """Check referral accrual daemon status."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "referral_accrue.py"],
+            capture_output=True,
+            text=True
+        )
+        process_running = result.returncode == 0
+        pid = result.stdout.strip().split()[0] if process_running and result.stdout.strip() else None
+    except Exception:
+        process_running = False
+        pid = None
+    
+    if not process_running:
+        return ServiceStatus(
+            name="Referrals",
+            status=Status.ERROR,
+            message="Not running",
+            details={"running": False}
+        )
+    
+    # Get additional info from database
+    db_url = os.environ.get(
+        "MIRAGE_INDEXER_DB_URL",
+        "postgresql://mirage:mirage@127.0.0.1:5432/mirage"
+    )
+    
+    pending_count = 0
+    total_links = 0
+    total_accrued = 0
+    try:
+        with psycopg.connect(db_url, connect_timeout=2) as conn:
+            with conn.cursor() as cur:
+                # Count pending rewards
+                cur.execute(
+                    "SELECT COUNT(*) FROM referral_pending_rewards "
+                    "WHERE status = 'pending'"
+                )
+                pending_count = cur.fetchone()[0]
+                
+                # Count total referral links
+                cur.execute("SELECT COUNT(*) FROM referral_links")
+                total_links = cur.fetchone()[0]
+                
+                # Count total accrued (completed payouts)
+                cur.execute(
+                    "SELECT COUNT(*) FROM referral_pending_rewards "
+                    "WHERE status = 'completed'"
+                )
+                total_accrued = cur.fetchone()[0]
+    except Exception:
+        pass
+    
+    return ServiceStatus(
+        name="Referrals",
+        status=Status.OK,
+        message="Running",
+        details={
+            "running": True,
+            "pending": pending_count,
+            "links": total_links,
+            "total_accrued": total_accrued,
+            "pid": pid,
+        }
+    )
 
 
 def check_hermes() -> ServiceStatus:
@@ -653,7 +843,7 @@ def check_hermes() -> ServiceStatus:
             details={"configured": False}
         )
     
-    # Check if process is running
+    # Check if process is running and get PID
     try:
         result = subprocess.run(
             ["pgrep", "-f", "hermes.*start"],
@@ -661,16 +851,37 @@ def check_hermes() -> ServiceStatus:
             text=True
         )
         process_running = result.returncode == 0
+        pid = result.stdout.strip().split()[0] if process_running and result.stdout.strip() else None
     except Exception:
         process_running = False
+        pid = None
+    
+    # Parse config.toml to get chain IDs
+    chains = []
+    try:
+        with open(config_path) as f:
+            import re
+            config_content = f.read()
+            # Find all chain IDs in [[chains]] sections
+            chain_matches = re.findall(r'id\s*=\s*["\']([^"\']+)["\']', config_content)
+            chains = chain_matches[:3]  # Limit to first 3
+    except Exception:
+        pass
     
     if not process_running:
         return ServiceStatus(
             name="Hermes IBC",
             status=Status.ERROR,
             message="Not running",
-            details={"configured": True, "running": False}
+            details={"configured": True, "running": False, "chains": ", ".join(chains) if chains else None}
         )
+    
+    base_details = {
+        "configured": True,
+        "running": True,
+        "pid": pid,
+        "chains": ", ".join(chains) if chains else None,
+    }
     
     # Try to check client health via hermes CLI
     try:
@@ -685,35 +896,27 @@ def check_hermes() -> ServiceStatus:
                 name="Hermes IBC",
                 status=Status.OK,
                 message="Running",
-                details={
-                    "configured": True,
-                    "running": True,
-                    "clients_found": True,
-                }
+                details={**base_details, "clients_found": True}
             )
         return ServiceStatus(
             name="Hermes IBC",
             status=Status.WARN,
             message="No clients",
-            details={
-                "configured": True,
-                "running": True,
-                "clients_found": False,
-            }
+            details={**base_details, "clients_found": False}
         )
     except subprocess.TimeoutExpired:
         return ServiceStatus(
             name="Hermes IBC",
             status=Status.OK,
             message="Running",
-            details={"configured": True, "running": True}
+            details=base_details
         )
     except Exception:
         return ServiceStatus(
             name="Hermes IBC",
             status=Status.OK,
             message="Running",
-            details={"configured": True, "running": True}
+            details=base_details
         )
 
 
@@ -770,32 +973,103 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     color = STATUS_COLORS[status.status]
     lines.append(f"{color}{status.message}{Colors.RESET}")
     
-    # Service-specific details
+    # Bullet prefix for detail lines
+    bullet = f"{Colors.DIM}-{Colors.RESET} "
+    
+    # Service-specific details (4 bullets each)
     if status.name == "Node":
+        if details.get("chain_id"):
+            lines.append(f"{bullet}{Colors.DIM}Chain:{Colors.RESET} {details['chain_id']}")
         if details.get("height"):
-            lines.append(f"{Colors.DIM}Height:{Colors.RESET} {details['height']}")
+            lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
+        if "peers" in details:
+            peers = details["peers"]
+            peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_YELLOW
+            lines.append(f"{bullet}{Colors.DIM}Peers:{Colors.RESET} {peer_color}{peers}{Colors.RESET}")
+        if details.get("block_age"):
+            lines.append(f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {details['block_age']}")
     
     elif status.name == "Validator":
         if details.get("moniker"):
-            lines.append(f"{Colors.DIM}Moniker:{Colors.RESET} {truncate(details['moniker'], 22)}")
+            moniker = details['moniker']
+            # Strip https:// prefix for cleaner display
+            if moniker.startswith("https://"):
+                moniker = moniker[8:]
+            elif moniker.startswith("http://"):
+                moniker = moniker[7:]
+            lines.append(f"{bullet}{Colors.DIM}Moniker:{Colors.RESET} {truncate(moniker, 18)}")
+        if details.get("tokens"):
+            tok = details["tokens"]
+            lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok:,} MIRAGE")
+        if details.get("power_pct") is not None:
+            pct = details["power_pct"]
+            lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
         if details.get("voting_power"):
             vp = details["voting_power"]
-            lines.append(f"{Colors.DIM}Voting Power:{Colors.RESET} {vp:,}")
+            lines.append(f"{bullet}{Colors.DIM}Voting power:{Colors.RESET} {vp:,}")
+        if details.get("jailed"):
+            lines.append(f"{bullet}{Colors.BRIGHT_RED}⚠ JAILED{Colors.RESET}")
+    
+    elif status.name == "PostgreSQL":
+        if details.get("tables") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Tables:{Colors.RESET} {details['tables']}")
+        if details.get("size"):
+            lines.append(f"{bullet}{Colors.DIM}Size:{Colors.RESET} {details['size']}")
+        if details.get("connections") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Connections:{Colors.RESET} {details['connections']}")
+        if details.get("version"):
+            lines.append(f"{bullet}{Colors.DIM}Version:{Colors.RESET} {details['version']}")
+    
+    elif status.name == "Backend":
+        if details.get("workers"):
+            lines.append(f"{bullet}{Colors.DIM}Workers:{Colors.RESET} {details['workers']}")
+        if details.get("response_ms") is not None:
+            ms = details["response_ms"]
+            ms_color = Colors.BRIGHT_GREEN if ms < 100 else Colors.BRIGHT_YELLOW if ms < 500 else Colors.BRIGHT_RED
+            lines.append(f"{bullet}{Colors.DIM}Response:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
+        if details.get("status_code"):
+            code = details["status_code"]
+            code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
+            lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
     
     elif status.name == "Indexer":
         if details.get("height"):
-            lines.append(f"{Colors.DIM}Height:{Colors.RESET} {details['height']:,}")
+            lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']:,}")
         if details.get("lag") is not None:
             lag = details["lag"]
             lag_color = Colors.BRIGHT_GREEN if lag <= 10 else Colors.BRIGHT_YELLOW
-            lines.append(f"{Colors.DIM}Lag:{Colors.RESET} {lag_color}{lag}{Colors.RESET} blocks")
+            lines.append(f"{bullet}{Colors.DIM}Lag:{Colors.RESET} {lag_color}{lag}{Colors.RESET} blocks")
+        if details.get("rate"):
+            lines.append(f"{bullet}{Colors.DIM}Rate:{Colors.RESET} {details['rate']}")
+    
+    elif status.name == "Caddy":
+        if details.get("domain"):
+            lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
+        if details.get("https"):
+            lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}✓ Active{Colors.RESET}")
+        elif details.get("running"):
+            lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.DIM}HTTP only{Colors.RESET}")
+    
+    elif status.name == "Referrals":
+        if "links" in details:
+            lines.append(f"{bullet}{Colors.DIM}Links:{Colors.RESET} {details['links']:,}")
+        if "pending" in details:
+            pending = details["pending"]
+            if pending > 0:
+                lines.append(f"{bullet}{Colors.DIM}Pending:{Colors.RESET} {Colors.BRIGHT_YELLOW}{pending}{Colors.RESET}")
+            else:
+                lines.append(f"{bullet}{Colors.DIM}Pending:{Colors.RESET} 0")
+        if details.get("total_accrued") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Accrued:{Colors.RESET} {details['total_accrued']:,}")
     
     elif status.name == "Hermes IBC":
         if details.get("clients_found"):
-            lines.append(f"{Colors.DIM}IBC Clients:{Colors.RESET} Active")
+            lines.append(f"{bullet}{Colors.DIM}IBC Clients:{Colors.RESET} Active")
+        if details.get("chains"):
+            lines.append(f"{bullet}{Colors.DIM}Chains:{Colors.RESET} {details['chains']}")
     
-    # Ensure minimum card height
-    while len(lines) < 3:
+    # Ensure minimum card height (4 detail lines + status = 5 total)
+    while len(lines) < 5:
         lines.append("")
     
     return lines
@@ -816,6 +1090,7 @@ def render_dashboard():
         check_backend(),
         check_indexer(),
         check_caddy(),
+        check_referrals(),
         check_hermes(),
     ]
     
@@ -823,7 +1098,7 @@ def render_dashboard():
     # But keep them if they have errors
     display_statuses = [
         s for s in statuses
-        if s.status != Status.UNKNOWN or s.name in ("Node", "PostgreSQL", "Backend", "Indexer", "Caddy")
+        if s.status != Status.UNKNOWN or s.name in ("Node", "PostgreSQL", "Backend", "Indexer", "Caddy", "Referrals")
     ]
     
     # Render header
