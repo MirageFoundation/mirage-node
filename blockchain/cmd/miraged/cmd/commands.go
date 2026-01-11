@@ -185,7 +185,7 @@ func initRootCmd(
 		if strings.TrimSpace(homeDir) == "" {
 			homeDir = app.DefaultNodeHome
 		}
-		_ = setupStdFileRotation(homeDir)
+		// Log rotation removed - handled by shell (cronolog) in entrypoint.sh
 		if originalRunE != nil {
 			return originalRunE(cmd, args)
 		}

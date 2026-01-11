@@ -9,8 +9,12 @@ This migration removes files and directories that are no longer used:
 5. ~/.mirage/main/bin/ - old snapshot location (now main/snapshot/)
 6. ~/.mirage/main/indexer.sql - old snapshot location (now main/snapshot/)
 7. ~/.mirage/setup/ - legacy manual setup directory (all contents are duplicates or unused)
-8. ~/.mirage/main/logs/ - move to ~/.mirage/logs/ (centralized log structure)
-9. ~/.mirage/main/miraged.log - move to ~/.mirage/logs/node/miraged.log
+8. ~/.mirage/main/logs/ - DELETE entirely (old logs including garbage node.log files)
+9. ~/.mirage/main/miraged.log - DELETE (new logs go to ~/.mirage/logs/ via cronolog)
+
+Note: Old logs are deleted, not moved. The new centralized logging structure
+(~/.mirage/logs/) uses cronolog for date-based files. Old logs include garbage
+from Go's internal log rotation (node.log files with just dashes).
 """
 
 import shutil
@@ -81,48 +85,21 @@ def run(config_dir: Path, logger) -> str:
         removed.append("setup/")
         logger.info("  Removed legacy setup/ directory")
     
-    # 8. Move main/logs/ to logs/ (centralized log structure)
-    new_logs_dir = data_dir / "logs"
-    new_logs_dir.mkdir(parents=True, exist_ok=True)
-    
+    # 8. DELETE main/logs/ entirely (old logs including garbage node.log files)
     old_logs_dir = main_dir / "logs"
     if old_logs_dir.exists():
-        # Move contents, preserving structure
-        for item in old_logs_dir.iterdir():
-            dest = new_logs_dir / item.name
-            if item.is_dir():
-                if not dest.exists():
-                    shutil.move(str(item), str(dest))
-                    logger.info(f"  Moved logs/{item.name}/ to new location")
-                else:
-                    # Merge contents
-                    for sub in item.iterdir():
-                        sub_dest = dest / sub.name
-                        if not sub_dest.exists():
-                            shutil.move(str(sub), str(sub_dest))
-                    shutil.rmtree(item)
-            else:
-                if not dest.exists():
-                    shutil.move(str(item), str(dest))
-                    logger.info(f"  Moved logs/{item.name} to new location")
-        # Remove empty old logs dir
-        if old_logs_dir.exists() and not any(old_logs_dir.iterdir()):
-            old_logs_dir.rmdir()
-            removed.append("main/logs/")
+        # Count files for logging
+        file_count = sum(1 for _ in old_logs_dir.rglob("*") if _.is_file())
+        shutil.rmtree(old_logs_dir)
+        removed.append(f"main/logs/ ({file_count} files)")
+        logger.info(f"  Deleted main/logs/ directory ({file_count} old log files)")
     
-    # 9. Move main/miraged.log to logs/node/miraged.log
+    # 9. DELETE main/miraged.log (new logs go to ~/.mirage/logs/ via cronolog)
     old_miraged_log = main_dir / "miraged.log"
     if old_miraged_log.exists():
-        node_logs_dir = new_logs_dir / "node"
-        node_logs_dir.mkdir(parents=True, exist_ok=True)
-        new_miraged_log = node_logs_dir / "miraged.log"
-        if not new_miraged_log.exists():
-            shutil.move(str(old_miraged_log), str(new_miraged_log))
-            removed.append("main/miraged.log -> logs/node/")
-            logger.info("  Moved main/miraged.log to logs/node/miraged.log")
-        else:
-            old_miraged_log.unlink()
-            logger.info("  Removed duplicate main/miraged.log")
+        old_miraged_log.unlink()
+        removed.append("main/miraged.log")
+        logger.info("  Deleted main/miraged.log")
     
     if removed:
         return f"removed/moved: {', '.join(removed)}"
