@@ -301,10 +301,11 @@ tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/r
 #       If you change this, update the other file too!
 HERMES_HOME="$DATA_DIR/hermes"
 if [ -f "$HERMES_HOME/config.toml" ]; then
-  # Install hermes if not present
-  if ! command -v hermes >/dev/null 2>&1; then
-    echo "==> Installing Hermes binary..."
-    HERMES_VERSION="v1.13.3"
+  # Install or upgrade hermes if needed
+  HERMES_VERSION="v1.13.3"
+  INSTALLED_VERSION=$(hermes version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+  if [ "$INSTALLED_VERSION" != "$HERMES_VERSION" ]; then
+    echo "==> Installing Hermes ${HERMES_VERSION} (was: ${INSTALLED_VERSION:-not installed})..."
     curl -sL "https://github.com/informalsystems/hermes/releases/download/${HERMES_VERSION}/hermes-${HERMES_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/hermes.tar.gz
     tar -xzf /tmp/hermes.tar.gz -C /usr/local/bin/
     chmod +x /usr/local/bin/hermes

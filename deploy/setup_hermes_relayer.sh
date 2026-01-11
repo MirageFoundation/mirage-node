@@ -58,18 +58,20 @@ if [ "$WORD_COUNT" -ne 12 ]; then
 fi
 echo "==> Mnemonic accepted (12 words)"
 
-# Install Hermes (needed to derive addresses)
-echo "==> Installing Hermes ${HERMES_VERSION}..."
-if ! command -v hermes &>/dev/null; then
+# Install or upgrade Hermes
+echo "==> Checking Hermes ${HERMES_VERSION}..."
+INSTALLED_VERSION=$(hermes version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+if [ "$INSTALLED_VERSION" != "$HERMES_VERSION" ]; then
+    echo "    Installing Hermes ${HERMES_VERSION} (was: ${INSTALLED_VERSION:-not installed})..."
     cd /tmp
     curl -sL "https://github.com/informalsystems/hermes/releases/download/${HERMES_VERSION}/hermes-${HERMES_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o hermes.tar.gz
     tar -xzf hermes.tar.gz
-    mv hermes /usr/local/bin/
+    mv -f hermes /usr/local/bin/
     chmod +x /usr/local/bin/hermes
     rm hermes.tar.gz
     echo "    Installed: $(hermes version 2>&1 | head -1)"
 else
-    echo "    Already installed: $(hermes version 2>&1 | head -1)"
+    echo "    Already at ${HERMES_VERSION}"
 fi
 
 # Create minimal config for key derivation
