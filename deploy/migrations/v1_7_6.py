@@ -181,6 +181,12 @@ def run(config_dir: Path, logger) -> str:
         validator_marker.unlink()
         removed.append(".validator_auto_enabled")
 
+    # Old indexer lock directory (lock now in /tmp)
+    old_indexer_dir = main_dir / "data" / "indexer"
+    if old_indexer_dir.exists():
+        shutil.rmtree(old_indexer_dir)
+        removed.append("main/data/indexer/")
+
     if removed:
         results.append(f"removed {len(removed)} legacy items")
         logger.info(f"    Removed: {', '.join(removed)}")

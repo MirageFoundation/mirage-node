@@ -11,7 +11,7 @@ MIGRATE="${MIGRATE_CONFIG:-0}"
 
 echo "==> Init: NODE_HOME=$NODE_HOME MIGRATE=$MIGRATE"
 
-mkdir -p "$NODE_HOME" "$NODE_HOME/config" "$NODE_HOME/data" "$NODE_HOME/data/indexer"
+mkdir -p "$NODE_HOME" "$NODE_HOME/config" "$NODE_HOME/data"
 
 # Import validator key from seed on first init (idempotent)
 KEYRING_BACKEND="test"

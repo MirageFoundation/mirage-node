@@ -51,8 +51,7 @@ cp "$MAIN_DIR/data/priv_validator_state.json" "$BACKUP_DIR/data/"
 cp -a "$MAIN_DIR/data/application.db" "$BACKUP_DIR/data/"
 cp -a "$MAIN_DIR/data/state.db" "$BACKUP_DIR/data/"
 
-# Optional: indexer data (small)
-cp -a "$MAIN_DIR/data/indexer" "$BACKUP_DIR/data/" 2>/dev/null || true
+# Note: indexer lock file is now in /tmp (ephemeral), no need to backup
 
 echo "==> Restarting container..."
 docker start mirage
