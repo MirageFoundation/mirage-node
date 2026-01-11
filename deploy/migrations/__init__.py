@@ -104,7 +104,7 @@ def run_one_time_migrations(config_dir: Path) -> int:
     Run all pending one-time migrations.
 
     Args:
-        config_dir: Path to config directory (e.g., ~/.mirage/config)
+        config_dir: Path to env directory (e.g., ~/.mirage/env)
 
     Returns:
         Number of migrations that were run
@@ -179,11 +179,18 @@ def run_migrations(config_dir: Path) -> int:
     Run all migrations, sync env files, and clean up temp files.
 
     Args:
-        config_dir: Path to config directory (e.g., ~/.mirage/config)
+        config_dir: Path to env directory (e.g., ~/.mirage/env)
 
     Returns:
         Number of one-time migrations that were run
     """
+    # Step 0: Rename config/ -> env/ if old directory exists
+    config_dir = Path(config_dir)
+    old_config_dir = config_dir.parent / "config"
+    if old_config_dir.exists() and old_config_dir.is_dir() and not config_dir.exists():
+        logger.info(f"Renaming {old_config_dir} -> {config_dir}")
+        old_config_dir.rename(config_dir)
+
     # Step 1: Run one-time migrations
     count = run_one_time_migrations(config_dir)
 
@@ -210,8 +217,8 @@ def main():
     parser.add_argument(
         "--config-dir",
         type=Path,
-        default=Path.home() / ".mirage" / "config",
-        help="Path to config directory (default: ~/.mirage/config)",
+        default=Path.home() / ".mirage" / "env",
+        help="Path to env directory (default: ~/.mirage/env)",
     )
     parser.add_argument(
         "--list",

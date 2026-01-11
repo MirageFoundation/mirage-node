@@ -74,12 +74,12 @@ No manual action required. On next deploy:
 
 1. Migration runs automatically to move secrets
 2. Env sync updates files to latest format
-3. Backups created in `~/.mirage/config/backups/`
+3. Backups created in `~/.mirage/env/backups/`
 
 If you need to restore previous config:
 ```bash
-ls ~/.mirage/config/backups/
-cp ~/.mirage/config/backups/backend.env.TIMESTAMP.bak ~/.mirage/config/backend.env
+ls ~/.mirage/env/backups/
+cp ~/.mirage/env/backups/backend.env.TIMESTAMP.bak ~/.mirage/env/backend.env
 ```
 
 ---

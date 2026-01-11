@@ -68,10 +68,10 @@ MAX_RECENT_POSTS = 10  # Same for target and matches
 MAX_RECENT_VOTES = 25
 MAX_MATCHES_WITH_POST_SAMPLES = 5  # per severity bucket (CRITICAL/HIGH)
 
-# OpenAI API key - loaded from ~/.mirage/config/secrets.env or prompted at runtime
+# OpenAI API key - loaded from ~/.mirage/env/secrets.env or prompted at runtime
 def _load_secrets():
     """Load secrets from env file if present."""
-    secrets_file = os.path.join(os.path.expanduser("~/.mirage/config"), "secrets.env")
+    secrets_file = os.path.join(os.path.expanduser("~/.mirage/env"), "secrets.env")
     if os.path.exists(secrets_file):
         with open(secrets_file) as f:
             for line in f:

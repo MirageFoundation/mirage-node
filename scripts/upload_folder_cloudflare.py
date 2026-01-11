@@ -5,7 +5,7 @@ Upload all images in a folder to Cloudflare Images and output the URLs.
 Usage:
     conda run -n mirage-node python scripts/upload_folder_cloudflare.py /path/to/folder
 
-Credentials loaded from ~/.mirage/config/backend.env (local docker config).
+Credentials loaded from ~/.mirage/env/backend.env (local docker config).
 
 Output:
     Prints each uploaded file's URL, one per line.

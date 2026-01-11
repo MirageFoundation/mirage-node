@@ -10,7 +10,7 @@
 # 4. Are there pending/stuck packets?
 # 5. Are client updates happening? (prevents expiry)
 #
-# Alerts: Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in ~/.mirage/config/secrets.env
+# Alerts: Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in ~/.mirage/env/secrets.env
 #         Or use --alert-webhook for Slack-compatible webhooks
 #
 # Exit codes:
@@ -21,7 +21,7 @@
 set -euo pipefail
 
 # Load secrets env file if present (for Telegram credentials)
-SECRETS_FILE="${HOME}/.mirage/config/secrets.env"
+SECRETS_FILE="${HOME}/.mirage/env/secrets.env"
 if [ -f "$SECRETS_FILE" ]; then
     # shellcheck source=/dev/null
     source "$SECRETS_FILE"

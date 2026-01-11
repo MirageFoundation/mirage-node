@@ -29,9 +29,9 @@ SESSION="mirage"
 export PYTHONPATH="/opt/mirage"
 
 # Load persistent env files if present
-CONFIG_DIR="${HOME}/.mirage/config"
+ENV_DIR="${HOME}/.mirage/env"
 load_env_files() {
-  for envfile in "${CONFIG_DIR}/backend.env" "${CONFIG_DIR}/node.env" "${CONFIG_DIR}/indexer.env" "${CONFIG_DIR}/frontend.env" "${CONFIG_DIR}/secrets.env"; do
+  for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env"; do
     if [ -f "$envfile" ]; then
       set -a
       . "$envfile"
@@ -42,11 +42,11 @@ load_env_files() {
 load_env_files
 
 # Ensure config directory exists
-mkdir -p "$CONFIG_DIR"
+mkdir -p "$ENV_DIR"
 
 # Run deploy migrations (one-time migrations + env sync with templates)
 echo "==> Running deploy migrations..."
-python3 -m deploy.migrations --config-dir "$CONFIG_DIR" || true
+python3 -m deploy.migrations --config-dir "$ENV_DIR" || true
 
 # Reload env files after migrations
 load_env_files

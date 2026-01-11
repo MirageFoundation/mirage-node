@@ -23,7 +23,7 @@ def _ensure_project_root_on_path() -> None:
 _ensure_project_root_on_path()
 
 # Load environment variables for local development from persistent config if available
-cfg_env = os.path.expanduser("~/.mirage/config/backend.env")
+cfg_env = os.path.expanduser("~/.mirage/env/backend.env")
 if os.path.exists(cfg_env):
     load_dotenv(cfg_env, override=False)
 

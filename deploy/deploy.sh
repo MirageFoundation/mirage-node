@@ -383,24 +383,24 @@ run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.hermes'
 # Initialize persistent config directory and seed env files if missing (for --init and --update-init)
 if [ "$MODE" = "init" ] || [ "$MODE" = "update-init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
-  run_cmd 'mkdir -p ~/.mirage/config'
+  run_cmd 'mkdir -p ~/.mirage/env'
   # Copy env templates if they don't exist on remote
   for f in "$(dirname "$0")/templates"/*.env; do
     if [ -f "$f" ]; then
       fname="$(basename "$f")"
       # Only copy if file doesn't exist on remote (preserve user customizations)
       if [ "$IS_LOCAL" -eq 1 ]; then
-        [ -f "$HOME/.mirage/config/$fname" ] || cp "$f" "$HOME/.mirage/config/$fname"
+        [ -f "$HOME/.mirage/env/$fname" ] || cp "$f" "$HOME/.mirage/env/$fname"
       else
-        ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/config/$fname ]" 2>/dev/null || copy_file "$f" "~/.mirage/config/$fname"
+        ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/env/$fname ]" 2>/dev/null || copy_file "$f" "~/.mirage/env/$fname"
       fi
     fi
   done
   # Seed MIRAGE_INDEXER_DB_URL if missing or empty
-  run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/config/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
+  run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
   # Persist moniker only during first-time init; do not overwrite during update-init
   if [ "$MODE" = "init" ] && [ -n "$MONIKER_VALUE" ]; then
-    run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/config/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"
+    run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"
   fi
 fi
 
@@ -409,9 +409,9 @@ fi
 if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
   echo "==> Reading existing MONIKER from node.env..."
   if [ "$IS_LOCAL" -eq 1 ]; then
-    EXISTING_MONIKER=$(grep -E '^MONIKER=' "$HOME/.mirage/config/node.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
+    EXISTING_MONIKER=$(grep -E '^MONIKER=' "$HOME/.mirage/env/node.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
   else
-    EXISTING_MONIKER=$(ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "grep -E '^MONIKER=' ~/.mirage/config/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
+    EXISTING_MONIKER=$(ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "grep -E '^MONIKER=' ~/.mirage/env/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
   fi
   if [ -n "$EXISTING_MONIKER" ] && [ "$EXISTING_MONIKER" != "mirage-node" ]; then
     MONIKER_VALUE="$EXISTING_MONIKER"
@@ -423,8 +423,8 @@ PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
 if [ "$IS_LOCAL" -eq 1 ]; then
   ENV_ARGS=""
   for f in backend node indexer frontend secrets; do
-    if [ -f "$HOME/.mirage/config/$f.env" ]; then
-      ENV_ARGS="$ENV_ARGS --env-file $HOME/.mirage/config/$f.env"
+    if [ -f "$HOME/.mirage/env/$f.env" ]; then
+      ENV_ARGS="$ENV_ARGS --env-file $HOME/.mirage/env/$f.env"
     fi
   done
   MONIKER_ARG=""
@@ -443,7 +443,7 @@ else
     # Replace dots with dashes for valid hostname
     HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
   fi
-  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/config/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/config/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
 fi
 
 echo "==> Waiting briefly for container to become healthy..."

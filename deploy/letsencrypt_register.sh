@@ -94,7 +94,7 @@ echo "==> Reloading Caddy..."
 caddy reload --config "$CADDY_DIR/Caddyfile" --adapter caddyfile
 
 # Persist domain to node.env for automatic HTTPS on future deployments
-NODE_ENV_FILE="${HOME}/.mirage/config/node.env"
+NODE_ENV_FILE="${HOME}/.mirage/env/node.env"
 if [ -f "$NODE_ENV_FILE" ]; then
   if grep -q "^DOMAIN=" "$NODE_ENV_FILE"; then
     sed -i "s|^DOMAIN=.*|DOMAIN=$DOMAIN|" "$NODE_ENV_FILE"
