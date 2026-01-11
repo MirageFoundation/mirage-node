@@ -20,7 +20,7 @@ Target structure after migration:
 import shutil
 from pathlib import Path
 
-MIGRATION_KEY = "v1.7.9-directory-restructuring"
+MIGRATION_KEY = "v1.7.8-directory-restructuring"
 DESCRIPTION = "Reorganize ~/.mirage directory (main→node, postgres to top level)"
 
 
