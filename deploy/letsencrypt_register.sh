@@ -93,11 +93,18 @@ fi
 echo "==> Reloading Caddy..."
 caddy reload --config "$CADDY_DIR/Caddyfile" --adapter caddyfile
 
-# Persist domain for automatic HTTPS configuration on subsequent deployments
-DOMAIN_PERSIST_FILE="${HOME}/.mirage/.domain"
-mkdir -p "$(dirname "$DOMAIN_PERSIST_FILE")"
-echo "$DOMAIN" > "$DOMAIN_PERSIST_FILE"
-echo "==> Domain persisted to $DOMAIN_PERSIST_FILE (will auto-configure HTTPS on future deployments)"
+# Persist domain to node.env for automatic HTTPS on future deployments
+NODE_ENV_FILE="${HOME}/.mirage/config/node.env"
+if [ -f "$NODE_ENV_FILE" ]; then
+  if grep -q "^DOMAIN=" "$NODE_ENV_FILE"; then
+    sed -i "s|^DOMAIN=.*|DOMAIN=$DOMAIN|" "$NODE_ENV_FILE"
+  else
+    echo "DOMAIN=$DOMAIN" >> "$NODE_ENV_FILE"
+  fi
+  echo "==> Domain saved to $NODE_ENV_FILE"
+else
+  echo "WARNING: $NODE_ENV_FILE not found, domain not persisted" >&2
+fi
 
 echo "✓ HTTPS configured for $DOMAIN"
 

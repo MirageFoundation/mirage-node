@@ -52,7 +52,7 @@ python3 -m deploy.migrations --config-dir "$CONFIG_DIR" || true
 load_env_files
 
 # Set container hostname to MONIKER or external IP (instead of random container ID)
-# Note: Replace dots with dashes in hostname (dots not allowed). Fails silently if no permissions.
+# Note: Replace dots with dashes (dots not allowed in hostnames). Fails silently if no permissions.
 if [ -n "${MONIKER:-}" ]; then
   hostname "${MONIKER//./-}" 2>/dev/null || true
 else
@@ -230,16 +230,12 @@ ensure_local_postgres_db() {
 }
 ensure_local_postgres_db
 
-# Auto-configure HTTPS if domain file exists (persisted from previous deployment)
-DOMAIN_FILE="$DATA_DIR/.domain"
-if [ -f "$DOMAIN_FILE" ]; then
-  DOMAIN=$(cat "$DOMAIN_FILE" 2>/dev/null | tr -d '\r\n' | xargs)
-  if [ -n "$DOMAIN" ]; then
-    echo "==> Found persisted domain: $DOMAIN"
-    echo "==> Configuring HTTPS automatically..."
-    sleep 2  # Give Caddy a moment to start
-    bash "$ROOT_DIR/deploy/letsencrypt_register.sh" --domain="$DOMAIN"
-  fi
+# Auto-configure HTTPS if domain is set (from node.env)
+if [ -n "${DOMAIN:-}" ]; then
+  echo "==> Domain configured: $DOMAIN"
+  echo "==> Configuring HTTPS automatically..."
+  sleep 2  # Give Caddy a moment to start
+  bash "$ROOT_DIR/deploy/letsencrypt_register.sh" --domain="$DOMAIN"
 fi
 
 # Node (second)

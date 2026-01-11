@@ -431,7 +431,8 @@ if [ "$IS_LOCAL" -eq 1 ]; then
   HOSTNAME_ARG=""
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-    HOSTNAME_ARG="--hostname $MONIKER_VALUE"
+    # Replace dots with dashes for valid hostname
+    HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
   fi
   docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" -v "$HOME/.hermes:/root/.hermes" mirage:prod
 else
@@ -439,7 +440,8 @@ else
   HOSTNAME_ARG=""
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-    HOSTNAME_ARG="--hostname $MONIKER_VALUE"
+    # Replace dots with dashes for valid hostname
+    HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
   fi
   ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/config/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/config/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
 fi
