@@ -247,7 +247,8 @@ elif [ -n "$PROXYJUMP" ]; then
     echo "    Copying from jump host ($PROXYJUMP) to target..."
     # Extract target host from REMOTE (user@host format)
     TARGET_HOST="${REMOTE#*@}"
-    ssh "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz"
+    # Use -A for agent forwarding so jump host can use our local SSH key
+    ssh -A "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz"
   else
     echo "    Uploading from local (jump host hash mismatch or missing)..."
     run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
