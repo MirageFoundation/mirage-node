@@ -21,10 +21,8 @@
 	}
 
 	handle {
-	root * /opt/mirage/web/frontend/build
-	try_files {path} /index.html
-	file_server
+		root * /opt/mirage/web/frontend/build
+		try_files {path} /index.html
+		file_server
 	}
 }
-
-

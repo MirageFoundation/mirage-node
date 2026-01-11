@@ -287,7 +287,7 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   # Install hermes if not present
   if ! command -v hermes >/dev/null 2>&1; then
     echo "==> Installing Hermes binary..."
-    HERMES_VERSION="${HERMES_VERSION:-v1.10.4}"
+    HERMES_VERSION="v1.10.4"
     curl -sL "https://github.com/informalsystems/hermes/releases/download/${HERMES_VERSION}/hermes-${HERMES_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/hermes.tar.gz
     tar -xzf /tmp/hermes.tar.gz -C /usr/local/bin/
     chmod +x /usr/local/bin/hermes

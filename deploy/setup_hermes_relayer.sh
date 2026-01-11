@@ -10,7 +10,7 @@ set -euo pipefail
 # You will be prompted to enter your 12-word mnemonic (hidden input)
 # Data is stored in ~/.hermes (persisted via Docker volume mount)
 
-HERMES_VERSION="${HERMES_VERSION:-v1.10.4}"
+HERMES_VERSION="v1.10.4"
 CREATE_NEW_CHANNEL=false
 
 # Parse arguments

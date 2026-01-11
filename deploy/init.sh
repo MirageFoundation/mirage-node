@@ -44,10 +44,9 @@ if [ "$MIGRATE" != "1" ] && [ ! -f "$NODE_HOME/config/genesis.json" ]; then
   $BIN init "validator" --chain-id "$CHAIN_ID" --home "$NODE_HOME"
 fi
 
-# Read persistent peers from template file
+# Peer configuration (from node.env)
 # For local deployment, skip external peers to avoid validator set mismatches
 R="$ROOT_DIR/deploy/templates"
-PEERS_FILE="$R/persistent_peers.txt"
 if [ "${MIRAGE_MODE:-}" = "local" ] || [ "${SKIP_PEERS:-0}" = "1" ]; then
   echo "==> Local deployment detected, disabling peer connections"
   PERSISTENT_PEERS=""
@@ -55,14 +54,8 @@ if [ "${MIRAGE_MODE:-}" = "local" ] || [ "${SKIP_PEERS:-0}" = "1" ]; then
   MAX_INBOUND_PEERS="0"
   MAX_OUTBOUND_PEERS="0"
 else
-  # Read peers from file if it exists
-  if [ -f "$PEERS_FILE" ] && [ -s "$PEERS_FILE" ]; then
-    PERSISTENT_PEERS=$(cat "$PEERS_FILE" | tr '\n' ',' | sed 's/,$//' | tr -d ' \r')
-  else
-    echo "WARNING: persistent_peers.txt not found in templates, using empty peers list" >&2
-    PERSISTENT_PEERS=""
-  fi
-  # Use env values if set, otherwise use defaults
+  # Use env values (from node.env), with sensible defaults
+  PERSISTENT_PEERS="${PERSISTENT_PEERS:-}"
   PEX_ENABLED="${PEX_ENABLED:-true}"
   MAX_INBOUND_PEERS="${MAX_INBOUND_PEERS:-40}"
   MAX_OUTBOUND_PEERS="${MAX_OUTBOUND_PEERS:-10}"
