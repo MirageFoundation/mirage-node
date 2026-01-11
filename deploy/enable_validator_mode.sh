@@ -71,14 +71,15 @@ EOF
     if pgrep -f "miraged start" >/dev/null 2>&1; then
       pkill -f "miraged start"
     fi
-    if pgrep -f "tail.*miraged.log" >/dev/null 2>&1; then
-      pkill -f "tail.*miraged.log"
+    if pgrep -f "tail.*miraged.*log" >/dev/null 2>&1; then
+      pkill -f "tail.*miraged.*log"
     fi
     sleep 1
     
     # Clear the pane and restart with full command (matching entrypoint)
+    # Use cronolog for date-based logs if available
     tmux send-keys -t "$SESSION:mirage.0" C-l
-    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; mkdir -p \"$LOGS_DIR/node\"; setsid nohup $BIN start >> \"$LOGS_DIR/node/miraged.log\" 2>&1 & echo PID:\$! && sleep 1 && tail -n +1 -F \"$LOGS_DIR/node/miraged.log\"'" C-m
+    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; mkdir -p \"$LOGS_DIR/node\"; $BIN start 2>&1 | cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\"'" C-m
   fi
 
   echo "Validator enabled at height $target_height."

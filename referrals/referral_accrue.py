@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import signal
 import sys
@@ -21,6 +22,14 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Set
+
+# Add parent directory to path for shared imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from shared.logging_setup import configure_logging
+
+# Initialize logging
+configure_logging("referrals", redirect_std=False)
+logger = logging.getLogger("referrals")
 
 # =============================================================================
 # CONFIGURATION
@@ -308,7 +317,6 @@ def save_rewards(cur, rewards: Dict[str, float], details: list[AccrualDetail], r
 def run_accrual(dry_run: bool = False, period_seconds: int = DEFAULT_PERIOD_SECONDS) -> bool:
     """Run one accrual cycle."""
     now_ts = int(time.time())
-    now_str = datetime.fromtimestamp(now_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     with connect() as conn:
         with conn.cursor() as cur:
@@ -319,26 +327,26 @@ def run_accrual(dry_run: bool = False, period_seconds: int = DEFAULT_PERIOD_SECO
                 if period_seconds == 86400:
                     since_ts = get_midnight_utc(now_ts) - 86400
                     since_str = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-                    print(f"\n[{now_str}] First run, checking since {since_str}...")
+                    logger.info(f"First run, checking since {since_str}")
                 else:
                     since_ts = now_ts - period_seconds
-                    print(f"\n[{now_str}] First run, checking last {format_period(period_seconds)}...")
+                    logger.info(f"First run, checking last {format_period(period_seconds)}")
             else:
                 # For daily periods, use midnight boundaries
                 if period_seconds == 86400:
                     since_ts = get_midnight_utc(last_run)
                     since_str = datetime.fromtimestamp(since_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-                    print(f"\n[{now_str}] Checking activity since {since_str} (midnight UTC)...")
+                    logger.info(f"Checking activity since {since_str} (midnight UTC)")
                 else:
                     since_ts = last_run
                     elapsed = now_ts - since_ts
-                    print(f"\n[{now_str}] Checking activity since last run ({format_period(elapsed)} ago)...")
+                    logger.info(f"Checking activity since last run ({format_period(elapsed)} ago)")
 
             referral_tree = load_referral_tree(cur)
-            print(f"  Referral relationships: {len(referral_tree)}")
+            logger.info(f"Referral relationships: {len(referral_tree)}")
 
             if not referral_tree:
-                print("  No referrals found. Skipping.")
+                logger.info("No referrals found. Skipping.")
                 if not dry_run:
                     set_last_run_ts(cur, now_ts)
                     set_period_seconds(cur, period_seconds)
@@ -346,35 +354,35 @@ def run_accrual(dry_run: bool = False, period_seconds: int = DEFAULT_PERIOD_SECO
 
             users = load_user_activity(cur, since_ts, period_seconds)
             active_count = sum(1 for u in users.values() if u.period_count > 0)
-            print(f"  Active users since last run: {active_count}")
+            logger.info(f"Active users since last run: {active_count}")
 
             # Ensure tracking table exists and load existing rewarded periods
             ensure_rewarded_periods_table(cur)
             existing_rewarded = load_rewarded_periods(cur, list(users.keys()))
             capped_count = sum(1 for u in users if existing_rewarded.get(u, 0) >= MAX_LIFETIME_PERIODS)
             if capped_count > 0:
-                print(f"  Users at lifetime cap ({MAX_LIFETIME_PERIODS} days): {capped_count}")
+                logger.info(f"Users at lifetime cap ({MAX_LIFETIME_PERIODS} days): {capped_count}")
 
             # Calculate rewards
             rewards, details, period_updates = calculate_referral_rewards(users, referral_tree, existing_rewarded)
             total = sum(rewards.values())
-            print(f"  Total rewards: {total:.4f} MIRAGE for {len(rewards)} users")
-            print(f"  Per-referee accruals: {len(details)} entries")
+            logger.info(f"Total rewards: {total:.4f} MIRAGE for {len(rewards)} users")
+            logger.info(f"Per-referee accruals: {len(details)} entries")
 
             if rewards:
                 top = sorted(rewards.items(), key=lambda x: x[1], reverse=True)[:5]
-                print("  Top earners:")
+                logger.info("Top earners:")
                 for user, amount in top:
-                    print(f"    {user[:16]}...: {amount:.4f} MIRAGE")
+                    logger.info(f"  {user[:16]}...: {amount:.4f} MIRAGE")
 
             if dry_run:
-                print("  DRY RUN - not saving")
+                logger.info("DRY RUN - not saving")
             else:
                 count = save_rewards(cur, rewards, details, now_ts)
                 update_rewarded_periods(cur, period_updates, now_ts)
                 set_last_run_ts(cur, now_ts)
                 set_period_seconds(cur, period_seconds)
-                print(f"  Saved {count} reward records")
+                logger.info(f"Saved {count} reward records")
 
     return True
 
@@ -461,20 +469,20 @@ def main():
     global PERIOD_SECONDS
     PERIOD_SECONDS = period_seconds
 
-    print("=" * 50)
-    print("Referral Accrual Daemon")
-    print("=" * 50)
-    print(f"Period: {format_period(period_seconds)} ({period_seconds}s)")
+    logger.info("=" * 50)
+    logger.info("Referral Accrual Daemon")
+    logger.info("=" * 50)
+    logger.info(f"Period: {format_period(period_seconds)} ({period_seconds}s)")
     if period_seconds == 86400:
-        print("  -> Aligned to midnight UTC")
-    print(f"Lifetime cap: {MAX_LIFETIME_PERIODS} active periods per referral")
-    print(f"Reward rates: L1={REWARD_RATES[1]}, L2={REWARD_RATES[2]}, L3={REWARD_RATES[3]}...")
+        logger.info("  -> Aligned to midnight UTC")
+    logger.info(f"Lifetime cap: {MAX_LIFETIME_PERIODS} active periods per referral")
+    logger.info(f"Reward rates: L1={REWARD_RATES[1]}, L2={REWARD_RATES[2]}, L3={REWARD_RATES[3]}...")
 
     running = True
 
     def signal_handler(sig, frame):
         nonlocal running
-        print("\nShutting down...")
+        logger.info("Shutting down...")
         running = False
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -488,11 +496,11 @@ def main():
             if should_run:
                 run_accrual(dry_run=args.dry_run, period_seconds=period_seconds)
             else:
-                print(f"\nLast run was recent. Next run in {format_duration(wait)}.")
-                print("Use --force to run anyway.")
+                logger.info(f"Last run was recent. Next run in {format_duration(wait)}.")
+                logger.info("Use --force to run anyway.")
         return
 
-    print("\nRunning in daemon mode. Press Ctrl+C to stop.")
+    logger.info("Running in daemon mode. Press Ctrl+C to stop.")
 
     while running:
         should_run, wait = should_run_now(period_seconds)
@@ -506,14 +514,14 @@ def main():
             break
 
         next_time = datetime.fromtimestamp(int(time.time()) + wait, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        print(f"\nNext run in {format_duration(wait)} at {next_time}")
+        logger.info(f"Next run in {format_duration(wait)} at {next_time}")
 
         # Sleep in 1-second chunks for fast shutdown
         while wait > 0 and running:
             time.sleep(1)
             wait -= 1
 
-    print("Daemon stopped.")
+    logger.info("Daemon stopped.")
 
 
 if __name__ == "__main__":

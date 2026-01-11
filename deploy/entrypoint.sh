@@ -86,8 +86,8 @@ mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deplo
 # Export variables needed by init.sh and render_template.py
 export MONIKER CHAIN_ID LOGS_DIR
 
-# Start logging entrypoint to deploy log
-DEPLOY_LOG="$LOGS_DIR/deploy/entrypoint.log"
+# Start logging entrypoint to deploy log (date-based)
+DEPLOY_LOG="$LOGS_DIR/deploy/entrypoint-$(date -u +%Y-%m-%d).log"
 exec > >(tee -a "$DEPLOY_LOG") 2>&1
 
 echo "=== Mirage Startup $(date -Iseconds) ==="
@@ -134,7 +134,7 @@ if [ -f "$TMUX_TEMPLATE" ]; then
 fi
 
 # Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
-tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee \"$LOGS_DIR/caddy/caddy.log\"" C-m
+tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\"" C-m
 
 # PostgreSQL (start early)
 # Data lives directly on persistent volume at ~/.mirage/main/data/postgres
@@ -250,7 +250,7 @@ fi
 # Node (second)
 tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:node" "export MIRAGE_NODE_HOME=\"$NODE_HOME\"" C-m
-tmux send-keys -t "$SESSION:node" "$BIN start --home \"$NODE_HOME\" 2>&1 | tee \"$LOGS_DIR/node/miraged.log\"" C-m
+tmux send-keys -t "$SESSION:node" "$BIN start --home \"$NODE_HOME\" 2>&1 | cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\"" C-m
 
 # Wait for node RPC to be ready before starting dependent services
 echo "==> Waiting for node RPC to become available..."
@@ -304,7 +304,7 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   fi
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee \"$LOGS_DIR/hermes/hermes.log\"" C-m
+  tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\"" C-m
   # Add status monitor pane (50% bottom)
   tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m

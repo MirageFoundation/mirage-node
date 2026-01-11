@@ -778,7 +778,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting node in tmux ...")
-    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/main" 2>&1 | tee "/root/.mirage/logs/node/miraged.log"'
+    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/main" 2>&1 | cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log"'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
 
     status("Waiting for RPC ...")

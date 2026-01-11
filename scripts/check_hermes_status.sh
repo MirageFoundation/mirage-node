@@ -151,8 +151,12 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
     fi
     
     # Check hermes log for recent activity (client updates keep the channel alive)
-    # Check new centralized location first, fall back to legacy
-    HERMES_LOG="${HOME}/.mirage/logs/hermes/hermes.log"
+    # Check date-based log first, then legacy locations
+    HERMES_LOG="${HOME}/.mirage/logs/hermes/hermes-$(date -u +%Y-%m-%d).log"
+    if [ ! -f "$HERMES_LOG" ]; then
+        # Try yesterday's log
+        HERMES_LOG="${HOME}/.mirage/logs/hermes/hermes-$(date -u -d 'yesterday' +%Y-%m-%d 2>/dev/null || date -u -v-1d +%Y-%m-%d).log"
+    fi
     if [ ! -f "$HERMES_LOG" ]; then
         HERMES_LOG="/var/log/hermes.log"  # Legacy location
     fi

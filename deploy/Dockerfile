@@ -76,6 +76,7 @@ RUN apt-get update && apt-get install -y \
     jq \
     procps \
     dnsutils \
+    cronolog \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 

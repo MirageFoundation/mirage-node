@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Optional
 import threading
 import asyncio
@@ -18,6 +19,40 @@ def _ensure_dir(path: str) -> None:
         pass
 
 
+def _get_date_log_path(log_dir: str, component: str) -> str:
+    """Get log file path with today's date: component-YYYY-MM-DD.log"""
+    date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return os.path.join(log_dir, f"{component}-{date_str}.log")
+
+
+class _DateFileHandler(logging.FileHandler):
+    """
+    File handler that automatically switches to a new file each day (UTC).
+    Filename format: component-YYYY-MM-DD.log
+    """
+
+    def __init__(self, log_dir: str, component: str, encoding: str = "utf-8"):
+        self.log_dir = log_dir
+        self.component = component
+        self._current_date = self._get_utc_date()
+        log_path = _get_date_log_path(log_dir, component)
+        super().__init__(log_path, mode="a", encoding=encoding)
+
+    def _get_utc_date(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Check if we need to roll over to a new day
+        current_date = self._get_utc_date()
+        if current_date != self._current_date:
+            self._current_date = current_date
+            # Close old file, open new one
+            self.close()
+            self.baseFilename = _get_date_log_path(self.log_dir, self.component)
+            self.stream = self._open()
+        super().emit(record)
+
+
 def _project_root() -> str:
     # This file is under shared/, project root is one level up
     here = os.path.abspath(os.path.dirname(__file__))
@@ -27,7 +62,7 @@ def _project_root() -> str:
 def log_dir_for_component(component: str) -> str:
     """
     Get log directory for a component.
-    
+
     New structure: ~/.mirage/logs/<component>/
     Components: node, indexer, backend, postgres, hermes, caddy, referrals, deploy
     """
@@ -71,8 +106,9 @@ def configure_logging(
     redirect_std: bool = True,
 ) -> str:
     """
-    Configure Python logging to write to a daily-rotated file under ~/.mirage/logs/<component>/.
-    Keeps 30 days. Optionally redirects stdout/stderr to logging.
+    Configure Python logging to write to date-based files under ~/.mirage/logs/<component>/.
+    Each day gets a new file: component-YYYY-MM-DD.log (UTC).
+    Optionally redirects stdout/stderr to logging.
 
     Args:
         component: Name of the component (indexer, backend, referrals, deploy, etc.)
@@ -85,12 +121,10 @@ def configure_logging(
     try:
         log_dir = log_dir_for_component(component)
         _ensure_dir(log_dir)
-        log_path = os.path.join(log_dir, f"{component}.log")
+        log_path = _get_date_log_path(log_dir, component)
 
-        # Daily rotation at midnight UTC, keep 30 files
-        file_handler = logging.handlers.TimedRotatingFileHandler(
-            log_path, when="midnight", interval=1, backupCount=30, utc=True, encoding="utf-8"
-        )
+        # Date-based file handler - auto-switches at midnight UTC
+        file_handler = _DateFileHandler(log_dir, component, encoding="utf-8")
         file_handler.setLevel(level)
         formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s")
         file_handler.setFormatter(formatter)
@@ -105,7 +139,7 @@ def configure_logging(
 
         # Avoid duplicate handlers on repeated calls
         _types = {type(h) for h in root_logger.handlers}
-        if logging.handlers.TimedRotatingFileHandler not in _types:
+        if _DateFileHandler not in _types:
             root_logger.addHandler(file_handler)
         if logging.StreamHandler not in _types:
             root_logger.addHandler(console)
