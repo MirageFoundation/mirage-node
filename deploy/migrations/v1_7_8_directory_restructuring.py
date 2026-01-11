@@ -34,8 +34,8 @@ def run(config_dir: Path, logger) -> str:
     old_postgres = old_main / "data" / "postgres"
     new_postgres = data_dir / "postgres"
 
-    # Skip if already migrated (node exists, main doesn't)
-    if new_node.exists() and not old_main.exists():
+    # Skip if already migrated (node exists, main doesn't or is symlink)
+    if new_node.exists() and (not old_main.exists() or old_main.is_symlink()):
         logger.info("    Directory structure already migrated")
         return "already migrated"
 
@@ -55,14 +55,22 @@ def run(config_dir: Path, logger) -> str:
             results.append("moved postgres to top level")
 
     # Step 2: Rename main to node
-    if old_main.exists():
+    if old_main.exists() and not old_main.is_symlink():
         if new_node.exists():
             logger.warning(f"    Target node dir already exists: {new_node}")
             results.append("node: target exists, skipped")
         else:
             logger.info(f"    Renaming: {old_main} -> {new_node}")
             shutil.move(str(old_main), str(new_node))
-            results.append("renamed main to node")
+            
+            # Create symlink for backward compatibility
+            try:
+                old_main.symlink_to(new_node)
+                logger.info(f"    Created symlink: {old_main} -> {new_node}")
+                results.append("renamed main to node + symlink")
+            except Exception as e:
+                logger.warning(f"    Failed to create symlink: {e}")
+                results.append("renamed main to node (symlink failed)")
 
     if results:
         return "; ".join(results)
