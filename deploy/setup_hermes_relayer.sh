@@ -448,11 +448,14 @@ else
     echo "    Using background process (Docker mode)..."
     
     # Create a restart wrapper script
-    cat > /usr/local/bin/hermes-runner.sh << 'RUNNER'
+    HERMES_LOG_DIR="$HOME/.mirage/logs/hermes"
+    mkdir -p "$HERMES_LOG_DIR"
+    cat > /usr/local/bin/hermes-runner.sh << RUNNER
 #!/usr/bin/env bash
+HERMES_LOG="$HERMES_LOG_DIR/hermes.log"
 while true; do
-    /usr/local/bin/hermes start >> /var/log/hermes.log 2>&1
-    echo "$(date): Hermes exited, restarting in 5s..." >> /var/log/hermes.log
+    /usr/local/bin/hermes start >> "\$HERMES_LOG" 2>&1
+    echo "\$(date): Hermes exited, restarting in 5s..." >> "\$HERMES_LOG"
     sleep 5
 done
 RUNNER
@@ -466,7 +469,7 @@ RUNNER
         echo "    Hermes is running (PID: $(pgrep -f 'hermes start'))"
         SERVICE_MODE="background"
     else
-        echo "ERROR: Hermes failed to start. Check /var/log/hermes.log"
+        echo "ERROR: Hermes failed to start. Check ~/.mirage/logs/hermes/hermes.log"
         exit 1
     fi
 fi
@@ -488,7 +491,7 @@ if [ "$SERVICE_MODE" = "systemd" ]; then
 else
     echo "Relayer Process (Docker mode):"
     echo "  Status:  pgrep -a hermes"
-    echo "  Logs:    tail -f /var/log/hermes.log"
+    echo "  Logs:    tail -f ~/.mirage/logs/hermes/hermes.log"
     echo "  Restart: pkill -f hermes-runner && /usr/local/bin/hermes-runner.sh &"
 fi
 echo ""

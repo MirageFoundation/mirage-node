@@ -151,7 +151,11 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
     fi
     
     # Check hermes log for recent activity (client updates keep the channel alive)
-    HERMES_LOG="/var/log/hermes.log"
+    # Check new centralized location first, fall back to legacy
+    HERMES_LOG="${HOME}/.mirage/logs/hermes/hermes.log"
+    if [ ! -f "$HERMES_LOG" ]; then
+        HERMES_LOG="/var/log/hermes.log"  # Legacy location
+    fi
     if [ -f "$HERMES_LOG" ]; then
         # Check for any client update in the last 24 hours
         LAST_UPDATE=$(grep -i "client.*update\|UpdateClient" "$HERMES_LOG" 2>/dev/null | tail -1 || echo "")

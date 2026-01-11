@@ -102,7 +102,7 @@ if [[ "${RESTART_NODE}" == "1" ]]; then
   echo "==> Restarting node in tmux..."
   docker exec "${CONTAINER_NAME}" bash -lc "
     tmux send-keys -t '${NODE_PANE}' \"export MIRAGE_NODE_HOME='${NODE_HOME}'\" C-m
-    tmux send-keys -t '${NODE_PANE}' \"${ROOT_DIR}/blockchain/miraged start --home '${NODE_HOME}' 2>&1 | tee '${NODE_HOME}/miraged.log'\" C-m
+    tmux send-keys -t '${NODE_PANE}' \"${ROOT_DIR}/blockchain/miraged start --home '${NODE_HOME}' 2>&1 | tee '/root/.mirage/logs/node/miraged.log'\" C-m
   " || {
     echo "Error: Failed to restart node in tmux" >&2
     exit 1

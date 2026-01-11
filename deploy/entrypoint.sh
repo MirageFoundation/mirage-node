@@ -74,16 +74,25 @@ fi
 
 DATA_DIR="${HOME}/.mirage"
 NODE_HOME="$DATA_DIR/main"
+LOGS_DIR="$DATA_DIR/logs"
 BIN="$ROOT_DIR/blockchain/miraged"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 MIGRATE_CONFIG="${MIGRATE_CONFIG:-0}"
 
-# Export variables needed by init.sh and render_template.py
-export MONIKER CHAIN_ID
+# Create centralized log directory structure
+mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy}
 
-echo "=== Mirage Startup ==="
+# Export variables needed by init.sh and render_template.py
+export MONIKER CHAIN_ID LOGS_DIR
+
+# Start logging entrypoint to deploy log
+DEPLOY_LOG="$LOGS_DIR/deploy/entrypoint.log"
+exec > >(tee -a "$DEPLOY_LOG") 2>&1
+
+echo "=== Mirage Startup $(date -Iseconds) ==="
 echo "Node home: $NODE_HOME"
+echo "Logs dir:  $LOGS_DIR"
 echo "Moniker:   $MONIKER"
 
 # Run initialization if needed
@@ -125,15 +134,15 @@ if [ -f "$TMUX_TEMPLATE" ]; then
 fi
 
 # Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
-tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile" C-m
+tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee \"$LOGS_DIR/caddy/caddy.log\"" C-m
 
 # PostgreSQL (start early)
 # Data lives directly on persistent volume at ~/.mirage/main/data/postgres
 PG_DATA_DIR="$DATA_DIR/main/data/postgres"
-PG_LOG_DIR="$DATA_DIR/main/logs/postgres"
+PG_LOG_DIR="$LOGS_DIR/postgres"
 
-# Ensure persistent log directory exists
-mkdir -p "$PG_LOG_DIR"
+# Ensure postgres user can traverse to and write to log directory
+chmod o+x "$DATA_DIR" "$LOGS_DIR" 2>/dev/null || true
 chown postgres:postgres "$PG_LOG_DIR"
 chmod 755 "$PG_LOG_DIR"
 
@@ -153,7 +162,7 @@ else
   CURRENT_DATADIR=$(pg_lsclusters -h 2>/dev/null | awk '/^16 *main/ {print $6}')
   if [ "$CURRENT_DATADIR" != "$PG_DATA_DIR" ]; then
     echo "==> Pointing PostgreSQL cluster to $PG_DATA_DIR..."
-    chmod o+x "$HOME" "$DATA_DIR" "$DATA_DIR/main" "$DATA_DIR/main/data" "$DATA_DIR/main/logs" 2>/dev/null || true
+    chmod o+x "$HOME" "$DATA_DIR" "$DATA_DIR/main" "$DATA_DIR/main/data" "$LOGS_DIR" 2>/dev/null || true
     pg_ctlcluster 16 main stop 2>/dev/null || true
     # Update postgresql.conf to point to new data and log directories
     sed -i "s|^data_directory = .*|data_directory = '$PG_DATA_DIR'|" /etc/postgresql/16/main/postgresql.conf
@@ -241,7 +250,7 @@ fi
 # Node (second)
 tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:node" "export MIRAGE_NODE_HOME=\"$NODE_HOME\"" C-m
-tmux send-keys -t "$SESSION:node" "$BIN start --home \"$NODE_HOME\" 2>&1 | tee \"$NODE_HOME/miraged.log\"" C-m
+tmux send-keys -t "$SESSION:node" "$BIN start --home \"$NODE_HOME\" 2>&1 | tee \"$LOGS_DIR/node/miraged.log\"" C-m
 
 # Wait for node RPC to be ready before starting dependent services
 echo "==> Waiting for node RPC to become available..."
@@ -295,7 +304,7 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   fi
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee /var/log/hermes.log" C-m
+  tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee \"$LOGS_DIR/hermes/hermes.log\"" C-m
   # Add status monitor pane (50% bottom)
   tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m

@@ -366,7 +366,7 @@ def reinitialize_postgres():
     script = """#!/bin/bash
 set -e
 PG_DATA_DIR="/root/.mirage/main/data/postgres"
-PG_LOG_DIR="/root/.mirage/main/logs/postgres"
+PG_LOG_DIR="/root/.mirage/logs/postgres"
 
 pkill -9 postgres 2>/dev/null || true
 sleep 1
@@ -376,7 +376,7 @@ rm -rf /var/lib/postgresql/16/main 2>/dev/null || true
 rm -rf "$PG_DATA_DIR"
 
 mkdir -p "$PG_DATA_DIR" "$PG_LOG_DIR"
-chmod o+x /root /root/.mirage /root/.mirage/main /root/.mirage/main/data /root/.mirage/main/logs
+chmod o+x /root /root/.mirage /root/.mirage/main /root/.mirage/main/data /root/.mirage/logs
 chown postgres:postgres "$PG_DATA_DIR" "$PG_LOG_DIR"
 chmod 700 "$PG_DATA_DIR"
 chmod 755 "$PG_LOG_DIR"
@@ -750,7 +750,7 @@ def write_working_genesis(genesis_json: str):
             "mkdir -p /root/.mirage/main/data && "
             "cd /root/.mirage/main/data && "
             "find . -mindepth 1 -maxdepth 1 ! -name postgres -exec rm -rf {} \\; ; "
-            "mkdir -p /root/.mirage/main/data/cs.wal /root/.mirage/main/logs'",
+            "mkdir -p /root/.mirage/main/data/cs.wal /root/.mirage/logs'",
         ]
     )
     run(
@@ -778,7 +778,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting node in tmux ...")
-    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/main" 2>&1 | tee "/root/.mirage/main/miraged.log"'
+    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/main" 2>&1 | tee "/root/.mirage/logs/node/miraged.log"'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
 
     status("Waiting for RPC ...")

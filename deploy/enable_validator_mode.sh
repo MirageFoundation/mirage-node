@@ -7,6 +7,7 @@ set -euo pipefail
 # 3) Restarting the node process (when run with --restart)
 
 NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/main}"
+LOGS_DIR="${HOME}/.mirage/logs"
 PV_STATE="$NODE_HOME/data/priv_validator_state.json"
 PV_KEY="$NODE_HOME/config/priv_validator_key.json"
 PV_KEY_DISABLED="$NODE_HOME/config/priv_validator_key.json.disabled"
@@ -77,7 +78,7 @@ EOF
     
     # Clear the pane and restart with full command (matching entrypoint)
     tmux send-keys -t "$SESSION:mirage.0" C-l
-    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; setsid nohup $BIN start >> \"$NODE_HOME/miraged.log\" 2>&1 & echo PID:\$! && sleep 1 && tail -n +1 -F \"$NODE_HOME/miraged.log\"'" C-m
+    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; mkdir -p \"$LOGS_DIR/node\"; setsid nohup $BIN start >> \"$LOGS_DIR/node/miraged.log\" 2>&1 & echo PID:\$! && sleep 1 && tail -n +1 -F \"$LOGS_DIR/node/miraged.log\"'" C-m
   fi
 
   echo "Validator enabled at height $target_height."

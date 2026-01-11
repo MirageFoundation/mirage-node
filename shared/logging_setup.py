@@ -24,23 +24,28 @@ def _project_root() -> str:
     return os.path.abspath(os.path.join(here, ".."))
 
 
-def log_dir_for_node(node_id: int) -> str:
+def log_dir_for_component(component: str) -> str:
+    """
+    Get log directory for a component.
+    
+    New structure: ~/.mirage/logs/<component>/
+    Components: node, indexer, backend, postgres, hermes, caddy, referrals, deploy
+    """
     # Prefer explicit override
     override = os.environ.get("MIRAGE_LOG_DIR")
     if override:
         return os.path.abspath(os.path.expanduser(override))
 
-    # Use node home derived from central config (defaults to ~/.mirage/main or ~/.mirage/devN)
-    try:
-        from shared.config import get_config  # lazy import to avoid cycles
+    # New structure: ~/.mirage/logs/<component>/
+    base_dir = os.path.expanduser("~/.mirage/logs")
+    return os.path.join(base_dir, component)
 
-        cfg = get_config()
-        node_home = cfg.get_node_config(int(node_id))["home"]
-        return os.path.join(os.path.expanduser(node_home), "logs")
-    except Exception:
-        # Fallback to historical project-root based path (should not be used in production)
-        root = _project_root()
-        return os.path.join(root, "network", f"node{int(node_id)}", "logs")
+
+def log_dir_for_node(node_id: int) -> str:
+    """Legacy function - redirects to log_dir_for_component for backwards compatibility."""
+    # For backwards compatibility, map node_id to component
+    # In production, node_id is typically 1 and logs go to ~/.mirage/logs/node/
+    return log_dir_for_component("node")
 
 
 class _StreamToLogger:
@@ -66,16 +71,19 @@ def configure_logging(
     redirect_std: bool = True,
 ) -> str:
     """
-    Configure Python logging to write to a daily-rotated file under the node's logs directory.
+    Configure Python logging to write to a daily-rotated file under ~/.mirage/logs/<component>/.
     Keeps 30 days. Optionally redirects stdout/stderr to logging.
+
+    Args:
+        component: Name of the component (indexer, backend, referrals, deploy, etc.)
+        node_id: Deprecated, ignored. Kept for backwards compatibility.
+        level: Logging level (default: INFO)
+        redirect_std: Whether to redirect stdout/stderr to logging
 
     Returns the absolute log file path.
     """
     try:
-        if node_id is None:
-            # Default to node1 if not specified
-            node_id = 1
-        log_dir = log_dir_for_node(int(node_id))
+        log_dir = log_dir_for_component(component)
         _ensure_dir(log_dir)
         log_path = os.path.join(log_dir, f"{component}.log")
 
@@ -188,4 +196,4 @@ def configure_logging(
         return os.path.join(_project_root(), "logs", f"{component}.log")
 
 
-__all__ = ["configure_logging", "log_dir_for_node"]
+__all__ = ["configure_logging", "log_dir_for_component", "log_dir_for_node"]

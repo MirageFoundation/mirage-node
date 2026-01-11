@@ -33,7 +33,8 @@ docker stop mirage --timeout 60 || true
 echo "==> Cleaning up old backups and unnecessary files..."
 rm -rf "$BACKUP_DIR"
 rm -rf "$MAIN_DIR"/data.backup.* 2>/dev/null || true
-rm -rf "$MAIN_DIR"/logs/*.log.* 2>/dev/null || true
+# Clean old log locations (if any) - new logs are in ~/.mirage/logs/
+rm -rf "$MAIN_DIR"/logs 2>/dev/null || true
 rm -f "$MAIN_DIR"/miraged.log 2>/dev/null || true
 
 echo "==> Creating lean backup..."

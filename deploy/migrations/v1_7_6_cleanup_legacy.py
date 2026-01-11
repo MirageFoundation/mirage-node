@@ -9,6 +9,8 @@ This migration removes files and directories that are no longer used:
 5. ~/.mirage/main/bin/ - old snapshot location (now main/snapshot/)
 6. ~/.mirage/main/indexer.sql - old snapshot location (now main/snapshot/)
 7. ~/.mirage/setup/ - legacy manual setup directory (all contents are duplicates or unused)
+8. ~/.mirage/main/logs/ - move to ~/.mirage/logs/ (centralized log structure)
+9. ~/.mirage/main/miraged.log - move to ~/.mirage/logs/node/miraged.log
 """
 
 import shutil
@@ -79,6 +81,49 @@ def run(config_dir: Path, logger) -> str:
         removed.append("setup/")
         logger.info("  Removed legacy setup/ directory")
     
+    # 8. Move main/logs/ to logs/ (centralized log structure)
+    new_logs_dir = data_dir / "logs"
+    new_logs_dir.mkdir(parents=True, exist_ok=True)
+    
+    old_logs_dir = main_dir / "logs"
+    if old_logs_dir.exists():
+        # Move contents, preserving structure
+        for item in old_logs_dir.iterdir():
+            dest = new_logs_dir / item.name
+            if item.is_dir():
+                if not dest.exists():
+                    shutil.move(str(item), str(dest))
+                    logger.info(f"  Moved logs/{item.name}/ to new location")
+                else:
+                    # Merge contents
+                    for sub in item.iterdir():
+                        sub_dest = dest / sub.name
+                        if not sub_dest.exists():
+                            shutil.move(str(sub), str(sub_dest))
+                    shutil.rmtree(item)
+            else:
+                if not dest.exists():
+                    shutil.move(str(item), str(dest))
+                    logger.info(f"  Moved logs/{item.name} to new location")
+        # Remove empty old logs dir
+        if old_logs_dir.exists() and not any(old_logs_dir.iterdir()):
+            old_logs_dir.rmdir()
+            removed.append("main/logs/")
+    
+    # 9. Move main/miraged.log to logs/node/miraged.log
+    old_miraged_log = main_dir / "miraged.log"
+    if old_miraged_log.exists():
+        node_logs_dir = new_logs_dir / "node"
+        node_logs_dir.mkdir(parents=True, exist_ok=True)
+        new_miraged_log = node_logs_dir / "miraged.log"
+        if not new_miraged_log.exists():
+            shutil.move(str(old_miraged_log), str(new_miraged_log))
+            removed.append("main/miraged.log -> logs/node/")
+            logger.info("  Moved main/miraged.log to logs/node/miraged.log")
+        else:
+            old_miraged_log.unlink()
+            logger.info("  Removed duplicate main/miraged.log")
+    
     if removed:
-        return f"removed: {', '.join(removed)}"
+        return f"removed/moved: {', '.join(removed)}"
     return "no legacy files found"
