@@ -293,8 +293,8 @@ tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:status" "watch -n 10 bash $ROOT_DIR/scripts/check_validator_status.sh" C-m
 
 # Referral accrual daemon (sixth)
-tmux new-window -t "$SESSION" -n referral -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:referral" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
+tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
+tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
 # IBC Relayer (seventh) - only if Hermes is configured
 if [ -f "$HOME/.hermes/config.toml" ]; then
