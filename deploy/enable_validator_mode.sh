@@ -77,9 +77,9 @@ EOF
     sleep 1
     
     # Clear the pane and restart with full command (matching entrypoint)
-    # Use cronolog for date-based logs if available
+    # Use tee + cronolog for live output AND date-based log files
     tmux send-keys -t "$SESSION:mirage.0" C-l
-    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; mkdir -p \"$LOGS_DIR/node\"; $BIN start 2>&1 | cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\"'" C-m
+    tmux send-keys -t "$SESSION:mirage.0" "bash -lc 'export MIRAGE_NODE_HOME=\"$NODE_HOME\"; mkdir -p \"$LOGS_DIR/node\"; $BIN start 2>&1 | tee >(cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\")'" C-m
   fi
 
   echo "Validator enabled at height $target_height."
