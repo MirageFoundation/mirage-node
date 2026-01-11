@@ -28,9 +28,9 @@ def run(config_dir: Path, logger) -> str:
     """Run the migration."""
     data_dir = config_dir.parent  # ~/.mirage
     main_dir = data_dir / "main"
-    
+
     removed = []
-    
+
     # 1. Remove CometBFT temp files
     config_path = main_dir / "config"
     if config_path.exists():
@@ -40,7 +40,7 @@ def run(config_dir: Path, logger) -> str:
                 f.unlink()
             removed.append(f"main/config/write-file-atomic-* ({len(temp_files)} files)")
             logger.info(f"  Removed {len(temp_files)} CometBFT temp files")
-    
+
     # 2. Remove old priv_validator_key backups
     if config_path.exists():
         backup_files = list(config_path.glob("priv_validator_key.json.bak-*"))
@@ -49,42 +49,42 @@ def run(config_dir: Path, logger) -> str:
                 f.unlink()
             removed.append(f"main/config/priv_validator_key.json.bak-* ({len(backup_files)} files)")
             logger.info(f"  Removed {len(backup_files)} validator key backup files")
-    
+
     # 3. Remove orphaned priv_validator_state.json from root
     orphan_pv_state = data_dir / "priv_validator_state.json"
     if orphan_pv_state.exists():
         orphan_pv_state.unlink()
         removed.append("priv_validator_state.json")
         logger.info("  Removed orphaned priv_validator_state.json")
-    
+
     # 4. Remove legacy .domain file
     legacy_domain = data_dir / ".domain"
     if legacy_domain.exists():
         legacy_domain.unlink()
         removed.append(".domain")
         logger.info("  Removed legacy .domain file")
-    
+
     # 5. Remove old snapshot location (main/bin/)
     old_bin_dir = main_dir / "bin"
     if old_bin_dir.exists():
         shutil.rmtree(old_bin_dir)
         removed.append("main/bin/")
         logger.info("  Removed old main/bin/ directory")
-    
+
     # 6. Remove old snapshot location (main/indexer.sql)
     old_indexer_sql = main_dir / "indexer.sql"
     if old_indexer_sql.exists():
         old_indexer_sql.unlink()
         removed.append("main/indexer.sql")
         logger.info("  Removed old main/indexer.sql")
-    
+
     # 7. Remove legacy setup directory
     setup_dir = data_dir / "setup"
     if setup_dir.exists():
         shutil.rmtree(setup_dir)
         removed.append("setup/")
         logger.info("  Removed legacy setup/ directory")
-    
+
     # 8. DELETE main/logs/ entirely (old logs including garbage node.log files)
     old_logs_dir = main_dir / "logs"
     if old_logs_dir.exists():
@@ -93,14 +93,14 @@ def run(config_dir: Path, logger) -> str:
         shutil.rmtree(old_logs_dir)
         removed.append(f"main/logs/ ({file_count} files)")
         logger.info(f"  Deleted main/logs/ directory ({file_count} old log files)")
-    
+
     # 9. DELETE main/miraged.log (new logs go to ~/.mirage/logs/ via cronolog)
     old_miraged_log = main_dir / "miraged.log"
     if old_miraged_log.exists():
         old_miraged_log.unlink()
         removed.append("main/miraged.log")
         logger.info("  Deleted main/miraged.log")
-    
+
     if removed:
         return f"removed/moved: {', '.join(removed)}"
     return "no legacy files found"
