@@ -57,6 +57,14 @@ else
   MAX_OUTBOUND_PEERS="${MAX_OUTBOUND_PEERS:-10}"
 fi
 
+# MONIKER: derived from DOMAIN if set, otherwise fallback to "validator"
+# DOMAIN is only set after HTTPS is configured via letsencrypt_register.sh
+if [ -n "${DOMAIN:-}" ]; then
+  MONIKER="https://${DOMAIN}"
+else
+  MONIKER="${MONIKER:-validator}"
+fi
+
 export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBOUND_PEERS
 
 # Render templates atomically

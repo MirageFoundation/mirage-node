@@ -103,10 +103,9 @@ def run(config_dir: Path, logger) -> str:
                     f.write(f"\nDOMAIN={domain}\n")
                 logger.info(f"    Set DOMAIN={domain}")
 
-        # Update MONIKER if it's the default
-        if existing.get("MONIKER") == "mirage-node":
-            if update_env_value(node_env, "MONIKER", domain):
-                logger.info(f"    Updated MONIKER={domain}")
+        # NOTE: We no longer auto-sync MONIKER from DOMAIN.
+        # MONIKER should be set explicitly to match the on-chain validator description.
+        # The on-chain moniker may include "https://" or other formatting.
 
         results.append(f"domain={domain}")
 

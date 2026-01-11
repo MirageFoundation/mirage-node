@@ -401,15 +401,6 @@ if tmux has-session -t mirage 2>/dev/null; then
     tmux new-window -t "$SESSION" -n hermes -c /opt/mirage
     tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$HERMES_LOG_DIR/hermes-%Y-%m-%d.log\")" C-m
     
-    # Add status monitor pane (50% bottom)
-    # Set default window size for headless mode, then split
-    tmux set-option -t "$SESSION:hermes" default-size 180x50 2>/dev/null || true
-    tmux resize-window -t "$SESSION:hermes" -x 180 -y 50 2>/dev/null || true
-    if tmux split-window -t "$SESSION:hermes" -v -p 50 -c /opt/mirage 2>/dev/null; then
-        tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
-        tmux select-pane -t "$SESSION:hermes.0"
-    fi
-    
     sleep 2
     if pgrep -f "hermes start" >/dev/null; then
         echo "    Hermes is running in tmux window 'hermes'"

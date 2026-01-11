@@ -65,8 +65,8 @@ echo ""
 
 # Check 1: Is Hermes running?
 echo "Checking Hermes relayer..."
-if pgrep -f "hermes start" >/dev/null 2>&1; then
-    echo -e "  ${GREEN}✓${NC} Hermes is running (PID: $(pgrep -f 'hermes start'))"
+if pgrep -f "hermes.*start" >/dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} Hermes is running (PID: $(pgrep -f 'hermes.*start'))"
 else
     echo -e "  ${RED}✗${NC} Hermes is NOT running!"
     STATUS="critical"

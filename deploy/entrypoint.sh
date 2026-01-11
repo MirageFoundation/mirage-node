@@ -51,10 +51,15 @@ python3 -m deploy.migrations --config-dir "$ENV_DIR" || true
 # Reload env files after migrations
 load_env_files
 
-# Set container hostname to MONIKER or external IP (instead of random container ID)
-# Note: Replace dots with dashes (dots not allowed in hostnames). Fails silently if no permissions.
-if [ -n "${MONIKER:-}" ]; then
-  hostname "${MONIKER//./-}" 2>/dev/null || true
+# Set container hostname (instead of random container ID)
+# Priority: DOMAIN > MONIKER > external IP
+# Note: Replace dots/colons/slashes with dashes (invalid in hostnames). Fails silently if no permissions.
+if [ -n "${DOMAIN:-}" ]; then
+  hostname "${DOMAIN//./-}" 2>/dev/null || true
+elif [ -n "${MONIKER:-}" ] && [ "${MONIKER}" != "validator" ]; then
+  # Strip protocol and replace invalid chars
+  CLEAN_MONIKER=$(echo "$MONIKER" | sed 's|https\?://||' | tr './:' '-')
+  hostname "$CLEAN_MONIKER" 2>/dev/null || true
 else
   EXTERNAL_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || echo "")
   if [ -n "$EXTERNAL_IP" ]; then
@@ -288,15 +293,11 @@ tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "MIRAGE_NODE_HOME=\"$NODE_HOME\" BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
-# Validator status monitor (fifth)
-tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:status" "watch -n 10 bash $ROOT_DIR/scripts/check_validator_status.sh" C-m
-
-# Referral accrual daemon (sixth)
+# Referral accrual daemon (fifth)
 tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
-# IBC Relayer (seventh) - only if Hermes is configured
+# IBC Relayer (sixth) - only if Hermes is configured
 # NOTE: This hermes startup code is duplicated in deploy/setup_hermes_relayer.sh
 #       If you change this, update the other file too!
 HERMES_HOME="$DATA_DIR/hermes"
@@ -314,15 +315,11 @@ if [ -f "$HERMES_HOME/config.toml" ]; then
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
-  # Add status monitor pane (50% bottom)
-  # Set default window size for headless mode, then split
-  tmux set-option -t "$SESSION:hermes" default-size 180x50 2>/dev/null || true
-  tmux resize-window -t "$SESSION:hermes" -x 180 -y 50 2>/dev/null || true
-  if tmux split-window -t "$SESSION:hermes" -v -p 50 -c "$ROOT_DIR" 2>/dev/null; then
-    tmux send-keys -t "$SESSION:hermes.1" "watch -n 60 /opt/mirage/scripts/check_hermes_status.sh" C-m
-    tmux select-pane -t "$SESSION:hermes.0"
-  fi
 fi
+
+# Unified Status Dashboard (last window)
+tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
+tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/check_status.py" C-m
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
