@@ -239,22 +239,23 @@ LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
 REMOTE_SHA="$(run_ssh 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""')"
 
 if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
-  echo "    Skipped: target already has matching tarball"
+  echo "    Hash match: target already has identical tarball (SHA256: ${LOCAL_SHA:0:16}...), skipping transfer"
 elif [ -n "$PROXYJUMP" ]; then
   # Check if jump host has the tarball (can copy internally, much faster)
   JUMP_SHA="$(ssh "$PROXYJUMP" 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""' 2>/dev/null || echo "")"
   if [ -n "$JUMP_SHA" ] && [ "$JUMP_SHA" = "$LOCAL_SHA" ]; then
     # Extract target host from REMOTE (user@host format)
     TARGET_HOST="${REMOTE#*@}"
+    echo "    Hash match: jump host has identical tarball (SHA256: ${LOCAL_SHA:0:16}...)"
     echo "    Copying via jump host: $PROXYJUMP -> $TARGET_HOST (internal network)..."
     # Use -A for agent forwarding so jump host can use our local SSH key
     ssh -A "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz" && echo "    Done."
   else
-    echo "    Uploading from local (jump host doesn't have matching tarball)..."
+    echo "    Hash mismatch or missing: uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
     run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
   fi
 else
-  echo "    Uploading from local..."
+  echo "    Uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
   run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
 fi
 
