@@ -76,26 +76,27 @@ fi
 # Check 2: Is Hermes config present?
 echo ""
 echo "Checking Hermes configuration..."
-if [ -f "$HOME/.hermes/config.toml" ]; then
+HERMES_HOME="${HOME}/.mirage/hermes"
+if [ -f "$HERMES_HOME/config.toml" ]; then
     echo -e "  ${GREEN}✓${NC} Config file exists"
 else
-    echo -e "  ${RED}✗${NC} Config file missing at ~/.hermes/config.toml"
+    echo -e "  ${RED}✗${NC} Config file missing at ~/.mirage/hermes/config.toml"
     STATUS="critical"
     ISSUES+=("Hermes config missing")
 fi
 
 # Check 3: Query IBC client status (if hermes is available)
-if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
+if command -v hermes &>/dev/null && [ -f "$HERMES_HOME/config.toml" ]; then
     echo ""
     echo "Checking IBC client health..."
     
     # Check Mirage -> Osmosis client
-    CLIENT_OUTPUT=$(hermes query clients --host-chain mirage-1 2>&1 || true)
+    CLIENT_OUTPUT=$(hermes --home "$HERMES_HOME" query clients --host-chain mirage-1 2>&1 || true)
     if echo "$CLIENT_OUTPUT" | grep -q "07-tendermint"; then
         MIRAGE_CLIENT=$(echo "$CLIENT_OUTPUT" | grep -oE "07-tendermint-[0-9]+" | tail -1 || echo "")
         if [ -n "$MIRAGE_CLIENT" ]; then
             # Check client status (Active vs Expired/Frozen)
-            CLIENT_STATUS=$(hermes query client status --chain mirage-1 --client "$MIRAGE_CLIENT" 2>&1 || true)
+            CLIENT_STATUS=$(hermes --home "$HERMES_HOME" query client status --chain mirage-1 --client "$MIRAGE_CLIENT" 2>&1 || true)
             if echo "$CLIENT_STATUS" | grep -q "SUCCESS Active"; then
                 echo -e "  ${GREEN}✓${NC} Mirage client $MIRAGE_CLIENT is Active"
             elif echo "$CLIENT_STATUS" | grep -qi "expired\|frozen"; then
@@ -114,11 +115,11 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
     # Check channel status
     echo ""
     echo "Checking IBC channel..."
-    CHANNEL_OUTPUT=$(hermes query channels --chain mirage-1 2>&1 || true)
+    CHANNEL_OUTPUT=$(hermes --home "$HERMES_HOME" query channels --chain mirage-1 2>&1 || true)
     if echo "$CHANNEL_OUTPUT" | grep -q "channel-"; then
         CHANNEL=$(echo "$CHANNEL_OUTPUT" | grep -oE "channel-[0-9]+" | head -1 || echo "")
         if [ -n "$CHANNEL" ]; then
-            CHANNEL_STATE=$(hermes query channel end --chain mirage-1 --port transfer --channel "$CHANNEL" 2>&1 || true)
+            CHANNEL_STATE=$(hermes --home "$HERMES_HOME" query channel end --chain mirage-1 --port transfer --channel "$CHANNEL" 2>&1 || true)
             if echo "$CHANNEL_STATE" | grep -qi "OPEN"; then
                 echo -e "  ${GREEN}✓${NC} Channel $CHANNEL is OPEN"
             else
@@ -135,7 +136,7 @@ if command -v hermes &>/dev/null && [ -f "$HOME/.hermes/config.toml" ]; then
     echo ""
     echo "Checking relay activity..."
     if [ -n "$CHANNEL" ]; then
-        PENDING=$(hermes query packet pending --chain mirage-1 --port transfer --channel "$CHANNEL" 2>&1 || true)
+        PENDING=$(hermes --home "$HERMES_HOME" query packet pending --chain mirage-1 --port transfer --channel "$CHANNEL" 2>&1 || true)
         UNRECEIVED=$(echo "$PENDING" | grep -oE "unreceived_packets: \[[0-9]" | head -1 || echo "")
         UNACKED=$(echo "$PENDING" | grep -oE "unreceived_acks: \[[0-9]" | head -1 || echo "")
         

@@ -14,7 +14,7 @@ The `setup_hermes_relayer.sh` script has been completely rewritten:
 
 - **Automatic channel detection**: Script now queries existing IBC channels instead of using hardcoded values
 - **Safe channel creation**: New `--create-new-channel` flag with mandatory confirmation to prevent accidental duplicate channels
-- **Persistence verification**: Warns if running inside Docker without a volume mount for `~/.hermes`
+- **Persistence verification**: Hermes config is stored in `~/.mirage/hermes` (automatically persisted with main volume)
 - **Dynamic config generation**: Generates Hermes `config.toml` with correct chain endpoints and gas settings
 - **Docker-aware operation**: Detects container environment and uses appropriate process management
 - **Clear post-setup instructions**: Reminds operators to restart the container for auto-start on future boots
@@ -91,4 +91,4 @@ If running a node with IBC enabled:
 
 1. The Hermes relayer should run continuously to keep IBC clients alive (trusting period is ~13 days)
 2. Use `check_hermes_status.sh` in a cron job to monitor status
-3. Ensure `~/.hermes` is mounted as a volume for persistence across container restarts
+3. Hermes config is stored in `~/.mirage/hermes` (persisted automatically with main volume)

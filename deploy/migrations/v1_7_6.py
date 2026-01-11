@@ -192,6 +192,35 @@ def run(config_dir: Path, logger) -> str:
         logger.info(f"    Removed: {', '.join(removed)}")
 
     # =========================================================================
+    # STEP 4: Move ~/.hermes to ~/.mirage/hermes
+    # =========================================================================
+    logger.info("  Step 4: Hermes directory migration")
+
+    home_dir = Path.home()
+    old_hermes = home_dir / ".hermes"
+    new_hermes = data_dir / "hermes"
+
+    if old_hermes.exists() and old_hermes.is_dir():
+        if new_hermes.exists():
+            # Both exist - merge (copy files that don't exist in new location)
+            for item in old_hermes.iterdir():
+                dest = new_hermes / item.name
+                if not dest.exists():
+                    if item.is_dir():
+                        shutil.copytree(item, dest)
+                    else:
+                        shutil.copy2(item, dest)
+            # Remove old directory
+            shutil.rmtree(old_hermes)
+            logger.info("    Merged ~/.hermes -> ~/.mirage/hermes")
+            results.append("merged hermes dir")
+        else:
+            # Move old to new
+            shutil.move(str(old_hermes), str(new_hermes))
+            logger.info("    Moved ~/.hermes -> ~/.mirage/hermes")
+            results.append("moved hermes dir")
+
+    # =========================================================================
     # Summary
     # =========================================================================
     if results:

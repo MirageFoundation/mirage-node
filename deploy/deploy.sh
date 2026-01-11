@@ -355,7 +355,7 @@ echo "==> Starting container..."
 EXTRA_ENVS=""
 
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage; persist hermes IBC relayer data
-run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.hermes'
+run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.mirage/hermes'
 
 # Initialize persistent config directory and seed env files if missing (for --init)
 if [ "$MODE" = "init" ]; then
@@ -411,7 +411,7 @@ if [ "$IS_LOCAL" -eq 1 ]; then
     # Replace dots with dashes for valid hostname
     HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
   fi
-  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" -v "$HOME/.hermes:/root/.hermes" mirage:prod
+  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" mirage:prod
 else
   MONIKER_ARG=""
   HOSTNAME_ARG=""
@@ -420,7 +420,7 @@ else
     # Replace dots with dashes for valid hostname
     HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
   fi
-  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy -v \$HOME/.hermes:/root/.hermes mirage:prod"
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
 fi
 
 echo "==> Waiting briefly for container to become healthy..."

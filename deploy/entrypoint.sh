@@ -299,7 +299,8 @@ tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/r
 # IBC Relayer (seventh) - only if Hermes is configured
 # NOTE: This hermes startup code is duplicated in deploy/setup_hermes_relayer.sh
 #       If you change this, update the other file too!
-if [ -f "$HOME/.hermes/config.toml" ]; then
+HERMES_HOME="$DATA_DIR/hermes"
+if [ -f "$HERMES_HOME/config.toml" ]; then
   # Install hermes if not present
   if ! command -v hermes >/dev/null 2>&1; then
     echo "==> Installing Hermes binary..."
@@ -311,7 +312,7 @@ if [ -f "$HOME/.hermes/config.toml" ]; then
   fi
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:hermes" "hermes start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
+  tmux send-keys -t "$SESSION:hermes" "hermes --home \"$HERMES_HOME\" start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
   # Add status monitor pane (50% bottom)
   # Set default window size for headless mode, then split
   tmux set-option -t "$SESSION:hermes" default-size 180x50 2>/dev/null || true
