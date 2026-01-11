@@ -90,14 +90,11 @@ func initRootCmd(
 		}
 
 		// After init, write embedded canonical genesis.json
-		homeDir := os.Getenv("MIRAGE_NODE_HOME")
+		homeDir := app.DefaultNodeHome
 		if cmd.Flags().Lookup(flags.FlagHome) != nil {
 			if hval, err := cmd.Flags().GetString(flags.FlagHome); err == nil && strings.TrimSpace(hval) != "" {
 				homeDir = hval
 			}
-		}
-		if strings.TrimSpace(homeDir) == "" {
-			homeDir = app.DefaultNodeHome
 		}
 		genPath := filepath.Join(homeDir, "config", "genesis.json")
 		if err := os.MkdirAll(filepath.Dir(genPath), 0o755); err != nil {
@@ -213,9 +210,6 @@ func validateAppConfig(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	if strings.TrimSpace(homeDir) == "" {
-		homeDir = os.Getenv("MIRAGE_NODE_HOME")
-	}
-	if strings.TrimSpace(homeDir) == "" {
 		homeDir = app.DefaultNodeHome
 	}
 
@@ -311,15 +305,12 @@ func dumpConfigCommand() *cobra.Command {
 		Use:   "dump-config",
 		Short: "Print effective configuration from HOME/config files",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			homeDir := os.Getenv("MIRAGE_NODE_HOME")
+			homeDir := app.DefaultNodeHome
 			// Allow optional --home
 			if cmd.Flags().Lookup(flags.FlagHome) != nil {
 				if hval, err := cmd.Flags().GetString(flags.FlagHome); err == nil && strings.TrimSpace(hval) != "" {
 					homeDir = hval
 				}
-			}
-			if strings.TrimSpace(homeDir) == "" {
-				homeDir = app.DefaultNodeHome
 			}
 			cfgDir := filepath.Join(homeDir, "config")
 
@@ -407,11 +398,7 @@ func appExport(
 	// we can exit more gracefully by checking the flag here.
 	homePath, ok := appOpts.Get(flags.FlagHome).(string)
 	if !ok || strings.TrimSpace(homePath) == "" {
-		// Fallback to env or default if flag not plumbed through
-		homePath = os.Getenv("MIRAGE_NODE_HOME")
-		if strings.TrimSpace(homePath) == "" {
-			homePath = app.DefaultNodeHome
-		}
+		homePath = app.DefaultNodeHome
 	}
 
 	viperAppOpts, ok := appOpts.(*viper.Viper)

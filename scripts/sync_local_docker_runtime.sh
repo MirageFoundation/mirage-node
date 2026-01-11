@@ -80,7 +80,7 @@ done
 echo ""
 echo "==> Restarting backend in tmux..."
 docker exec "${CONTAINER_NAME}" bash -lc "
-  tmux send-keys -t '${BACKEND_PANE}' \"cd ${ROOT_DIR}/web/backend && MIRAGE_NODE_HOME='${NODE_HOME}' BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH='${ROOT_DIR}' python3 -m gunicorn -c gunicorn_config.py 'factory:app'\" C-m
+  tmux send-keys -t '${BACKEND_PANE}' \"cd ${ROOT_DIR}/web/backend && BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH='${ROOT_DIR}' python3 -m gunicorn -c gunicorn_config.py 'factory:app'\" C-m
 " || {
   echo "Error: Failed to restart backend in tmux" >&2
   exit 1
@@ -101,8 +101,7 @@ if [[ "${RESTART_NODE}" == "1" ]]; then
   echo ""
   echo "==> Restarting node in tmux..."
   docker exec "${CONTAINER_NAME}" bash -lc "
-    tmux send-keys -t '${NODE_PANE}' \"export MIRAGE_NODE_HOME='${NODE_HOME}'\" C-m
-    tmux send-keys -t '${NODE_PANE}' \"${ROOT_DIR}/blockchain/miraged start --home '${NODE_HOME}' 2>&1 | tee >(cronolog '/root/.mirage/logs/node/miraged-%Y-%m-%d.log')\" C-m
+    tmux send-keys -t '${NODE_PANE}' \"${ROOT_DIR}/blockchain/miraged start 2>&1 | tee >(cronolog '/root/.mirage/logs/node/miraged-%Y-%m-%d.log')\" C-m
   " || {
     echo "Error: Failed to restart node in tmux" >&2
     exit 1

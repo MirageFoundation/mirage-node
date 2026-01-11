@@ -7,7 +7,7 @@ set -euo pipefail
 trap 'echo "ERROR: Script failed at line $LINENO. Command: $BASH_COMMAND" >&2' ERR
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
-NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/node}"
+NODE_HOME="$HOME/.mirage/node"
 BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
 RPC_URL="${RPC_URL:-http://127.0.0.1:26657}"
 CHAIN_ID="${CHAIN_ID:-mirage-1}"

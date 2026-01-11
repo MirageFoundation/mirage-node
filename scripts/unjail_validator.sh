@@ -16,23 +16,7 @@ set -euo pipefail
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
 BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
-# Handle HOME that might already be .mirage/node
-# Check if MIRAGE_NODE_HOME is explicitly set
-if [ -n "${MIRAGE_NODE_HOME:-}" ]; then
-  NODE_HOME="$MIRAGE_NODE_HOME"
-# Check if HOME ends with .mirage/node (HOME is already node home)
-elif echo "${HOME:-}" | grep -qE "\.mirage/node$"; then
-  NODE_HOME="${HOME}"
-# Check if HOME/config exists (HOME is already node home)
-elif [ -d "${HOME:-/root}/config" ] 2>/dev/null && [ -f "${HOME:-/root}/config/priv_validator_key.json" ] 2>/dev/null; then
-  NODE_HOME="${HOME:-/root}"
-# Check if HOME/.mirage/node/config exists (normal case)
-elif [ -d "${HOME:-/root}/.mirage/node/config" ] 2>/dev/null; then
-  NODE_HOME="${HOME:-/root}/.mirage/node"
-# Default fallback
-else
-  NODE_HOME="/root/.mirage/node"
-fi
+NODE_HOME="${HOME:-/root}/.mirage/node"
 
 # Safety check: prevent doubling .mirage/node
 if echo "$NODE_HOME" | grep -qE "\.mirage/node/\.mirage/node"; then

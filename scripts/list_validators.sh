@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: list_validators.sh [--rpc=tcp://127.0.0.1:26657] [--home=PATH] [--bonded|--unbonding|--unbonded|--all]
+Usage: list_validators.sh [--rpc=tcp://127.0.0.1:26657] [--bonded|--unbonding|--unbonded|--all]
 
 Shows validators and their stake (tokens) in MIRAGE.
 Defaults to bonded (active) validators.
@@ -25,14 +25,13 @@ if [ -z "${BIN:-}" ]; then
   fi
 fi
 
-NODE_HOME="${MIRAGE_NODE_HOME:-$HOME/.mirage/node}"
+NODE_HOME="$HOME/.mirage/node"
 RPC="${RPC:-tcp://127.0.0.1:26657}"
 STATUS="BOND_STATUS_BONDED"  # BOND_STATUS_BONDED | BOND_STATUS_UNBONDING | BOND_STATUS_UNBONDED | (empty => all)
 
 for arg in "$@"; do
   case "$arg" in
     --rpc=*) RPC="${arg#--rpc=}" ;;
-    --home=*) NODE_HOME="${arg#--home=}" ;;
     --bonded) STATUS="BOND_STATUS_BONDED" ;;
     --unbonding) STATUS="BOND_STATUS_UNBONDING" ;;
     --unbonded) STATUS="BOND_STATUS_UNBONDED" ;;

@@ -277,7 +277,7 @@ fi
 
 # Node (second)
 tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:node" "export MIRAGE_NODE_HOME=\"$NODE_HOME\"" C-m
+# Node home is always ~/.mirage/node (hardcoded)
 tmux send-keys -t "$SESSION:node" "$BIN start --home \"$NODE_HOME\" 2>&1 | tee >(cronolog \"$LOGS_DIR/node/miraged-%Y-%m-%d.log\")" C-m
 
 # Wait for node RPC to be ready before starting dependent services
@@ -300,7 +300,7 @@ fi
 # Enable validator mode if priv_validator_key.json exists
 if [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
   echo "==> Enabling validator mode..."
-  MIRAGE_NODE_HOME="$NODE_HOME" bash "$ROOT_DIR/deploy/enable_validator_mode.sh"
+  bash "$ROOT_DIR/deploy/enable_validator_mode.sh"
 fi
 
 # Indexer (third) - uses wrapper script that waits for RPC
@@ -309,7 +309,7 @@ tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.
 
 # Backend (fourth)
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
-tmux send-keys -t "$SESSION:backend" "MIRAGE_NODE_HOME=\"$NODE_HOME\" BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
+tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
 # Referral accrual daemon (fifth)
 tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"

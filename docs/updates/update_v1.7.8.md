@@ -33,7 +33,7 @@ The `~/.mirage` directory has been reorganized:
 **Why:**
 - `node/` is clearer than `main/`
 - PostgreSQL is a separate service, shouldn't be nested in blockchain data
-- Aligns with `MIRAGE_NODE_HOME` and `node.env` naming
+- Aligns with `node.env` naming
 
 ---
 

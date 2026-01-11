@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Remote deployment script for Mirage
+# Deployment script for Mirage
 # Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE] [--proxyjump HOST]
+#        deploy/deploy.sh --local [--init|--update] [--file TARBALL]
 #
 # Notes:
 # - Moniker defaults to "mirage-node" and can be overridden with --moniker
 # - Domain/TLS: Configure HTTPS inside the container using letsencrypt_register.sh (domain is persisted automatically)
-# - For local testing, use scripts/reset_local_testnet.py instead
+# - Use --local for local Docker deployment (no SSH)
 # - Use --proxyjump for slow/high-latency servers (routes traffic through a jump host)
 #
 
@@ -16,10 +17,12 @@ show_help() {
 Mirage Remote Deployment
 
 Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE] [--proxyjump HOST]
+       deploy/deploy.sh --local [--init|--update] [--file TARBALL]
        deploy/deploy.sh --build-only [--file TARBALL]
 
 Arguments:
   user@host            SSH connection string (e.g., root@159.203.114.27)
+  --local              Deploy to local Docker container (no SSH)
 
 Modes (exactly one required, except for --build-only):
   --init               First-time setup: build, upload, start container.
@@ -36,8 +39,8 @@ Options:
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
 
-Local testing:
-  For local development with production data, use scripts/reset_local_testnet.py instead.
+Local deployment:
+  deploy/deploy.sh --local --update --file deploy/mirage-docker-prod.tar.gz
 
 Remote access:
   ssh user@host 'docker logs mirage'
@@ -50,10 +53,15 @@ if [ "${1-}" = "" ] || [ "${1-}" = "--help" ] || [ "${1-}" = "-h" ]; then
   exit 0
 fi
 
-# Check if first arg is --build-only (no remote required)
+# Check if first arg is --build-only or --local (no remote required)
 BUILD_ONLY=0
+LOCAL_MODE=0
 if [ "${1-}" = "--build-only" ]; then
   BUILD_ONLY=1
+  shift
+  REMOTE=""
+elif [ "${1-}" = "--local" ]; then
+  LOCAL_MODE=1
   shift
   REMOTE=""
 else
@@ -144,15 +152,40 @@ if [ -z "$MODE" ]; then
   exit 1
 fi
 
+if [ "$LOCAL_MODE" -eq 1 ] && [ "$MODE" = "init" ]; then
+  echo "ERROR: --init is not supported with --local" >&2
+  echo "For local development, use: scripts/reset_local_testnet.py" >&2
+  exit 1
+fi
+
 if [ -n "$TARBALL_FILE" ] && [ ! -f "$TARBALL_FILE" ]; then
   echo "ERROR: Tarball file not found: $TARBALL_FILE" >&2
   exit 1
 fi
 
 REMOTE_HOST="${REMOTE##*@}"
+LOCAL_CONTAINER="mirage"
+LOCAL_DATA_DIR="$HOME/.mirage"
 
-# Set up SSH options based on whether we're using ProxyJump
-if [ -n "$PROXYJUMP" ]; then
+# Set up execution mode based on --local or remote SSH
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  echo "==> Local deployment mode"
+  
+  close_ssh_socket() { :; }  # No-op for local
+  
+  # Helper functions for local Docker deployment
+  run_ssh() {
+    docker exec "$LOCAL_CONTAINER" bash -lc "$*"
+  }
+  run_scp() {
+    # run_scp source dest - for local, dest is container path
+    local src="$1"
+    local dest="$2"
+    # Extract path from dest (format: ignored:/path or just /path)
+    local container_path="${dest#*:}"
+    docker cp "$src" "$LOCAL_CONTAINER:$container_path"
+  }
+elif [ -n "$PROXYJUMP" ]; then
   echo "==> Using ProxyJump through $PROXYJUMP"
   SSH_OPTS="-J $PROXYJUMP -o StrictHostKeyChecking=accept-new"
   SCP_OPTS="-J $PROXYJUMP -o StrictHostKeyChecking=accept-new"
@@ -163,6 +196,14 @@ if [ -n "$PROXYJUMP" ]; then
   ssh -J "$PROXYJUMP" -o StrictHostKeyChecking=accept-new "$REMOTE" 'exit' 2>/dev/null || true
   
   close_ssh_socket() { :; }  # No-op when using ProxyJump
+  
+  # Helper functions using the configured SSH options
+  run_ssh() {
+    ssh $SSH_OPTS "$REMOTE" "$@"
+  }
+  run_scp() {
+    scp $SCP_OPTS "$@"
+  }
 else
   SSH_OPTS="-o ControlPath=/tmp/mirage-ssh-%r@%h:%p"
   SCP_OPTS="-o ControlPath=/tmp/mirage-ssh-%r@%h:%p"
@@ -175,15 +216,15 @@ else
   # Establish SSH control socket for re-use
   echo "==> Establishing SSH control socket..."
   ssh -o PreferredAuthentications=publickey,password,keyboard-interactive -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPath=/tmp/mirage-ssh-%r@%h:%p -o ControlPersist=300 "$REMOTE" 'exit'
+  
+  # Helper functions using the configured SSH options
+  run_ssh() {
+    ssh $SSH_OPTS "$REMOTE" "$@"
+  }
+  run_scp() {
+    scp $SCP_OPTS "$@"
+  }
 fi
-
-# Helper functions using the configured SSH options
-run_ssh() {
-  ssh $SSH_OPTS "$REMOTE" "$@"
-}
-run_scp() {
-  scp $SCP_OPTS "$@"
-}
 
 # Early sanity check for --init: consensus key must NOT already exist on remote
 if [ "$MODE" = "init" ]; then
@@ -196,17 +237,19 @@ if [ "$MODE" = "init" ]; then
   fi
 fi
 
-# Ensure docker on remote
-echo "==> Ensuring Docker is installed on remote..."
-run_ssh '
-  set -euo pipefail
-  if ! command -v docker >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -y
-    apt-get install -y docker.io
-    systemctl enable --now docker
-  fi
-'
+# Ensure docker on remote (skip for local - docker is already running)
+if [ "$LOCAL_MODE" -eq 0 ]; then
+  echo "==> Ensuring Docker is installed on remote..."
+  run_ssh '
+    set -euo pipefail
+    if ! command -v docker >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -y
+      apt-get install -y docker.io
+      systemctl enable --now docker
+    fi
+  '
+fi
 
 # No seed file verification required
 # Build binary and Docker image locally (unless --file is provided)
@@ -232,48 +275,63 @@ else
   docker save mirage:prod | gzip > "$TARBALL"
 fi
 
-echo "==> Transferring image..."
-# Optimization: avoid re-uploading the tarball if possible.
-# Priority: 1) Target has it, 2) Jump host has it (copy internally), 3) Upload from local
-LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
-REMOTE_SHA="$(run_ssh 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""')"
+if [ "$LOCAL_MODE" -eq 0 ]; then
+  echo "==> Transferring image..."
+  # Optimization: avoid re-uploading the tarball if possible.
+  # Priority: 1) Target has it, 2) Jump host has it (copy internally), 3) Upload from local
+  LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
+  REMOTE_SHA="$(run_ssh 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""')"
 
-if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
-  echo "    Hash match: target already has identical tarball (SHA256: ${LOCAL_SHA:0:16}...), skipping transfer"
-elif [ -n "$PROXYJUMP" ]; then
-  # Check if jump host has the tarball (can copy internally, much faster)
-  JUMP_SHA="$(ssh "$PROXYJUMP" 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""' 2>/dev/null || echo "")"
-  if [ -n "$JUMP_SHA" ] && [ "$JUMP_SHA" = "$LOCAL_SHA" ]; then
-    # Extract target host from REMOTE (user@host format)
-    TARGET_HOST="${REMOTE#*@}"
-    echo "    Hash match: jump host has identical tarball (SHA256: ${LOCAL_SHA:0:16}...)"
-    echo "    Copying via jump host: $PROXYJUMP -> $TARGET_HOST (internal network)..."
-    # Use -A for agent forwarding so jump host can use our local SSH key
-    ssh -A "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz" && echo "    Done."
+  if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
+    echo "    Hash match: target already has identical tarball (SHA256: ${LOCAL_SHA:0:16}...), skipping transfer"
+  elif [ -n "$PROXYJUMP" ]; then
+    # Check if jump host has the tarball (can copy internally, much faster)
+    JUMP_SHA="$(ssh "$PROXYJUMP" 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""' 2>/dev/null || echo "")"
+    if [ -n "$JUMP_SHA" ] && [ "$JUMP_SHA" = "$LOCAL_SHA" ]; then
+      # Extract target host from REMOTE (user@host format)
+      TARGET_HOST="${REMOTE#*@}"
+      echo "    Hash match: jump host has identical tarball (SHA256: ${LOCAL_SHA:0:16}...)"
+      echo "    Copying via jump host: $PROXYJUMP -> $TARGET_HOST (internal network)..."
+      # Use -A for agent forwarding so jump host can use our local SSH key
+      ssh -A "$PROXYJUMP" "scp -o StrictHostKeyChecking=no /tmp/mirage-docker.tar.gz root@${TARGET_HOST}:/tmp/mirage-docker.tar.gz" && echo "    Done."
+    else
+      echo "    Hash mismatch or missing: uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
+      run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
+    fi
   else
-    echo "    Hash mismatch or missing: uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
+    echo "    Uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
     run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
   fi
-else
-  echo "    Uploading from local (SHA256: ${LOCAL_SHA:0:16}...)..."
-  run_scp "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
 fi
 
 echo "==> Stopping old container..."
-run_ssh '
-  set -euo pipefail
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  # Local: run docker commands directly on host
   if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
-    docker stop --timeout=60 mirage
-    docker rm mirage
+    docker stop --timeout=60 mirage || true
+    docker rm mirage || true
   fi
   if docker images --format "{{.Repository}}:{{.Tag}}" | grep -qx mirage:prod; then
-    docker rmi mirage:prod
+    docker rmi mirage:prod || true
   fi
   docker system prune -f
-'
-
-echo "==> Loading image on remote..."
-run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+  echo "==> Loading image locally..."
+  gunzip -c "$TARBALL" | docker load
+else
+  run_ssh '
+    set -euo pipefail
+    if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
+      docker stop --timeout=60 mirage
+      docker rm mirage
+    fi
+    if docker images --format "{{.Repository}}:{{.Tag}}" | grep -qx mirage:prod; then
+      docker rmi mirage:prod
+    fi
+    docker system prune -f
+  '
+  echo "==> Loading image on remote..."
+  run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+fi
 
 # For --init: enforce --moniker is provided
 if [ "$MODE" = "init" ]; then
@@ -315,7 +373,7 @@ if [ "$MODE" = "init" ]; then
   if ! echo "$MNEMONIC" | run_ssh "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
     --entrypoint python3 \
     -v ~/.mirage:/root/.mirage \
-      mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/node"; then
+      mirage:prod /opt/mirage/deploy/derive_consensus_key.py"; then
   echo "ERROR: Failed to derive consensus key." >&2
   exit 1
   fi
@@ -337,19 +395,23 @@ fi
 echo "==> Starting container..."
 
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage
-run_ssh 'mkdir -p ~/.caddy ~/.mirage'
-
-# One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
-run_ssh '
-  if [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
-    echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
-    mv ~/.hermes ~/.mirage/hermes
-  elif [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
-    echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
-    cp -a ~/.hermes/. ~/.mirage/hermes/
-    rm -rf ~/.hermes
-  fi
-'
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  mkdir -p "$HOME/.caddy" "$HOME/.mirage"
+  # Skip hermes migration for local
+else
+  run_ssh 'mkdir -p ~/.caddy ~/.mirage'
+  # One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
+  run_ssh '
+    if [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
+      echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
+      mv ~/.hermes ~/.mirage/hermes
+    elif [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
+      echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
+      cp -a ~/.hermes/. ~/.mirage/hermes/
+      rm -rf ~/.hermes
+    fi
+  '
+fi
 
 # Initialize persistent config directory and seed env files if missing (for --init)
 if [ "$MODE" = "init" ]; then
@@ -373,7 +435,11 @@ fi
 # For --update modes, read MONIKER from existing node.env if not explicitly provided
 if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
   echo "==> Reading existing MONIKER from node.env..."
-  EXISTING_MONIKER=$(run_ssh "grep -E '^MONIKER=' ~/.mirage/env/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
+  if [ "$LOCAL_MODE" -eq 1 ]; then
+    EXISTING_MONIKER=$(grep -E '^MONIKER=' "$HOME/.mirage/env/node.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
+  else
+    EXISTING_MONIKER=$(run_ssh "grep -E '^MONIKER=' ~/.mirage/env/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
+  fi
   if [ -n "$EXISTING_MONIKER" ] && [ "$EXISTING_MONIKER" != "mirage-node" ]; then
     MONIKER_VALUE="$EXISTING_MONIKER"
     echo "    Using existing moniker: $MONIKER_VALUE"
@@ -389,14 +455,66 @@ if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi
-run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
+
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  # Local: run docker directly on host
+  ENV_ARGS=""
+  for f in backend node indexer frontend secrets; do
+    if [ -f "$HOME/.mirage/env/$f.env" ]; then
+      ENV_ARGS="$ENV_ARGS --env-file $HOME/.mirage/env/$f.env"
+    fi
+  done
+  # Add SKIP_VALIDATOR_CHECK for local testing (validator key created by reset script)
+  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" mirage:prod
+else
+  run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
+fi
 
 echo "==> Waiting briefly for container to become healthy..."
 sleep 2
 
 # Ensure container is running and stable (handle restart loop) before docker exec
 echo "==> Waiting for container to be running and stable..."
-STABILITY_CHECK='
+stability_check() {
+  local consec=0
+  for i in $(seq 1 60); do
+    local st=$(docker inspect -f "{{.State.Status}}" mirage 2>/dev/null || echo "notfound")
+    echo "[$i/60] Container status: $st (consecutive stable checks: $consec)"
+    if [ "$st" = "restarting" ]; then
+      consec=0
+      echo "  -> Waiting for restart to complete..."
+      sleep 1
+      continue
+    elif [ "$st" = "running" ]; then
+      if docker exec mirage echo ready >/dev/null 2>&1; then
+        consec=$((consec+1))
+        echo "  -> Docker exec successful (need 3 consecutive)"
+        if [ "$consec" -ge 3 ]; then
+          echo "  -> Container is stable!"
+          return 0
+        fi
+      else
+        echo "  -> Docker exec failed, resetting counter"
+        consec=0
+      fi
+    else
+      if [ "$st" != "notfound" ]; then
+        echo "  -> ERROR: Container status is $st (not running)"
+        docker logs --tail 20 mirage 2>&1 | sed "s/^/    /" || true
+      fi
+      consec=0
+    fi
+    sleep 1
+  done
+  echo "ERROR: Container not stable after 60s (last status: $st)" >&2
+  docker logs --tail 100 mirage 2>&1 | tail -100 | sed "s/^/  /" >&2
+  return 1
+}
+
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  stability_check
+else
+  STABILITY_CHECK='
 set -euo pipefail
 consec=0
 for i in $(seq 1 60); do
@@ -432,7 +550,8 @@ echo "ERROR: Container not stable after 60s (last status: $st)" >&2
 docker logs --tail 100 mirage 2>&1 | tail -100 | sed "s/^/  /" >&2
 exit 1
 '
-run_ssh "bash -c '$STABILITY_CHECK'"
+  run_ssh "bash -c '$STABILITY_CHECK'"
+fi
 
 # On init only, create the validator if it doesn't exist yet (idempotent)
 if [ "$MODE" = "init" ]; then
@@ -450,16 +569,25 @@ if [ "$MODE" = "update" ]; then
   fi
 fi
 
-echo "==> Done. Container 'mirage' is running on $REMOTE_HOST."
-echo "    To configure HTTPS (domain will persist for future deployments):"
-echo "      ssh $REMOTE 'docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com'"
-echo ""
-echo "Remote container access:"
-echo "  Attach tmux session:"
-echo "    ssh -t $REMOTE 'docker exec -it mirage tmux attach -t mirage'"
-echo "  Shell into container:"
-echo "    ssh -t $REMOTE 'docker exec -it mirage bash'"
-echo "  Follow logs:"
-echo "    ssh $REMOTE 'docker logs -f mirage'"
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  echo "==> Done. Container 'mirage' is running locally."
+  echo ""
+  echo "Container access:"
+  echo "  Attach tmux:  docker exec -it mirage tmux attach -t mirage"
+  echo "  Shell:        docker exec -it mirage bash"
+  echo "  Logs:         docker logs -f mirage"
+else
+  echo "==> Done. Container 'mirage' is running on $REMOTE_HOST."
+  echo "    To configure HTTPS (domain will persist for future deployments):"
+  echo "      ssh $REMOTE 'docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com'"
+  echo ""
+  echo "Remote container access:"
+  echo "  Attach tmux session:"
+  echo "    ssh -t $REMOTE 'docker exec -it mirage tmux attach -t mirage'"
+  echo "  Shell into container:"
+  echo "    ssh -t $REMOTE 'docker exec -it mirage bash'"
+  echo "  Follow logs:"
+  echo "    ssh $REMOTE 'docker logs -f mirage'"
+fi
 
 close_ssh_socket

@@ -80,12 +80,22 @@ def write_priv_validator(home: str, priv_seed: bytes, pubkey: bytes) -> None:
 
 
 def main():
-    home = None
-    for i, a in enumerate(sys.argv):
-        if a == "--home" and i + 1 < len(sys.argv):
-            home = sys.argv[i + 1]
-    if not home:
-        print("Usage: derive_consensus_key.py --home /root/.mirage/node", file=sys.stderr)
+    import argparse
+    import os
+
+    # Node home is always ~/.mirage/node (hardcoded)
+    home = os.path.join(os.environ.get("HOME", "/root"), ".mirage", "node")
+
+    parser = argparse.ArgumentParser(description="Derive consensus key from mnemonic")
+    parser.add_argument("--passphrase", default="", help="BIP39 passphrase (optional)")
+    parser.add_argument("--index", type=int, default=0, help="Derivation index (default: 0)")
+    args = parser.parse_args()
+
+    passphrase = args.passphrase
+    idx = args.index
+
+    if idx < 0:
+        print("Derivation index must be >= 0", file=sys.stderr)
         sys.exit(1)
 
     # Read mnemonic from stdin
@@ -93,18 +103,6 @@ def main():
     if not mnemonic:
         print("Empty mnemonic on stdin", file=sys.stderr)
         sys.exit(1)
-    # Parse CLI arguments: [passphrase] [index]
-    passphrase = sys.argv[1] if len(sys.argv) > 1 else ""
-    idx = 0
-    if len(sys.argv) > 2:
-        try:
-            idx = int(sys.argv[2])
-        except ValueError:
-            print("Derivation index must be an integer", file=sys.stderr)
-            sys.exit(1)
-        if idx < 0:
-            print("Derivation index must be >= 0", file=sys.stderr)
-            sys.exit(1)
 
     # Path: m/44'/118'/1'/i'
     path = f"m/44'/118'/1'/{idx}'"
@@ -123,5 +121,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

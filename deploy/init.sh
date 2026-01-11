@@ -12,22 +12,27 @@ echo "==> Init: NODE_HOME=$NODE_HOME"
 
 mkdir -p "$NODE_HOME" "$NODE_HOME/config" "$NODE_HOME/data"
 
-# Validator key must exist (imported by deploy.sh during --init)
-KEYRING_BACKEND="test"
-if ! $BIN keys show validator --home "$NODE_HOME" --keyring-backend "$KEYRING_BACKEND" >/dev/null 2>&1; then
-  echo "ERROR: validator account key not found in keyring. Import it before startup." >&2
-  echo "Hint: The deploy script imports the mnemonic into the node volume during --init." >&2
-  exit 1
-fi
-echo "==> Validator key present"
+# SKIP_VALIDATOR_CHECK=1 skips key checks (used by reset_local_testnet.py)
+if [ "${SKIP_VALIDATOR_CHECK:-0}" != "1" ]; then
+  # Validator key must exist (imported by deploy.sh during --init)
+  KEYRING_BACKEND="test"
+  if ! $BIN keys show validator --home "$NODE_HOME" --keyring-backend "$KEYRING_BACKEND" >/dev/null 2>&1; then
+    echo "ERROR: validator account key not found in keyring. Import it before startup." >&2
+    echo "Hint: The deploy script imports the mnemonic into the node volume during --init." >&2
+    exit 1
+  fi
+  echo "==> Validator key present"
 
-# Consensus key must exist (derived by deploy.sh during --init)
-if [ ! -f "$NODE_HOME/config/priv_validator_key.json" ]; then
-  echo "ERROR: Consensus key missing: $NODE_HOME/config/priv_validator_key.json" >&2
-  echo "Hint: On --init, the deploy script derives this from your mnemonic." >&2
-  exit 1
+  # Consensus key must exist (derived by deploy.sh during --init)
+  if [ ! -f "$NODE_HOME/config/priv_validator_key.json" ]; then
+    echo "ERROR: Consensus key missing: $NODE_HOME/config/priv_validator_key.json" >&2
+    echo "Hint: On --init, the deploy script derives this from your mnemonic." >&2
+    exit 1
+  fi
+  echo "==> Consensus key present"
+else
+  echo "==> Skipping validator/consensus key checks (SKIP_VALIDATOR_CHECK=1)"
 fi
-echo "==> Consensus key present"
 
 # Ensure priv_validator_state.json exists BEFORE miraged init (it needs this file)
 if [ ! -f "$NODE_HOME/data/priv_validator_state.json" ]; then

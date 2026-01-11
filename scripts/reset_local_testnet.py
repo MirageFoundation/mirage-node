@@ -101,7 +101,7 @@ def ensure_local_container():
             "bash",
             "-lc",
             "docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
-            "--name mirage --restart unless-stopped -e SKIP_PEERS=1 "
+            "--name mirage --restart unless-stopped -e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
             f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy mirage:prod",
         ]
     )
@@ -120,11 +120,11 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     Create a lightweight snapshot on the remote host by running export there.
     This avoids copying ~5GB of blockchain databases, reducing transfer to ~200MB.
 
-    The archive contains (in main/snapshot/):
+    The archive contains (in node/snapshot/):
     - miraged (production binary, ~150MB)
     - export.json (chain state export, ~50MB)
     - indexer.sql (PostgreSQL dump, ~20MB)
-    And main/config/ (node configuration)
+    And node/config/ (node configuration)
     """
     conn = f"{ssh_user}@{source_host}"
     status(f"Connecting to source host: {conn}")
@@ -165,9 +165,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'cd /root/.mirage && tar czf /tmp/main.tgz "
-            "main/snapshot "
-            "main/config'",
+            f"ssh {conn} 'cd /root/.mirage && tar czf /tmp/main.tgz " "node/snapshot " "node/config'",
         ]
     )
 
@@ -200,10 +198,13 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
         shutil.rmtree(extract_dir)
     extract_dir.mkdir(parents=True)
     run(["bash", "-lc", f"tar xzf '{local_tar}' -C '{extract_dir}' --no-same-owner --no-same-permissions"])
-    src_dir = extract_dir / "main"
+    # Support both new (node/) and old (main/) tarball structures
+    src_dir = extract_dir / "node"
+    if not src_dir.exists():
+        src_dir = extract_dir / "main"  # fallback for old tarballs
     snapshot_dir = src_dir / "snapshot"
     if not src_dir.exists():
-        raise RuntimeError(f"Expected directory not found after extraction: {src_dir}")
+        raise RuntimeError(f"Expected directory not found after extraction: {extract_dir}/node or {extract_dir}/main")
 
     export_json = snapshot_dir / "export.json"
     if not export_json.exists():
@@ -301,8 +302,10 @@ def generate_random_mnemonic() -> str:
 
 def scrub_consensus_key():
     status("Generating new local consensus key...")
+    # Remove existing key (copied from snapshot) before generating new one
+    run(["bash", "-lc", "docker exec mirage rm -f /root/.mirage/node/config/priv_validator_key.json"])
     mnemonic = generate_random_mnemonic()
-    cmd = "python3 /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/node"
+    cmd = "python3 /opt/mirage/deploy/derive_consensus_key.py"
     run(["bash", "-lc", f"echo '{mnemonic}' | docker exec -i mirage bash -lc \"{cmd}\""])
     run(["bash", "-lc", "docker exec mirage chmod 600 /root/.mirage/node/config/priv_validator_key.json"])
     status("Consensus key generated")
@@ -706,7 +709,7 @@ def write_working_genesis(genesis_json: str):
     run(["bash", "-lc", f"docker cp '{local_path}' mirage:/root/.mirage/node/config/genesis.json"])
     shutil.rmtree(tmp, ignore_errors=True)
 
-    status("Copying config files from main.clone ...")
+    status("Copying config files from node.clone ...")
     run(
         [
             "bash",
