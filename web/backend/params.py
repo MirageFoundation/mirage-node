@@ -20,6 +20,8 @@ from shared.datatypes import QueryParamsRequest, QueryParamsResponse
 log = logging.getLogger(__name__)
 
 _PARAMS_CACHE: Optional[Dict[str, Any]] = None
+_PARAMS_CACHE_TIME: float = 0.0
+_PARAMS_CACHE_TTL: float = 300.0  # 5 minutes - auto-refresh after chain upgrades
 _LOCK = threading.Lock()
 
 # ALL required integer params from chain - no defaults, MUST be present
@@ -102,9 +104,11 @@ def load_params(
     Raises:
         RuntimeError: If chain is not available after max_retries
     """
-    global _PARAMS_CACHE
+    global _PARAMS_CACHE, _PARAMS_CACHE_TIME
     with _LOCK:
-        if _PARAMS_CACHE is not None and not force:
+        now = time.time()
+        cache_valid = _PARAMS_CACHE is not None and (now - _PARAMS_CACHE_TIME) < _PARAMS_CACHE_TTL
+        if cache_valid and not force:
             return _PARAMS_CACHE
 
         rt = require_runtime()
@@ -115,6 +119,7 @@ def load_params(
                 params_dict = _query_core_params(rt.grpc_target)
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
+                _PARAMS_CACHE_TIME = time.time()
                 log.info(f"Loaded chain params: {cache}")
                 return _PARAMS_CACHE
             except Exception as e:
