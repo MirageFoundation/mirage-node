@@ -41,10 +41,10 @@ if [ ! -f "$NODE_HOME/config/genesis.json" ]; then
 fi
 
 # Peer configuration (from node.env)
-# For local deployment, skip external peers to avoid validator set mismatches
+# For local testnet (SKIP_PEERS=1), disable peer connections to avoid validator set mismatches
 R="$ROOT_DIR/deploy/templates"
-if [ "${MIRAGE_MODE:-}" = "local" ] || [ "${SKIP_PEERS:-0}" = "1" ]; then
-  echo "==> Local deployment detected, disabling peer connections"
+if [ "${SKIP_PEERS:-0}" = "1" ]; then
+  echo "==> Local testnet mode, disabling peer connections"
   PERSISTENT_PEERS=""
   PEX_ENABLED="false"
   MAX_INBOUND_PEERS="0"

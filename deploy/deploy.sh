@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Unified remote deployment script for Mirage
+# Remote deployment script for Mirage
 # Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE]
 #
 # Notes:
 # - Moniker defaults to "mirage-node" and can be overridden with --moniker
 # - Domain/TLS: Configure HTTPS inside the container using letsencrypt_register.sh (domain is persisted automatically)
+# - For local testing, use scripts/reset_local_testnet.py instead
 #
 
 show_help() {
   cat <<EOF
-Unified Mirage Deployment
+Mirage Remote Deployment
 
 Usage: deploy/deploy.sh user@host [--init|--update] [--file TARBALL] [--moniker VALUE]
        deploy/deploy.sh --build-only [--file TARBALL]
@@ -31,6 +32,9 @@ Options:
   --file TARBALL       For deploy modes: skip build and use the provided tarball.
                        For --build-only: specify output tarball path.
   --moniker VALUE      Set CometBFT node moniker (default: mirage-node, REQUIRED for --init)
+
+Local testing:
+  For local development with production data, use scripts/reset_local_testnet.py instead.
 
 Remote access:
   ssh user@host 'docker logs mirage'
@@ -131,78 +135,19 @@ fi
 
 REMOTE_HOST="${REMOTE##*@}"
 
-# Detect local deployment (skip SSH)
-IS_LOCAL=0
-if [ "$REMOTE_HOST" = "localhost" ] || [ "$REMOTE_HOST" = "127.0.0.1" ] || [ "$REMOTE_HOST" = "$(hostname)" ] || [ "$REMOTE_HOST" = "$(hostname -s)" ]; then
-  IS_LOCAL=1
-  echo "==> Detected local deployment, skipping SSH"
-fi
-
-# Helper function to run commands locally or remotely
-run_cmd() {
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    eval "$1"
-  else
-    ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "$1"
-  fi
-}
-
-# Helper function to run commands with heredoc input locally or remotely
-run_cmd_with_input() {
-  local cmd="$1"
-  local input="$2"
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    echo "$input" | eval "$cmd"
-  else
-    echo "$input" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "$cmd"
-  fi
-}
-
-# Helper function to copy files locally or remotely
-copy_file() {
-  local src="$1"
-  local dst="$2"
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    # For local, dst might be ~/.tmux.conf, need to expand it
-    local expanded_dst="${dst/#~\//$HOME/}"
-    # Skip copy if source and destination are the same
-    if [ "$src" = "$expanded_dst" ]; then
-      return 0
-    fi
-    cp "$src" "$expanded_dst"
-  else
-    scp -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$src" "$REMOTE:$dst"
-  fi
-}
-
-# Helper function to test file existence locally or remotely
-test_file() {
-  local file="$1"
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    local expanded_file="${file/#~\//$HOME/}"
-    test -f "$expanded_file"
-  else
-    ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "test -f $file"
-  fi
-}
-
-# Helper function to close SSH control socket (no-op for local)
+# Helper function to close SSH control socket
 close_ssh_socket() {
-  if [ "$IS_LOCAL" -eq 0 ]; then
-    ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p -O exit "$REMOTE" 2>/dev/null || true
-  fi
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p -O exit "$REMOTE" 2>/dev/null || true
 }
 
-# Establish SSH control socket for re-use (skip for local)
-if [ "$IS_LOCAL" -eq 0 ]; then
+# Establish SSH control socket for re-use
 echo "==> Establishing SSH control socket..."
 ssh -o PreferredAuthentications=publickey,password,keyboard-interactive -o StrictHostKeyChecking=accept-new -o ControlMaster=auto -o ControlPath=/tmp/mirage-ssh-%r@%h:%p -o ControlPersist=300 "$REMOTE" 'exit'
-fi
 
 # Early sanity check for --init: consensus key must NOT already exist on remote
 if [ "$MODE" = "init" ]; then
   echo "==> Sanity check: remote consensus key must not exist..."
-  if test_file '~/.mirage/main/config/priv_validator_key.json'; then
+  if ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "test -f ~/.mirage/main/config/priv_validator_key.json"; then
     echo "ERROR: Found existing ~/.mirage/main/config/priv_validator_key.json on remote. Aborting to avoid accidental overwrite." >&2
     echo "If this server was previously used, provision a fresh server or remove the file manually with extreme caution." >&2
     close_ssh_socket
@@ -212,7 +157,7 @@ fi
 
 # Ensure docker on remote
 echo "==> Ensuring Docker is installed on remote..."
-run_cmd '
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" '
   set -euo pipefail
   if ! command -v docker >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
@@ -246,18 +191,12 @@ else
   docker save mirage:prod | gzip > "$TARBALL"
 fi
 
-## Simpler behavior: only update on-chain moniker when --moniker is provided
-
 echo "==> Uploading image..."
-run_cmd 'rm -f /tmp/mirage-docker.tar.gz'
-if [ "$IS_LOCAL" -eq 1 ]; then
-  cp "$TARBALL" /tmp/mirage-docker.tar.gz
-else
-  scp -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
-fi
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'rm -f /tmp/mirage-docker.tar.gz'
+scp -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$TARBALL" "$REMOTE:/tmp/mirage-docker.tar.gz"
 
 echo "==> Stopping old container..."
-run_cmd '
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" '
   set -euo pipefail
   if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
     docker stop --timeout=60 mirage
@@ -270,7 +209,7 @@ run_cmd '
 '
 
 echo "==> Loading image on remote..."
-run_cmd 'gunzip < /tmp/mirage-docker.tar.gz | docker load && rm -f /tmp/mirage-docker.tar.gz'
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'gunzip < /tmp/mirage-docker.tar.gz | docker load && rm -f /tmp/mirage-docker.tar.gz'
 
 # For --init: enforce --moniker is provided
 if [ "$MODE" = "init" ]; then
@@ -294,7 +233,7 @@ if [ "$MODE" = "init" ]; then
     exit 1
   fi
   # Ensure data dirs exist on remote
-  run_cmd 'mkdir -p ~/.mirage/main/config ~/.caddy'
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.mirage/main/config ~/.caddy'
   # Prompt for consensus derivation index (default 0)
   read -p "Consensus derivation index [0] (default 0; do not change unless rotating): " CONS_INDEX
   CONS_INDEX="${CONS_INDEX:-0}"
@@ -303,81 +242,56 @@ if [ "$MODE" = "init" ]; then
     exit 1
   fi
   # Double-check consensus key doesn't exist on remote (sanity check before deriving)
-  if test_file '~/.mirage/main/config/priv_validator_key.json'; then
+  if ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "test -f ~/.mirage/main/config/priv_validator_key.json"; then
     echo "ERROR: Consensus key already exists on remote. Aborting to avoid overwrite." >&2
     exit 1
   fi
   # Derive consensus key on remote using Docker
   echo "==> Deriving consensus key on remote..."
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    if ! echo "$MNEMONIC" | MIRAGE_DERIVATION_INDEX="$CONS_INDEX" docker run --rm -i \
-        --entrypoint python3 \
-        -v "$HOME/.mirage:/root/.mirage" \
-        mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/main; then
-      echo "ERROR: Failed to derive consensus key." >&2
-      exit 1
-    fi
-  else
-    if ! echo "$MNEMONIC" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
-      --entrypoint python3 \
-      -v ~/.mirage:/root/.mirage \
-        mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/main"; then
-    echo "ERROR: Failed to derive consensus key." >&2
-    exit 1
-    fi
+  if ! echo "$MNEMONIC" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
+    --entrypoint python3 \
+    -v ~/.mirage:/root/.mirage \
+      mirage:prod /opt/mirage/deploy/derive_consensus_key.py --home /root/.mirage/main"; then
+  echo "ERROR: Failed to derive consensus key." >&2
+  exit 1
   fi
   # Set correct permissions on remote
-  run_cmd 'chmod 600 ~/.mirage/main/config/priv_validator_key.json'
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'chmod 600 ~/.mirage/main/config/priv_validator_key.json'
   echo "✓ Consensus key derived (index $CONS_INDEX)."
   # Import using a one-shot container into the mounted volume to avoid storing the mnemonic as an env var
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    if ! echo "$MNEMONIC" | docker run --rm -i \
-        --entrypoint /bin/sh \
-        -v "$HOME/.mirage:/root/.mirage" \
-        mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/main --keyring-backend test >/dev/null 2>&1'; then
-      echo "ERROR: Failed to import mnemonic into keyring volume." >&2
-      exit 1
-    fi
-  else
-    if ! echo "$MNEMONIC" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "docker run --rm -i \
-      --entrypoint /bin/sh \
-      -v ~/.mirage:/root/.mirage \
-        mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/main --keyring-backend test >/dev/null 2>&1'"; then
-    echo "ERROR: Failed to import mnemonic into keyring volume." >&2
-    exit 1
-    fi
+  if ! echo "$MNEMONIC" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "docker run --rm -i \
+    --entrypoint /bin/sh \
+    -v ~/.mirage:/root/.mirage \
+      mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/main --keyring-backend test >/dev/null 2>&1'"; then
+  echo "ERROR: Failed to import mnemonic into keyring volume." >&2
+  exit 1
   fi
   unset MNEMONIC || true
   echo "✓ Account key imported into keyring."
 fi
 
 echo "==> Starting container..."
-EXTRA_ENVS=""
 
-# Persist caddy data for future TLS issuance; persist node data under ~/.mirage; persist hermes IBC relayer data
-run_cmd 'mkdir -p ~/.caddy ~/.mirage ~/.mirage/hermes'
+# Persist caddy data for future TLS issuance; persist node data under ~/.mirage
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.caddy ~/.mirage'
 
 # Initialize persistent config directory and seed env files if missing (for --init)
 if [ "$MODE" = "init" ]; then
   echo "==> Ensuring persistent config files exist on remote..."
-  run_cmd 'mkdir -p ~/.mirage/env'
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" 'mkdir -p ~/.mirage/env'
   # Copy env templates if they don't exist on remote
   for f in "$(dirname "$0")/templates"/*.env; do
     if [ -f "$f" ]; then
       fname="$(basename "$f")"
       # Only copy if file doesn't exist on remote (preserve user customizations)
-      if [ "$IS_LOCAL" -eq 1 ]; then
-        [ -f "$HOME/.mirage/env/$fname" ] || cp "$f" "$HOME/.mirage/env/$fname"
-      else
-        ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/env/$fname ]" 2>/dev/null || copy_file "$f" "~/.mirage/env/$fname"
-      fi
+      ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "[ -f ~/.mirage/env/$fname ]" 2>/dev/null || scp -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$f" "$REMOTE:~/.mirage/env/$fname"
     fi
   done
   # Seed MIRAGE_INDEXER_DB_URL if missing or empty
-  run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/indexer.env; touch \"\$FILE\"; cur=\$(grep -E \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\" 2>/dev/null || true); val=\${cur#MIRAGE_INDEXER_DB_URL=}; if [ -z \"\$val\" ]; then if grep -qE \"^MIRAGE_INDEXER_DB_URL=\" \"\$FILE\"; then sed -i \"s|^MIRAGE_INDEXER_DB_URL=.*|MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage|\" \"\$FILE\"; else echo \"MIRAGE_INDEXER_DB_URL=postgresql://mirage:mirage@127.0.0.1:5432/mirage\" >> \"\$FILE\"; fi; fi'"
   # Persist moniker during first-time init
   if [ -n "$MONIKER_VALUE" ]; then
-    run_cmd "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"
+    ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -lc 'set -euo pipefail; FILE=\$HOME/.mirage/env/node.env; touch \"\$FILE\"; if grep -q \"^MONIKER=\" \"\$FILE\"; then sed -i \"s/^MONIKER=.*/MONIKER=\\\"$MONIKER_VALUE\\\"/\" \"\$FILE\"; else echo MONIKER=\\\"$MONIKER_VALUE\\\" >> \"\$FILE\"; fi'"
   fi
 fi
 
@@ -385,11 +299,7 @@ fi
 # For --update modes, read MONIKER from existing node.env if not explicitly provided
 if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
   echo "==> Reading existing MONIKER from node.env..."
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    EXISTING_MONIKER=$(grep -E '^MONIKER=' "$HOME/.mirage/env/node.env" 2>/dev/null | cut -d= -f2 | tr -d '"' || echo "")
-  else
-    EXISTING_MONIKER=$(ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "grep -E '^MONIKER=' ~/.mirage/env/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
-  fi
+  EXISTING_MONIKER=$(ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "grep -E '^MONIKER=' ~/.mirage/env/node.env 2>/dev/null | cut -d= -f2 | tr -d '\"'" || echo "")
   if [ -n "$EXISTING_MONIKER" ] && [ "$EXISTING_MONIKER" != "mirage-node" ]; then
     MONIKER_VALUE="$EXISTING_MONIKER"
     echo "    Using existing moniker: $MONIKER_VALUE"
@@ -397,31 +307,14 @@ if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
 fi
 
 PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
-if [ "$IS_LOCAL" -eq 1 ]; then
-  ENV_ARGS=""
-  for f in backend node indexer frontend secrets; do
-    if [ -f "$HOME/.mirage/env/$f.env" ]; then
-      ENV_ARGS="$ENV_ARGS --env-file $HOME/.mirage/env/$f.env"
-    fi
-  done
-  MONIKER_ARG=""
-  HOSTNAME_ARG=""
-  if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
-    MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-    # Replace dots with dashes for valid hostname
-    HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
-  fi
-  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_PEERS=1 $EXTRA_ENVS -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" mirage:prod
-else
-  MONIKER_ARG=""
-  HOSTNAME_ARG=""
-  if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
-    MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-    # Replace dots with dashes for valid hostname
-    HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
-  fi
-  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG $EXTRA_ENVS -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
+MONIKER_ARG=""
+HOSTNAME_ARG=""
+if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
+  MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
+  # Replace dots with dashes for valid hostname
+  HOSTNAME_ARG="--hostname $(echo "$MONIKER_VALUE" | tr '.' '-')"
 fi
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
 
 echo "==> Waiting briefly for container to become healthy..."
 sleep 2
@@ -464,22 +357,13 @@ echo "ERROR: Container not stable after 60s (last status: $st)" >&2
 docker logs --tail 100 mirage 2>&1 | tail -100 | sed "s/^/  /" >&2
 exit 1
 '
-if [ "$IS_LOCAL" -eq 1 ]; then
-  bash -c "$STABILITY_CHECK"
-else
-  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -c '$STABILITY_CHECK'"
-fi
+ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "bash -c '$STABILITY_CHECK'"
 
 # On init only, create the validator if it doesn't exist yet (idempotent)
 if [ "$MODE" = "init" ]; then
   echo "==> Ensuring validator exists on-chain..."
-  if [ "$IS_LOCAL" -eq 1 ]; then
-    echo "==> Running create_validator.sh inside container with moniker: $MONIKER_VALUE"
-    docker exec -i mirage bash -c "MONIKER=\"$MONIKER_VALUE\" bash /opt/mirage/deploy/create_validator.sh"
-  else
-    echo "==> Running create_validator.sh inside container (remote) with moniker: $MONIKER_VALUE"
-    ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "docker exec -i mirage bash -c \"MONIKER=\\\"$MONIKER_VALUE\\\" bash /opt/mirage/deploy/create_validator.sh\""
-  fi
+  echo "==> Running create_validator.sh inside container (remote) with moniker: $MONIKER_VALUE"
+  ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "docker exec -i mirage bash -c \"MONIKER=\\\"$MONIKER_VALUE\\\" bash /opt/mirage/deploy/create_validator.sh\""
 fi
 
 # For --update: update validator moniker on-chain if it differs
@@ -487,27 +371,11 @@ if [ "$MODE" = "update" ]; then
   if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
     echo "==> Checking if validator moniker needs update..."
     MONIKER_UPDATE_SCRIPT=$'# Ensure strict mode in container\nset -euo pipefail\ncd /opt/mirage\nVALOPER=$(/opt/mirage/blockchain/miraged keys show validator --home /root/.mirage/main --keyring-backend test --bech val -a 2>/dev/null || echo \"\")\nif [ -z \"$VALOPER\" ]; then\n  echo \"Validator not found, skipping moniker update\"\n  exit 0\nfi\nCURRENT=$(/opt/mirage/blockchain/miraged q staking validator \"$VALOPER\" --home /root/.mirage/main --node tcp://127.0.0.1:26657 -o json 2>/dev/null | jq -r \".validator.description.moniker // \\\"\\\"\" || echo \"\")\nif [ \"$CURRENT\" = \"${NEW_MONIKER:-}\" ]; then\n  echo \"Validator moniker already set to \\\"${NEW_MONIKER:-}\\\"\"\n  exit 0\nfi\necho \"Updating validator moniker from \\\"$CURRENT\\\" to \\\"${NEW_MONIKER:-}\\\"\"\n/opt/mirage/blockchain/miraged tx staking edit-validator --new-moniker=\"${NEW_MONIKER:-}\" \\\n  --from validator --home /root/.mirage/main --keyring-backend test \\\n  --chain-id mirage-1 --node tcp://127.0.0.1:26657 --gas auto --gas-adjustment 1.5 -y >/dev/null 2>&1 || true\n'
-    if [ "$IS_LOCAL" -eq 1 ]; then
-      echo "$MONIKER_UPDATE_SCRIPT" | docker exec -e NEW_MONIKER="$MONIKER_VALUE" -i mirage bash -seuo pipefail
-    else
-      run_cmd_with_input "docker exec -e NEW_MONIKER=\"$MONIKER_VALUE\" -i mirage bash -seuo pipefail" "$MONIKER_UPDATE_SCRIPT"
-    fi
+    echo "$MONIKER_UPDATE_SCRIPT" | ssh -o ControlPath=/tmp/mirage-ssh-%r@%h:%p "$REMOTE" "docker exec -e NEW_MONIKER=\"$MONIKER_VALUE\" -i mirage bash -seuo pipefail"
   fi
 fi
 
 echo "==> Done. Container 'mirage' is running on $REMOTE_HOST."
-if [ "$IS_LOCAL" -eq 1 ]; then
-  echo "    To configure HTTPS (domain will persist for future deployments):"
-  echo "      docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com"
-  echo ""
-  echo "Container access:"
-  echo "  Attach tmux session:"
-  echo "    docker exec -it mirage tmux attach -t mirage"
-  echo "  Shell into container:"
-  echo "    docker exec -it mirage bash"
-  echo "  Follow logs:"
-  echo "    docker logs -f mirage"
-else
 echo "    To configure HTTPS (domain will persist for future deployments):"
 echo "      ssh $REMOTE 'docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com'"
 echo ""
@@ -518,8 +386,5 @@ echo "  Shell into container:"
 echo "    ssh -t $REMOTE 'docker exec -it mirage bash'"
 echo "  Follow logs:"
 echo "    ssh $REMOTE 'docker logs -f mirage'"
-fi
 
 close_ssh_socket
-
-
