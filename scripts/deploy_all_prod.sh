@@ -4,11 +4,12 @@ set -euo pipefail
 # Hard-coded wrapper: deploy a pre-built tarball to all production servers.
 #
 # Usage:
-#   scripts/deploy_all_prod.sh [--file <tarball>] [--init|--update]
+#   scripts/deploy_all_prod.sh [--file <tarball>] [--init|--update] [--proxyjump <host>]
 #
 # Arguments:
 #   --file <tarball>  Optional. Path to the Docker image tarball to deploy.
 #                     If not provided, REBUILDS deploy/mirage-docker-dev.tar.gz automatically.
+#   --proxyjump <host>  Optional. Route SSH/SCP through a jump host (passed to deploy/deploy.sh).
 #
 # Default mode: --update
 #
@@ -43,6 +44,7 @@ trash_file() {
 # Parse arguments
 MODE=""
 TARBALL=""
+PROXYJUMP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --init|--update)
@@ -57,9 +59,17 @@ while [[ $# -gt 0 ]]; do
       TARBALL="$2"
       shift 2
       ;;
+    --proxyjump|-J)
+      if [[ -z "${2-}" ]]; then
+        echo "ERROR: --proxyjump requires a host argument" >&2
+        exit 1
+      fi
+      PROXYJUMP="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--file <tarball>] [--init|--update|--update-init]" >&2
+      echo "Usage: $0 [--file <tarball>] [--init|--update] [--proxyjump <host>]" >&2
       exit 1
       ;;
   esac
@@ -67,6 +77,11 @@ done
 
 if [[ -z "${MODE}" ]]; then
   MODE="--update"
+fi
+
+PROXYJUMP_ARGS=()
+if [[ -n "${PROXYJUMP}" ]]; then
+  PROXYJUMP_ARGS=(--proxyjump "${PROXYJUMP}")
 fi
 
 # Determine which tarball will be used and whether to rebuild
@@ -131,7 +146,7 @@ fi
 # Deploy to all hosts using provided tarball
 for HOST in "${HOSTS[@]}"; do
   echo "---- Deploying to ${SSH_USER}@${HOST}"
-  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}" --file "${TARBALL}"
+  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}" --file "${TARBALL}" "${PROXYJUMP_ARGS[@]}"
 done
 
 # Always rotate tarballs: remove prod and rename dev to prod

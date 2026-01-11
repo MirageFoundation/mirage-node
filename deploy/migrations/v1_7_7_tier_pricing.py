@@ -11,6 +11,10 @@ Chain-side changes (via upgrade handler):
 
 Shell-based logging via cronolog now handles all log output to
 ~/.mirage/logs/node/miraged-YYYY-MM-DD.log
+
+NOTE: This migration runs during container startup *before* miraged is started (see deploy/entrypoint.sh),
+so it cannot reliably verify on-chain params. For post-start verification, run:
+  python3 scripts/verify_v1_7_7_tier_pricing.py
 """
 
 import shutil

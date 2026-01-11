@@ -410,6 +410,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	// - Tier 1 (Trusted): 10 MIRAGE per 30 days
 	// - Tier 2 (Established): 20 MIRAGE per 30 days
 	// - Tier 3 (Distinguished): 30 MIRAGE per 30 days
+	// - SubscriptionPeriod: 43200 minutes (30 days)
 	// - Go-based log rotation removed (shell cronolog handles logging)
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.7.7-tier-pricing",
@@ -422,9 +423,16 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Update tier costs
+			// Update subscription period + tier costs
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			changed := false
+
+			// SubscriptionPeriod is in minutes (43200 = 30 days)
+			if params.SubscriptionPeriod != 43200 {
+				params.SubscriptionPeriod = 43200
+				changed = true
+				sdkCtx.Logger().Info("v1.7.7-tier-pricing: set subscription_period", "value", 43200)
+			}
 
 			// Ensure we have at least 4 tiers
 			if len(params.Tiers) >= 4 {

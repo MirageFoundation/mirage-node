@@ -41,7 +41,10 @@ If the upgrade requires filesystem/config cleanup on validators (not chain state
 - `deploy/migrations/*.py`
 
 Important:
-- **Do not change old `MIGRATION_KEY`s after they’ve shipped** unless you intentionally want them to run again and you understand the implications.
+- **Renaming the migration filename is safe** (ordering is by filename, tracking is by key).
+- **Changing `MIGRATION_KEY` changes what the system considers “already run”**:
+  - A new key will run even if an older version already ran (because it won’t be present in `~/.mirage/env/.migrations`).
+  - Only do this if the migration is truly idempotent and you *want* it to re-run.
 - Migrations run on container start via `deploy/entrypoint.sh`:
   - `python3 -m deploy.migrations --config-dir ~/.mirage/env`
 
