@@ -632,8 +632,28 @@ def check_indexer() -> ServiceStatus:
 
 def check_caddy() -> ServiceStatus:
     """Check Caddy web server status by actually making requests."""
+    # Try to get domain from env first, then from Caddyfile
     domain = os.environ.get("DOMAIN", "")
-    
+
+    # If not in env, read from Caddyfile (more reliable)
+    if not domain:
+        try:
+            with open("/etc/caddy/Caddyfile") as f:
+                content = f.read()
+                # Look for domain (not :80 or www.)
+                for line in content.splitlines():
+                    line = line.strip()
+                    # Skip :80, www., comments, empty lines
+                    if line.startswith(":") or line.startswith("www.") or line.startswith("#") or not line:
+                        continue
+                    # Match domain-like pattern at start of line (before {)
+                    match = re.match(r"^([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", line)
+                    if match:
+                        domain = match.group(1)
+                        break
+        except Exception:
+            pass
+
     # Strip protocol from domain if present
     clean_domain = domain
     if clean_domain.startswith("https://"):
@@ -1123,9 +1143,13 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         https_val = details.get("https")
         if https_val is not None:
             if isinstance(https_val, int) and https_val < 400:
-                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val} ✓{Colors.RESET}")
+                lines.append(
+                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val} ✓{Colors.RESET}"
+                )
             elif isinstance(https_val, int):
-                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_YELLOW}{https_val}{Colors.RESET}")
+                lines.append(
+                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_YELLOW}{https_val}{Colors.RESET}"
+                )
             else:
                 lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_RED}{https_val}{Colors.RESET}")
         elif not details.get("domain"):
