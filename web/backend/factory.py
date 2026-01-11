@@ -38,15 +38,10 @@ def create_app(init_runtime: bool = True) -> Flask:
     configure_logging()
     app = Flask(__name__)
 
-    mode = os.environ.get("MIRAGE_MODE", "main").strip().lower()
-    if mode == "main":
-        app.config["ENV"] = "production"
-        app.config["DEBUG"] = False
-        app.config["TESTING"] = False
-    else:
-        app.config["ENV"] = "development"
-        app.config["DEBUG"] = True
-        app.config["TESTING"] = False
+    # Always run in production mode
+    app.config["ENV"] = "production"
+    app.config["DEBUG"] = False
+    app.config["TESTING"] = False
 
     CORS(app)
 

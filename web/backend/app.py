@@ -20,13 +20,13 @@ app = create_app(init_runtime=True)
 
 if __name__ == "__main__":
     port = int(os.environ.get("BACKEND_PORT", 5000))
-    mode = os.environ.get("MIRAGE_MODE", "main").strip().lower()
-    host = os.environ.get("BACKEND_HOST", "127.0.0.1" if mode == "main" else "0.0.0.0")
-    logger().info(f"Starting Mirage backend on port {port} (development mode)")
+    # Bind to localhost by default, unless overridden (e.g. 0.0.0.0 for Docker)
+    host = os.environ.get("BACKEND_HOST", "127.0.0.1")
+    logger().info(f"Starting Mirage backend on port {port}")
     try:
         db_url = get_config().get_indexer_config().get("database_url", "")
     except Exception:
         db_url = ""
     logger().info(f"Database URL: {db_url}")
     logger().info("Note: For production, use Gunicorn via entrypoint.sh")
-    app.run(host=host, port=port, debug=(mode != "main"))
+    app.run(host=host, port=port, debug=False)

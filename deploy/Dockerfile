@@ -55,7 +55,6 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH=/usr/local/bin:/usr/bin:/bin
 ENV PYTHONPATH=/opt/mirage
-ENV MIRAGE_MODE=main
 ENV BACKEND_HOST=127.0.0.1
 ENV BACKEND_PORT=5000
 ENV TERM=xterm-256color

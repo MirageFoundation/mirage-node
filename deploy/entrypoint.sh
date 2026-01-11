@@ -73,7 +73,6 @@ if [ -z "${MIRAGE_INDEXER_DB_URL:-}" ]; then
 fi
 
 # Defaults if not provided
-: "${MIRAGE_MODE:=main}"
 : "${BACKEND_HOST:=127.0.0.1}"
 : "${BACKEND_PORT:=5000}"
 
