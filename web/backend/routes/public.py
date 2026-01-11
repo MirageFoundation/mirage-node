@@ -322,7 +322,7 @@ def reload_params():
     rid = next_request_id()
     try:
         rt = require_runtime()
-        load_params(rt.node_id, force=True)
+        load_params(force=True)
         params = expect_params()
         log_event(rid, "reload_params.success", params_keys=list(params.keys()))
         return jsonify({"status": "ok", "params": params})
@@ -1817,7 +1817,7 @@ def get_parameters():
         addr = request.args.get("address", default=None, type=str)
         last = _latest_block_hash()
         diff = _get_current_pow_difficulty()
-        op_addr = find_local_operator_address(require_runtime().node_id)
+        op_addr = find_local_operator_address()
         bal = _get_balance(addr) if addr else None
         log_event(rid, "get_parameters.ok", last=last[:8], diff=diff, operator=op_addr, addr=addr, bal=bal)
         payload: Dict[str, Any] = {"last_block_hash": last, "pow_difficulty": diff}
@@ -2218,7 +2218,7 @@ def get_supply_history():
         history = _get_cached_supply_history()
 
         # Get mint params for calculations
-        p = load_params(require_runtime().node_id, force=False)
+        p = load_params(force=False)
         mint_interval = int(p["mint_interval"])
         mint_quantity = int(p["mint_quantity"])
 
@@ -2316,7 +2316,7 @@ def get_config():
 
         # Load cached chain params
         try:
-            p = load_params(require_runtime().node_id, force=False)
+            p = load_params(force=False)
             max_username_size = p["max_username_size"]
             min_username_size = p["min_username_size"]
             max_topic_size = p["max_topic_size"]
@@ -2335,7 +2335,7 @@ def get_config():
         # Get current site's validator moniker
         validator_moniker = ""
         try:
-            valoper = find_local_operator_address(rt.node_id)
+            valoper = find_local_operator_address()
             if valoper:
                 possible_paths = [
                     "/opt/mirage/blockchain/miraged",
@@ -2372,8 +2372,8 @@ def get_config():
             "tiers": tiers,
             # Validator info (static per node)
             "validator_account_address": rt.validator_payer_addr,
-            "validator_operator_address": find_local_operator_address(rt.node_id),
-            "validator_consensus_address": find_local_consensus_address(rt.node_id),
+            "validator_operator_address": find_local_operator_address(),
+            "validator_consensus_address": find_local_consensus_address(),
             "validator_moniker": validator_moniker,
         }
         log_event(rid, "get_config.ok")

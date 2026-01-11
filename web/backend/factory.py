@@ -58,7 +58,7 @@ def create_app(init_runtime: bool = True) -> Flask:
         # Load chain params at startup, waiting for chain to be available
         logger().info("Loading chain params (waiting for chain if needed)...")
         rt = require_runtime()
-        load_params(rt.node_id)
+        load_params()
         logger().info("Chain params loaded successfully")
 
     return app

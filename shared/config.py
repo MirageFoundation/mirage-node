@@ -143,10 +143,8 @@ class MirageConfig:
                 return default
         return current
 
-    def get_node_config(self, node_id: int) -> Dict[str, Any]:
-        """Return single-node configuration (ignores node_id)."""
-        if node_id < 1:
-            node_id = 1
+    def get_node_config(self) -> Dict[str, Any]:
+        """Return node configuration."""
         home_path = os.path.join(str(Path.home() / ".mirage"), "main")
         p2p = int(self.get("ports", "p2p", default=26656))
         rpc = int(self.get("ports", "rpc", default=26657))
@@ -154,8 +152,7 @@ class MirageConfig:
         grpc = int(self.get("ports", "grpc", default=9090))
 
         return {
-            "id": 1,
-            "name": "node1",
+            "name": "main",
             "home": home_path,
             "ports": {"p2p": p2p, "rpc": rpc, "rest": rest, "grpc": grpc},
             "urls": {"rpc": f"http://127.0.0.1:{rpc}", "rest": f"http://127.0.0.1:{rest}", "grpc": f"127.0.0.1:{grpc}"},

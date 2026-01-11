@@ -71,13 +71,6 @@ def log_dir_for_component(component: str) -> str:
     return os.path.join(base_dir, component)
 
 
-def log_dir_for_node(node_id: int) -> str:
-    """Legacy function - redirects to log_dir_for_component for backwards compatibility."""
-    # For backwards compatibility, map node_id to component
-    # In production, node_id is typically 1 and logs go to ~/.mirage/logs/node/
-    return log_dir_for_component("node")
-
-
 class _StreamToLogger:
     def __init__(self, level: int) -> None:
         self._level = level
@@ -96,7 +89,6 @@ class _StreamToLogger:
 
 def configure_logging(
     component: str,
-    node_id: Optional[int] = None,
     level: int = logging.INFO,
     redirect_std: bool = True,
 ) -> str:
@@ -107,7 +99,6 @@ def configure_logging(
 
     Args:
         component: Name of the component (indexer, backend, referrals, deploy, etc.)
-        node_id: Deprecated, ignored. Kept for backwards compatibility.
         level: Logging level (default: INFO)
         redirect_std: Whether to redirect stdout/stderr to logging
 
@@ -225,4 +216,4 @@ def configure_logging(
         return os.path.join(_project_root(), "logs", f"{component}.log")
 
 
-__all__ = ["configure_logging", "log_dir_for_component", "log_dir_for_node"]
+__all__ = ["configure_logging", "log_dir_for_component"]

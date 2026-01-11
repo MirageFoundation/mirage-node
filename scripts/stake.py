@@ -90,13 +90,7 @@ def main():
         print(f"Binary not found: {bin_path}", file=sys.stderr)
         sys.exit(1)
 
-    mode = os.environ.get("MIRAGE_MODE", "main")
-    if mode == "main":
-        home = os.path.expanduser("~/.mirage/main")
-    elif mode == "uat":
-        home = os.path.expanduser("~/.mirage/uat")
-    else:
-        home = os.path.expanduser("~/.mirage/dev")
+    home = os.path.expanduser("~/.mirage/main")
 
     if not os.path.exists(home):
         print(f"Node home not found: {home}", file=sys.stderr)

@@ -3,15 +3,15 @@ from __future__ import annotations
 """Node and runtime helpers.
 
 Functions:
-- initialize_runtime(node_id): Resolve URLs, keys; verify gRPC.
+- initialize_runtime(): Resolve URLs, keys; verify gRPC.
 - require_runtime(): Return initialized runtime or raise.
-- assert_node_home_ready(node_id): Validate node directories/files.
-- get_rpc_url/get_grpc_url/get_grpc_target(node_id): URL helpers.
-- min_gas_price_umirage(node_id): Minimum gas price for umirage.
-- resolve_validator_payer_address(node_id): Fee payer address.
-- resolve_validator_pubkey_bytes(node_id): Validator pubkey bytes.
-- find_local_operator_address(node_id): miragevaloper address.
-- find_local_consensus_address(node_id): miragevalcons address.
+- assert_node_home_ready(): Validate node directories/files.
+- get_rpc_url/get_grpc_url/get_grpc_target(): URL helpers.
+- min_gas_price_umirage(): Minimum gas price for umirage.
+- resolve_validator_payer_address(): Fee payer address.
+- resolve_validator_pubkey_bytes(): Validator pubkey bytes.
+- find_local_operator_address(): miragevaloper address.
+- find_local_consensus_address(): miragevalcons address.
 - derive_address_from_pubkey(pubkey, hrp): Account bech32 address.
 """
 
@@ -37,7 +37,6 @@ KEYRING_BACKEND = get_config().get_keyring_backend()
 
 @dataclass
 class Runtime:
-    node_id: int
     rpc_url: str
     api_url: str
     grpc_url: str
@@ -49,9 +48,9 @@ class Runtime:
 _RUNTIME: Optional[Runtime] = None
 
 
-def assert_node_home_ready(node_id: int) -> None:
+def assert_node_home_ready() -> None:
     cfg = get_config()
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     if not os.path.isdir(home):
         raise RuntimeError(f"node home not found: {home}")
     must_files = [
@@ -66,22 +65,22 @@ def assert_node_home_ready(node_id: int) -> None:
         raise RuntimeError(f"missing keyring: {keyring_dir}")
 
 
-def get_rpc_url(node_id: int) -> str:
+def get_rpc_url() -> str:
     cfg = get_config()
-    return cfg.get_node_config(node_id)["urls"]["rpc"].rstrip("/")
+    return cfg.get_node_config()["urls"]["rpc"].rstrip("/")
 
 
-def get_api_url(node_id: int) -> str:
+def get_api_url() -> str:
     cfg = get_config()
-    return cfg.get_node_config(node_id)["urls"]["rest"].rstrip("/")
+    return cfg.get_node_config()["urls"]["rest"].rstrip("/")
 
 
-def get_grpc_url(node_id: int) -> str:
+def get_grpc_url() -> str:
     cfg = get_config()
-    derived = str(cfg.get_node_config(node_id)["urls"]["grpc"]).strip()
+    derived = str(cfg.get_node_config()["urls"]["grpc"]).strip()
     if not derived:
         raise RuntimeError("derived grpc url missing from config")
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     path = os.path.join(home, "config", "app.toml")
     with open(path, "rb") as f:
         data = _toml.load(f)
@@ -108,8 +107,8 @@ def get_grpc_url(node_id: int) -> str:
     return url
 
 
-def get_grpc_target(node_id: int) -> str:
-    url = get_grpc_url(node_id)
+def get_grpc_target() -> str:
+    url = get_grpc_url()
     if url.startswith("grpc+http://"):
         url = url[len("grpc+http://") :]
     if url.startswith("http://"):
@@ -119,9 +118,9 @@ def get_grpc_target(node_id: int) -> str:
     return url
 
 
-def min_gas_price_umirage(node_id: int) -> float:
+def min_gas_price_umirage() -> float:
     cfg = get_config()
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     path = os.path.join(home, "config", "app.toml")
     with open(path, "rb") as f:
         data = _toml.load(f)
@@ -140,9 +139,9 @@ def min_gas_price_umirage(node_id: int) -> float:
     raise RuntimeError("minimum-gas-prices must include umirage entry")
 
 
-def _get_node_consensus_pubkey_bytes(node_id: int) -> bytes:
+def _get_node_consensus_pubkey_bytes() -> bytes:
     cfg = get_config()
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     path = os.path.join(home, "config", "priv_validator_key.json")
     with open(path, "r") as f:
         data = json.load(f)
@@ -152,12 +151,12 @@ def _get_node_consensus_pubkey_bytes(node_id: int) -> bytes:
     return base64.b64decode(b64)
 
 
-def find_local_operator_address(node_id: int) -> str:
-    local_cons_pub = _get_node_consensus_pubkey_bytes(node_id)
+def find_local_operator_address() -> str:
+    local_cons_pub = _get_node_consensus_pubkey_bytes()
     import urllib.request as _url
     import json as _json
 
-    rpc = get_rpc_url(node_id)
+    rpc = get_rpc_url()
     url = f"{rpc}/validators"
     with _url.urlopen(url, timeout=2) as resp:
         data = _json.loads(resp.read().decode("utf-8"))
@@ -174,7 +173,7 @@ def find_local_operator_address(node_id: int) -> str:
     else:
         raise RuntimeError("local consensus key not found in current validator set")
 
-    addr = resolve_validator_payer_address(node_id)
+    addr = resolve_validator_payer_address()
     hrp, data5 = bech32_decode(addr)
     if not hrp or not data5:
         raise RuntimeError("invalid bech32 account address for validator key")
@@ -187,10 +186,10 @@ def find_local_operator_address(node_id: int) -> str:
     return bech32_encode("miragevaloper", data5_new)
 
 
-def find_local_consensus_address(node_id: int) -> str:
+def find_local_consensus_address() -> str:
     import hashlib as _hl
 
-    cons_pub = _get_node_consensus_pubkey_bytes(node_id)
+    cons_pub = _get_node_consensus_pubkey_bytes()
     if not cons_pub:
         raise RuntimeError("missing consensus pubkey bytes")
     h20 = _hl.sha256(cons_pub).digest()[:20]
@@ -200,9 +199,9 @@ def find_local_consensus_address(node_id: int) -> str:
     return bech32_encode("miragevalcons", data5)
 
 
-def resolve_validator_payer_address(node_id: int) -> str:
+def resolve_validator_payer_address() -> str:
     cfg = get_config()
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "miraged"))
     cmd = [bin_path, "keys", "list", "--output", "json", "--home", home, "--keyring-backend", KEYRING_BACKEND]
     out = subprocess.check_output(cmd, timeout=5).decode("utf-8").strip()
@@ -216,9 +215,9 @@ def resolve_validator_payer_address(node_id: int) -> str:
     raise RuntimeError("validator key not found in keyring")
 
 
-def resolve_validator_pubkey_bytes(node_id: int) -> bytes:
+def resolve_validator_pubkey_bytes() -> bytes:
     cfg = get_config()
-    home = cfg.get_node_config(node_id)["home"]
+    home = cfg.get_node_config()["home"]
     bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "miraged"))
     cmd = [
         bin_path,
@@ -273,19 +272,16 @@ def derive_address_from_pubkey(pubkey_bytes: bytes, hrp: str = "mirage") -> str:
     return bech32_encode(hrp, data5)
 
 
-def initialize_runtime(node_id: int | None = None) -> Runtime:
+def initialize_runtime() -> Runtime:
     global _RUNTIME
-    # Default to node 1 if not provided; actual home/ports come from central config
-    resolved_id = 1 if node_id is None else int(node_id)
-    assert_node_home_ready(resolved_id)
-    rpc_url = get_rpc_url(resolved_id)
-    api_url = get_api_url(resolved_id)
-    grpc_url = get_grpc_url(resolved_id)
-    grpc_target = get_grpc_target(resolved_id)
-    validator_payer_addr = resolve_validator_payer_address(resolved_id)
-    validator_pubkey_bytes = resolve_validator_pubkey_bytes(resolved_id)
+    assert_node_home_ready()
+    rpc_url = get_rpc_url()
+    api_url = get_api_url()
+    grpc_url = get_grpc_url()
+    grpc_target = get_grpc_target()
+    validator_payer_addr = resolve_validator_payer_address()
+    validator_pubkey_bytes = resolve_validator_pubkey_bytes()
     _RUNTIME = Runtime(
-        node_id=resolved_id,
         rpc_url=rpc_url,
         api_url=api_url,
         grpc_url=grpc_url,

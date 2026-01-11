@@ -56,9 +56,6 @@ EOF
     chmod 600 "$PV_KEY"
   fi
 
-  # Create marker file to prevent re-disabling on container restart
-  touch "$NODE_HOME/.validator_auto_enabled"
-  
   if [ "$RESTART_AFTER" = "--restart" ]; then
     # Restart the node process inside tmux pane 0
     SESSION="${SESSION:-mirage}"

@@ -1477,7 +1477,7 @@ def core_delete_post():
             return jsonify({"error": "node_catching_up"}), 503
         # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
         try:
-            load_params(require_runtime().node_id, force=False)
+            load_params(force=False)
         except Exception:
             pass
         data = request.get_json(force=True) or {}
@@ -2319,7 +2319,7 @@ def core_send_tokens():
             return jsonify({"error": "node_catching_up"}), 503
         # Ensure params cache is initialized for fee checks
         try:
-            load_params(require_runtime().node_id, force=False)
+            load_params(force=False)
         except Exception:
             pass
         data = request.get_json(force=True) or {}
@@ -2517,7 +2517,7 @@ def core_upgrade_level():
 
         # Backend precheck: ensure user has enough balance for the target tier's period fee
         try:
-            p = load_params(require_runtime().node_id, force=False)
+            p = load_params(force=False)
         except Exception:
             p = {}
         period_fee = 0

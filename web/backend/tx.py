@@ -29,7 +29,7 @@ from node import min_gas_price_umirage, require_runtime
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
     base_required = 0
     tx_size_ppb = _get_tx_size_cost_per_byte()
-    min_gas_price = min_gas_price_umirage(require_runtime().node_id)
+    min_gas_price = min_gas_price_umirage()
 
     def _txraw_len(gas_lim: int) -> int:
         fee_amt = int(_math.ceil(gas_lim * min_gas_price))
@@ -62,7 +62,7 @@ def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
 
 
 def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
-    min_gas_price = min_gas_price_umirage(require_runtime().node_id)
+    min_gas_price = min_gas_price_umirage()
     fee_amt = int(_math.ceil(int(gas_limit) * min_gas_price))
     fee = Fee(gas_limit=int(gas_limit))
     fee.amount.extend([Coin(denom="umirage", amount=str(fee_amt))])
