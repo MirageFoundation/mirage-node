@@ -236,7 +236,7 @@ echo "==> Uploading image..."
 # Optimization: avoid re-uploading the tarball if the remote already has the exact same bytes.
 # This only skips the SCP step (we still load/restart as usual).
 LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
-REMOTE_SHA="$(run_ssh "test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '{print \\$1}' || true")"
+REMOTE_SHA="$(run_ssh 'test -f /tmp/mirage-docker.tar.gz && sha256sum /tmp/mirage-docker.tar.gz | awk '\''{print $1}'\'' || echo ""')"
 if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" = "$LOCAL_SHA" ]; then
   echo "==> Remote tarball hash matches, skipping upload."
 else
