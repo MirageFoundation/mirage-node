@@ -247,13 +247,13 @@ type Params struct {
 	// min_topic_size is the minimum topic length
 	MinTopicSize uint64 `protobuf:"varint,37,opt,name=min_topic_size,json=minTopicSize,proto3" json:"min_topic_size,omitempty"`
 	// subscription_reserve_percent is the percentage of period fee escrowed as gas reserve (0-100)
-	// Default: 20 (20% of period fee goes to reserve, 80% burned)
+	// Default: 80 (80% of period fee goes to reserve, 20% burned)
 	SubscriptionReservePercent uint64 `protobuf:"varint,42,opt,name=subscription_reserve_percent,json=subscriptionReservePercent,proto3" json:"subscription_reserve_percent,omitempty"`
-	// relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per 1000 gas units)
-	// Default: 25 (equivalent to 0.025 umirage per gas). Set to match node's minimum-gas-prices.
+	// relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
+	// Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
 	RelayMinGasPrice uint64 `protobuf:"varint,43,opt,name=relay_min_gas_price,json=relayMinGasPrice,proto3" json:"relay_min_gas_price,omitempty"`
 	// relay_max_gas_fee is the maximum gas fee that can be deducted per relayed transaction (in umirage)
-	// Default: 5000 (0.005 MIRAGE). Protects users from unexpectedly high fees.
+	// Default: 500,000,000 (500 MIRAGE). Protects users from unexpectedly high fees.
 	RelayMaxGasFee uint64 `protobuf:"varint,44,opt,name=relay_max_gas_fee,json=relayMaxGasFee,proto3" json:"relay_max_gas_fee,omitempty"`
 	// max_envelope_age is the maximum age in seconds for envelope_timestamp.
 	// Transactions with envelope_timestamp older than (now - max_envelope_age) are rejected.

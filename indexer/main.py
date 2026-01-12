@@ -62,12 +62,12 @@ class Indexer:
 
         self.db = DatabaseManager(db_url)
         self.chain = ChainClient(jsonrpc_url)
-        
+
         # Run pending migrations before processing begins
         migration_count = run_migrations(self.db, self.chain)
         if migration_count > 0:
             logger.info(f"Completed {migration_count} migrations")
-        
+
         self.processor = MessageProcessor(
             self.db,
             self.chain,
@@ -79,6 +79,7 @@ class Indexer:
         self.ws = None
         self._seen_txs: set[str] = set()
         self._proposal_cache: dict[int, list[dict]] = {}
+        self._skipped_proposals: set[int] = set()  # Track proposals we've already logged as skipped
         self._catch_up_mode: bool = False
         self._last_height = self.db.get_last_height()
 
@@ -307,6 +308,9 @@ class Indexer:
 
         passed_ids = self.processor.extract_passed_proposals(events)
         for proposal_id in passed_ids:
+            # Skip proposals we've already tried and failed to resolve
+            if proposal_id in self._skipped_proposals:
+                continue
             try:
                 messages = self._proposal_cache.pop(proposal_id, None)
                 if not messages:
@@ -319,6 +323,7 @@ class Indexer:
                                     "Skipping proposal %s - contains only governance-only messages (not tracked by indexer)",
                                     proposal_id,
                                 )
+                                self._skipped_proposals.add(proposal_id)
                                 continue
                             try:
                                 messages = self.chain.fetch_submit_proposal_messages_via_tx_search(
@@ -334,6 +339,7 @@ class Indexer:
                                     grpc_err,
                                     tx_err,
                                 )
+                                self._skipped_proposals.add(proposal_id)
                                 continue
                     else:
                         try:
@@ -352,6 +358,7 @@ class Indexer:
                                         "Skipping proposal %s - contains only governance-only messages (not tracked by indexer)",
                                         proposal_id,
                                     )
+                                    self._skipped_proposals.add(proposal_id)
                                     continue
                                 logger.warning(
                                     "Skipping proposal %s - unable to resolve messages (tx_search error: %s, gRPC error: %s)",
@@ -359,6 +366,7 @@ class Indexer:
                                     tx_err,
                                     grpc_err,
                                 )
+                                self._skipped_proposals.add(proposal_id)
                                 continue
 
                 for entry in messages or []:

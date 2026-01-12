@@ -165,7 +165,7 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'cd /root/.mirage && tar czf /tmp/main.tgz " "node/snapshot " "node/config'",
+            f"ssh {conn} 'cd /root/.mirage && tar czf /tmp/main.tgz " "node/snapshot " "node/config " "env/.migrations'",
         ]
     )
 
@@ -231,6 +231,13 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
     if indexer_sql.exists():
         status("Copying PostgreSQL indexer dump...")
         run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/node.clone/indexer.sql"])
+
+    # Copy .migrations file to preserve deploy migration state
+    migrations_file = extract_dir / "env" / ".migrations"
+    if migrations_file.exists():
+        status("Copying .migrations file...")
+        run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/env"])
+        run(["bash", "-lc", f"docker cp '{migrations_file}' mirage:/root/.mirage/env/.migrations"])
 
     run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/node.clone || true"])
 
@@ -380,7 +387,7 @@ rm -rf "$PG_DATA_DIR"
 
 mkdir -p "$PG_DATA_DIR" "$PG_LOG_DIR"
 chmod o+x /root /root/.mirage /root/.mirage/node /root/.mirage/node/data /root/.mirage/logs
-chown postgres:postgres "$PG_DATA_DIR" "$PG_LOG_DIR"
+chown -R postgres:postgres "$PG_DATA_DIR" "$PG_LOG_DIR"
 chmod 700 "$PG_DATA_DIR"
 chmod 755 "$PG_LOG_DIR"
 
@@ -395,6 +402,8 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
+su - postgres -c "psql -c \\"DROP DATABASE IF EXISTS mirage;\\""
+su - postgres -c "psql -c \\"DROP ROLE IF EXISTS mirage;\\""
 su - postgres -c "psql -c \\"CREATE ROLE mirage WITH LOGIN PASSWORD 'mirage';\\""
 su - postgres -c "psql -c \\"CREATE DATABASE mirage OWNER mirage;\\""
 """
