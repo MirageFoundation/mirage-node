@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.7.9-node-home",
+                "name": "v1.8.0-economics",
                 "height": "T+50",
-                "info": "DefaultNodeHome changed from main to node, removes backward-compat symlink"
+                "info": "Major economics rebalancing for 10,000x token multiplier - updates relay fees, mint quantity, tier pricing, and gov deposits"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.7.9-node-home",
-    "summary": "Changes the default node home directory from ~/.mirage/main/ to ~/.mirage/node/. The backward-compatibility symlink (main -> node) created in v1.7.8 is removed. This completes the directory restructuring started in v1.7.8.",
+    "title": "Upgrade: v1.8.0-economics",
+    "summary": "Phase 2 of the Economics v2.0 upgrade. This upgrade rebalances all economic parameters for the 10,000x token multiplier applied in Phase 1.\n\nCore module changes:\n- RelayMinGasPrice: 25 → 5000 (now umirage per gas, removes /1000 divisor)\n- RelayMaxGasFee: 5,000 → 500,000,000 (500 MIRAGE cap per tx)\n- SubscriptionReservePercent: 40% → 80% (20% burned, 80% to gas reserve)\n- MintQuantity: 100,000 → 350,000,000 (350 MIRAGE per 10min)\n- Tier 1 (Trusted): 10M → 100B umirage ($1/mo at $0.00001/MIRAGE)\n- Tier 2 (Established): 20M → 200B umirage ($2/mo)\n- Tier 3 (Distinguished): 30M → 300B umirage ($3/mo)\n\nGovernance module changes:\n- min_deposit: 10M → 500B umirage ($5 at $0.00001/MIRAGE)\n- expedited_min_deposit: 10M → 1T umirage ($10)\n\nBINARY REQUIREMENT: All validators must update to the v1.8.0 binary AND set minimum-gas-prices = \"5000umirage\" in app.toml BEFORE the upgrade height. The node will fail to start if this is not configured correctly.\n\nSee docs/economics_v2_upgrade.md for the complete upgrade plan.",
     "expedited": true
 }
