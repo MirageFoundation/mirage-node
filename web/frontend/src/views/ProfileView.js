@@ -16,6 +16,7 @@ import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollow
 import { tooltipStyles } from "../components/Tooltip";
 import { useTxStatus } from "../utils/useTxStatus";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
+import { formatMirage } from "../utils/formatters";
 
 const Row = styled.div`
     display: grid;
@@ -795,13 +796,6 @@ export default function ProfileView({ state }) {
     }, [recentHasMore, isLoadingRecentPosts]);
 
     // no copy buttons requested; show full values with wrapping
-
-    const formatMirage = (umirage) => {
-        const n = Number(umirage);
-        if (!isFinite(n)) return '0.000000';
-        const v = n / 1_000_000;
-        return v.toFixed(6);
-    };
 
     const shortenAddress = (addr) => {
         if (!addr) return '';

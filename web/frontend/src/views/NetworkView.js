@@ -8,6 +8,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
+import { formatMirage } from "../utils/formatters";
 
 const Row = styled.div`
     display: grid;
@@ -451,15 +452,6 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
             </ChartLabel>
         </ChartWrapper>
     );
-}
-
-function formatMirage(umirage) {
-    const n = Number(umirage);
-    if (!isFinite(n)) return '0.000000';
-    const v = n / 1_000_000;
-    const [intPart, decPart] = v.toFixed(6).split('.');
-    const formattedInt = Number(intPart).toLocaleString('en-US');
-    return `${formattedInt}.${decPart}`;
 }
 
 export default function NetworkView({ state }) {

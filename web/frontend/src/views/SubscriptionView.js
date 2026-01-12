@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import styled from 'styled-components';
 import { useLocation } from 'react-router-dom';
 import Storage from '../utils/Storage';
+import { formatMirage, formatMirageCompact } from '../utils/formatters';
 import Api from '../lib/api';
 import { upgradeLevel as txUpgradeLevel, setAutoRenewal as txSetAutoRenewal } from '../utils/tx';
 import transactionHandler from '../utils/TransactionHandler';
@@ -740,21 +741,8 @@ export default function SubscriptionView({ state }) {
 
     const handleCancelAutoRenew = handleToggleAutoRenew;
 
-    const formatMirage = (umirage) => {
-        const n = Number(umirage);
-        if (!isFinite(n)) return '0.000000';
-        return (n / 1_000_000).toFixed(6);
-    };
-
     const canAfford = (tier) => {
         return balance >= tier.periodFeeUmirage;
-    };
-
-    const formatFee = (umirage) => {
-        const mirage = umirage / 1_000_000;
-        if (mirage === 0) return '0';
-        if (mirage >= 1) return mirage.toFixed(mirage % 1 === 0 ? 0 : 2);
-        return mirage.toFixed(2);
     };
 
     const buildTierDetails = (tier, periodLabel) => {
@@ -763,7 +751,7 @@ export default function SubscriptionView({ state }) {
         if (tier.periodFeeUmirage === 0) {
             details.push('Free tier. No MIRAGE needed to keep this plan active.');
         } else {
-            const price = `${formatFee(tier.periodFeeUmirage)} MIRAGE`;
+            const price = `${formatMirageCompact(tier.periodFeeUmirage)} MIRAGE`;
             details.push(`Subscription price: ${price} every ${periodLabel}.`);
         }
 
@@ -911,7 +899,7 @@ export default function SubscriptionView({ state }) {
         if (txInFlightRef.current) return;
         if (tier.level === userLevel) return;
         if (tier.level > 0 && !canAfford(tier)) {
-            setError(`Insufficient balance. You need ${formatFee(tier.periodFeeUmirage)} MIRAGE.`);
+            setError(`Insufficient balance. You need ${formatMirageCompact(tier.periodFeeUmirage)} MIRAGE.`);
             return;
         }
 
@@ -1042,7 +1030,7 @@ export default function SubscriptionView({ state }) {
                                                         {tier.periodFeeUmirage === 0 ? (
                                                             'Free'
                                                         ) : (
-                                                            <>{formatFee(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>
+                                                            <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>
                                                         )}
                                                     </TierPrice>
                                                     <TierFeatures $color={color}>
@@ -1193,7 +1181,7 @@ Not directly spendable and will get burned if not used.`}>
                                                                 {tier.periodFeeUmirage === 0 ? (
                                                                     'Free'
                                                                 ) : (
-                                                                    <>{formatFee(tier.periodFeeUmirage)}<span>MIRAGE / {periodLabel}</span></>
+                                                                    <>{formatMirageCompact(tier.periodFeeUmirage)} <span>MIRAGE / {periodLabel}</span></>
                                                                 )}
                                                             </TierPrice>
 
