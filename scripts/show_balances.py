@@ -4,8 +4,14 @@ Display liquid and staked balances for ALL live accounts on-chain (no local file
 with username (profile) when available.
 
 Optimized for speed: uses CLI commands directly with high concurrency.
+
+Usage:
+    python3 scripts/show_balances.py                    # Show all accounts
+    python3 scripts/show_balances.py --min 100          # Only show accounts with >= 100 MIRAGE total
+    python3 scripts/show_balances.py --min 1000         # Only show accounts with >= 1000 MIRAGE total
 """
 
+import argparse
 import json
 import base64
 import hashlib
@@ -18,6 +24,9 @@ from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psycopg
+
+# 1 MIRAGE = 1,000,000 umirage
+UMIRAGE_PER_MIRAGE = 1_000_000
 
 # Ensure shared/ is importable
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -57,6 +66,12 @@ def format_number(num_str: str) -> str:
         return f"{int(num_str):,}"
     except ValueError:
         return num_str
+
+
+def format_mirage(umirage: int) -> str:
+    """Format umirage amount as MIRAGE with 1 decimal place."""
+    mirage = umirage / UMIRAGE_PER_MIRAGE
+    return f"{mirage:,.1f}"
 
 
 def run_cli_command(cmd: List[str], timeout: int = 30) -> Optional[str]:
@@ -420,7 +435,27 @@ def build_well_known_usernames(hrp: str = "mirage") -> Dict[str, str]:
 
 
 def main():
-    print("==================== All Account Balances ===================")
+    parser = argparse.ArgumentParser(
+        description="Display liquid and staked balances for all accounts on-chain"
+    )
+    parser.add_argument(
+        "--min", 
+        type=float, 
+        default=0,
+        help="Minimum total balance in MIRAGE to display (default: 0, show all)"
+    )
+    parser.add_argument(
+        "--rpc",
+        type=str,
+        default="tcp://127.0.0.1:26657",
+        help="RPC endpoint (default: tcp://127.0.0.1:26657)"
+    )
+    args = parser.parse_args()
+    
+    min_balance_umirage = int(args.min * UMIRAGE_PER_MIRAGE)
+    
+    if args.min > 0:
+        print(f"Showing accounts with >= {args.min:,.1f} MIRAGE", file=sys.stderr)
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     bin_path = os.path.join(root_dir, "blockchain", "miraged")
@@ -429,29 +464,21 @@ def main():
     if not os.path.exists(bin_path):
         bin_path = "miraged"
 
-    rpc_url = "tcp://127.0.0.1:26657"
+    rpc_url = args.rpc
     denom = "umirage"
 
-    print("Querying denom owners...", end="", flush=True)
     owners = query_denom_owners_cli(bin_path, rpc_url, denom)
     owners = [o for o in owners if is_valid_address(o.get("address", ""))]
     owners.sort(key=lambda x: x["address"])
 
-    print(f" found {len(owners)} accounts")
-
     if not owners:
-        print("No accounts found on the chain.")
+        print("No accounts found.", file=sys.stderr)
         sys.exit(0)
 
-    print(" Querying validators...", end="", flush=True)
     validators = query_validators_cli(bin_path, rpc_url)
     validator_moniker_by_account = {
         v["account"].lower(): normalize_moniker(v.get("moniker") or "") for v in validators if v.get("account")
     }
-    print(
-        f"[DEBUG] Found {len(validators)} validators, monikers: {list(validator_moniker_by_account.values())}",
-        flush=True,
-    )
 
     # Determine which addresses still need usernames (no moniker available)
     need_username_lower: set[str] = set()
@@ -463,20 +490,16 @@ def main():
         if not moniker:
             need_username_lower.add(addr)
 
-    print(" Loading usernames (only for non-validator accounts or missing monikers)...", end="", flush=True)
     usernames: Dict[str, str] = {}
-    db_count = 0
-    chain_count = 0
     try:
         db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "").strip()
-        print(f"\n[DEBUG] DB URL configured: {bool(db_url)}", flush=True)
         if db_url and need_username_lower:
             conn = psycopg.connect(db_url, autocommit=True)
             cur = conn.cursor()
             chunk: List[str] = []
 
             def _flush_chunk() -> None:
-                nonlocal chunk, db_count
+                nonlocal chunk
                 if not chunk:
                     return
                 placeholders = ",".join(["%s"] * len(chunk))
@@ -490,9 +513,8 @@ def main():
                             uname_str = str(uname).strip() if uname else ""
                             if uname_str:
                                 usernames[addr.lower()] = uname_str
-                                db_count += 1
-                        except Exception as e:
-                            print(f"\n[DEBUG] Error processing DB username: {e}", flush=True)
+                        except Exception:
+                            pass
                 chunk = []
 
             for o in owners:
@@ -503,30 +525,23 @@ def main():
                         _flush_chunk()
             _flush_chunk()
             conn.close()
-            print(f"[DEBUG] Loaded {db_count} usernames from DB", flush=True)
-    except Exception as e:
-        print(f"\n[DEBUG] DB load error: {e}", flush=True)
+    except Exception:
+        pass
 
     onchain = load_profiles_from_chain("http://127.0.0.1:26657")
     if onchain and need_username_lower:
         for a, u in onchain.items():
             if a in need_username_lower and a not in usernames and u:
                 usernames[a] = str(u).strip()
-                chain_count += 1
-    print(f"[DEBUG] Loaded {chain_count} usernames from chain, total usernames: {len(usernames)}", flush=True)
 
     official_names_by_addr = build_well_known_usernames()
     official_lower = {k.lower(): v for k, v in official_names_by_addr.items()}
-    print(f"[DEBUG] Official names: {list(official_lower.values())}", flush=True)
-
-    print(" Querying staked balances...", end="", flush=True)
     # Only validators can stake, so only query delegations for validator accounts
     validator_accounts = {v["account"].lower() for v in validators if v.get("account")}
     validator_addresses = [v["account"] for v in validators if v.get("account") and is_valid_address(v["account"])]
 
     staked_map = {}
     if validator_addresses:
-        # Query delegations for each validator account
         with ThreadPoolExecutor(max_workers=min(16, len(validator_addresses))) as ex:
             futs = {ex.submit(query_delegations_cli, bin_path, rpc_url, addr): addr for addr in validator_addresses}
             for fut in as_completed(futs):
@@ -536,9 +551,6 @@ def main():
                     staked_map[addr.lower()] = amt
                 except Exception:
                     staked_map[addr.lower()] = 0
-
-    print(" Done")
-    print()
 
     account_data: List[Dict[str, Any]] = []
     for item in owners:
@@ -552,11 +564,6 @@ def main():
             uname_db = usernames.get(addr_l, "")
             uname_official = official_lower.get(addr_l, "")
             uname = uname_db or uname_official
-            if not uname:
-                print(
-                    f"[DEBUG] No username for {address}: db={uname_db}, official={uname_official}, validator=",
-                    flush=True,
-                )
             display_name = normalize_username(uname)
         staked_amt = int(staked_map.get(addr_l, 0) or 0)
         account_data.append(
@@ -568,18 +575,51 @@ def main():
             }
         )
 
-    account_data.sort(key=lambda x: x["username"] or "")
+    # Filter by minimum balance
+    if min_balance_umirage > 0:
+        account_data = [
+            a for a in account_data 
+            if (int(a["liquid"]) + int(a["staked"])) >= min_balance_umirage
+        ]
+    
+    # Sort by total balance descending
+    account_data.sort(key=lambda x: int(x["liquid"]) + int(x["staked"]), reverse=True)
 
-    print(f"{'Address':<45} | {'Username':<35} | {'Liquid (' + denom + ')':>20} | {'Staked (' + denom + ')':>18}")
-    print("-" * 127)
+    print()
+    print(f"{'Address':<45} | {'Username':<35} | {'Liquid (MIRAGE)':>18} | {'Staked (MIRAGE)':>18} | {'Total':>18}")
+    print("-" * 140)
 
+    total_liquid = 0
+    total_staked = 0
     for account in account_data:
-        liquid_formatted = format_number(account["liquid"])
-        staked_formatted = f"{int(account['staked']):,}"
+        liquid = int(account["liquid"])
+        staked = int(account["staked"])
+        total = liquid + staked
+        total_liquid += liquid
+        total_staked += staked
+        
+        liquid_formatted = format_mirage(liquid)
+        staked_formatted = format_mirage(staked)
+        total_formatted = format_mirage(total)
         display_name = account["username"] or "-"
-        print(f"{account['address']:<45} | {display_name:<35} | {liquid_formatted:>20} | {staked_formatted:>18}")
+        print(
+            f"{account['address']:<45} | "
+            f"{display_name:<35} | "
+            f"{liquid_formatted:>18} | "
+            f"{staked_formatted:>18} | "
+            f"{total_formatted:>18}"
+        )
 
-    print("=" * 127)
+    print("-" * 140)
+    print(
+        f"{'TOTAL':<45} | "
+        f"{'':<35} | "
+        f"{format_mirage(total_liquid):>18} | "
+        f"{format_mirage(total_staked):>18} | "
+        f"{format_mirage(total_liquid + total_staked):>18}"
+    )
+    print("=" * 140)
+    print(f"Accounts shown: {len(account_data)}")
 
 
 if __name__ == "__main__":

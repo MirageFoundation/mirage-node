@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import getpass
 import json
+import re
 import subprocess
 import sys
 import time
@@ -76,6 +77,74 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
         print(f"Error querying RPC {rpc_endpoint}: {result.stderr}", file=sys.stderr)
         sys.exit(1)
     return json.loads(result.stdout)
+
+
+def estimate_gas(tx_cmd: list[str], rpc_endpoint: str, buffer_percent: float = 50.0) -> int:
+    """Simulate a transaction to estimate gas needed, then add buffer.
+    
+    Args:
+        tx_cmd: The transaction command (without --gas, --fees, --yes flags)
+        rpc_endpoint: RPC endpoint to use
+        buffer_percent: Percentage buffer to add (default 50%)
+    
+    Returns:
+        Estimated gas with buffer applied
+    """
+    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    
+    # Build simulation command with --dry-run and --gas auto
+    sim_cmd = [bin_path] + tx_cmd + [
+        "--node", rpc_endpoint,
+        "--gas", "auto",
+        "--dry-run",
+        "-o", "json",
+    ]
+    
+    print(f"==> Simulating transaction to estimate gas...", file=sys.stderr)
+    
+    if _is_local_mode:
+        # For local mode, run via docker
+        sim_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + tx_cmd + [
+            "--node", "tcp://127.0.0.1:26657",
+            "--gas", "auto", 
+            "--dry-run",
+            "-o", "json",
+        ]
+    
+    result = subprocess.run(sim_cmd, capture_output=True, text=True, timeout=30)
+    
+    # Parse gas from output - look for gas_info in JSON or "gas estimate:" in text
+    gas_used = 0
+    
+    # Try JSON parsing first
+    try:
+        data = json.loads(result.stdout)
+        if "gas_info" in data:
+            gas_used = int(data["gas_info"].get("gas_used", 0))
+        elif "gas_used" in data:
+            gas_used = int(data["gas_used"])
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    # Fallback: parse text output for "gas estimate: XXXXX"
+    if gas_used == 0:
+        import re
+        combined = result.stdout + result.stderr
+        match = re.search(r"gas estimate:\s*(\d+)", combined)
+        if match:
+            gas_used = int(match.group(1))
+    
+    if gas_used == 0:
+        print(f"FATAL: Could not estimate gas for transaction", file=sys.stderr)
+        print(f"  stdout: {result.stdout[:500]}", file=sys.stderr)
+        print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Add buffer
+    gas_with_buffer = int(gas_used * (1 + buffer_percent / 100))
+    print(f"  Gas estimate: {gas_used}, with {buffer_percent}% buffer: {gas_with_buffer}", file=sys.stderr)
+    
+    return gas_with_buffer
 
 
 def run_with_pexpect(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
@@ -634,22 +703,37 @@ def main():
             try:
                 balance_result = query_json_rpc(rpc_endpoint, ["q", "bank", "balances", faucet_addr])
                 balances = balance_result.get("balances", [])
-                total_needed = 1275000  # 1000000 deposit + 275000 fees
+                
+                # Calculate required balance: deposit + estimated gas (with buffer)
+                if proposal_json is None:
+                    print("FATAL: proposal_json not loaded", file=sys.stderr)
+                    sys.exit(1)
+                if "deposit" not in proposal_json:
+                    print("FATAL: proposal JSON missing 'deposit' field", file=sys.stderr)
+                    sys.exit(1)
+                deposit_str = proposal_json["deposit"]
+                deposit_amount = int(re.sub(r"[^0-9]", "", deposit_str))
+                if deposit_amount <= 0:
+                    print(f"FATAL: invalid deposit amount: {deposit_str}", file=sys.stderr)
+                    sys.exit(1)
+                estimated_submit_gas = 500000  # Conservative estimate, will be recalculated before submit
+                total_needed = deposit_amount + estimated_submit_gas
+                
                 if balances:
                     amt_str = balances[0].get("amount", "0")
                     denom = balances[0].get("denom", "")
                     amt_int = int(amt_str) if amt_str.isdigit() else 0
-                    print(f"  Balance: {amt_int}{denom}")
+                    print(f"  Balance: {amt_int:,} {denom}")
                     if amt_int < total_needed:
                         print(f"\nERROR: Insufficient balance!", file=sys.stderr)
                         print(f"  Account: {faucet_addr}", file=sys.stderr)
-                        print(f"  Current: {amt_int}{denom}", file=sys.stderr)
-                        print(f"  Required: {total_needed}umirage (1000000 deposit + 275000 fees)", file=sys.stderr)
+                        print(f"  Current: {amt_int:,} umirage", file=sys.stderr)
+                        print(f"  Required: ~{total_needed:,} umirage ({deposit_amount:,} deposit + ~{estimated_submit_gas:,} gas)", file=sys.stderr)
                         print(f"  Please fund the account before submitting proposals.", file=sys.stderr)
                         return 1
                 else:
                     print(f"  WARNING: Account {faucet_addr} has no balance!")
-                    print(f"  Required: {total_needed}umirage (1000000 deposit + 275000 fees)")
+                    print(f"  Required: ~{total_needed:,} umirage ({deposit_amount:,} deposit + ~{estimated_submit_gas:,} gas)")
                     print(f"  Please fund the account before submitting proposals.")
                     return 1
             except Exception as e:
@@ -705,6 +789,15 @@ def main():
         subprocess.run(["docker", "cp", str(proposal_file), f"{LOCAL_CONTAINER}:{container_proposal_path}"], check=True)
         proposal_path_for_cmd = container_proposal_path
 
+    # Estimate gas for proposal submission
+    estimate_cmd = [
+        "tx", "gov", "submit-proposal", proposal_path_for_cmd,
+        "--from", FAUCET_ACCOUNT,
+        "--keyring-backend", get_keyring_backend(),
+        "--home", get_keyring_home(),
+    ]
+    estimated_gas = estimate_gas(estimate_cmd, rpc_endpoint, buffer_percent=50.0)
+    
     submit_cmd = [
         bin_path,
         "tx",
@@ -722,9 +815,9 @@ def main():
         "--broadcast-mode",
         "sync",
         "--gas",
-        "275000",
+        str(estimated_gas),
         "--fees",
-        "275000umirage",
+        f"{estimated_gas}umirage",
         "--yes",
     ]
 
@@ -738,18 +831,55 @@ def main():
             print("No output captured. This might indicate the command failed silently.", file=sys.stderr)
         sys.exit(1)
 
-    print("✓ Proposal submitted (check output above for txhash)")
-    time.sleep(5)
+    # Extract txhash from output and verify transaction succeeded
+    txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
+    if txhash_match:
+        txhash = txhash_match.group(1)
+        print(f"Transaction hash: {txhash}")
+        print("Waiting for transaction to be included in a block...")
+        time.sleep(5)
+        
+        # Query transaction to verify it succeeded
+        try:
+            tx_result = query_json_rpc(rpc_endpoint, ["q", "tx", txhash])
+            tx_code = tx_result.get("code", 0)
+            if tx_code != 0:
+                raw_log = tx_result.get("raw_log", "unknown error")
+                print(f"\nERROR: Transaction FAILED on-chain!", file=sys.stderr)
+                print(f"  Code: {tx_code}", file=sys.stderr)
+                print(f"  Error: {raw_log}", file=sys.stderr)
+                sys.exit(1)
+            print("✓ Transaction confirmed on-chain")
+        except Exception as e:
+            print(f"Warning: Could not verify transaction: {e}", file=sys.stderr)
+    else:
+        print("Warning: Could not extract txhash from output", file=sys.stderr)
+        time.sleep(5)
 
-    # Get proposal ID (via RPC)
-    proposals = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
+    # Get proposal ID (via RPC) - get count before to detect new proposal
+    proposals_before = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
+    proposals_list = proposals_before.get("proposals", [])
 
-    if not proposals.get("proposals"):
+    if not proposals_list:
         print("No proposals found", file=sys.stderr)
         return 1
 
-    proposal_id = proposals["proposals"][-1]["id"]
-    proposal = proposals["proposals"][-1]
+    proposal_id = proposals_list[-1]["id"]
+    proposal = proposals_list[-1]
+    
+    # Verify this is actually our proposal by checking the title
+    if proposal_json is None:
+        print("FATAL: proposal_json not available for verification", file=sys.stderr)
+        sys.exit(1)
+    if "title" not in proposal_json:
+        print("FATAL: proposal JSON missing 'title' field", file=sys.stderr)
+        sys.exit(1)
+    expected_title = proposal_json["title"]
+    if proposal.get("title") != expected_title:
+        print(f"\nWARNING: Latest proposal title doesn't match!", file=sys.stderr)
+        print(f"  Expected: {expected_title}", file=sys.stderr)
+        print(f"  Found: {proposal.get('title')}", file=sys.stderr)
+        print("  The proposal submission may have failed silently.", file=sys.stderr)
 
     print(f"\n{'=' * 80}")
     print(f"PROPOSAL #{proposal_id}")
@@ -804,6 +934,15 @@ def main():
             if not _is_local_mode:
                 print("==> You will be prompted for keyring password (OS backend)")
 
+            # Estimate gas for deposit
+            deposit_estimate_cmd = [
+                "tx", "gov", "deposit", str(proposal_id), f"{additional_needed}umirage",
+                "--from", FAUCET_ACCOUNT,
+                "--keyring-backend", get_keyring_backend(),
+                "--home", get_keyring_home(),
+            ]
+            deposit_gas = estimate_gas(deposit_estimate_cmd, rpc_endpoint, buffer_percent=50.0)
+
             deposit_cmd = [
                 bin_path,
                 "tx",
@@ -822,9 +961,9 @@ def main():
                 "--broadcast-mode",
                 "sync",
                 "--gas",
-                "200000",
+                str(deposit_gas),
                 "--fees",
-                "200000umirage",
+                f"{deposit_gas}umirage",
                 "--yes",
             ]
 
@@ -879,18 +1018,31 @@ def main():
                 continue
             account_addr = addr_result.stdout.strip()
 
-            # Check if account exists on-chain by checking if it has any balance
+            # Check if account has enough balance for voting fees
             balance_result = query_json_rpc(rpc_endpoint, ["q", "bank", "balances", account_addr])
             balances = balance_result.get("balances", []) if balance_result else []
 
-            # Account exists if it has any balance (even 0 is stored as an entry)
-            # Or we can check total supply which should be non-empty for initialized accounts
+            # Estimate ~300,000 umirage needed for voting (with buffer)
+            min_vote_fee = 300000
+            
             if balances and len(balances) > 0:
-                valid_validator_accounts.append(account_name)
-                print(f"✓ {account_name} ({account_addr[:20]}...) exists on-chain")
+                umirage_balance = 0
+                for b in balances:
+                    if b.get("denom") == "umirage":
+                        umirage_balance = int(b.get("amount", "0"))
+                        break
+                
+                if umirage_balance >= min_vote_fee:
+                    valid_validator_accounts.append(account_name)
+                    print(f"✓ {account_name} ({account_addr[:20]}...) balance: {umirage_balance:,} umirage")
+                else:
+                    print(
+                        f"⊘ Skipping {account_name} ({account_addr[:20]}...) - "
+                        f"insufficient balance: {umirage_balance:,} < {min_vote_fee:,} umirage needed for vote"
+                    )
             else:
                 print(
-                    f"⊘ Skipping {account_name} ({account_addr[:20]}...) - not initialized on-chain (no balance record)"
+                    f"⊘ Skipping {account_name} ({account_addr[:20]}...) - no balance on-chain"
                 )
         except Exception as e:
             print(f"⊘ Skipping {account_name} - error checking account: {e}")
@@ -900,6 +1052,16 @@ def main():
         sys.exit(1)
 
     print(f"\nVoting with {len(valid_validator_accounts)} validator account(s)...")
+
+    # Estimate gas for voting once (same for all validators)
+    first_voter = valid_validator_accounts[0]
+    vote_estimate_cmd = [
+        "tx", "gov", "vote", str(proposal_id), "yes",
+        "--from", first_voter,
+        "--keyring-backend", get_keyring_backend(),
+        "--home", get_keyring_home(),
+    ]
+    vote_gas = estimate_gas(vote_estimate_cmd, rpc_endpoint, buffer_percent=50.0)
 
     # Vote with all valid validator accounts
     for account_name in valid_validator_accounts:
@@ -925,9 +1087,9 @@ def main():
             "--broadcast-mode",
             "sync",
             "--gas",
-            "200000",
+            str(vote_gas),
             "--fees",
-            "200000umirage",
+            f"{vote_gas}umirage",
             "--yes",
         ]
 
