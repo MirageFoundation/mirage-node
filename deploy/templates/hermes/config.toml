@@ -50,7 +50,7 @@ clock_drift = '5s'
 max_block_time = '30s'
 trusting_period = '14days'
 trust_threshold = '2/3'
-gas_price = { price = 0.025, denom = 'umirage' }
+gas_price = { price = 5000, denom = 'umirage' }
 address_type = { derivation = 'cosmos' }
 
 [chains.packet_filter]

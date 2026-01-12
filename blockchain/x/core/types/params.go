@@ -6,6 +6,7 @@ import (
 
 // DefaultTiers returns the default tier configurations.
 // Index 0 = Free, 1 = Trusted, 2 = Established, 3 = Distinguished
+// Pricing assumes $0.00001/MIRAGE (post 10,000x multiplier economics)
 func DefaultTiers() []*TierConfig {
 	return []*TierConfig{
 		// Level 0: Free
@@ -29,9 +30,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       false,
 			CanHaveBanner:       false,
 		},
-		// Level 1: Trusted (10 MIRAGE per 30 days)
+		// Level 1: Trusted (100K MIRAGE = $1/mo at $0.00001/MIRAGE)
 		{
-			PeriodFee:           10_000_000,
+			PeriodFee:           100_000_000_000,
 			MaxFollowedMods:     10,
 			MaxFollowedUsers:    125,
 			MaxFollowedTopics:   250,
@@ -50,9 +51,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       true,
 			CanHaveBanner:       true,
 		},
-		// Level 2: Established (20 MIRAGE per 30 days)
+		// Level 2: Established (200K MIRAGE = $2/mo at $0.00001/MIRAGE)
 		{
-			PeriodFee:           20_000_000,
+			PeriodFee:           200_000_000_000,
 			MaxFollowedMods:     25,
 			MaxFollowedUsers:    500,
 			MaxFollowedTopics:   500,
@@ -71,9 +72,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveAvatar:       true,
 			CanHaveBanner:       true,
 		},
-		// Level 3: Distinguished (30 MIRAGE per 30 days)
+		// Level 3: Distinguished (300K MIRAGE = $3/mo at $0.00001/MIRAGE)
 		{
-			PeriodFee:           30_000_000,
+			PeriodFee:           300_000_000_000,
 			MaxFollowedMods:     50,
 			MaxFollowedUsers:    1000,
 			MaxFollowedTopics:   1000,
@@ -96,13 +97,14 @@ func DefaultTiers() []*TierConfig {
 }
 
 // DefaultParams returns a default set of parameters.
+// These defaults reflect v1.8.0 economics (post 10,000x multiplier).
 func DefaultParams() Params {
 	return Params{
 		// Minting
-		MintInterval:         200,    // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
-		MintQuantity:         100000, // in umirage
-		MintDynamicCreditCap: 25,     // default cap per interval per validator (same as default PowMessageLimit)
-		MintDynamicSplit:     0.5,    // 50% dynamic by default
+		MintInterval:         200,         // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
+		MintQuantity:         350_000_000, // 350 MIRAGE per 10min
+		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
+		MintDynamicSplit:     0.5,         // 50% dynamic by default
 
 		// minimum Argon2id difficulty for leading zero bits
 		MinDifficulty: 10,
@@ -132,13 +134,14 @@ func DefaultParams() Params {
 		Tiers: DefaultTiers(),
 
 		// Percentage of period fee escrowed as gas reserve (remainder burned)
-		SubscriptionReservePercent: 40,
+		SubscriptionReservePercent: 80,
 
-		// Min gas price for relayed txs: 25 = 0.025 umirage per gas (25/1000)
-		RelayMinGasPrice: 25,
+		// Min gas price for relayed txs in umirage per gas unit
+		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
+		RelayMinGasPrice: 5000,
 
-		// Max fee deducted per relayed tx in umirage (protects users)
-		RelayMaxGasFee: 5000,
+		// Max fee deducted per relayed tx in umirage (500 MIRAGE cap)
+		RelayMaxGasFee: 500_000_000,
 
 		// Max age in seconds for envelope_timestamp (replay protection)
 		MaxEnvelopeAge: 60,

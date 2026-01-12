@@ -486,4 +486,105 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.8.0-economics: Major economics rebalancing for 10,000x token multiplier
+	// - RelayMinGasPrice: 25 → 5000 (now umirage per gas, was per 1000 gas)
+	// - RelayMaxGasFee: 5000 → 500,000,000 (500 MIRAGE cap)
+	// - SubscriptionReservePercent: 40 → 80 (80% to reserve, 20% burned)
+	// - MintQuantity: 100,000 → 350,000,000 (350 MIRAGE per 10min)
+	// - Tier period fees: 10/20/30 MIRAGE → 100K/200K/300K MIRAGE
+	// - Gov min_deposit: 10 MIRAGE → 500K MIRAGE ($5)
+	// - Gov expedited_min_deposit: 10 MIRAGE → 1M MIRAGE ($10)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.8.0-economics",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.8.0-economics...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Update core params
+			params := app.CoreKeeper.GetParams(sdkCtx)
+
+			// Log old values before update
+			sdkCtx.Logger().Info("v1.8.0-economics: current core params",
+				"relay_min_gas_price", params.RelayMinGasPrice,
+				"relay_max_gas_fee", params.RelayMaxGasFee,
+				"subscription_reserve_percent", params.SubscriptionReservePercent,
+				"mint_quantity", params.MintQuantity,
+				"tier1_period_fee", params.Tiers[1].PeriodFee,
+				"tier2_period_fee", params.Tiers[2].PeriodFee,
+				"tier3_period_fee", params.Tiers[3].PeriodFee,
+			)
+
+			// RelayMinGasPrice: now umirage per gas (was per 1000 gas with /1000 divisor)
+			params.RelayMinGasPrice = 5000 // 5000 umirage per gas
+			sdkCtx.Logger().Info("v1.8.0-economics: set relay_min_gas_price", "value", params.RelayMinGasPrice)
+
+			// RelayMaxGasFee: 500 MIRAGE cap per tx
+			params.RelayMaxGasFee = 500_000_000
+			sdkCtx.Logger().Info("v1.8.0-economics: set relay_max_gas_fee", "value", params.RelayMaxGasFee)
+
+			// SubscriptionReservePercent: 80% to reserve, 20% burned
+			params.SubscriptionReservePercent = 80
+			sdkCtx.Logger().Info("v1.8.0-economics: set subscription_reserve_percent", "value", params.SubscriptionReservePercent)
+
+			// MintQuantity: 350 MIRAGE per 10min
+			params.MintQuantity = 350_000_000
+			sdkCtx.Logger().Info("v1.8.0-economics: set mint_quantity", "value", params.MintQuantity)
+
+			// Tier period fees (10,000x increase)
+			if len(params.Tiers) >= 4 {
+				// Tier 1: 100K MIRAGE ($1/mo at $0.00001/MIRAGE)
+				params.Tiers[1].PeriodFee = 100_000_000_000
+				sdkCtx.Logger().Info("v1.8.0-economics: set tier 1 period_fee", "value", params.Tiers[1].PeriodFee)
+
+				// Tier 2: 200K MIRAGE ($2/mo)
+				params.Tiers[2].PeriodFee = 200_000_000_000
+				sdkCtx.Logger().Info("v1.8.0-economics: set tier 2 period_fee", "value", params.Tiers[2].PeriodFee)
+
+				// Tier 3: 300K MIRAGE ($3/mo)
+				params.Tiers[3].PeriodFee = 300_000_000_000
+				sdkCtx.Logger().Info("v1.8.0-economics: set tier 3 period_fee", "value", params.Tiers[3].PeriodFee)
+			}
+
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				sdkCtx.Logger().Error("v1.8.0-economics: failed to update core params", "err", err)
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.8.0-economics: core params updated successfully")
+
+			// Update gov params (min_deposit, expedited_min_deposit)
+			govParams, err := app.GovKeeper.Params.Get(ctx)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.8.0-economics: failed to get gov params", "err", err)
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("v1.8.0-economics: current gov params",
+				"min_deposit", govParams.MinDeposit,
+				"expedited_min_deposit", govParams.ExpeditedMinDeposit,
+			)
+
+			// min_deposit: 500K MIRAGE ($5 at $0.00001/MIRAGE)
+			govParams.MinDeposit = sdk.NewCoins(sdk.NewInt64Coin("umirage", 500_000_000_000))
+			sdkCtx.Logger().Info("v1.8.0-economics: set min_deposit", "value", govParams.MinDeposit)
+
+			// expedited_min_deposit: 1M MIRAGE ($10)
+			govParams.ExpeditedMinDeposit = sdk.NewCoins(sdk.NewInt64Coin("umirage", 1_000_000_000_000))
+			sdkCtx.Logger().Info("v1.8.0-economics: set expedited_min_deposit", "value", govParams.ExpeditedMinDeposit)
+
+			if err := app.GovKeeper.Params.Set(ctx, govParams); err != nil {
+				sdkCtx.Logger().Error("v1.8.0-economics: failed to update gov params", "err", err)
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.8.0-economics: gov params updated successfully")
+
+			sdkCtx.Logger().Info("Upgrade to v1.8.0-economics complete - economics rebalanced for 10,000x multiplier")
+			return toVM, nil
+		},
+	)
 }

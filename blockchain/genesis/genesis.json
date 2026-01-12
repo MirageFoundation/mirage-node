@@ -107,18 +107,20 @@
                 "pow_calm_period_definition": "20",
                 "pow_calm_sequence_threshold": "100",
                 "mint_interval": "200",
-                "mint_quantity": "100000",
+                "mint_quantity": "350000000",
                 "block_hash_window": "10",
                 "pow_difficulty_allowance": "2",
-                "max_username_size": "64",
-                "max_topic_size": "50",
+                "max_username_size": "30",
+                "max_topic_size": "35",
                 "min_username_size": "3",
+                "min_topic_size": "2",
                 "mint_dynamic_credit_cap": "25",
                 "mint_dynamic_split": 0.5,
                 "subscription_period": "43200",
-                "subscription_reserve_percent": "20",
-                "relay_min_gas_price": "25",
-                "relay_max_gas_fee": "5000",
+                "subscription_reserve_percent": "80",
+                "relay_min_gas_price": "5000",
+                "relay_max_gas_fee": "500000000",
+                "max_envelope_age": "60",
                 "tiers": [
                     {
                         "period_fee": "0",
@@ -141,7 +143,7 @@
                         "can_have_banner": false
                     },
                     {
-                        "period_fee": "10000000",
+                        "period_fee": "100000000000",
                         "max_followed_mods": "10",
                         "max_followed_users": "125",
                         "max_followed_topics": "250",
@@ -161,7 +163,7 @@
                         "can_have_banner": true
                     },
                     {
-                        "period_fee": "20000000",
+                        "period_fee": "200000000000",
                         "max_followed_mods": "25",
                         "max_followed_users": "500",
                         "max_followed_topics": "500",
@@ -181,7 +183,7 @@
                         "can_have_banner": true
                     },
                     {
-                        "period_fee": "30000000",
+                        "period_fee": "300000000000",
                         "max_followed_mods": "50",
                         "max_followed_users": "1000",
                         "max_followed_topics": "1000",
@@ -394,7 +396,7 @@
                 "min_deposit": [
                     {
                         "denom": "umirage",
-                        "amount": "10000000"
+                        "amount": "500000000000"
                     }
                 ],
                 "max_deposit_period": "172800s",
@@ -410,7 +412,7 @@
                 "expedited_min_deposit": [
                     {
                         "denom": "umirage",
-                        "amount": "10000000"
+                        "amount": "1000000000000"
                     }
                 ],
                 "burn_vote_quorum": false,

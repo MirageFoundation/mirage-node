@@ -45,7 +45,7 @@ func initAppConfig() (string, interface{}) {
 	// server config.
 	srvCfg := serverconfig.DefaultConfig()
 
-	srvCfg.MinGasPrices = "0.025umirage"
+	srvCfg.MinGasPrices = "5000umirage"
 
 	// Pruning (app state only): keep a rolling window of recent committed heights.
 	// IMPORTANT (Mirage):

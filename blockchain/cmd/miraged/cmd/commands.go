@@ -231,15 +231,16 @@ func validateAppConfig(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Validate minimum-gas-prices is set and non-empty
-	// This is critical - if empty, the node will halt silently on startup
+	// Validate minimum-gas-prices is exactly "5000umirage"
+	// This is critical for v1.8.0 economics - the relay fee math expects this exact value
 	minGasPrices := strings.TrimSpace(appConfig.MinGasPrices)
-	if minGasPrices == "" {
+	const requiredMinGasPrice = "5000umirage"
+	if minGasPrices != requiredMinGasPrice {
 		return errors.New(
-			"FATAL: minimum-gas-prices is not set in app.toml. " +
-				"This will cause the node to exit immediately on startup.\n" +
-				"Please set minimum-gas-prices in " + appConfigPath + "\n" +
-				"Example: minimum-gas-prices = \"0.025umirage\"",
+			"FATAL: minimum-gas-prices must be exactly \"" + requiredMinGasPrice + "\" in app.toml.\n" +
+				"Current value: \"" + minGasPrices + "\"\n" +
+				"Please update " + appConfigPath + " and set:\n" +
+				"  minimum-gas-prices = \"" + requiredMinGasPrice + "\"",
 		)
 	}
 

@@ -139,8 +139,22 @@ func (am AppModule) validateAndDeductFee(ctx sdk.Context, owner string, feeAmt, 
 	return nil
 }
 
+// calculateRelayFee computes the fee based on gas consumed and min gas price.
+// fee = gasConsumed * minGasPrice, capped at maxGasFee.
+func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
+	// Fee = gasConsumed * minGasPrice (minGasPrice is umirage per gas unit)
+	fee := gasConsumed * minGasPrice
+
+	// Cap at maximum
+	if fee > maxGasFee {
+		fee = maxGasFee
+	}
+	return fee
+}
+
 // deductRelayGasFee deducts gas fee from paid users (level >= 1) using their escrowed reserve.
-// Fee = (gasConsumed * relayMinGasPrice) / 1000, capped at relayMaxGasFee.
+// Fee = gasConsumed * relayMinGasPrice, capped at relayMaxGasFee.
+// relayMinGasPrice is in umirage per gas unit (e.g., 5000 = 5000 umirage per gas).
 // Only deducts from users with level >= 1; free users (level 0) use PoW instead.
 // If reserve is insufficient, burns remainder, zeros reserve, and downgrades user to level 0.
 func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int) {
@@ -155,13 +169,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 
 	// Calculate fee based on gas consumed
 	gasConsumed := ctx.GasMeter().GasConsumed()
-	// Fee = gasConsumed * minGasPrice / 1000 (since minGasPrice is per 1000 gas units)
-	fee := (gasConsumed*minGasPrice + 999) / 1000 // Round up
-
-	// Cap at maximum
-	if fee > maxGasFee {
-		fee = maxGasFee
-	}
+	fee := calculateRelayFee(gasConsumed, minGasPrice, maxGasFee)
 
 	if fee == 0 {
 		return

@@ -94,15 +94,15 @@ message Params {
   uint64 min_topic_size = 37;
 
   // subscription_reserve_percent is the percentage of period fee escrowed as gas reserve (0-100)
-  // Default: 20 (20% of period fee goes to reserve, 80% burned)
+  // Default: 80 (80% of period fee goes to reserve, 20% burned)
   uint64 subscription_reserve_percent = 42;
 
-  // relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per 1000 gas units)
-  // Default: 25 (equivalent to 0.025 umirage per gas). Set to match node's minimum-gas-prices.
+  // relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
+  // Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
   uint64 relay_min_gas_price = 43;
 
   // relay_max_gas_fee is the maximum gas fee that can be deducted per relayed transaction (in umirage)
-  // Default: 5000 (0.005 MIRAGE). Protects users from unexpectedly high fees.
+  // Default: 500,000,000 (500 MIRAGE). Protects users from unexpectedly high fees.
   uint64 relay_max_gas_fee = 44;
 
   // max_envelope_age is the maximum age in seconds for envelope_timestamp.
