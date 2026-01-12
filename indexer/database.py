@@ -1316,19 +1316,39 @@ class DatabaseManager:
                 return cur.rowcount > 0
 
     def update_profile_subscription(
-        self, owner: str, level: int, subscription_expiry: int, updated_at: int
+        self,
+        owner: str,
+        level: int,
+        subscription_expiry: int,
+        auto_renew: bool | None,
+        updated_at: int,
     ) -> bool:
-        """Update level and subscription_expiry for a profile (used for renewals)."""
+        """Update subscription-related fields for a profile.
+        
+        If auto_renew is None, it won't be changed (used for renewals).
+        If auto_renew is a bool, it will be updated (used for user toggling).
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE profiles
-                    SET level=%s, subscription_expiry=%s, updated_at=%s
-                    WHERE LOWER(owner) = LOWER(%s)
-                    """,
-                    (int(level), int(subscription_expiry), int(updated_at), owner),
-                )
+                if auto_renew is None:
+                    # Preserve existing auto_renew value
+                    cur.execute(
+                        """
+                        UPDATE profiles
+                        SET level=%s, subscription_expiry=%s, updated_at=%s
+                        WHERE LOWER(owner) = LOWER(%s)
+                        """,
+                        (int(level), int(subscription_expiry), int(updated_at), owner),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE profiles
+                        SET level=%s, subscription_expiry=%s, auto_renew=%s, updated_at=%s
+                        WHERE LOWER(owner) = LOWER(%s)
+                        """,
+                        (int(level), int(subscription_expiry), bool(auto_renew), int(updated_at), owner),
+                    )
                 return cur.rowcount > 0
 
     def upsert_profile_full(
@@ -1384,23 +1404,6 @@ class DatabaseManager:
                     ),
                 )
 
-    def update_profile_subscription(
-        self, owner: str, level: int, subscription_expiry: int, auto_renew: bool, updated_at: int
-    ) -> None:
-        """Update subscription-related fields for a profile."""
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE profiles SET 
-                        level = %s,
-                        subscription_expiry = %s,
-                        auto_renew = %s,
-                        updated_at = %s
-                    WHERE LOWER(owner) = LOWER(%s)
-                    """,
-                    (int(level), int(subscription_expiry), bool(auto_renew), int(updated_at), owner),
-                )
 
     def update_profile_timestamp(self, owner: str, updated_at: int) -> None:
         """Update profile timestamp."""

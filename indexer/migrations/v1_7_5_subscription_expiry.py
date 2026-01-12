@@ -51,7 +51,8 @@ def run(db: "DatabaseManager", chain: "ChainClient", logger: "Logger") -> str:
             active_count += 1
         
         try:
-            success = db.update_profile_subscription(owner, level, subscription_expiry, now)
+            # Pass None for auto_renew to preserve existing setting
+            success = db.update_profile_subscription(owner, level, subscription_expiry, None, now)
             if success:
                 updated_count += 1
             else:

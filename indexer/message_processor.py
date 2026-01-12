@@ -1199,7 +1199,8 @@ class MessageProcessor:
     def update_profile_subscription(self, addr: str, level: int, subscription_expiry: int, ts: int):
         """Update profile level and subscription_expiry from renewal events (EndBlock)."""
         try:
-            updated = self.db.update_profile_subscription(addr, level, subscription_expiry, ts)
+            # Pass None for auto_renew to preserve the existing setting
+            updated = self.db.update_profile_subscription(addr, level, subscription_expiry, None, ts)
             if updated:
                 logger.info(
                     "Updated profile subscription for %s: level=%d, expiry=%d",

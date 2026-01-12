@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import getpass
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -36,6 +37,50 @@ REMOTE_RPC_ENDPOINT = "http://159.203.114.27:26657"
 _temp_keyring_home = None
 _is_local_mode = False
 
+# Logging setup
+LOG_DIR = Path.home() / ".mirage" / "logs" / "submit_proposal"
+_log_file: Path | None = None
+_logger: logging.Logger | None = None
+
+
+def setup_logging() -> logging.Logger:
+    """Setup logging to file. Returns logger instance."""
+    global _log_file, _logger
+    
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _log_file = LOG_DIR / f"proposal_{timestamp}.log"
+    
+    _logger = logging.getLogger("submit_proposal")
+    _logger.setLevel(logging.DEBUG)
+    
+    # File handler - all debug info
+    fh = logging.FileHandler(_log_file)
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s: %(message)s"))
+    _logger.addHandler(fh)
+    
+    return _logger
+
+
+def log(msg: str) -> None:
+    """Log to file only."""
+    if _logger:
+        _logger.info(msg)
+
+
+def log_debug(msg: str) -> None:
+    """Log debug info to file only."""
+    if _logger:
+        _logger.debug(msg)
+
+
+def info(msg: str) -> None:
+    """Print to stdout and log to file."""
+    print(msg)
+    if _logger:
+        _logger.info(msg)
+
 
 def get_keyring_backend() -> str:
     """Get keyring backend based on mode"""
@@ -65,85 +110,60 @@ def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = F
         full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + cmd
     else:
         full_cmd = [bin_path] + cmd
-    return subprocess.run(full_cmd, capture_output=capture_output, text=True, check=check)
+    log_debug(f"Running: {' '.join(full_cmd)}")
+    result = subprocess.run(full_cmd, capture_output=capture_output, text=True, check=check)
+    if result.stdout:
+        log_debug(f"stdout: {result.stdout[:500]}")
+    if result.stderr:
+        log_debug(f"stderr: {result.stderr[:500]}")
+    return result
 
 
 def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     """Query via miraged with --node (uses HTTP internally, no home required)"""
     bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
     cmd_with_node = [bin_path] + cmd + ["--node", rpc_endpoint, "-o", "json"]
+    log_debug(f"Query: {' '.join(cmd_with_node)}")
     result = subprocess.run(cmd_with_node, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        print(f"Error querying RPC {rpc_endpoint}: {result.stderr}", file=sys.stderr)
+        log(f"RPC query failed: {result.stderr}")
+        print(f"ERROR: RPC query failed", file=sys.stderr)
         sys.exit(1)
+    log_debug(f"Response: {result.stdout[:500]}...")
     return json.loads(result.stdout)
 
 
-def estimate_gas(tx_cmd: list[str], rpc_endpoint: str, buffer_percent: float = 50.0) -> int:
-    """Simulate a transaction to estimate gas needed, then add buffer.
-    
-    Args:
-        tx_cmd: The transaction command (without --gas, --fees, --yes flags)
-        rpc_endpoint: RPC endpoint to use
-        buffer_percent: Percentage buffer to add (default 50%)
+def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0) -> int:
+    """Estimate gas needed for a proposal based on message count."""
+    msgs = proposal_json.get("messages", [])
+    num_messages = len(msgs) if msgs else 1
+    estimated_gas = 100000 + (num_messages * 75000)
+    gas_with_buffer = int(estimated_gas * (1 + buffer_percent / 100))
+    log_debug(f"Gas estimate: {estimated_gas} ({num_messages} msgs) + {buffer_percent}% buffer = {gas_with_buffer}")
+    return gas_with_buffer
+
+
+def estimate_gas_for_vote(buffer_percent: float = 50.0) -> int:
+    """Estimate gas needed for a vote transaction.
     
     Returns:
         Estimated gas with buffer applied
     """
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    # Votes are simple transactions, typically ~100000 gas
+    base_gas = 100000
+    gas_with_buffer = int(base_gas * (1 + buffer_percent / 100))
+    return gas_with_buffer
+
+
+def estimate_gas_for_deposit(buffer_percent: float = 50.0) -> int:
+    """Estimate gas needed for a deposit transaction.
     
-    # Build simulation command with --dry-run and --gas auto
-    sim_cmd = [bin_path] + tx_cmd + [
-        "--node", rpc_endpoint,
-        "--gas", "auto",
-        "--dry-run",
-        "-o", "json",
-    ]
-    
-    print(f"==> Simulating transaction to estimate gas...", file=sys.stderr)
-    
-    if _is_local_mode:
-        # For local mode, run via docker
-        sim_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + tx_cmd + [
-            "--node", "tcp://127.0.0.1:26657",
-            "--gas", "auto", 
-            "--dry-run",
-            "-o", "json",
-        ]
-    
-    result = subprocess.run(sim_cmd, capture_output=True, text=True, timeout=30)
-    
-    # Parse gas from output - look for gas_info in JSON or "gas estimate:" in text
-    gas_used = 0
-    
-    # Try JSON parsing first
-    try:
-        data = json.loads(result.stdout)
-        if "gas_info" in data:
-            gas_used = int(data["gas_info"].get("gas_used", 0))
-        elif "gas_used" in data:
-            gas_used = int(data["gas_used"])
-    except (json.JSONDecodeError, ValueError):
-        pass
-    
-    # Fallback: parse text output for "gas estimate: XXXXX"
-    if gas_used == 0:
-        import re
-        combined = result.stdout + result.stderr
-        match = re.search(r"gas estimate:\s*(\d+)", combined)
-        if match:
-            gas_used = int(match.group(1))
-    
-    if gas_used == 0:
-        print(f"FATAL: Could not estimate gas for transaction", file=sys.stderr)
-        print(f"  stdout: {result.stdout[:500]}", file=sys.stderr)
-        print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Add buffer
-    gas_with_buffer = int(gas_used * (1 + buffer_percent / 100))
-    print(f"  Gas estimate: {gas_used}, with {buffer_percent}% buffer: {gas_with_buffer}", file=sys.stderr)
-    
+    Returns:
+        Estimated gas with buffer applied
+    """
+    # Deposits need ~170000 gas based on observed usage
+    base_gas = 170000
+    gas_with_buffer = int(base_gas * (1 + buffer_percent / 100))
     return gas_with_buffer
 
 
@@ -790,13 +810,7 @@ def main():
         proposal_path_for_cmd = container_proposal_path
 
     # Estimate gas for proposal submission
-    estimate_cmd = [
-        "tx", "gov", "submit-proposal", proposal_path_for_cmd,
-        "--from", FAUCET_ACCOUNT,
-        "--keyring-backend", get_keyring_backend(),
-        "--home", get_keyring_home(),
-    ]
-    estimated_gas = estimate_gas(estimate_cmd, rpc_endpoint, buffer_percent=50.0)
+    estimated_gas = estimate_gas_for_proposal(proposal_json, buffer_percent=50.0)
     
     submit_cmd = [
         bin_path,
@@ -935,13 +949,7 @@ def main():
                 print("==> You will be prompted for keyring password (OS backend)")
 
             # Estimate gas for deposit
-            deposit_estimate_cmd = [
-                "tx", "gov", "deposit", str(proposal_id), f"{additional_needed}umirage",
-                "--from", FAUCET_ACCOUNT,
-                "--keyring-backend", get_keyring_backend(),
-                "--home", get_keyring_home(),
-            ]
-            deposit_gas = estimate_gas(deposit_estimate_cmd, rpc_endpoint, buffer_percent=50.0)
+            deposit_gas = estimate_gas_for_deposit(buffer_percent=50.0)
 
             deposit_cmd = [
                 bin_path,
@@ -1053,15 +1061,8 @@ def main():
 
     print(f"\nVoting with {len(valid_validator_accounts)} validator account(s)...")
 
-    # Estimate gas for voting once (same for all validators)
-    first_voter = valid_validator_accounts[0]
-    vote_estimate_cmd = [
-        "tx", "gov", "vote", str(proposal_id), "yes",
-        "--from", first_voter,
-        "--keyring-backend", get_keyring_backend(),
-        "--home", get_keyring_home(),
-    ]
-    vote_gas = estimate_gas(vote_estimate_cmd, rpc_endpoint, buffer_percent=50.0)
+    # Estimate gas for voting
+    vote_gas = estimate_gas_for_vote(buffer_percent=50.0)
 
     # Vote with all valid validator accounts
     for account_name in valid_validator_accounts:
