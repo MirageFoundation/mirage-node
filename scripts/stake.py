@@ -138,15 +138,15 @@ def main():
         sys.exit(1)
 
     balance_mirage = balance_um / 1_000_000
-    print(f"Current balance: {balance_mirage:.6f} MIRAGE")
+    print(f"Current balance: {balance_mirage:,.2f} MIRAGE")
 
     if balance_mirage < 20:
-        print(f"Insufficient balance. Need at least 20 MIRAGE, have {balance_mirage:.6f} MIRAGE", file=sys.stderr)
+        print(f"Insufficient balance. Need at least 20 MIRAGE, have {balance_mirage:,.2f} MIRAGE", file=sys.stderr)
         sys.exit(1)
 
     amount_um = amount_mirage * 1_000_000
     if amount_um > balance_um:
-        print(f"Cannot stake {amount_mirage} MIRAGE. Balance: {balance_mirage:.6f} MIRAGE", file=sys.stderr)
+        print(f"Cannot stake {amount_mirage:,} MIRAGE. Balance: {balance_mirage:,.2f} MIRAGE", file=sys.stderr)
         sys.exit(1)
 
     valoper = get_valoper_address(bin_path, home, keyring, key_name)
@@ -154,7 +154,23 @@ def main():
         print("Failed to get validator operator address", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Staking {amount_mirage} MIRAGE to {valoper}...")
+    # Confirmation
+    print(f"\n{'─' * 40}")
+    print(f"Stake: {amount_mirage:,} MIRAGE")
+    print(f"To validator: {valoper}")
+    print(f"From: {address}")
+    print(f"{'─' * 40}")
+    
+    try:
+        confirm = input("Type 'confirm' to proceed: ").strip()
+        if confirm != "confirm":
+            print("Aborted.")
+            sys.exit(0)
+    except KeyboardInterrupt:
+        print("\nAborted.")
+        sys.exit(0)
+
+    print(f"\nStaking {amount_mirage:,} MIRAGE...")
 
     tx_cmd = [
         bin_path,
@@ -215,7 +231,7 @@ def main():
             height = query_data.get("height", "?")
 
             if query_code == 0:
-                print(f"Delegation successful at height {height}")
+                print(f"✓ Staked {amount_mirage:,} MIRAGE at height {height}")
                 sys.exit(0)
             else:
                 print(f"Delegation failed (code={query_code})", file=sys.stderr)
