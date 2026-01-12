@@ -785,7 +785,7 @@ def main():
                 log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
                 info(f"ERROR: Transaction failed on-chain: {raw_log}")
                 sys.exit(1)
-            info("✓ Proposal submitted")
+            info("✅ Proposal submitted")
         except Exception as e:
             log(f"TX verification error: {e}")
     else:
@@ -870,7 +870,7 @@ def main():
                 info("ERROR: Deposit failed")
                 sys.exit(1)
 
-            info("✓ Deposit submitted")
+            info("✅ Deposit submitted")
             time.sleep(5)
 
             proposal = query_json_rpc(rpc_endpoint, ["q", "gov", "proposal", str(proposal_id)])["proposal"]
@@ -980,9 +980,9 @@ def main():
         exit_status, output = run_with_pexpect(vote_cmd, timeout=60)
         if exit_status != 0:
             log(f"Vote failed for {account_name}: {output}")
-            info(f"⚠ {account_name} vote failed")
+            info(f"⚠️ {account_name} vote failed")
         else:
-            info(f"✓ {account_name} voted YES")
+            info(f"✅ {account_name} voted YES")
 
         time.sleep(3)
 
@@ -1029,9 +1029,9 @@ def main():
 
             if is_final_status(status):
                 if status == "PROPOSAL_STATUS_PASSED":
-                    info(f"\n✓ PROPOSAL PASSED")
+                    info(f"\n✅ PROPOSAL PASSED")
                 else:
-                    info(f"\n✗ Proposal {status}")
+                    info(f"\n❌ Proposal {status}")
                     failed_reason = current_proposal.get("failed_reason", "")
                     if failed_reason:
                         info(f"  Reason: {failed_reason}")
