@@ -11,7 +11,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Circuit: reset (resume core msgs)",
     "summary": "Resume processing of core posting/voting/send messages.",
     "expedited": true

@@ -656,13 +656,51 @@ def main():
 
     # Show gas estimates before confirmation
     estimated_gas = estimate_gas_for_proposal(proposal_json, buffer_percent=50.0)
-    deposit_amount = int(re.sub(r"[^0-9]", "", proposal_json.get("deposit", "0")))
+
+    # Query gov params to get the required deposit
+    gov_params = query_json_rpc(rpc_endpoint, ["q", "gov", "params"])
+    params = gov_params.get("params", {}) if gov_params else {}
+
+    min_deposit_key = "expedited_min_deposit" if is_expedited else "min_deposit"
+    min_deposit_list = params.get(min_deposit_key, [])
+    required_deposit = 0
+    for dep in min_deposit_list:
+        if dep.get("denom") == "umirage":
+            required_deposit = int(dep.get("amount", "0"))
+            break
+
+    # Check if deposit should be auto-calculated
+    proposal_deposit = proposal_json.get("deposit", "auto") if proposal_json else "auto"
+    if proposal_deposit == "auto" or not proposal_deposit:
+        # Add 25% buffer and round to nice number (nearest million)
+        deposit_with_buffer = int(required_deposit * 1.25)
+        deposit_amount = ((deposit_with_buffer + 999_999) // 1_000_000) * 1_000_000
+        deposit_source = f"auto: {min_deposit_key} {required_deposit:,} + 25%"
+    else:
+        # Use explicit deposit from proposal (but ensure it meets minimum)
+        explicit_deposit = int(re.sub(r"[^0-9]", "", proposal_deposit))
+        if explicit_deposit < required_deposit:
+            deposit_with_buffer = int(required_deposit * 1.25)
+            deposit_amount = ((deposit_with_buffer + 999_999) // 1_000_000) * 1_000_000
+            deposit_source = f"auto (explicit {explicit_deposit:,} < required {required_deposit:,})"
+        else:
+            deposit_amount = explicit_deposit
+            deposit_source = "explicit"
+
+    # Update proposal with calculated deposit
+    if proposal_json:
+        proposal_json["deposit"] = f"{deposit_amount}umirage"
+        # Write updated proposal to temp file
+        if proposal_file:
+            with open(proposal_file, "w", encoding="utf-8") as wf:
+                json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
+
     total_umirage = estimated_gas + deposit_amount  # gas fee + deposit
     total_mirage = total_umirage / 1_000_000
 
     print(f"\nEstimated costs:")
     print(f"  Gas: {estimated_gas:,} umirage")
-    print(f"  Deposit: {deposit_amount:,} umirage")
+    print(f"  Deposit: {deposit_amount:,} umirage ({deposit_source})")
     print(f"  Total: {total_umirage:,} umirage ({total_mirage:.2f} MIRAGE)")
 
     # Confirmation
@@ -826,9 +864,36 @@ def main():
 
     # Vote if in voting period
     if status != "PROPOSAL_STATUS_VOTING_PERIOD":
-        info(f"Not in voting period ({status})")
+        # Show helpful error info
+        gov_params = query_json_rpc(rpc_endpoint, ["q", "gov", "params"])
+        params = gov_params.get("params", {}) if gov_params else {}
+
+        is_expedited = proposal.get("expedited", False)
+        min_deposit_key = "expedited_min_deposit" if is_expedited else "min_deposit"
+        min_deposit_list = params.get(min_deposit_key, [])
+        min_deposit_amount = 0
+        for dep in min_deposit_list:
+            if dep.get("denom") == "umirage":
+                min_deposit_amount = int(dep.get("amount", "0"))
+                break
+
+        total_deposit_list = proposal.get("total_deposit", [])
+        current_deposit_amount = 0
+        for dep in total_deposit_list:
+            if dep.get("denom") == "umirage":
+                current_deposit_amount = int(dep.get("amount", "0"))
+                break
+
+        info(f"\n⚠️  Proposal stuck in {status}")
+        info(
+            f"   Required deposit ({min_deposit_key}): {min_deposit_amount:,} umirage ({min_deposit_amount/1_000_000:.1f} MIRAGE)"
+        )
+        info(f"   Current deposit: {current_deposit_amount:,} umirage ({current_deposit_amount/1_000_000:.1f} MIRAGE)")
+        if current_deposit_amount < min_deposit_amount:
+            shortfall = min_deposit_amount - current_deposit_amount
+            info(f"   Shortfall: {shortfall:,} umirage ({shortfall/1_000_000:.1f} MIRAGE)")
         info(f"\nLog file: {_log_file}")
-        return 0
+        return 1
 
     # Filter valid validators
     valid_validator_accounts = []

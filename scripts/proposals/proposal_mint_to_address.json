@@ -9,7 +9,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Mint to account",
     "summary": "Mint new tokens directly to a specified account.",
     "expedited": true

@@ -1,0 +1,534 @@
+{
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1rd00maj4htc0f550pjy302maywy2wtaxv8ntaq",
+      "amount": "14406559200000",
+      "reason": "User compensation 10,000x: https://mirage.talk (1440.8 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3",
+      "amount": "8247175200000",
+      "reason": "User compensation 10,000x: mirage-node-3 (824.8 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5",
+      "amount": "4557544200000",
+      "reason": "User compensation 10,000x: https://mirage.vote (455.8 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ur6xu4ue9f4pk4a2thnhnf8ctu4dpkqehp7yqs",
+      "amount": "2332766700000",
+      "reason": "User compensation 10,000x: mirage-node-4 (233.3 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1egs798jgy8d34uymemush3nhnaqn7tswvawj80",
+      "amount": "9990983801700000",
+      "reason": "User compensation 10,000x: mirage-faucet (999198.3 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1venw2fdw8wx8mux4gglqjctwwttvw6f2y04qhw",
+      "amount": "1576842300000",
+      "reason": "User compensation 10,000x: God (157.7 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1p9te3c5fgjjw4dkg4kmm6g4yy62a3z3003l0td",
+      "amount": "619938000000",
+      "reason": "User compensation 10,000x: Mirage (62.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage13ezyksswxnmxc3qvtwk9aknadq4a0htjp3gmxd",
+      "amount": "499950000000",
+      "reason": "User compensation 10,000x: Anon-Tomply (50.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ug4fu9mc3xthgc9q24uzef3xwecl793984pnfp",
+      "amount": "488951100000",
+      "reason": "User compensation 10,000x: HermesRelayer (48.9 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1lwnl2j3srpdanun2u3sa3wdkk8dm5czasz98qr",
+      "amount": "299970000000",
+      "reason": "User compensation 10,000x: Anon-Kio (30.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage17w4ggt84ymq9aze75zndjdesks99zcr0j9ngj2",
+      "amount": "249975000000",
+      "reason": "User compensation 10,000x: Anon-Runanode (25.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1u96yk5l7vdruyhxu93v2zzv9f0a3l4zwtvglyd",
+      "amount": "219978000000",
+      "reason": "User compensation 10,000x: SantaClause (22.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1dw64u9engyg7d88s8t0c5ar3ccjc9cslljyagz",
+      "amount": "109989000000",
+      "reason": "User compensation 10,000x: RealMetasiigner (11.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1u4lcw3x32mwweh3utg66fynt5g0p2zclnp5n5q",
+      "amount": "107989200000",
+      "reason": "User compensation 10,000x: satoshi (10.8 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage10dwzynfv2nmux2zndvugh4qye29ugg5cu3kwgg",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-0xjack (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage10f8ndszry26uwla6d4pj8ncvqz2alz9dpa4xal",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Antisocial (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage10xk6avk4rhajax5w86hqzupsnnmvwavldppx5t",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Usman9815 (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage126mthv9a8eksx5y7g9xu03esha2h4y3v0nm2eu",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-anurajyoyo (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage12tvxz2hw9h4k4scp4malv27yxaru8c6zfzltg3",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-AIai (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage12wqz6q2x9xhth980fnvmlmyfv2ctfdxma48ulz",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Emeka (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage14c24k3fv70x5k7jt4jpxk02k9q500r404jdu45",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-MirajMan (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage14tdd42ns007sytwylklldxyt5uvrx5grerej65",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Savantfan (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage16se3atmyl2px6gfvwpwfedvv36ahzc83srwgkh",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Ozark (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage16w86nv39w4fvkqfedp8zmv64jn9ftdsjs80tmu",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-cryptoser (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage16z04lr68xnrgh3rh3ttlq0cjfza5xwxtpufrpk",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Pip (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage17xc79sy59uq525ztyeap5d57perue3xu5zgttw",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Park (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1cz0ash28sq606klxr3fqz4vha9at3sw6eeyacr",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Rohma0601 (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1d3l42ltzekltzazd2989c0g9pwz2v6ak20pz2g",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Naurelsexsu (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1f20ka9eqvyys6e4djpwy4th0802tfn2r93zr84",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Studentokinawa (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1f8clexwnkq00nfxrvhfpklq8kqffmmwvtcw4js",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-brownboyyy (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1fv2jw88l0ge3966epdeg6hnh8y7pufeq7598ff",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Riyyui (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1hnzr6wsf7smyl93srglms207mg2t0aqtuqs5rz",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Redrastafari123 (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1knmtnt5xw9r2ux6lntwrtsql2tfj547ln0q3hj",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Dress-Stone (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1lszq7ntauxe4vu7cwgz0qa36z4p42v57vmf00m",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Stevros (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1nwfz93cmjlu65cv3rc3l0ytt9333nllrmphkp8",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Sother (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1r2hqr506g2dpy7xsg9rnxspyvwu7x4wppw4ycy",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-megy (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1rtlm2gp3m9sj6z884xm4djm7mr5avqupwquu4m",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-hohoang2108 (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1rxauwa0vj7gs5tc4av99enzgz6kac7yadxy45e",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Yeboah (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1tj883u297d0muuegzjzw5yullelw00ea044u37",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Budimirage (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ugruedjgwzf44ave3k4ktdrxyxfzlea878dhqa",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Cuppynite (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1uldeuwr9kgzd6t2jrd5aen66jnx4w52drtjjfr",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-gangabeat (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1v79kwf8remr2fm2fc9yjwjxpw453eq4wlnyzzf",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Lastborn (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1vmqa249j0jy7e6jpyqp5gxtatzw7h003n7x2t3",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-CryptoDumbledore (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1wqaq74jl34d4x9yd3ag0kahuaejam6wvqnj4pk",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-reddington (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1wqdh3gk0fyazyhc20e5ch57ssgj9duahp2dhat",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Ethjoker (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1xjrrwxy4y8mtwjjnx9gz52k8xmq6c0q8euk4fa",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Gerratmirage (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1xqnfz9aldma7lqvxrskkg50mvqpqcga38nmydm",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-UmmuYasmin (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage142rfw7776palfuu7m0s5dj0x7d3qglhujmxxtr",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-xxdxdxd (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1dqj8tv0z8x8chrnr0frvg9xepenkl6hlf95s8g",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-Afipetis (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1e53acm03vmar3jkp5lt55kexe8y9du7fau8x6k",
+      "amount": "99990000000",
+      "reason": "User compensation 10,000x: Anon-adda (10.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage15ds2w9nwe86ang05zs0rdv0f6vls2nw5cxe5cy",
+      "amount": "79992000000",
+      "reason": "User compensation 10,000x: Anon-Earn-Wool (8.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1k5s00uhau2u8kgpply3dfsantyhc433kw3yv5v",
+      "amount": "79992000000",
+      "reason": "User compensation 10,000x: Anon-Anime (8.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1lmtyqyelv56hs3sh8r2qk7agtppvgsajyt8s6f",
+      "amount": "79992000000",
+      "reason": "User compensation 10,000x: Anon-Uchiha (8.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1x9csul59eap7jjrvaf505rnf39dfys63eyq5x2",
+      "amount": "79992000000",
+      "reason": "User compensation 10,000x: divebomb (8.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ecvfr2jsrykfrmdwkhg622fm55p0t4xhxg457a",
+      "amount": "69993000000",
+      "reason": "User compensation 10,000x: Anon-Tradermobile (7.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ezeesqnmt5x0akfguuz8tgpa2vlqw9xkns6hfy",
+      "amount": "58994100000",
+      "reason": "User compensation 10,000x: Kenaiah (5.9 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ua3nf655mv05chctmg3pc4c6st4dg6m03a7syy",
+      "amount": "53994600000",
+      "reason": "User compensation 10,000x: TheApostle (5.4 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1826gceahxrlmclrdvs436xqctrkypmws2qtxx4",
+      "amount": "49995000000",
+      "reason": "User compensation 10,000x: Trixys (5.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1rxhnyf2w8lgfpmldctenrfr3det6l2s8kkt4jh",
+      "amount": "49995000000",
+      "reason": "User compensation 10,000x: Anon-Again-Merry (5.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ex8gsjq0h46qj0g2j89064vcsk5z0l6rkm42ft",
+      "amount": "49995000000",
+      "reason": "User compensation 10,000x: Aeroxander (5.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1kcpp8sz6pz836u773m2fdtcxq60clzxp8d4ntx",
+      "amount": "49995000000",
+      "reason": "User compensation 10,000x: Anon-Jscott (5.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage14k6kerc9gurrnf586dczanv6prkce0zwn2cu8k",
+      "amount": "48995100000",
+      "reason": "User compensation 10,000x: OptionTrader (4.9 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage15lsymaanxp8n3afcp57xgymqjj8qnekuav0ga6",
+      "amount": "48995100000",
+      "reason": "User compensation 10,000x: ElonMusk (4.9 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1zu76lhate4m6dhqzgszqnegdkry6wp89e2s04s",
+      "amount": "47995200000",
+      "reason": "User compensation 10,000x: Kokomet (4.8 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage10edwawal9yhzufzqzu6qzq20ugur6m2plxck48",
+      "amount": "29997000000",
+      "reason": "User compensation 10,000x: Anon-Gates (3.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage16mrm3yzf7d4fnnlwtp3zxp6rusjzhw2pr9dwdr",
+      "amount": "19998000000",
+      "reason": "User compensation 10,000x: RedditMumbler (2.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1zy3dqnvuyqrhnq5kyxlx32kyqjnrnr4t4yt27t",
+      "amount": "19998000000",
+      "reason": "User compensation 10,000x: Anon-madmints (2.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1e0w3zj5vyq34ehmnvmfayd42scrpq75v957rda",
+      "amount": "18998100000",
+      "reason": "User compensation 10,000x: popanri (1.9 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage15ndfj2zeymz7kghkf5ha7nq2m090dhxa96f50h",
+      "amount": "9999000000",
+      "reason": "User compensation 10,000x: Anon-joeszn (1.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1ynqmqucuf9lq83sfg5gq87dp8sxfwnqycneu8u",
+      "amount": "9999000000",
+      "reason": "User compensation 10,000x: Anon-VANDANGOGO (1.0 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1jgzgzky9jfj5s36grkmvl8d8xc0tdd2j5jd3cc",
+      "amount": "5999400000",
+      "reason": "User compensation 10,000x: uchihaitachi (0.6 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage10wl8exenwulr280qh6r5ffaype9783aqfmxnr2",
+      "amount": "4999500000",
+      "reason": "User compensation 10,000x: maggi-magicsarap (0.5 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1mkjw5fnslz7drc4dpgkqu4e0twg3fm38cmtq6k",
+      "amount": "4999500000",
+      "reason": "User compensation 10,000x: polysaccharide (0.5 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1stmjk6k8zetl4shrygcew2wwzx998j8asyjgtn",
+      "amount": "2999700000",
+      "reason": "User compensation 10,000x: Web3Dhruv (0.3 MIRAGE)"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgMintTo",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "recipient": "mirage1lq44uvnqselad4fxsmlek25867zxmlj23pj2e7",
+      "amount": "1999800000",
+      "reason": "User compensation 10,000x: Paperlantern (0.2 MIRAGE)"
+    }
+  ],
+  "metadata": "ipfs://economics-v2-user-compensation",
+  "deposit": "25000000umirage",
+  "title": "Economics v2.0: User Balance Compensation (10,000x)",
+  "summary": "Mint additional MIRAGE to all user accounts with <1M MIRAGE balance, bringing their total to 10,000x their current holdings. This compensates early users for the new tokenomics. Total minted: 10,029,389,961 MIRAGE.",
+  "expedited": true
+}

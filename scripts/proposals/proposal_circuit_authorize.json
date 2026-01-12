@@ -16,7 +16,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Circuit: authorize security multisig",
     "summary": "Grant circuit breaker rights over selected messages to the security multisig.",
     "expedited": true

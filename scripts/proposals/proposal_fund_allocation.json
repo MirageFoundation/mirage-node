@@ -1,0 +1,30 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgMintTo",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "recipient": "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",
+            "amount": "10000000000000000",
+            "reason": "Fund allocation: Founders Fund - 10B MIRAGE"
+        },
+        {
+            "@type": "/mirage.core.v1.MsgMintTo",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "recipient": "mirage1zjs7qn3chramktnu96wft4cs6ry2srddv27dmr",
+            "amount": "20000000000000000",
+            "reason": "Fund allocation: Marketing Fund - 20B MIRAGE"
+        },
+        {
+            "@type": "/mirage.core.v1.MsgMintTo",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "recipient": "mirage13e3rxansuzneayrf9nwrxdpp38sphshz7ly8xd",
+            "amount": "50000000000000000",
+            "reason": "Fund allocation: Development Fund - 50B MIRAGE"
+        }
+    ],
+    "metadata": "ipfs://fund-allocation-v1",
+    "deposit": "auto",
+    "title": "Fund Allocation: Founders, Marketing, and Development",
+    "summary": "Allocate funds for ecosystem growth: 10B MIRAGE to Founders Fund, 20B MIRAGE to Marketing Fund, 50B MIRAGE to Development Fund. Total: 80B MIRAGE.",
+    "expedited": true
+}

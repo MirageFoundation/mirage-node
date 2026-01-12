@@ -11,7 +11,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Circuit: trip (pause core msgs)",
     "summary": "Pause processing of core posting/voting/send messages.",
     "expedited": true

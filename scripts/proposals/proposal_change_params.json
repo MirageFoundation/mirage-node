@@ -14,7 +14,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Changing parameters",
     "summary": "Changing some parameter(s) summary",
     "expedited": true

@@ -11,7 +11,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Punish validator",
     "summary": "Slash and optionally jail/tombstone a validator by governance.",
     "expedited": true

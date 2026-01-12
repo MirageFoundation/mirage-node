@@ -11,7 +11,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Upgrade: v1.7.9-node-home",
     "summary": "Changes the default node home directory from ~/.mirage/main/ to ~/.mirage/node/. The backward-compatibility symlink (main -> node) created in v1.7.8 is removed. This completes the directory restructuring started in v1.7.8.",
     "expedited": true

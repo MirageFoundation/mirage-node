@@ -9,7 +9,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Change subscription reserve percentage",
     "summary": "Change the percentage of monthly subscription fees escrowed as gas reserve from 20% to 25%. The remainder is burned.",
     "expedited": true

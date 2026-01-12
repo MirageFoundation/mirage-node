@@ -8,7 +8,7 @@
         }
     ],
     "metadata": "",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Set username for address",
     "summary": "Set the username for address",
     "expedited": true

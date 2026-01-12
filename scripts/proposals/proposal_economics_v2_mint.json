@@ -30,7 +30,7 @@
         }
     ],
     "metadata": "ipfs://economics-v2-phase1-mint",
-    "deposit": "10000000umirage",
+    "deposit": "auto",
     "title": "Economics v2.0 Phase 1: Mint tokens to validators",
     "summary": "Mint 5,000,000,000 MIRAGE (~5B) to each of the 4 validators to establish proper stake levels for the new tokenomics. This increases each validator's holdings to $50,000 equivalent at the target price of $0.00001/MIRAGE. See docs/economics_v2_upgrade.md for the full upgrade plan.",
     "expedited": true
