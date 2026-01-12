@@ -144,13 +144,13 @@ def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0)
     msgs = proposal_json.get("messages", [])
     num_messages = len(msgs) if msgs else 1
     
-    # Calculate byte size of the proposal
-    proposal_bytes = len(json.dumps(proposal_json, ensure_ascii=False).encode("utf-8"))
+    # Calculate byte size of the proposal (include indentation to match file size more closely)
+    proposal_bytes = len(json.dumps(proposal_json, ensure_ascii=False, indent=2).encode("utf-8"))
     
     # Base gas + per-message gas + per-byte gas (WritePerByte cost)
     base_gas = 100_000
     per_message_gas = num_messages * 75_000
-    per_byte_gas = proposal_bytes * 10  # ~10 gas per byte for writes
+    per_byte_gas = proposal_bytes * 100  # ~100 gas per byte (aggressive safety margin)
     
     estimated_gas = base_gas + per_message_gas + per_byte_gas
     gas_with_buffer = int(estimated_gas * (1 + buffer_percent / 100))
