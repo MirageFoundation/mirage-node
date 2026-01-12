@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """
-Verify Mirage Node Upgrade (v1.7.9+)
+Verify Mirage Node Upgrade (v1.8.0-economics)
 
 Checks:
 1. Node Health: RPC reachable, not catching up (optional warn)
-2. Chain State: Tier pricing (10/20/30 MIRAGE) & subscription period (30 days)
-3. Directory Structure:
-   - ~/.mirage/node/ exists (node home)
-   - ~/.mirage/postgres/ exists (postgres location)
-   - ~/.mirage/main/ does NOT exist (symlink removed in v1.7.9)
-   - ~/.mirage/node/logs/ is absent (Go log rotation removed)
-4. Logging: Cronolog is writing to ~/.mirage/logs/node/miraged-YYYY-MM-DD.log
+2. Economics Parameters (v1.8.0):
+   - RelayMinGasPrice: 5000 (umirage per gas)
+   - RelayMaxGasFee: 500,000,000 (500 MIRAGE cap)
+   - SubscriptionReservePercent: 80%
+   - MintQuantity: 350,000,000 (350 MIRAGE per 10min)
+   - Tier fees: 100B/200B/300B umirage ($1/$2/$3 per month)
+3. Governance Parameters:
+   - min_deposit: 500B umirage ($5)
+   - expedited_min_deposit: 1T umirage ($10)
+4. Node Config:
+   - minimum-gas-prices = "5000umirage" in app.toml
 """
 
 import argparse
@@ -64,66 +68,22 @@ def _as_int(v) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Mirage Node Upgrade Status")
+    parser = argparse.ArgumentParser(description="Verify v1.8.0-economics Upgrade Status")
     parser.add_argument("--node", default="http://127.0.0.1:26657", help="CometBFT RPC endpoint")
+    parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory")
     args = parser.parse_args()
 
     rpc = args.node.rstrip("/")
     miraged = _find_miraged()
-    home_dir = Path.home() / ".mirage"
+    home_dir = Path(args.home)
 
     failures: list[str] = []
     warnings: list[str] = []
 
-    print(f"=== Verifying Upgrade Status ({datetime.now().isoformat()}) ===\n")
+    print(f"=== Verifying v1.8.0-economics Upgrade ({datetime.now().isoformat()}) ===\n")
 
-    # 1. Directory Structure (v1.7.8 restructuring + v1.7.9 symlink removal)
-    print("-> Checking directory structure...")
-    node_dir = home_dir / "node"
-    main_dir = home_dir / "main"
-    postgres_dir = home_dir / "postgres"
-
-    if node_dir.is_dir() and not node_dir.is_symlink():
-        print("   [OK] ~/.mirage/node/ exists")
-    else:
-        failures.append("~/.mirage/node/ directory missing or is symlink")
-
-    if postgres_dir.is_dir():
-        print("   [OK] ~/.mirage/postgres/ exists")
-    else:
-        failures.append("~/.mirage/postgres/ directory missing")
-
-    # v1.7.9: main should NOT exist at all (symlink removed)
-    if main_dir.exists():
-        if main_dir.is_symlink():
-            failures.append("~/.mirage/main/ symlink still exists (v1.7.9 migration incomplete)")
-        else:
-            failures.append("~/.mirage/main/ is a real directory (should have been renamed to node/)")
-    else:
-        print("   [OK] ~/.mirage/main/ absent (symlink removed)")
-
-    # 2. Go Logs Removal (v1.7.7 cleanup)
-    old_logs = node_dir / "logs"
-    if old_logs.exists():
-        failures.append(f"Unexpected Go logs dir exists: {old_logs}")
-    else:
-        print("   [OK] Go logs dir absent (cleanup successful)")
-
-    # 3. Cronolog Logging
-    print("\n-> Checking logging...")
-    utc_day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    cronolog_file = home_dir / "logs" / "node" / f"miraged-{utc_day}.log"
-    if not cronolog_file.exists():
-        failures.append(f"Expected cronolog file missing: {cronolog_file}")
-    else:
-        size = cronolog_file.stat().st_size
-        if size > 0:
-            print(f"   [OK] Log file present and active: {cronolog_file.name} ({size} bytes)")
-        else:
-            failures.append(f"Cronolog file exists but is empty: {cronolog_file}")
-
-    # 4. Chain State & Health
-    print("\n-> Checking chain state...")
+    # 1. Node Health
+    print("-> Checking node health...")
     try:
         status = _http_get_json(f"{rpc}/status")
         latest = status.get("result", {}).get("sync_info", {}).get("latest_block_height", "")
@@ -132,34 +92,114 @@ def main() -> int:
         print(f"   [OK] RPC reachable (Height: {latest})")
         if catching:
             warnings.append("Node is catching up (syncing)")
+    except Exception as e:
+        failures.append(f"RPC check failed: {e}")
 
-        # Check params
+    # 2. Core Economics Parameters
+    print("\n-> Checking core economics parameters...")
+    try:
         params = _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
         p = params.get("params", params)
 
-        # Subscription period
-        sub_period = _as_int(p.get("subscription_period"))
-        if sub_period == 43200:
-            print("   [OK] Subscription period: 43200 (30 days)")
+        # RelayMinGasPrice: 5000
+        relay_min = _as_int(p.get("relay_min_gas_price"))
+        if relay_min == 5000:
+            print(f"   [OK] RelayMinGasPrice: {relay_min}")
         else:
-            failures.append(f"subscription_period expected 43200, got {sub_period}")
+            failures.append(f"RelayMinGasPrice expected 5000, got {relay_min}")
 
-        # Tier fees
+        # RelayMaxGasFee: 500,000,000
+        relay_max = _as_int(p.get("relay_max_gas_fee"))
+        if relay_max == 500_000_000:
+            print(f"   [OK] RelayMaxGasFee: {relay_max:,} (500 MIRAGE)")
+        else:
+            failures.append(f"RelayMaxGasFee expected 500,000,000, got {relay_max}")
+
+        # SubscriptionReservePercent: 80
+        reserve_pct = _as_int(p.get("subscription_reserve_percent"))
+        if reserve_pct == 80:
+            print(f"   [OK] SubscriptionReservePercent: {reserve_pct}%")
+        else:
+            failures.append(f"SubscriptionReservePercent expected 80, got {reserve_pct}")
+
+        # MintQuantity: 350,000,000
+        mint_qty = _as_int(p.get("mint_quantity"))
+        if mint_qty == 350_000_000:
+            print(f"   [OK] MintQuantity: {mint_qty:,} (350 MIRAGE per 10min)")
+        else:
+            failures.append(f"MintQuantity expected 350,000,000, got {mint_qty}")
+
+        # Tier fees: 100B/200B/300B
         tiers = p.get("tiers") or []
         if len(tiers) >= 4:
             t1 = _as_int(tiers[1].get("period_fee"))
             t2 = _as_int(tiers[2].get("period_fee"))
             t3 = _as_int(tiers[3].get("period_fee"))
 
-            if t1 == 10_000_000 and t2 == 20_000_000 and t3 == 30_000_000:
-                print("   [OK] Tier fees: 10/20/30 MIRAGE")
+            expected_t1 = 100_000_000_000  # 100B
+            expected_t2 = 200_000_000_000  # 200B
+            expected_t3 = 300_000_000_000  # 300B
+
+            if t1 == expected_t1 and t2 == expected_t2 and t3 == expected_t3:
+                print(f"   [OK] Tier fees: {t1//1e9:.0f}B/{t2//1e9:.0f}B/{t3//1e9:.0f}B ($1/$2/$3)")
             else:
-                failures.append(f"Tier fees mismatch: {t1}/{t2}/{t3} (expected 10M/20M/30M)")
+                failures.append(f"Tier fees mismatch: {t1}/{t2}/{t3} (expected {expected_t1}/{expected_t2}/{expected_t3})")
         else:
             failures.append(f"Tiers config incomplete (len={len(tiers)})")
 
     except Exception as e:
-        failures.append(f"Chain check failed: {e}")
+        failures.append(f"Core params check failed: {e}")
+
+    # 3. Governance Parameters
+    print("\n-> Checking governance parameters...")
+    try:
+        gov_params = _run_json([miraged, "q", "gov", "params", "--node", rpc, "-o", "json"])
+        gp = gov_params.get("params", gov_params)
+
+        # min_deposit: 500B
+        min_deposit = gp.get("min_deposit", [])
+        min_amt = 0
+        for d in min_deposit:
+            if d.get("denom") == "umirage":
+                min_amt = _as_int(d.get("amount"))
+                break
+
+        expected_min = 500_000_000_000  # 500B
+        if min_amt == expected_min:
+            print(f"   [OK] min_deposit: {min_amt//1e9:.0f}B umirage ($5)")
+        else:
+            failures.append(f"min_deposit expected {expected_min}, got {min_amt}")
+
+        # expedited_min_deposit: 1T
+        exp_deposit = gp.get("expedited_min_deposit", [])
+        exp_amt = 0
+        for d in exp_deposit:
+            if d.get("denom") == "umirage":
+                exp_amt = _as_int(d.get("amount"))
+                break
+
+        expected_exp = 1_000_000_000_000  # 1T
+        if exp_amt == expected_exp:
+            print(f"   [OK] expedited_min_deposit: {exp_amt//1e12:.0f}T umirage ($10)")
+        else:
+            failures.append(f"expedited_min_deposit expected {expected_exp}, got {exp_amt}")
+
+    except Exception as e:
+        failures.append(f"Gov params check failed: {e}")
+
+    # 4. Node Config (app.toml)
+    print("\n-> Checking node config...")
+    app_toml = home_dir / "node" / "config" / "app.toml"
+    if app_toml.exists():
+        content = app_toml.read_text()
+        if 'minimum-gas-prices = "5000umirage"' in content:
+            print('   [OK] minimum-gas-prices = "5000umirage"')
+        elif "5000umirage" in content:
+            print('   [OK] minimum-gas-prices contains 5000umirage')
+        else:
+            failures.append('app.toml: minimum-gas-prices must be "5000umirage"')
+    else:
+        warnings.append(f"app.toml not found at {app_toml}")
 
     print("\n=== Summary ===")
     if warnings:
@@ -172,7 +212,7 @@ def main() -> int:
             print(f"  - {f}")
         return 1
 
-    print("[PASS] All checks passed successfully.")
+    print("[PASS] All v1.8.0-economics checks passed successfully.")
     return 0
 
 
