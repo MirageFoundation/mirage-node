@@ -134,12 +134,27 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
 
 
 def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0) -> int:
-    """Estimate gas needed for a proposal based on message count."""
+    """Estimate gas needed for a proposal based on message count and byte size.
+    
+    Gas cost includes:
+    - Base tx overhead: 100,000
+    - Per message: 75,000
+    - WritePerByte: ~10 gas per byte of serialized JSON
+    """
     msgs = proposal_json.get("messages", [])
     num_messages = len(msgs) if msgs else 1
-    estimated_gas = 100000 + (num_messages * 75000)
+    
+    # Calculate byte size of the proposal
+    proposal_bytes = len(json.dumps(proposal_json, ensure_ascii=False).encode("utf-8"))
+    
+    # Base gas + per-message gas + per-byte gas (WritePerByte cost)
+    base_gas = 100_000
+    per_message_gas = num_messages * 75_000
+    per_byte_gas = proposal_bytes * 10  # ~10 gas per byte for writes
+    
+    estimated_gas = base_gas + per_message_gas + per_byte_gas
     gas_with_buffer = int(estimated_gas * (1 + buffer_percent / 100))
-    log_debug(f"Gas estimate: {estimated_gas} ({num_messages} msgs) + {buffer_percent}% buffer = {gas_with_buffer}")
+    log_debug(f"Gas estimate: base={base_gas} + msgs={per_message_gas} + bytes={per_byte_gas} ({proposal_bytes}B) = {estimated_gas}, +{buffer_percent}% = {gas_with_buffer}")
     return gas_with_buffer
 
 
@@ -639,9 +654,9 @@ def main():
 
                 if balances:
                     amt_int = int(balances[0].get("amount", "0"))
-                    log_debug(f"Faucet balance: {amt_int:,} umirage, need: {total_needed:,}")
+                    log_debug(f"Faucet balance: {amt_int/1_000_000:,.2f} MIRAGE, need: {total_needed/1_000_000:,.2f}")
                     if amt_int < total_needed:
-                        info(f"ERROR: Insufficient faucet balance ({amt_int:,} < {total_needed:,} umirage)")
+                        info(f"ERROR: Insufficient faucet balance ({amt_int/1_000_000:,.2f} < {total_needed/1_000_000:,.2f} MIRAGE)")
                         return 1
                 else:
                     info(f"ERROR: Faucet account has no balance")
@@ -696,12 +711,11 @@ def main():
                 json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
 
     total_umirage = estimated_gas + deposit_amount  # gas fee + deposit
-    total_mirage = total_umirage / 1_000_000
 
     print(f"\nEstimated costs:")
-    print(f"  Gas: {estimated_gas:,} umirage")
-    print(f"  Deposit: {deposit_amount:,} umirage ({deposit_source})")
-    print(f"  Total: {total_umirage:,} umirage ({total_mirage:.2f} MIRAGE)")
+    print(f"  Gas: {estimated_gas/1_000_000:,.2f} MIRAGE")
+    print(f"  Deposit: {deposit_amount/1_000_000:,.2f} MIRAGE ({deposit_source})")
+    print(f"  Total: {total_umirage/1_000_000:,.2f} MIRAGE")
 
     # Confirmation
     try:
@@ -823,7 +837,7 @@ def main():
 
         if current_deposit_amount < min_deposit_amount:
             additional_needed = min_deposit_amount - current_deposit_amount
-            info(f"Depositing {additional_needed:,} umirage...")
+            info(f"Depositing {additional_needed/1_000_000:,.2f} MIRAGE...")
 
             deposit_gas = estimate_gas_for_deposit(buffer_percent=50.0)
             deposit_cmd = [
@@ -885,13 +899,11 @@ def main():
                 break
 
         info(f"\n⚠️  Proposal stuck in {status}")
-        info(
-            f"   Required deposit ({min_deposit_key}): {min_deposit_amount:,} umirage ({min_deposit_amount/1_000_000:.1f} MIRAGE)"
-        )
-        info(f"   Current deposit: {current_deposit_amount:,} umirage ({current_deposit_amount/1_000_000:.1f} MIRAGE)")
+        info(f"   Required deposit ({min_deposit_key}): {min_deposit_amount/1_000_000:,.2f} MIRAGE")
+        info(f"   Current deposit: {current_deposit_amount/1_000_000:,.2f} MIRAGE")
         if current_deposit_amount < min_deposit_amount:
             shortfall = min_deposit_amount - current_deposit_amount
-            info(f"   Shortfall: {shortfall:,} umirage ({shortfall/1_000_000:.1f} MIRAGE)")
+            info(f"   Shortfall: {shortfall/1_000_000:,.2f} MIRAGE")
         info(f"\nLog file: {_log_file}")
         return 1
 
@@ -927,9 +939,9 @@ def main():
 
             if umirage_balance >= min_vote_fee:
                 valid_validator_accounts.append(account_name)
-                log_debug(f"Validator {account_name}: {umirage_balance:,} umirage (OK)")
+                log_debug(f"Validator {account_name}: {umirage_balance/1_000_000:,.2f} MIRAGE (OK)")
             else:
-                log_debug(f"Validator {account_name}: {umirage_balance:,} umirage (insufficient)")
+                log_debug(f"Validator {account_name}: {umirage_balance/1_000_000:,.2f} MIRAGE (insufficient)")
         except Exception as e:
             log(f"Error checking validator {account_name}: {e}")
 
