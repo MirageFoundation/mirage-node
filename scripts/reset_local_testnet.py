@@ -656,8 +656,8 @@ def transform_to_single_validator(
         "missed_blocks": [],
     }
 
-    faucet_amount = 10_000_000_000
-    validator_extra = 10_000_000
+    faucet_amount = 100_000_000_000_000_000  # 100 billion MIRAGE
+    validator_extra = 100_000_000_000_000  # 100 million MIRAGE
     balances = bank.get("balances") or []
     balances.append({"address": faucet_addr, "coins": [{"denom": "umirage", "amount": str(faucet_amount)}]})
     balances.append({"address": val_addr, "coins": [{"denom": "umirage", "amount": str(validator_extra)}]})

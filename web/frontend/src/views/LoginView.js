@@ -123,8 +123,15 @@ function LoginView({ state, setCredentials }) {
             const username = await fetchUsernameFromAddress(publicKey);
 
             if (!username) {
-                if (mountedRef.current) setError('No account found for this recovery phrase');
+                // Account not found - redirect to create account with the provided seed
                 if (mountedRef.current) setLoading(false);
+                navigate('/create_account', { 
+                    state: { 
+                        importedSeed: trimmedSeed,
+                        fromRecovery: true 
+                    },
+                    replace: true 
+                });
                 return;
             }
 

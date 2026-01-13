@@ -110,6 +110,10 @@ function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
 
+    // Check if we're coming from login with an imported seed (account not found on chain)
+    const importedSeed = location.state?.importedSeed || null;
+    const fromRecovery = location.state?.fromRecovery || false;
+
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
         if (state.publicKey) {
@@ -174,8 +178,8 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
-    // Function to generate a new account
-    const generateAccount = () => {
+    // Function to initialize account (use imported seed or generate new)
+    const initializeAccount = (existingSeed = null) => {
         // Preserve referrer before clearing storage
         const referrer = localStorage.getItem('referrer_address');
         Storage.clear();
@@ -184,8 +188,8 @@ function CreateAccountView({ state, setCredentials }) {
             localStorage.setItem('referrer_address', referrer);
         }
 
-        // Generate new seed phrase
-        const newSeedPhrase = generateMnemonic();
+        // Use provided seed or generate new one
+        const newSeedPhrase = existingSeed || generateMnemonic();
         setSeedPhrase(newSeedPhrase);
 
         try {
@@ -197,13 +201,13 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
-    // Call generateAccount on component mount only if we don't have data yet and user is not signed in
+    // Call initializeAccount on component mount only if we don't have data yet and user is not signed in
     React.useEffect(() => {
         if (!seedPhrase && !publicKey && !state.publicKey) {
-            generateAccount();
+            initializeAccount(importedSeed);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.publicKey]);
+    }, [state.publicKey, importedSeed]);
 
     // Clear any pending username/publicKey if this view unmounts
     React.useEffect(() => {
@@ -357,15 +361,29 @@ function CreateAccountView({ state, setCredentials }) {
                     <AuthPageShell activeTab="create">
                         <Centered>
                             <StyledInfo>
-                                <WelcomeTitle>Welcome to Mirage!</WelcomeTitle>
+                                <WelcomeTitle>{fromRecovery ? 'Create Your Account' : 'Welcome to Mirage!'}</WelcomeTitle>
                                 <div>
-                                    <IntroP>
-                                        Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant.
-                                    </IntroP>
-                                    <IntroP>
-                                        Free accounts are prefixed with "Anon-" and run a small proof-of-work on your device to prevent spam.
-                                        You can upgrade anytime with MIRAGE tokens to remove the prefix, unlock cosmetic perks, and access premium features.
-                                    </IntroP>
+                                    {fromRecovery ? (
+                                        <>
+                                            <IntroP style={{ color: '#f66' }}>
+                                                No account was found on the blockchain for this recovery phrase, but you can create a new account using it now.
+                                            </IntroP>
+                                            <IntroP>
+                                                Free accounts are prefixed with "Anon-" and run a small proof-of-work on your device to prevent spam.
+                                                Choose a username below to continue.
+                                            </IntroP>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <IntroP>
+                                                Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant.
+                                            </IntroP>
+                                            <IntroP>
+                                                Free accounts are prefixed with "Anon-" and run a small proof-of-work on your device to prevent spam.
+                                                You can upgrade anytime with MIRAGE tokens to remove the prefix, unlock cosmetic perks, and access premium features.
+                                            </IntroP>
+                                        </>
+                                    )}
                                 </div>
                                 <UsernameLabel>Choose your username:</UsernameLabel>
                                 <StyledInputBox
