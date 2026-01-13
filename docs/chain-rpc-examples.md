@@ -1,16 +1,35 @@
 # Mirage Chain RPC Examples (Public)
 
-This document shows how to query a Mirage node via CometBFT RPC and the Cosmos REST API. It is written to be reusable for any node and does not hard-code IPs.
+This document shows how to query a Mirage node via CometBFT RPC and the Cosmos REST API.
 
-### Variables used below
+### Public Endpoints
+
+For public access via HTTPS (recommended):
 
 ```bash
-NODE_HOST="<YOUR_NODE_HOST_OR_DOMAIN>"
+# Primary endpoints (mirage.talk)
+RPC_URL="https://mirage.talk/chain/rpc"
+REST_URL="https://mirage.talk/chain/rest"
+WS_URL="wss://mirage.talk/chain/rpc/websocket"
+
+# Fallback endpoints (mirage.vote)
+RPC_URL="https://mirage.vote/chain/rpc"
+REST_URL="https://mirage.vote/chain/rest"
+```
+
+### Direct Port Access (internal/local only)
+
+For local or internal node access:
+
+```bash
+NODE_HOST="<YOUR_NODE_HOST_OR_IP>"
 
 RPC_HTTP="http://${NODE_HOST}:26657"
 RPC_WS="ws://${NODE_HOST}:26657/websocket"
 REST_HTTP="http://${NODE_HOST}:1317"
 ```
+
+> **Deprecation Notice**: The legacy paths `/rpc` and `/lcd` are deprecated and will be removed after **2026-02-20**. Use `/chain/rpc` and `/chain/rest` instead.
 
 ### CometBFT RPC (port 26657)
 
