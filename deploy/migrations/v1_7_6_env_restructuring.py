@@ -261,65 +261,61 @@ def run(config_dir: Path, logger) -> str:
             cleaned_lines.append(line)
         content = "\n".join(cleaned_lines)
 
-        # Ensure each chain has key_store_folder (points to ~/.mirage/hermes/keys)
+        # Ensure each chain has exactly one key_store_folder (points to ~/.mirage/hermes/keys)
+        # First, parse chain blocks to see which already have key_store_folder
         lines = content.split("\n")
-        new_lines = []
-        in_chain = False
-        saw_key_store = False
-        saw_key_name = False
-        current_chain_id = None
-
-        def _should_add_key_store(chain_id: str | None) -> str | None:
+        
+        def _key_store_line(chain_id: str | None) -> str | None:
             if chain_id == "mirage-1" or chain_id == "osmosis-1":
-                # NOTE: Hermes does not expand $HOME in this field in our environment,
-                # so we use an absolute path.
                 return "key_store_folder = '/root/.mirage/hermes/keys'"
             return None
 
-        for line in lines:
+        # First pass: identify chain blocks and whether they have key_store_folder
+        chain_blocks = []  # list of (start_idx, chain_id, has_key_store, key_name_idx)
+        current_start = None
+        current_chain_id = None
+        current_has_key_store = False
+        current_key_name_idx = None
+        
+        for i, line in enumerate(lines):
             stripped = line.strip()
             if stripped.startswith("[[chains]]"):
-                # finalize previous chain (if missing)
-                if in_chain and not saw_key_store:
-                    ks = _should_add_key_store(current_chain_id)
-                    if ks:
-                        new_lines.append(ks)
-                        modified = True
-                # reset for new chain
-                in_chain = True
-                saw_key_store = False
-                saw_key_name = False
+                # Save previous chain block
+                if current_start is not None:
+                    chain_blocks.append((current_start, current_chain_id, current_has_key_store, current_key_name_idx))
+                current_start = i
                 current_chain_id = None
-                new_lines.append(line)
-                continue
-
-            if in_chain:
+                current_has_key_store = False
+                current_key_name_idx = None
+            elif current_start is not None:
                 if stripped.startswith("id ="):
-                    # e.g. id = 'mirage-1'
                     current_chain_id = stripped.split("=", 1)[1].strip().strip("'").strip('"')
-                if stripped.startswith("key_store_folder"):
-                    saw_key_store = True
-                if stripped.startswith("key_name"):
-                    saw_key_name = True
-                    new_lines.append(line)
-                    # insert key_store_folder immediately after key_name if missing
-                    if not saw_key_store:
-                        ks = _should_add_key_store(current_chain_id)
-                        if ks:
-                            new_lines.append(ks)
-                            saw_key_store = True
-                            modified = True
-                    continue
-
+                elif stripped.startswith("key_store_folder"):
+                    current_has_key_store = True
+                elif stripped.startswith("key_name"):
+                    current_key_name_idx = i
+        
+        # Save last chain block
+        if current_start is not None:
+            chain_blocks.append((current_start, current_chain_id, current_has_key_store, current_key_name_idx))
+        
+        # Second pass: add key_store_folder where missing
+        # Build set of line indices after which to insert
+        insertions = {}  # line_idx -> line_to_insert
+        for start_idx, chain_id, has_key_store, key_name_idx in chain_blocks:
+            if not has_key_store and key_name_idx is not None:
+                ks = _key_store_line(chain_id)
+                if ks:
+                    insertions[key_name_idx] = ks
+                    modified = True
+        
+        # Build new content with insertions
+        new_lines = []
+        for i, line in enumerate(lines):
             new_lines.append(line)
-
-        # finalize last chain
-        if in_chain and not saw_key_store:
-            ks = _should_add_key_store(current_chain_id)
-            if ks:
-                new_lines.append(ks)
-                modified = True
-
+            if i in insertions:
+                new_lines.append(insertions[i])
+        
         content = "\n".join(new_lines)
 
         # Add packet_filter if missing (only relay on channel-1)

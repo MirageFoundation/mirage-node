@@ -9,7 +9,9 @@ import requests
 
 
 OSMOSIS_LCD = "https://lcd.osmosis.zone"
-IBC_DENOM = "ibc/FD0C5BF3009F3300961E52E4E0160D6901B1B3E7D0475766C5D960A9D3999B32"
+# New IBC denom after v1.7.5 channel rebuild (channel-1 <-> channel-108698)
+IBC_DENOM = "ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2"
+# Old denom (pre-v1.7.5, channel expired): ibc/FD0C5BF3009F3300961E52E4E0160D6901B1B3E7D0475766C5D960A9D3999B32
 
 
 def query_balance(address: str, denom: str) -> Optional[int]:

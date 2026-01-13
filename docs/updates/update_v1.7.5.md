@@ -81,6 +81,15 @@ Due to the previous IBC client expiration, Mirage now uses a new channel to Osmo
 | Mirage | channel-0 | channel-1 |
 | Osmosis | channel-108600 | channel-108698 |
 
+**IBC Denom Change**: The new channel results in a different IBC denom for MIRAGE on Osmosis:
+
+| | Old (Expired) | New (Active) |
+|--|---------------|--------------|
+| Osmosis Channel | channel-108600 | channel-108698 |
+| IBC Denom | `ibc/FD0C5BF3...B32` | `ibc/E132A35D...BE2` |
+
+Full new denom: `ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2`
+
 PRs submitted to update the chain registry and Osmosis asset lists.
 
 ---
