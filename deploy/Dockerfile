@@ -137,8 +137,7 @@ WORKDIR /opt/mirage
 # - 80, 443: Caddy (HTTP/HTTPS frontend)
 # - 26656: P2P (node-to-node communication)
 # - 26657: RPC (optional, for external queries)
-# - 9090: gRPC (for IBC relayers and chain queries)
-EXPOSE 80 443 26656 26657 9090
+EXPOSE 80 443 26656 26657
 
 # Set entrypoint
 ENTRYPOINT ["/opt/mirage/deploy/entrypoint.sh"]

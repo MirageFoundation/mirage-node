@@ -446,7 +446,7 @@ if [ "$MODE" != "init" ] && [ "$MONIKER_VALUE" = "mirage-node" ]; then
   fi
 fi
 
-PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 -p 9090:9090"
+PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
 MONIKER_ARG=""
 HOSTNAME_ARG=""
 if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
