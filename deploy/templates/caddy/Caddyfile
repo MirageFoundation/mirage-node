@@ -8,15 +8,15 @@ ${DOMAIN:-:80} {
 		reverse_proxy 127.0.0.1:5000
 	}
 
-	# Chain RPC (CometBFT) - includes WebSocket at /rpc/websocket
-	handle /rpc/* {
-		uri strip_prefix /rpc
+	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket
+	handle /chain/rpc/* {
+		uri strip_prefix /chain/rpc
 		reverse_proxy 127.0.0.1:26657
 	}
 
-	# Chain REST/LCD (Cosmos SDK)
-	handle /lcd/* {
-		uri strip_prefix /lcd
+	# Chain REST (Cosmos SDK)
+	handle /chain/rest/* {
+		uri strip_prefix /chain/rest
 		reverse_proxy 127.0.0.1:1317
 	}
 
