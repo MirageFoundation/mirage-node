@@ -51,38 +51,28 @@ if [ "$HOST_IP" != "$DOMAIN_IP" ]; then
   exit 1
 fi
 
+# Render Caddyfile from template (ensures we get latest paths)
 echo "==> Rendering Caddyfile for ${DOMAIN}..."
+TEMPLATE="$ROOT_DIR/deploy/templates/caddy/Caddyfile"
+if [ ! -f "$TEMPLATE" ]; then
+  echo "ERROR: Caddyfile template not found at $TEMPLATE" >&2
+  exit 1
+fi
+
+# Render template to temp file
+TEMP_CADDY=$(mktemp)
+export DOMAIN
+python3 "$ROOT_DIR/deploy/render_template.py" "$TEMPLATE" "$TEMP_CADDY"
+
+# Create final Caddyfile with www redirect + rendered content
 cat > "$CADDY_DIR/Caddyfile" <<EOF
 www.$DOMAIN {
 	redir https://$DOMAIN{uri} permanent
 }
 
-$DOMAIN {
-	encode zstd gzip
-
-	handle /api/* {
-		reverse_proxy 127.0.0.1:5000
-	}
-
-	# Chain RPC (CometBFT) - includes WebSocket at /rpc/websocket
-	handle /rpc/* {
-		uri strip_prefix /rpc
-		reverse_proxy 127.0.0.1:26657
-	}
-
-	# Chain REST/LCD (Cosmos SDK)
-	handle /lcd/* {
-		uri strip_prefix /lcd
-		reverse_proxy 127.0.0.1:1317
-	}
-
-	handle {
-		root * /opt/mirage/web/frontend/build
-		try_files {path} /index.html
-		file_server
-	}
-}
 EOF
+cat "$TEMP_CADDY" >> "$CADDY_DIR/Caddyfile"
+rm "$TEMP_CADDY"
 
 echo "==> Validating Caddyfile..."
 if ! caddy validate --config "$CADDY_DIR/Caddyfile" --adapter caddyfile; then
