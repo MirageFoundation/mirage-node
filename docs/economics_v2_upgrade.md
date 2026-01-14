@@ -13,9 +13,9 @@
 
 **Total Minted in Phase 1:** ~110B MIRAGE
 
-### 🔜 Phase 2: Chain Upgrade (v1.8.0)
+### ✅ Phase 2 Complete (2026-01-14)
 
-Code changes + param migration via governance proposal.
+Chain upgrade `v1.8.0-economics` deployed successfully.
 
 ---
 
@@ -130,22 +130,22 @@ These should be updated in the v1.8.0 upgrade handler via gov module params.
 
 ---
 
-## Review Before Upgrade
+## Review Before Upgrade (DONE)
 
 ### Governance (Cosmos SDK)
-- [ ] Update min_deposit to ~1M MIRAGE
-- [ ] Update expedited_min_deposit to ~2M MIRAGE
-- [ ] Review other gov params (voting_period, quorum, etc.)
+- [x] Update min_deposit to 500B umirage ($5)
+- [x] Update expedited_min_deposit to 1T umirage ($10)
+- [x] Review other gov params (voting_period, quorum, etc.)
 
 ### Chain Code
-- [ ] grep -rn "umirage" blockchain/ - find hardcoded amounts
-- [ ] grep -rn "000000" blockchain/ - find token amounts
-- [ ] Review Cosmos SDK module params we inherit
+- [x] grep -rn "umirage" blockchain/ - find hardcoded amounts
+- [x] grep -rn "000000" blockchain/ - find token amounts
+- [x] Review Cosmos SDK module params we inherit
 
 ### Backend/Frontend
-- [ ] Hardcoded MIRAGE amounts in Python
-- [ ] Frontend subscription price display
-- [ ] PoW difficulty for free users
+- [x] Hardcoded MIRAGE amounts in Python
+- [x] Frontend subscription price display
+- [x] PoW difficulty for free users
 
 ---
 
@@ -157,12 +157,12 @@ These should be updated in the v1.8.0 upgrade handler via gov module params.
 - [x] Validator self-delegation
 - [x] User balance compensation (10,000x)
 
-### Phase 2 - Chain Upgrade
-- [ ] Code: Remove /1000 divisors
-- [ ] Code: Startup gas price check (MUST validate minimum-gas-prices >= 5000umirage)
-- [ ] Code: Upgrade handler (core params + gov params)
-- [ ] Test on local testnet
-- [ ] Submit upgrade proposal
-- [ ] Coordinate validators
-- [ ] Execute upgrade
-- [ ] Verify all validators updated app.toml
+### Phase 2 - Chain Upgrade ✅
+- [x] Code: Remove /1000 divisors
+- [x] Code: Startup gas price check (MUST validate minimum-gas-prices >= 5000umirage)
+- [x] Code: Upgrade handler (core params + gov params)
+- [x] Test on local testnet
+- [x] Submit upgrade proposal
+- [x] Coordinate validators
+- [x] Execute upgrade
+- [x] Verify all validators updated app.toml

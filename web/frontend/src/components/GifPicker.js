@@ -2,10 +2,24 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import styled from 'styled-components';
 
-// Giphy API key from environment (set in frontend.env)
-const GIPHY_API_KEY = (process.env.REACT_APP_GIPHY_API_KEY || '').trim();
+// Build-time fallback (used if runtime config not available)
+const BUILD_TIME_GIPHY_KEY = (process.env.REACT_APP_GIPHY_API_KEY || '').trim();
 const GIPHY_SEARCH_URL = 'https://api.giphy.com/v1/gifs/search';
 const GIPHY_TRENDING_URL = 'https://api.giphy.com/v1/gifs/trending';
+
+// Get Giphy API key: runtime config (from backend) takes precedence over build-time env
+function getGiphyApiKey() {
+    try {
+        const configData = localStorage.getItem('configData');
+        if (configData) {
+            const config = JSON.parse(configData);
+            if (config.giphy_api_key) {
+                return config.giphy_api_key.trim();
+            }
+        }
+    } catch (_) {}
+    return BUILD_TIME_GIPHY_KEY;
+}
 
 const PickerWrapper = styled.div`
     position: relative;
@@ -189,10 +203,24 @@ export default function GifPicker({ onSelect, disabled = false }) {
     const [gifs, setGifs] = useState([]);
     const [loading, setLoading] = useState(false);
     const [position, setPosition] = useState({ top: 0, left: 0 });
+    const [apiKey, setApiKey] = useState(getGiphyApiKey);
     const buttonRef = useRef(null);
     const popoverRef = useRef(null);
     const searchInputRef = useRef(null);
     const searchTimeoutRef = useRef(null);
+
+    // Re-check API key when configData changes (e.g., after login)
+    useEffect(() => {
+        const handleStorageChange = (e) => {
+            if (e.key === 'configData') {
+                setApiKey(getGiphyApiKey());
+            }
+        };
+        window.addEventListener('storage', handleStorageChange);
+        // Also check on mount in case config was already loaded
+        setApiKey(getGiphyApiKey());
+        return () => window.removeEventListener('storage', handleStorageChange);
+    }, []);
 
     const updatePosition = useCallback(() => {
         if (!buttonRef.current) return;
@@ -218,15 +246,15 @@ export default function GifPicker({ onSelect, disabled = false }) {
     }, []);
 
     const fetchGifs = useCallback(async (query) => {
-        if (!GIPHY_API_KEY) {
+        if (!apiKey) {
             setGifs([]);
             return;
         }
         setLoading(true);
         try {
             const url = query
-                ? `${GIPHY_SEARCH_URL}?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(query)}&limit=20&rating=pg-13`
-                : `${GIPHY_TRENDING_URL}?api_key=${GIPHY_API_KEY}&limit=20&rating=pg-13`;
+                ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=20&rating=pg-13`
+                : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=20&rating=pg-13`;
             
             const response = await fetch(url);
             const data = await response.json();
@@ -237,7 +265,7 @@ export default function GifPicker({ onSelect, disabled = false }) {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [apiKey]);
 
     useEffect(() => {
         if (isOpen) {
@@ -320,9 +348,9 @@ export default function GifPicker({ onSelect, disabled = false }) {
                 type="button"
                 tabIndex={-1}
                 onClick={() => setIsOpen(!isOpen)}
-                disabled={disabled || !GIPHY_API_KEY}
+                disabled={disabled || !apiKey}
                 aria-label="GIFs"
-                title={GIPHY_API_KEY ? 'GIFs' : 'GIFs disabled (missing REACT_APP_GIPHY_API_KEY)'}
+                title={apiKey ? 'GIFs' : 'GIFs disabled (missing API key)'}
             >
                 <GifIcon />
             </PickerButton>

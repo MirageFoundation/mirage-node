@@ -1583,11 +1583,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'following' && 'following'}
                                             {post.feed_bucket === 'similar' && 'similar'}
                                             {post.feed_bucket === 'liked' && 'liked'}
-                                            {post.feed_bucket === 'discovery' && 'discover'}
+                                            {post.feed_bucket === 'discovery' && 'discovery'}
                                             {post.feed_bucket === 'popular' && 'popular'}
-                                            {post.feed_bucket === 'discussion' && 'discussion'}
-                                            {post.feed_bucket === 'second_chance' && '2nd chance'}
-                                            {post.feed_bucket === 'newest' && 'new'}
+                                            {post.feed_bucket === 'discussion' && 'discussed'}
+                                            {post.feed_bucket === 'second_chance' && 'second chance'}
+                                            {post.feed_bucket === 'newest' && 'newest'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>
                                     {feedTooltipOpen && post.feed_debug && ReactDOM.createPortal(
@@ -1601,9 +1601,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <>
                                                     <FeedDebugRow style={{ marginBottom: '0.3rem' }}>
                                                         <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
-                                                            {post.feed_debug.P !== undefined
-                                                                ? '(S + V + U + P) × R'
-                                                                : '(S + V + U) × R'}
+                                                            {post.feed_debug.equation ||
+                                                                (post.feed_debug.P !== undefined
+                                                                    ? '(S + V + U + P) × R'
+                                                                    : post.feed_debug.C !== undefined
+                                                                        ? '(V + C) × R'
+                                                                        : '(S + V + U) × R')}
                                                         </FeedDebugValue>
                                                     </FeedDebugRow>
                                                     <FeedDebugRow style={{ marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid #444' }}>
@@ -1612,7 +1615,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     </FeedDebugRow>
                                                 </>
                                             )}
-                                            {/* Old magic formula */}
+                                            {/* Detailed numeric formula (if provided) */}
                                             {post.feed_debug.formula && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>Formula:</FeedDebugLabel>

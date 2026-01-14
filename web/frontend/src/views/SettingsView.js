@@ -186,10 +186,10 @@ export default function SettingsView({ state }) {
     });
     const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
         try {
-            const val = Storage.load('hide_downvoted_posts', true);
-            return val === false ? false : true;
+            const val = Storage.load('hide_downvoted_posts', false);
+            return val === true ? true : false;
         } catch (_) {
-            return true;
+            return false;
         }
     });
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {

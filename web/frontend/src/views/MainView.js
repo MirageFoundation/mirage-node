@@ -829,8 +829,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         window.dispatchEvent(new CustomEvent('settingsUpdated', { detail: { cardSize: newSize } }));
     };
     const [hideDownvotedPosts, setHideDownvotedPosts] = useState(() => {
-        const val = Storage.load('hide_downvoted_posts', true);
-        return val === false ? false : true;
+        const val = Storage.load('hide_downvoted_posts', false);
+        return val === true ? true : false;
     });
     const hideDownvotedPostsRef = useRef(hideDownvotedPosts);
     useEffect(() => { hideDownvotedPostsRef.current = hideDownvotedPosts; }, [hideDownvotedPosts]);
@@ -1232,7 +1232,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 setCurrentPage(1);
                 setHasMorePosts(false);
                 setStableOrder([]);
-                getPosts(urlTopic);
+                // Always force page 1 on user-initiated feed refresh to avoid stale pagination leaks
+                getPosts(urlTopic, null, 1);
             } catch (_) { /* noop */ }
         } catch (_) { /* noop */ }
     }, [getPosts, urlTopic]);
@@ -1403,14 +1404,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     // Trigger fetch when page increments (pagination)
     useEffect(() => {
-        if (currentPage > 1 && hasMorePosts) {
+        // Only fetch page > 1 when infinite-scroll explicitly requested it.
+        // This prevents stale state from a previous feed from accidentally fetching page 2 on navigation.
+        if (currentPage > 1 && hasMorePosts && isLoadingMore) {
+            try { console.log('[Feed] paginate fetch:', { topic: urlTopic, page: currentPage }); } catch (_) { }
             getPosts(urlTopic);
         } else if (currentPage > 1 && !hasMorePosts) {
             setIsLoadingMore(false);
             try { loadMoreLockRef.current = false; } catch (_) { }
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [currentPage, urlTopic, hasMorePosts]);
+    }, [currentPage, urlTopic, hasMorePosts, isLoadingMore]);
 
     useEffect(() => {
         const storedTopicsData = Storage.load("topics", { topics: [], lastFetched: null });
@@ -1473,13 +1477,15 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         // For forward navigation (clicking links), ALWAYS fetch fresh
         // Force bypass debounce - this is a user-initiated navigation
         forceHardRefreshRef.current = true;
+        setCurrentPage(1);
         setStableOrder([]);  // Clear stale order
         setIsLoading(true);
         try { console.log('[Feed] PUSH fetch fresh:', urlTopic); } catch (_) { }
 
         const timeoutId = setTimeout(() => {
             if (cancelled || !isMountedRef.current) return;
-            getPosts(urlTopic);
+            // Hard force page 1 on navigation so Home/Following never starts at page 2
+            getPosts(urlTopic, null, 1);
         }, 50);
         return () => {
             cancelled = true;

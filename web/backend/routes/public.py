@@ -50,7 +50,11 @@ from chain import (
     is_node_catching_up as _is_catching_up,
     get_connected_peers as _get_connected_peers,
 )
-from bank import get_balance as _get_balance, get_total_supply as _get_total_supply, get_balances_batch as _get_balances_batch
+from bank import (
+    get_balance as _get_balance,
+    get_total_supply as _get_total_supply,
+    get_balances_batch as _get_balances_batch,
+)
 import base64
 import urllib.request as _ur
 import urllib.parse as _up
@@ -215,6 +219,7 @@ def _youtube_video_id_from_url(url: str) -> str | None:
         if host in ("www.youtube.com", "youtube.com", "m.youtube.com"):
             if u.path == "/watch":
                 from urllib.parse import parse_qs
+
                 qs = parse_qs(u.query)
                 v = qs.get("v")
                 if v and v[0]:
@@ -740,10 +745,11 @@ def _get_following_feed(
     sort_mode: str = "magic",
 ) -> dict:
     """
-    Following feed v2:
+    Following feed:
     - Candidates: root posts from followed topics/users + your own posts
-    - Scoring (magic): (V + C) * R
-    - Sorting (newest): chronological
+    - Sorting:
+      - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
+      - newest: chronological
     """
     viewer_lower = viewer.strip().lower() if viewer else ""
 
@@ -817,6 +823,18 @@ def _get_following_feed(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
 
+    # For Magic scoring consistency with home feed
+    from similarity import get_or_compute_similarities
+
+    similar_users = get_or_compute_similarities(cur, viewer_lower)
+    sim_lookup = {u[0]: u[1] for u in similar_users}
+    similar_addrs = set(sim_lookup.keys())
+    similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+    unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    now_ts = int(time.time())
+    topic_prefs: dict[str, float] = {}
+    author_prefs: dict[str, float] = {}
+
     for post in candidates:
         pid = post["post_id"]
         ts = post.get("timestamp", 0)
@@ -834,10 +852,19 @@ def _get_following_feed(
                 f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]} topic={topic_lower}"
             )
 
-        R = _log_recency(ts)
-        V = _log_signed(pts)
-        C = _log_comments(comments)
-        score = (V + C) * R
+        score, debug, should_hide = _score_magic(
+            post,
+            sim_lookup,
+            similar_upvotes,
+            unique_commenters,
+            vote_totals,
+            topic_prefs,
+            author_prefs,
+            now_ts,
+            False,
+        )
+        if should_hide:
+            continue
 
         if is_own_post:
             reason = "Your post"
@@ -851,22 +878,14 @@ def _get_following_feed(
         post["_score"] = score
         post["points"] = pts
         post["comments"] = comments
+        post["unique_commenters"] = unique_commenters.get(pid, 0)
         post["children"] = []
         post["feed_type"] = "following"
-        post["feed_bucket"] = "following"
+        post["feed_bucket"] = debug.get("bucket", "following")
         post["user_vote"] = user_votes.get(pid, 0)
         post["user_weight"] = user_weight_map.get(pid, 0.0)
-        post["feed_debug"] = {
-            "bucket": "following",
-            "reason": reason,
-            "score": round(score, 2),
-            "formula": f"(V:{V:.2f} + C:{C:.2f}) * R:{R:.2f} = {score:.2f}",
-            "R": round(R, 2),
-            "V": round(V, 2),
-            "C": round(C, 2),
-            "points": round(pts, 1),
-            "comments": comments,
-        }
+        debug["follow_reason"] = reason
+        post["feed_debug"] = debug
 
     if sort_mode == "newest":
         candidates.sort(key=lambda p: -(p.get("timestamp") or 0))
@@ -917,7 +936,7 @@ def _get_home_feed(
 
     # Guest users:
     # - newest: chronological
-    # - otherwise: Magic3-style scoring (no personalization; votes + unique commenters + recency)
+    # - otherwise: magic-style scoring (no personalization; votes + unique commenters + recency)
     if not viewer_lower or viewer_lower == "guest":
         if sort_mode == "newest":
             return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
@@ -1004,6 +1023,7 @@ def _get_home_feed_magic(
             topic_prefs,
             author_prefs,
             now_ts,
+            True,
         )
 
         if should_hide:
@@ -1059,22 +1079,22 @@ def _score_magic(
     topic_prefs: dict[str, float],
     author_prefs: dict[str, float],
     now_ts: int,
+    use_prefs: bool = True,
 ) -> tuple[float, dict, bool]:
     """
-    Magic3 scoring: (S + V + U + P) × R
+    Magic scoring: (S + V + U + P) × R
 
-    Components:
-    - S = similarity boost (capped at 2.0)
-    - V = sqrt(net_votes) × 0.5
-    - U = sqrt(unique_commenters) × 0.3
-    - P = sqrt(max(0, topic_pref + author_pref)) × 0.3
+    Components (uniform weighting):
+    - S = sqrt(similarity_sum)
+    - V = sqrt(net_votes)
+    - U = sqrt(unique_commenters)
+    - P = sqrt(max(0, topic_pref + author_pref))
     - R = 1 / (1 + (age_hours/24)^1.585) — gentle decay: 12h=0.75, 24h=0.5, 48h=0.25
 
     Returns (score, debug_info, should_hide).
     """
     import math
 
-    SIM_CAP = 2.0
     HIDE_THRESHOLD = -5.0
 
     pid = post["post_id"]
@@ -1082,29 +1102,38 @@ def _score_magic(
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
 
-    # Check user preference - hide severely disliked content
-    topic_pref = topic_prefs.get(topic_lower, 0)
-    author_pref = author_prefs.get(author, 0)
-    combined_pref = topic_pref + author_pref
+    if use_prefs:
+        # Check user preference - hide severely disliked content
+        topic_pref = float(topic_prefs.get(topic_lower, 0) or 0.0)
+        author_pref = float(author_prefs.get(author, 0) or 0.0)
+        combined_pref = topic_pref + author_pref
 
-    if combined_pref <= HIDE_THRESHOLD:
-        return 0.0, {}, True
+        if combined_pref <= HIDE_THRESHOLD:
+            return 0.0, {}, True
+    else:
+        # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
+        topic_pref = 0.0
+        author_pref = 0.0
+        combined_pref = 0.0
 
     # S = Similarity boost
+    #
+    # Similarity values are per-user (0..1) and we aggregate them over
+    # similar-users who upvoted this post.
     upvoters = similar_upvotes.get(pid, [])
-    raw_sim = sum(sim_lookup.get(v, 0) for v in upvoters)
-    S = min(raw_sim, SIM_CAP)
+    raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
+    S = math.sqrt(max(0.0, raw_sim))
 
     # V = Vote score (sqrt scaling)
     net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
-    V = math.sqrt(max(0, net_vote)) * 0.5
+    V = math.sqrt(max(0.0, net_vote))
 
     # U = Unique commenter score
     unique_count = unique_commenters.get(pid, 0)
-    U = math.sqrt(unique_count) * 0.3
+    U = math.sqrt(max(0.0, float(unique_count)))
 
     # P = Preference boost (only positive prefs boost, negative just for hiding)
-    P = math.sqrt(max(0, combined_pref)) * 0.3
+    P = math.sqrt(max(0.0, combined_pref))
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
     # 12h=0.75, 24h=0.50, 48h=0.25
@@ -1143,6 +1172,14 @@ def _score_magic(
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
+        "equation": ("(√sim_sum + √net_votes + √unique_commenters + √max(0, topic_pref+author_pref)) × R"),
+        "formula": (
+            f"(√S:{raw_sim:.3f}"
+            f" + √V:{net_vote:.3f}"
+            f" + √U:{unique_count}"
+            f" + √P:{combined_pref:.3f})"
+            f" × R:{R:.4f} = {float(score):.4f}"
+        ),
         "S": round(S, 3),
         "V": round(V, 3),
         "U": round(U, 3),
@@ -1479,6 +1516,9 @@ def _score_home_post(
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score or 0.0), 2),
+        "equation": (
+            "S × R" if bucket == "similar" else "(V + C) × R  (V=sign(votes)·ln(1+|votes|), C=ln(1+comments))"
+        ),
         "formula": formula,
         "S": round(S, 2),
         "R": round(R, 2),
@@ -1551,11 +1591,8 @@ def _get_guest_feed_magic(
 ) -> dict:
     """
     Guest home feed, Magic-style:
-    - No personalization (no similarity, no prefs)
-    - Score = (V + U) × R where:
-      - V = sqrt(net_votes) × 0.5
-      - U = sqrt(unique_commenters) × 0.3
-      - R = gentle recency decay (same as Magic)
+    - No personalization (S=0, P=0)
+    - Score uses the same Magic scorer: (S + V + U + P) × R
     """
     import time
 
@@ -1588,6 +1625,7 @@ def _get_guest_feed_magic(
             topic_prefs,
             author_prefs,
             now_ts,
+            False,
         )
         if should_hide:
             continue
@@ -1645,6 +1683,7 @@ def get_tx_status():
 
         # Check RPC for tx confirmation
         import urllib.request as _url
+
         rpc = require_runtime().rpc_url
         url = f"{rpc}/tx?hash=0x{tx_hash.upper()}&prove=false"
         try:
@@ -2279,11 +2318,13 @@ def get_circulation_stats():
         top_accounts = []
         for addr, bal in top_10:
             username = username_map.get(addr.lower(), "")
-            top_accounts.append({
-                "address": addr,
-                "username": username,
-                "balance": bal,
-            })
+            top_accounts.append(
+                {
+                    "address": addr,
+                    "username": username,
+                    "balance": bal,
+                }
+            )
 
         resp = {
             "total_supply": total_supply,
@@ -2375,6 +2416,8 @@ def get_config():
             "validator_operator_address": find_local_operator_address(),
             "validator_consensus_address": find_local_consensus_address(),
             "validator_moniker": validator_moniker,
+            # Public API keys (for client-side features)
+            "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
         }
         log_event(rid, "get_config.ok")
         out = jsonify(resp)
@@ -2391,6 +2434,7 @@ def get_config():
 
 def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
     """Get peer information including IP and on-chain validator moniker."""
+
     def _normalize_moniker(moniker: str) -> str:
         m = (moniker or "").strip()
         if not m:
@@ -2860,7 +2904,7 @@ def search():
     - @username: Search users by username, return user + their posts
     - #topic: Search topics by prefix
     - Otherwise: Search topics, users, and posts with substring matching
-    
+
     Query Parameters:
       - q (required): Search query
       - type: Filter to 'topics', 'users', or 'posts' (for Load More)
@@ -2871,14 +2915,14 @@ def search():
     q_raw = request.args.get("q", default="", type=str).strip()
     if not q_raw:
         return jsonify({"error": "q parameter is required"}), 400
-    
+
     search_type_filter = request.args.get("type", default="", type=str).strip().lower()
     limit = request.args.get("limit", 10, type=int)
     limit = min(max(1, limit), 50)
     offset = request.args.get("offset", 0, type=int)
     offset = max(0, offset)
     viewer = request.args.get("address", default="", type=str).strip()
-    
+
     # Detect search type from prefix
     if q_raw.startswith("@"):
         search_type = "user"
@@ -2889,19 +2933,21 @@ def search():
     else:
         search_type = "general"
         query = q_raw
-    
+
     if not query:
-        return jsonify({
-            "query": q_raw,
-            "search_type": search_type,
-            "topics": [],
-            "users": [],
-            "posts": [],
-            "has_more_topics": False,
-            "has_more_users": False,
-            "has_more_posts": False,
-        })
-    
+        return jsonify(
+            {
+                "query": q_raw,
+                "search_type": search_type,
+                "topics": [],
+                "users": [],
+                "posts": [],
+                "has_more_topics": False,
+                "has_more_users": False,
+                "has_more_posts": False,
+            }
+        )
+
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
@@ -2909,7 +2955,7 @@ def search():
         blocked_users = _get_blocked_users(cur, viewer) if viewer else set()
         deleted_clause = _deleted_filter()
         deleted_bare = _deleted_filter_bare()
-        
+
         result = {
             "query": q_raw,
             "search_type": search_type,
@@ -2920,11 +2966,11 @@ def search():
             "has_more_users": False,
             "has_more_posts": False,
         }
-        
+
         # Sanitize query for LIKE matching (escape special chars)
         query_lower = query.lower()
         like_query = query_lower.replace("%", "\\%").replace("_", "\\_")
-        
+
         # ========== USER SEARCH (@username) ==========
         if search_type == "user":
             # Find user by username (exact or prefix match) with post count
@@ -2945,23 +2991,25 @@ def search():
             user_rows = cur.fetchall()
             has_more_users = len(user_rows) > limit
             user_rows = user_rows[:limit]
-            
+
             users = []
             for row in user_rows:
                 addr, uname, level, created_at, post_count = row
                 if addr.lower() in blocked_users:
                     continue
-                users.append({
-                    "address": addr,
-                    "username": uname or None,
-                    "level": level or 0,
-                    "created_at": int(created_at) if created_at else None,
-                    "post_count": int(post_count or 0),
-                })
-            
+                users.append(
+                    {
+                        "address": addr,
+                        "username": uname or None,
+                        "level": level or 0,
+                        "created_at": int(created_at) if created_at else None,
+                        "post_count": int(post_count or 0),
+                    }
+                )
+
             result["users"] = users
             result["has_more_users"] = has_more_users
-            
+
             # Also fetch posts from the first matched user if any
             if users and not search_type_filter:
                 first_user_addr = users[0]["address"]
@@ -2985,13 +3033,13 @@ def search():
                 post_rows = cur.fetchall()
                 posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare)
                 result["posts"] = posts
-        
+
         # ========== TOPIC SEARCH (#topic) ==========
         elif search_type == "topic":
             p = expect_params()
             min_topic = p.get("min_topic_size", 3)
             max_topic = p.get("max_topic_size", 50)
-            
+
             cur.execute(
                 f"""
                 WITH topic_base AS (
@@ -3022,26 +3070,28 @@ def search():
             topic_rows = cur.fetchall()
             has_more_topics = len(topic_rows) > limit
             topic_rows = topic_rows[:limit]
-            
+
             topics = []
             topic_list = [row[0] for row in topic_rows]
             stats = _compute_dominant_flags(cur, topic_list) if topic_list else {}
-            
+
             for row in topic_rows:
                 topic, post_count, dominant_tag, dominant_ratio = row
                 stat = stats.get(topic, {}) if stats else {}
                 dom_tag = str(stat.get("dominant_tag") or "").lower()
                 dom_ratio = float(stat.get("dominant_ratio") or 0)
-                topics.append({
-                    "topic": topic,
-                    "post_count": int(post_count or 0),
-                    "dominant_tag": dom_tag or None,
-                    "dominant_ratio": dom_ratio,
-                })
-            
+                topics.append(
+                    {
+                        "topic": topic,
+                        "post_count": int(post_count or 0),
+                        "dominant_tag": dom_tag or None,
+                        "dominant_ratio": dom_ratio,
+                    }
+                )
+
             result["topics"] = topics
             result["has_more_topics"] = has_more_topics
-        
+
         # ========== GENERAL SEARCH ==========
         else:
             # Search topics (if not filtering or filtering to topics)
@@ -3049,7 +3099,7 @@ def search():
                 p = expect_params()
                 min_topic = p.get("min_topic_size", 3)
                 max_topic = p.get("max_topic_size", 50)
-                
+
                 cur.execute(
                     f"""
                     WITH topic_base AS (
@@ -3080,26 +3130,28 @@ def search():
                 topic_rows = cur.fetchall()
                 has_more_topics = len(topic_rows) > limit
                 topic_rows = topic_rows[:limit]
-                
+
                 topics = []
                 topic_list = [row[0] for row in topic_rows]
                 stats = _compute_dominant_flags(cur, topic_list) if topic_list else {}
-                
+
                 for row in topic_rows:
                     topic, post_count, dominant_tag, dominant_ratio = row
                     stat = stats.get(topic, {}) if stats else {}
                     dom_tag = str(stat.get("dominant_tag") or "").lower()
                     dom_ratio = float(stat.get("dominant_ratio") or 0)
-                    topics.append({
-                        "topic": topic,
-                        "post_count": int(post_count or 0),
-                        "dominant_tag": dom_tag or None,
-                        "dominant_ratio": dom_ratio,
-                    })
-                
+                    topics.append(
+                        {
+                            "topic": topic,
+                            "post_count": int(post_count or 0),
+                            "dominant_tag": dom_tag or None,
+                            "dominant_ratio": dom_ratio,
+                        }
+                    )
+
                 result["topics"] = topics
                 result["has_more_topics"] = has_more_topics
-            
+
             # Search users (if not filtering or filtering to users)
             if not search_type_filter or search_type_filter == "users":
                 cur.execute(
@@ -3119,23 +3171,25 @@ def search():
                 user_rows = cur.fetchall()
                 has_more_users = len(user_rows) > limit
                 user_rows = user_rows[:limit]
-                
+
                 users = []
                 for row in user_rows:
                     addr, uname, level, created_at, post_count = row
                     if addr.lower() in blocked_users:
                         continue
-                    users.append({
-                        "address": addr,
-                        "username": uname or None,
-                        "level": level or 0,
-                        "created_at": int(created_at) if created_at else None,
-                        "post_count": int(post_count or 0),
-                    })
-                
+                    users.append(
+                        {
+                            "address": addr,
+                            "username": uname or None,
+                            "level": level or 0,
+                            "created_at": int(created_at) if created_at else None,
+                            "post_count": int(post_count or 0),
+                        }
+                    )
+
                 result["users"] = users
                 result["has_more_users"] = has_more_users
-            
+
             # Search posts (if not filtering or filtering to posts)
             if not search_type_filter or search_type_filter == "posts":
                 cur.execute(
@@ -3158,11 +3212,11 @@ def search():
                 post_rows = cur.fetchall()
                 has_more_posts = len(post_rows) > limit
                 post_rows = post_rows[:limit]
-                
+
                 posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare)
                 result["posts"] = posts
                 result["has_more_posts"] = has_more_posts
-        
+
         conn.close()
         return jsonify(result)
     except Exception as e:
@@ -3179,12 +3233,12 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
         if txhash in blocked_posts or owner in blocked_users:
             continue
         filtered.append(r)
-    
+
     if not filtered:
         return []
-    
+
     post_ids = [(r[0] or "").lower() for r in filtered]
-    
+
     # Get points (sum of user_weight)
     vote_totals = {}
     if post_ids:
@@ -3207,7 +3261,7 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
         for tgt, vote_sum in cur.fetchall():
             if tgt:
                 vote_totals[tgt] = round(vote_sum or 0)
-    
+
     # Get comment counts
     comment_counts = {}
     if post_ids:
@@ -3243,7 +3297,7 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
         for root_id, cnt in cur.fetchall():
             if root_id:
                 comment_counts[root_id] = int(cnt or 0)
-    
+
     # Get viewer's votes and user_weight contributions
     user_votes = {}
     user_weight_map = {}
@@ -3259,27 +3313,29 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
             if tgt:
                 user_votes[tgt] = int(vote) if vote else 0
                 user_weight_map[tgt] = float(weight) if weight else 0.0
-    
+
     posts = []
     for row in filtered:
         txhash, owner, ts, topic, title, content, username, target, tag, thumbnail = row
         pid = (txhash or "").lower()
-        posts.append({
-            "post_id": pid,
-            "user_id": owner,
-            "username": username or None,
-            "timestamp": int(ts) if ts else None,
-            "topic": topic,
-            "title": title,
-            "content": content,
-            "tag": tag or "",
-            "thumbnail": thumbnail or "",
-            "points": vote_totals.get(pid, 0),
-            "comments": comment_counts.get(pid, 0),
-            "user_vote": user_votes.get(pid, 0),
-            "user_weight": user_weight_map.get(pid, 0.0),
-        })
-    
+        posts.append(
+            {
+                "post_id": pid,
+                "user_id": owner,
+                "username": username or None,
+                "timestamp": int(ts) if ts else None,
+                "topic": topic,
+                "title": title,
+                "content": content,
+                "tag": tag or "",
+                "thumbnail": thumbnail or "",
+                "points": vote_totals.get(pid, 0),
+                "comments": comment_counts.get(pid, 0),
+                "user_vote": user_votes.get(pid, 0),
+                "user_weight": user_weight_map.get(pid, 0.0),
+            }
+        )
+
     return posts
 
 
@@ -3312,7 +3368,6 @@ def get_posts():
         sort_mode = (request.args.get("by", default="", type=str) or "").strip().lower()
 
         # Only supported sort modes.
-        # Magic 1/2/3 were removed; Magic is now the only algo mode.
         if sort_mode and sort_mode not in ("magic", "newest"):
             return jsonify({"error": f"unsupported sort mode: {sort_mode}"}), 400
 
@@ -3384,20 +3439,10 @@ def get_posts():
             )
         total = cur.fetchone()[0] or 0
 
-        # Fetch paginated posts
-        # Determine sort order based on sort_mode
-        if sort_mode == "magic":
-            # Magic sort: score by (votes + comments) * recency
-            # Using a simpler formula for topic feeds than home feed
-            order_clause = """
-                ORDER BY (
-                    (COALESCE(v.vote_sum, 0) + COALESCE(c.comment_count, 0) * 2)
-                    / POWER(((EXTRACT(EPOCH FROM NOW()) - p.created_at) / 3600.0) + 2, 1.2)
-                ) DESC, p.created_at DESC
-            """
-        else:
-            # Default: newest first
-            order_clause = "ORDER BY p.created_at DESC"
+        # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
+        # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
+        max_candidates = max(500, limit * page * 3)
+        order_clause = "ORDER BY p.created_at DESC"
 
         if topic and topic != "all":
             cur.execute(
@@ -3430,9 +3475,9 @@ def get_posts():
                 ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND p.topic = %s AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
-                LIMIT %s OFFSET %s
+                LIMIT %s
                 """,
-                (topic, limit, offset),
+                (topic, max_candidates),
             )
         else:
             cur.execute(
@@ -3465,9 +3510,9 @@ def get_posts():
                 ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
-                LIMIT %s OFFSET %s
+                LIMIT %s
                 """,
-                (limit, offset),
+                (max_candidates,),
             )
         rows = cur.fetchall()
         # Opportunistic backfill of thumbnails for direct images
@@ -3579,91 +3624,97 @@ def get_posts():
             user_votes = {}
             user_weight_map = {}
 
-        # Attach feed metadata for topic/global feeds so the frontend can always show a reason chip.
-        is_magic_topic_feed = sort_mode == "magic"
+        # Convert rows to post dicts (and de-dupe / tag-filter consistently)
+        seen: set[str] = set()
+        candidates: list[dict] = []
+        for row in rows:
+            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+            if not post:
+                continue
+            post["_source"] = "topic" if (topic and topic != "all") else "all"
+            candidates.append(post)
+
+        # Attach feed metadata for topic/global feeds.
         topic_lower = (topic or "").strip().lower()
         is_global_topic_feed = (not topic_lower) or (topic_lower == "all")
         topic_feed_type = "all" if is_global_topic_feed else "topic"
-        topic_feed_bucket = "popular" if is_magic_topic_feed else "newest"
-        if is_global_topic_feed:
-            topic_feed_reason = (
-                "Global feed (hot)" if is_magic_topic_feed else "Global feed (newest)"
-            )
-        else:
-            topic_feed_reason = (
-                f"#{topic_lower} feed (hot)" if is_magic_topic_feed else f"#{topic_lower} feed (newest)"
-            )
 
-        result = []
-        for row in rows:
-            (
-                txhash,
-                owner,
-                ts,
-                tpc,
-                title,
-                content,
-                tag,
-                root_topic,
-                root_post_id,
-                uname,
-                edited,
-                edited_at,
-                thumbnail,
-            ) = row
-            pid = (txhash or "").lower()
-            ts_int = int(ts) if ts is not None else 0
-            pts = float(vote_totals.get(pid, 0) or 0)
-            comments = int(comment_counts.get(pid, 0) or 0)
+        if sort_mode == "magic":
+            # Rank via the same Magic scorer (no prefs in topic feeds, P=0).
+            from similarity import get_or_compute_similarities
+
+            address_lower = (address or "").strip().lower()
+            if address_lower and address_lower != "guest":
+                similar_users = get_or_compute_similarities(cur, address_lower)
+                sim_lookup = {u[0]: u[1] for u in similar_users}
+            else:
+                sim_lookup = {}
+            similar_addrs = set(sim_lookup.keys())
+
+            post_ids = [p["post_id"] for p in candidates]
+            similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
+            unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+            topic_prefs: dict[str, float] = {}
+            author_prefs: dict[str, float] = {}
             now_ts = int(time.time())
-            age_hours = max(0.0, (now_ts - ts_int) / 3600.0) if ts_int else 0.0
-            # Match topic-feed SQL ordering score:
-            # magic: (points + 2*comments) / (age_hours + 2)^1.2
-            # newest: monotonic recency score 1 / (age_hours + 2)^1.2 (same ordering as timestamp)
-            denom = (age_hours + 2.0) ** 1.2
-            R = (1.0 / denom) if denom > 0 else 0.0
-            Q = pts + (comments * 2.0)
-            score = (Q * R) if is_magic_topic_feed else R
-            formula = (
-                f"(P:{pts:.1f} + 2*C:{comments}) / (age_h+2)^1.2 = {score:.6f}"
-                if is_magic_topic_feed
-                else f"1 / (age_h+2)^1.2 = {score:.6f}"
-            )
-            result.append(
-                {
-                    "post_id": pid,
-                    "user_id": owner,
-                    "username": uname,
-                    "timestamp": int(ts) if ts is not None else None,
-                    "topic": tpc,
-                    "root_topic": root_topic or tpc,
-                    "root_post_id": (root_post_id or txhash or "").lower(),
-                    "title": title,
-                    "content": content,
-                    "tag": tag or "",
-                    "edited": bool(edited_at),
-                    "edited_at": int(edited_at or 0),
-                    "thumbnail": thumbnail,
-                    "points": pts,
-                    "comments": comments,
-                    "user_vote": user_votes.get(pid, 0),
-                    "user_weight": user_weight_map.get(pid, 0.0),
-                    "children": [],
-                    "feed_type": topic_feed_type,
-                    "feed_bucket": topic_feed_bucket,
-                    "feed_debug": {
-                        "bucket": topic_feed_bucket,
-                        "reason": topic_feed_reason,
-                        "score": round(float(score), 6),
-                        "formula": formula,
-                        "R": round(float(R), 6),
-                        "Q": round(float(Q), 3),
-                        "age_hours": round(float(age_hours), 2),
-                        "points": round(float(pts), 1),
-                        "comments": comments,
-                    },
+
+            scored = []
+            for post in candidates:
+                score, debug, should_hide = _score_magic(
+                    post,
+                    sim_lookup,
+                    similar_upvotes,
+                    unique_commenters,
+                    vote_totals,
+                    topic_prefs,
+                    author_prefs,
+                    now_ts,
+                    False,
+                )
+                if should_hide:
+                    continue
+                pid = post["post_id"]
+                post["_score"] = score
+                post["feed_debug"] = debug
+                post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
+                post["comments"] = int(comment_counts.get(pid, 0) or 0)
+                post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+                post["children"] = []
+                post["feed_type"] = topic_feed_type
+                post["feed_bucket"] = debug.get("bucket", "discovery")
+                post["user_vote"] = user_votes.get(pid, 0)
+                post["user_weight"] = user_weight_map.get(pid, 0.0)
+                scored.append(post)
+
+            scored.sort(key=lambda p: -float(p.get("_score", 0.0)))
+            start = (page - 1) * limit
+            end = start + limit
+            result = scored[start:end] if start < len(scored) else []
+            for p in result:
+                p.pop("_score", None)
+        else:
+            # newest: just return the newest candidates (already by created_at desc)
+            start = (page - 1) * limit
+            end = start + limit
+            page_posts = candidates[start:end] if start < len(candidates) else []
+            result = []
+            for post in page_posts:
+                pid = post["post_id"]
+                post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
+                post["comments"] = int(comment_counts.get(pid, 0) or 0)
+                post["children"] = []
+                post["feed_type"] = topic_feed_type
+                post["feed_bucket"] = "newest"
+                post["user_vote"] = user_votes.get(pid, 0)
+                post["user_weight"] = user_weight_map.get(pid, 0.0)
+                post["feed_debug"] = {
+                    "bucket": "newest",
+                    "reason": "Newest",
+                    "score": float(post.get("timestamp", 0) or 0),
+                    "equation": "timestamp",
+                    "formula": f"ts = {int(post.get('timestamp', 0) or 0)}",
                 }
-            )
+                result.append(post)
 
         has_more = (page * limit) < total
 
@@ -4111,11 +4162,13 @@ def get_comments():
         viewer_lower = (address or "").strip().lower()
         if viewer_lower and viewer_lower != "guest":
             all_post_ids = [root["post_id"]]
+
             def collect_ids(nodes):
                 for n in nodes:
                     all_post_ids.append(n["post_id"])
                     if n.get("children"):
                         collect_ids(n["children"])
+
             collect_ids(children)
             if all_post_ids:
                 ph = ",".join(["%s"] * len(all_post_ids))
@@ -4131,22 +4184,26 @@ def get_comments():
                         user_weight_map[tgt] = float(weight) if weight else 0.0
                 root["user_vote"] = user_votes.get(root["post_id"], 0)
                 root["user_weight"] = user_weight_map.get(root["post_id"], 0.0)
+
                 def apply_votes(nodes):
                     for n in nodes:
                         n["user_vote"] = user_votes.get(n["post_id"], 0)
                         n["user_weight"] = user_weight_map.get(n["post_id"], 0.0)
                         if n.get("children"):
                             apply_votes(n["children"])
+
                 apply_votes(children)
         else:
             root["user_vote"] = 0
             root["user_weight"] = 0.0
+
             def zero_votes(nodes):
                 for n in nodes:
                     n["user_vote"] = 0
                     n["user_weight"] = 0.0
                     if n.get("children"):
                         zero_votes(n["children"])
+
             zero_votes(children)
 
         # Add inbox timestamp for notification badge (only if user is logged in)
@@ -5421,12 +5478,18 @@ def get_referral_stats():
                 usernames = {r[0]: r[1] for r in cur.fetchall()}
 
                 # Load actual accruals for this user (from referral_user_accruals table)
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT referee_address, level, pending, paid, COALESCE(denied, 0)
                     FROM referral_user_accruals
                     WHERE beneficiary_address = %s
-                """, (address,))
-                accruals = {r[0]: {"level": r[1], "pending": float(r[2]), "paid": float(r[3]), "denied": float(r[4])} for r in cur.fetchall()}
+                """,
+                    (address,),
+                )
+                accruals = {
+                    r[0]: {"level": r[1], "pending": float(r[2]), "paid": float(r[3]), "denied": float(r[4])}
+                    for r in cur.fetchall()
+                }
 
                 # Reward rates by level (same as referral_accrue.py)
                 REWARD_RATES = [0.0, 1.0, 0.5, 0.25, 0.125, 0.0625]
@@ -5435,38 +5498,40 @@ def get_referral_stats():
                     """Build referral tree recursively with actual accrued earnings."""
                     if level > max_depth:
                         return []
-                    
+
                     # Find direct referees of this parent
                     direct_referees = [addr for addr, ref in all_links.items() if ref == parent_addr]
-                    
+
                     tree = []
                     for ref_addr in direct_referees:
                         rate = REWARD_RATES[level] if level < len(REWARD_RATES) else 0.0
-                        
+
                         # Get actual accrued amounts from database
                         accrual = accruals.get(ref_addr, {"pending": 0.0, "paid": 0.0, "denied": 0.0})
-                        
+
                         # Get children recursively
                         children = build_tree(ref_addr, level + 1, max_depth)
-                        
+
                         def count_descendants(nodes):
                             total = len(nodes)
                             for n in nodes:
                                 total += count_descendants(n.get("children", []))
                             return total
-                        
-                        tree.append({
-                            "address": ref_addr,
-                            "username": usernames.get(ref_addr),
-                            "level": level,
-                            "rate": rate,
-                            "pending": accrual["pending"],
-                            "paid": accrual["paid"],
-                            "denied": accrual["denied"],
-                            "children": children,
-                            "descendant_count": count_descendants(children),
-                        })
-                    
+
+                        tree.append(
+                            {
+                                "address": ref_addr,
+                                "username": usernames.get(ref_addr),
+                                "level": level,
+                                "rate": rate,
+                                "pending": accrual["pending"],
+                                "paid": accrual["paid"],
+                                "denied": accrual["denied"],
+                                "children": children,
+                                "descendant_count": count_descendants(children),
+                            }
+                        )
+
                     return tree
 
                 # Build the referral tree starting from the user
@@ -5478,7 +5543,7 @@ def get_referral_stats():
                     for n in nodes:
                         total += count_all(n.get("children", []))
                     return total
-                
+
                 def sum_tree_amounts(nodes):
                     pending = 0.0
                     paid = 0.0
@@ -5489,7 +5554,7 @@ def get_referral_stats():
                         pending += child_pending
                         paid += child_paid
                     return pending, paid
-                
+
                 total_referrals = count_all(referral_tree)
                 tree_pending, tree_paid = sum_tree_amounts(referral_tree)
 

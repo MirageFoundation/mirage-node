@@ -19,7 +19,7 @@ Tx submitter pays fee → fee_collector module → BeginBlock burns it
 
 **When it happens**: Every block in `BeginBlock`, the entire `fee_collector` balance is transferred to the `core` module and burned.
 
-**Typical amounts**: 200-600 umirage per transaction (varies by gas consumed)
+**Typical amounts**: 50,000-200,000 umirage per transaction (varies by gas consumed at 5000 umirage/gas)
 
 **Code path**: `blockchain/x/core/module/module.go` → `BeginBlock()` → `BurnAllFromModuleName(fee_collector)`
 
@@ -29,13 +29,13 @@ Tx submitter pays fee → fee_collector module → BeginBlock burns it
 
 **Flow**:
 ```
-User subscribes → 40% of period fee escrowed in core module as "reserve"
+User subscribes → 80% of period fee escrowed in core module as "reserve"
 User posts/votes → relay gas deducted from reserve → burned from core module
 ```
 
 **When it happens**: After each subscriber transaction, in the message handler via `deductRelayGasFee()`
 
-**Typical amounts**: 263-1000+ umirage per transaction (based on gas consumed, capped at `relay_max_gas_fee`)
+**Typical amounts**: 50,000-200,000 umirage per transaction (based on gas consumed at 5000 umirage/gas, capped at `relay_max_gas_fee` of 500 MIRAGE)
 
 **Code path**: `blockchain/x/core/module/module.go` → `deductRelayGasFee()` → `BurnFromModuleAmount()`
 
@@ -45,9 +45,9 @@ User posts/votes → relay gas deducted from reserve → burned from core module
 
 **Flow**:
 ```
-User pays period_fee (e.g., 1 MIRAGE)
-├── 40% → escrowed as reserve (for future relay gas)
-└── 60% → burned immediately
+User pays period_fee (e.g., 100,000 MIRAGE for Tier 1)
+├── 80% → escrowed as reserve (for future relay gas)
+└── 20% → burned immediately
 ```
 
 **When it happens**:
