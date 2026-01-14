@@ -1203,6 +1203,9 @@ def _load_unique_commenter_counts(
     Unlike regular comment_counts which just counts all comments,
     this counts DISTINCT owners to avoid inflating scores when
     one user spams multiple comments.
+
+    IMPORTANT: The root post author is excluded from the count.
+    Otherwise anyone could boost their own post by adding a comment.
     """
     if not post_ids:
         return {}
@@ -1211,30 +1214,35 @@ def _load_unique_commenter_counts(
     id_ph = ",".join(["%s"] * len(post_ids))
     all_blocked = blocked_posts | blocked_users
 
+    # Join with root posts to get the author, then exclude them from unique commenter count
     if all_blocked:
         ab_ph = ",".join(["%s"] * len(all_blocked))
         cur.execute(
             f"""
-            SELECT LOWER(root_post_id), COUNT(DISTINCT LOWER(owner)) AS unique_commenters
-            FROM posts
-            WHERE LOWER(root_post_id) IN ({id_ph})
-              AND COALESCE(target, '') != ''
-              AND LOWER(txhash) NOT IN ({ab_ph})
-              AND LOWER(owner) NOT IN ({ab_ph})
-              AND deleted = false
-            GROUP BY LOWER(root_post_id)
+            SELECT LOWER(c.root_post_id), COUNT(DISTINCT LOWER(c.owner)) AS unique_commenters
+            FROM posts c
+            JOIN posts root ON LOWER(root.txhash) = LOWER(c.root_post_id)
+            WHERE LOWER(c.root_post_id) IN ({id_ph})
+              AND COALESCE(c.target, '') != ''
+              AND LOWER(c.owner) != LOWER(root.owner)
+              AND LOWER(c.txhash) NOT IN ({ab_ph})
+              AND LOWER(c.owner) NOT IN ({ab_ph})
+              AND c.deleted = false
+            GROUP BY LOWER(c.root_post_id)
             """,
             post_ids + list(all_blocked) + list(all_blocked),
         )
     else:
         cur.execute(
             f"""
-            SELECT LOWER(root_post_id), COUNT(DISTINCT LOWER(owner)) AS unique_commenters
-            FROM posts
-            WHERE LOWER(root_post_id) IN ({id_ph})
-              AND COALESCE(target, '') != ''
-              AND deleted = false
-            GROUP BY LOWER(root_post_id)
+            SELECT LOWER(c.root_post_id), COUNT(DISTINCT LOWER(c.owner)) AS unique_commenters
+            FROM posts c
+            JOIN posts root ON LOWER(root.txhash) = LOWER(c.root_post_id)
+            WHERE LOWER(c.root_post_id) IN ({id_ph})
+              AND COALESCE(c.target, '') != ''
+              AND LOWER(c.owner) != LOWER(root.owner)
+              AND c.deleted = false
+            GROUP BY LOWER(c.root_post_id)
             """,
             post_ids,
         )
