@@ -2380,7 +2380,7 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             tag100, encStr(sender || ""),
             tag101, encStr(target || ""),
-            tag102, uvarint(amount >>> 0),
+            tag102, uvarint64(amount || 0),  // Use 64-bit for large amounts (>4B umirage)
         );
     }
 
@@ -2782,16 +2782,20 @@ class TransactionHandler {
             } else if (msgName === 'MsgSendTokens') {
                 // Sign relay for send tokens (must match chain ante)
                 const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
-                const canon = this.canonicalSendTokens({
+                // Ensure addresses are lowercase for consistency with backend
+                const senderLower = (signerAddress || "").toLowerCase();
+                const targetLower = (transaction.target || "").toLowerCase();
+                const canonParams = {
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
-                    sender: signerAddress,
-                    target: transaction.target || "",
+                    sender: senderLower,
+                    target: targetLower,
                     amount: Number(transaction.amount || 0),
-                });
+                };
+                const canon = this.canonicalSendTokens(canonParams);
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
                 const sigFixed = sigCompact.toFixedLength();
@@ -2800,7 +2804,7 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    target: transaction.target || "",
+                    target: targetLower,
                     amount: Number(transaction.amount || 0),
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
@@ -3722,7 +3726,7 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     tag100, encStr(transaction.sender || signerAddress),
                     tag101, encStr(transaction.target || ""),
-                    tag102, uvarint(transaction.amount >>> 0),
+                    tag102, uvarint64(transaction.amount || 0),  // Use 64-bit for large amounts
                 );
             } else if (action === 'report') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgReport\x00");
@@ -3837,7 +3841,18 @@ class TransactionHandler {
 
                 updateNotification("Preparing and broadcasting tx");
 
-                const proof = Number(e.data);
+                // IMPORTANT: PoW worker uses uint32 varint encoding (>>> 0). If the random start nonce is
+                // near 0xffffffff, the worker can increment past 2^32 and still validate using uint32 wrap.
+                // We MUST normalize to uint32 here so:
+                // - the signature canonical bytes match backend verification
+                // - the backend PoW digest uses the same uvarint(proof) encoding as the worker
+                const rawProof = Number(e.data);
+                const proof = rawProof >>> 0;
+                if (rawProof !== proof) {
+                    try {
+                        console.warn('[PoW] proof overflow normalized', { rawProof, proof, start });
+                    } catch (_) { }
+                }
                 this._setStatus("submitting");
                 try {
                     await this.handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);

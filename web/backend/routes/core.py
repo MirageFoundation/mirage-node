@@ -2360,6 +2360,8 @@ def core_send_tokens():
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
+        # Ensure lowercase for consistency with frontend signerAddress
+        user_addr = user_addr.lower()
 
         validator_addr = require_runtime().validator_payer_addr
 
