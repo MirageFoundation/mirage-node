@@ -883,6 +883,109 @@ def check_caddy() -> ServiceStatus:
             )
 
 
+def check_endpoints() -> ServiceStatus:
+    """Check public chain endpoints (RPC/REST paths through Caddy)."""
+    # Get domain from env or Caddyfile
+    domain = os.environ.get("DOMAIN", "")
+    if not domain:
+        try:
+            with open("/etc/caddy/Caddyfile") as f:
+                content = f.read()
+                for line in content.splitlines():
+                    line = line.strip()
+                    if line.startswith(":") or line.startswith("www.") or line.startswith("#") or not line:
+                        continue
+                    match = re.match(r"^([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", line)
+                    if match:
+                        domain = match.group(1)
+                        break
+        except Exception:
+            pass
+
+    if not domain:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.UNKNOWN,
+            message="No domain configured",
+            details={"configured": False},
+        )
+
+    # Clean domain
+    if domain.startswith("https://"):
+        domain = domain[8:]
+    elif domain.startswith("http://"):
+        domain = domain[7:]
+
+    # Endpoints to check: (path, name, is_legacy)
+    endpoints = [
+        ("/chain/rpc/status", "chain/rpc", False),
+        ("/chain/rest/cosmos/base/tendermint/v1beta1/node_info", "chain/rest", False),
+        ("/rpc/status", "rpc (legacy)", True),
+        ("/lcd/cosmos/base/tendermint/v1beta1/node_info", "lcd (legacy)", True),
+    ]
+
+    results = {}
+    all_ok = True
+    new_ok = True
+    legacy_ok = True
+
+    for path, name, is_legacy in endpoints:
+        try:
+            start = time.time()
+            resp = requests.get(f"https://{domain}{path}", timeout=5, verify=True)
+            ms = int((time.time() - start) * 1000)
+            ok = resp.status_code == 200
+            results[name] = {"ok": ok, "ms": ms, "status": resp.status_code}
+            if not ok:
+                all_ok = False
+                if is_legacy:
+                    legacy_ok = False
+                else:
+                    new_ok = False
+        except Exception as e:
+            results[name] = {"ok": False, "error": str(e)[:20]}
+            all_ok = False
+            if is_legacy:
+                legacy_ok = False
+            else:
+                new_ok = False
+
+    details = {
+        "configured": True,
+        "domain": domain,
+        "endpoints": results,
+    }
+
+    if all_ok:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.OK,
+            message="All OK",
+            details=details,
+        )
+    elif new_ok and not legacy_ok:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.WARN,
+            message="Legacy paths down",
+            details=details,
+        )
+    elif not new_ok:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.ERROR,
+            message="New paths down",
+            details=details,
+        )
+    else:
+        return ServiceStatus(
+            name="Endpoints",
+            status=Status.WARN,
+            message="Some paths down",
+            details=details,
+        )
+
+
 def check_referrals() -> ServiceStatus:
     """Check referral accrual daemon status."""
     try:
@@ -1324,6 +1427,20 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             ms_color = Colors.BRIGHT_GREEN if ms < 100 else Colors.BRIGHT_YELLOW if ms < 500 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}Response:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
 
+    elif status.name == "Endpoints":
+        endpoints = details.get("endpoints", {})
+        for name, info in endpoints.items():
+            if info.get("ok"):
+                ms = info.get("ms", "?")
+                lines.append(
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET} ({ms}ms)"
+                )
+            else:
+                err = info.get("error", info.get("status", "fail"))
+                lines.append(
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}"
+                )
+
     elif status.name == "Referrals":
         if "links" in details:
             lines.append(f"{bullet}{Colors.DIM}Links:{Colors.RESET} {details['links']:,}")
@@ -1370,6 +1487,7 @@ def render_dashboard(refresh_secs: int):
         check_grpc(),
         check_indexer(),
         check_caddy(),
+        check_endpoints(),
         check_referrals(),
         check_hermes(),
     ]
@@ -1380,7 +1498,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Referrals")
+        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "Referrals")
     ]
 
     # Render header
