@@ -916,27 +916,36 @@ def check_endpoints() -> ServiceStatus:
     elif domain.startswith("http://"):
         domain = domain[7:]
 
-    # Endpoints to check: (path, name, is_legacy)
-    endpoints = [
-        ("/chain/rpc/status", "chain/rpc", False),
-        ("/chain/rest/cosmos/base/tendermint/v1beta1/node_info", "chain/rest", False),
-        ("/rpc/status", "rpc (legacy)", True),
-        ("/lcd/cosmos/base/tendermint/v1beta1/node_info", "lcd (legacy)", True),
-    ]
-
     results = {}
     all_ok = True
     new_ok = True
     legacy_ok = True
+    block_height = None
 
-    for path, name, is_legacy in endpoints:
+    def check_rpc(path: str, name: str, is_legacy: bool):
+        nonlocal all_ok, new_ok, legacy_ok, block_height
         try:
             start = time.time()
-            resp = requests.get(f"https://{domain}{path}", timeout=5, verify=True)
+            resp = requests.get(f"https://{domain}{path}/status", timeout=5, verify=True)
             ms = int((time.time() - start) * 1000)
-            ok = resp.status_code == 200
-            results[name] = {"ok": ok, "ms": ms, "status": resp.status_code}
-            if not ok:
+            if resp.status_code == 200:
+                data = resp.json()
+                height = data.get("result", {}).get("sync_info", {}).get("latest_block_height")
+                network = data.get("result", {}).get("node_info", {}).get("network")
+                catching_up = data.get("result", {}).get("sync_info", {}).get("catching_up", False)
+                if height and network == "mirage-1":
+                    if block_height is None:
+                        block_height = int(height)
+                    results[name] = {"ok": True, "ms": ms, "height": int(height), "catching_up": catching_up}
+                else:
+                    results[name] = {"ok": False, "error": f"bad response"}
+                    all_ok = False
+                    if is_legacy:
+                        legacy_ok = False
+                    else:
+                        new_ok = False
+            else:
+                results[name] = {"ok": False, "status": resp.status_code}
                 all_ok = False
                 if is_legacy:
                     legacy_ok = False
@@ -950,9 +959,53 @@ def check_endpoints() -> ServiceStatus:
             else:
                 new_ok = False
 
+    def check_rest(path: str, name: str, is_legacy: bool):
+        nonlocal all_ok, new_ok, legacy_ok
+        try:
+            start = time.time()
+            # Query bank module params to verify REST is functional
+            resp = requests.get(f"https://{domain}{path}/cosmos/bank/v1beta1/params", timeout=5, verify=True)
+            ms = int((time.time() - start) * 1000)
+            if resp.status_code == 200:
+                data = resp.json()
+                # Check we got valid bank params
+                params = data.get("params", {})
+                if "default_send_enabled" in params or "send_enabled" in params:
+                    results[name] = {"ok": True, "ms": ms, "module": "bank"}
+                else:
+                    results[name] = {"ok": False, "error": "bad response"}
+                    all_ok = False
+                    if is_legacy:
+                        legacy_ok = False
+                    else:
+                        new_ok = False
+            else:
+                results[name] = {"ok": False, "status": resp.status_code}
+                all_ok = False
+                if is_legacy:
+                    legacy_ok = False
+                else:
+                    new_ok = False
+        except Exception as e:
+            results[name] = {"ok": False, "error": str(e)[:20]}
+            all_ok = False
+            if is_legacy:
+                legacy_ok = False
+            else:
+                new_ok = False
+
+    # Check new paths
+    check_rpc("/chain/rpc", "chain/rpc", False)
+    check_rest("/chain/rest", "chain/rest", False)
+
+    # Check legacy paths
+    check_rpc("/rpc", "rpc (legacy)", True)
+    check_rest("/lcd", "lcd (legacy)", True)
+
     details = {
         "configured": True,
         "domain": domain,
+        "block_height": block_height,
         "endpoints": results,
     }
 
@@ -960,7 +1013,7 @@ def check_endpoints() -> ServiceStatus:
         return ServiceStatus(
             name="Endpoints",
             status=Status.OK,
-            message="All OK",
+            message=f"All OK @ {block_height:,}" if block_height else "All OK",
             details=details,
         )
     elif new_ok and not legacy_ok:
@@ -1433,12 +1486,12 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             if info.get("ok"):
                 ms = info.get("ms", "?")
                 lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET} ({ms}ms)"
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}✓{Colors.RESET} {ms}ms"
                 )
             else:
                 err = info.get("error", info.get("status", "fail"))
                 lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}✗ {err}{Colors.RESET}"
                 )
 
     elif status.name == "Referrals":
