@@ -1096,6 +1096,14 @@ def _score_magic(
     import math
 
     HIDE_THRESHOLD = -5.0
+    PREF_RAW_CAP = 5.0
+
+    def _clamp_pref_raw(x: float) -> float:
+        if x > PREF_RAW_CAP:
+            return PREF_RAW_CAP
+        if x < -PREF_RAW_CAP:
+            return -PREF_RAW_CAP
+        return x
 
     pid = post["post_id"]
     author = post["author"]
@@ -1104,8 +1112,8 @@ def _score_magic(
 
     if use_prefs:
         # Check user preference - hide severely disliked content
-        topic_pref = float(topic_prefs.get(topic_lower, 0) or 0.0)
-        author_pref = float(author_prefs.get(author, 0) or 0.0)
+        topic_pref = _clamp_pref_raw(float(topic_prefs.get(topic_lower, 0) or 0.0))
+        author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
         combined_pref = topic_pref + author_pref
 
         if combined_pref <= HIDE_THRESHOLD:
