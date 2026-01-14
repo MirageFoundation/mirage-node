@@ -280,8 +280,9 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
     # Title line with icon
     title_text = f" {icon} {Colors.BOLD}{title}{Colors.RESET}"
     # Calculate visible length (excluding ANSI codes)
-    title_visible = f" {title}"
-    padding = inner_width - len(title_visible)
+    # Format is: " {icon} {title}" where icon is 1 visible char (e.g., "*")
+    title_visible_len = 1 + 1 + 1 + len(title)  # space + icon + space + title
+    padding = inner_width - title_visible_len
     result.append(f"{color}{v}{Colors.RESET}{title_text}{' ' * padding}{color}{v}{Colors.RESET}")
 
     # Separator

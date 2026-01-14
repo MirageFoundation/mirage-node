@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Hard-coded wrapper: deploy a pre-built tarball to all production servers.
+# Deploy to all production servers using GHCR registry.
 #
 # Usage:
-#   scripts/deploy_all_prod.sh [--file <tarball>] [--init|--update] [--proxyjump <host>]
-#
-# Arguments:
-#   --file <tarball>  Optional. Path to the Docker image tarball to deploy.
-#                     If not provided, REBUILDS deploy/mirage-docker-dev.tar.gz automatically.
-#   --proxyjump <host>  Optional. Route SSH/SCP through a jump host (passed to deploy/deploy.sh).
+#   scripts/deploy_all_prod.sh [--init|--update]
 #
 # Default mode: --update
+#
+# Flow:
+#   1. Build and push image to ghcr.io/miragefoundation/mirage-node
+#   2. All servers pull from registry (fast, parallel-friendly)
 #
 # Notes:
 # - This script is intentionally hard-coded to production hosts.
@@ -23,53 +22,18 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY_SH="${REPO_ROOT}/deploy/deploy.sh"
-DEFAULT_DEV_TARBALL="${REPO_ROOT}/deploy/mirage-docker-dev.tar.gz"
-PROD_TARBALL_PATH="${REPO_ROOT}/deploy/mirage-docker-prod.tar.gz"
-
-trash_file() {
-  local file="$1"
-  if [[ ! -e "$file" ]]; then
-    return 0
-  fi
-
-  local backup_dir="${REPO_ROOT}/.trash"
-  mkdir -p "${backup_dir}"
-  local ts
-  ts="$(date +%Y%m%d-%H%M%S)"
-  local base
-  base="$(basename "$file")"
-  mv "$file" "${backup_dir}/${base}.${ts}"
-}
 
 # Parse arguments
 MODE=""
-TARBALL=""
-PROXYJUMP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --init|--update)
       MODE="$1"
       shift
       ;;
-    --file)
-      if [[ -z "${2-}" ]]; then
-        echo "ERROR: --file requires a path argument" >&2
-        exit 1
-      fi
-      TARBALL="$2"
-      shift 2
-      ;;
-    --proxyjump|-J)
-      if [[ -z "${2-}" ]]; then
-        echo "ERROR: --proxyjump requires a host argument" >&2
-        exit 1
-      fi
-      PROXYJUMP="$2"
-      shift 2
-      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--file <tarball>] [--init|--update] [--proxyjump <host>]" >&2
+      echo "Usage: $0 [--init|--update]" >&2
       exit 1
       ;;
   esac
@@ -79,36 +43,27 @@ if [[ -z "${MODE}" ]]; then
   MODE="--update"
 fi
 
-PROXYJUMP_ARGS=()
-if [[ -n "${PROXYJUMP}" ]]; then
-  PROXYJUMP_ARGS=(--proxyjump "${PROXYJUMP}")
-fi
-
-# Determine which tarball will be used and whether to rebuild
-WILL_REBUILD=false
-if [[ -z "${TARBALL}" ]]; then
-  TARBALL="${DEFAULT_DEV_TARBALL}"
-  WILL_REBUILD=true
-fi
-
 # Hard-coded production hosts
 SSH_USER="${SSH_USER:-root}"
-HOSTS=(  
+HOSTS=(
   "mirage.vote"
   "146.190.108.140"
-  "139.59.9.96"  
+  "139.59.9.96"
   "mirage.talk"
 )
 
+# Get image tag info
+GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+IMAGE_TAG="ghcr.io/miragefoundation/mirage-node:${GIT_HASH}"
+
 # Show deployment info and get confirmation BEFORE building
 echo "=============================================================="
-echo "Mirage Production Deploy"
+echo "Mirage Production Deploy (Registry)"
 echo "Mode: ${MODE}"
-if [[ "${WILL_REBUILD}" == "true" ]]; then
-  echo "Tarball: ${TARBALL} (will be rebuilt)"
-else
-  echo "Tarball: ${TARBALL}"
-fi
+echo "Image: ${IMAGE_TAG}"
+echo "Branch: ${GIT_BRANCH}"
+echo ""
 echo "Deploying to hosts:"
 for h in "${HOSTS[@]}"; do
   echo "  - ${SSH_USER}@${h}"
@@ -121,49 +76,22 @@ if [[ "${CONFIRM}" != "confirm" ]]; then
   exit 1
 fi
 
-# Build tarball if needed (after confirmation)
-if [[ "${WILL_REBUILD}" == "true" ]]; then
-  echo "No --file provided, rebuilding dev tarball: ${TARBALL}"
-  if [[ -f "${TARBALL}" ]]; then
-    echo "Removing existing tarball before rebuild..."
-    rm -f "${TARBALL}"
-  fi
-  echo "==> Building Docker image..."
-  "${DEPLOY_SH}" --build-only --file "${TARBALL}"
-fi
+# Build and push to registry (once)
+echo "==> Building and pushing to registry..."
+"${DEPLOY_SH}" --build-only
 
-# Validate tarball
-if [[ ! -f "${TARBALL}" ]]; then
-  echo "ERROR: Tarball not found: ${TARBALL}" >&2
-  exit 1
-fi
-
-if [[ ! -x "${DEPLOY_SH}" ]]; then
-  echo "ERROR: Not found or not executable: ${DEPLOY_SH}" >&2
-  exit 1
-fi
-
-# Deploy to all hosts using provided tarball
+# Deploy to all hosts (each pulls from registry)
 for HOST in "${HOSTS[@]}"; do
-  echo "---- Deploying to ${SSH_USER}@${HOST}"
-  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}" --file "${TARBALL}" "${PROXYJUMP_ARGS[@]}"
+  echo ""
+  echo "=============================================================="
+  echo "Deploying to ${SSH_USER}@${HOST}"
+  echo "=============================================================="
+  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}"
 done
 
-# Always rotate tarballs: remove prod and rename dev to prod
-echo "Rotating tarballs: dev -> prod"
-if [[ -f "${PROD_TARBALL_PATH}" ]]; then
-  echo "Removing existing prod tarball: ${PROD_TARBALL_PATH}"
-  rm -f "${PROD_TARBALL_PATH}"
-fi
-if [[ -f "${DEFAULT_DEV_TARBALL}" ]]; then
-  echo "Renaming dev tarball to prod: ${DEFAULT_DEV_TARBALL} -> ${PROD_TARBALL_PATH}"
-  mv "${DEFAULT_DEV_TARBALL}" "${PROD_TARBALL_PATH}"
-fi
-
+echo ""
 echo "=============================================================="
 echo "Deploy complete."
 echo "If HTTPS is not working on mirage.vote or mirage.talk, run on each host:"
 echo "  docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain <domain>"
 echo "=============================================================="
-
-
