@@ -1630,13 +1630,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             </FeedDebugRow>
                                             <FeedDebugRow>
                                                 <FeedDebugLabel>V (votes):</FeedDebugLabel>
-                                                <FeedDebugValue>{post.feed_debug.V?.toFixed(3) || '0.000'} [{post.feed_debug.points ?? 0} pts]</FeedDebugValue>
+                                                <FeedDebugValue>{post.feed_debug.V?.toFixed(3) || '0.000'}</FeedDebugValue>
                                             </FeedDebugRow>
                                             {/* U for unique commenters */}
                                             {post.feed_debug.U !== undefined && (
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>U (unique commenters):</FeedDebugLabel>
-                                                    <FeedDebugValue>{post.feed_debug.U?.toFixed(3) || '0.000'} [{post.feed_debug.unique_commenters ?? 0}]</FeedDebugValue>
+                                                    <FeedDebugValue>{post.feed_debug.U ?? 0}</FeedDebugValue>
                                                 </FeedDebugRow>
                                             )}
                                             {/* P for preference boost */}

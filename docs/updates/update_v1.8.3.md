@@ -67,6 +67,31 @@ The chain endpoints have been reorganized under `/chain/rpc` and `/chain/rest` f
 - MIRAGE balance formatting improved (thousands separators)
 - Costs displayed in MIRAGE instead of raw umirage
 - Recovery flow redirects to account creation when no account found
+- "Immediately hide downvoted posts" now defaults to off
+
+---
+
+### Unified Magic Feed Algorithm
+
+The "magic" sort mode now uses a single scoring function across all feeds (home, following, topic/global). No more inconsistent ranking between feeds.
+
+**Formula:** `(√S + √V + √U + √P) × R`
+
+| Component | Description |
+|-----------|-------------|
+| S | Similarity sum — how many similar users upvoted this post |
+| V | Net votes — signed sqrt so downvotes hurt the score |
+| U | Unique commenters — discussion activity |
+| P | Your prefs — signed sqrt so disliked topics/authors rank lower |
+| R | Recency decay — `1 / (1 + (age_hours/24)^1.585)` |
+
+**Key changes:**
+- All components use sqrt scaling with equal weight (no arbitrary 0.5x or 0.3x multipliers)
+- V and P use signed sqrt: negative values actively hurt the score instead of clamping to 0
+- Following feed now uses the same scorer (P=0 since prefs don't apply)
+- Topic/global feeds use the same scorer (S=0, P=0 for non-personalized ranking)
+- Feed debug tooltip simplified: shows raw input values that match the formula
+- Removed dead code (`_score_home_post` bucketed scorer)
 
 ---
 

@@ -1116,24 +1116,27 @@ def _score_magic(
         author_pref = 0.0
         combined_pref = 0.0
 
-    # S = Similarity boost
-    #
-    # Similarity values are per-user (0..1) and we aggregate them over
-    # similar-users who upvoted this post.
+    # Signed sqrt: sqrt(abs(x)) * sign(x) — preserves sign, compresses magnitude
+    def _sqrt_signed(x: float) -> float:
+        if x >= 0:
+            return math.sqrt(x)
+        return -math.sqrt(abs(x))
+
+    # S = Similarity boost (always >= 0)
     upvoters = similar_upvotes.get(pid, [])
     raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
     S = math.sqrt(max(0.0, raw_sim))
 
-    # V = Vote score (sqrt scaling)
+    # V = Vote score (signed sqrt: negative votes hurt the score)
     net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
-    V = math.sqrt(max(0.0, net_vote))
+    V = _sqrt_signed(net_vote)
 
-    # U = Unique commenter score
+    # U = Unique commenter score (always >= 0)
     unique_count = unique_commenters.get(pid, 0)
     U = math.sqrt(max(0.0, float(unique_count)))
 
-    # P = Preference boost (only positive prefs boost, negative just for hiding)
-    P = math.sqrt(max(0.0, combined_pref))
+    # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
+    P = _sqrt_signed(combined_pref)
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
     # 12h=0.75, 24h=0.50, 48h=0.25
@@ -1172,22 +1175,14 @@ def _score_magic(
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
-        "equation": ("(√sim_sum + √net_votes + √unique_commenters + √max(0, topic_pref+author_pref)) × R"),
-        "formula": (
-            f"(√S:{raw_sim:.3f}"
-            f" + √V:{net_vote:.3f}"
-            f" + √U:{unique_count}"
-            f" + √P:{combined_pref:.3f})"
-            f" × R:{R:.4f} = {float(score):.4f}"
-        ),
-        "S": round(S, 3),
-        "V": round(V, 3),
-        "U": round(U, 3),
-        "P": round(P, 3),
+        "equation": "(√S + √V + √U + √P) × R",
+        # Raw input values (before sqrt) so the formula makes sense
+        "S": round(raw_sim, 3),
+        "V": round(net_vote, 3),
+        "U": unique_count,
+        "P": round(combined_pref, 3),
         "R": round(R, 4),
         "age_hours": round(age_hours, 1),
-        "points": round(net_vote, 1),
-        "unique_commenters": unique_count,
         "t_pref": round(topic_pref, 1),
         "a_pref": round(author_pref, 1),
         "source": post.get("_source", "unknown"),
