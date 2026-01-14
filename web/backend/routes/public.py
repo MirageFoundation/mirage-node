@@ -3460,7 +3460,6 @@ def get_posts():
                        COALESCE(p.root_topic, p.topic, '') AS root_topic,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
-                       CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                        COALESCE(p.edited_at, 0) as edited_at,
                        COALESCE(p.thumbnail_url, '') as thumbnail
                 FROM posts p
@@ -3495,7 +3494,6 @@ def get_posts():
                        COALESCE(p.root_topic, p.topic, '') AS root_topic,
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
-                       CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                        COALESCE(p.edited_at, 0) as edited_at,
                        COALESCE(p.thumbnail_url, '') as thumbnail
                 FROM posts p
@@ -3523,7 +3521,7 @@ def get_posts():
             for i, row in enumerate(rows):
                 txhash = row[0] if len(row) > 0 else ""
                 content = row[5] if len(row) > 5 else ""
-                thumbnail = row[12] if len(row) > 12 else ""
+                thumbnail = row[-1] if len(row) > 11 else ""
                 if not thumbnail:
                     new_thumb = _backfill_thumbnail_if_missing(cur, txhash, content or "", thumbnail or "")
                     if new_thumb:
