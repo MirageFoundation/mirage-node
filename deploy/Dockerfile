@@ -35,17 +35,27 @@ RUN pip3 install --break-system-packages --root-user-action=ignore --no-cache-di
 WORKDIR /opt/mirage/web/frontend
 RUN npm ci --no-audit --no-fund --legacy-peer-deps
 
-# Copy remaining project files
-COPY . /opt/mirage/
-
-# Build frontend
-WORKDIR /opt/mirage/web/frontend
+# One-time workaround dependency (keep cached unless package.json/lock changes)
 RUN npm install --no-audit --no-fund --no-save --legacy-peer-deps @babel/plugin-transform-private-property-in-object
+
+# Copy frontend sources only (avoid invalidating cache on unrelated changes)
+COPY web/frontend/ /opt/mirage/web/frontend/
+
+# Build frontend (version comes from build args provided by deploy script)
+ARG GIT_BRANCH
+ARG GIT_HASH
 ENV BROWSERSLIST_IGNORE_OLD_DATA=true
-# Get git branch and hash for version display
-RUN GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?') && \
-    GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo '?') && \
-    REACT_APP_VERSION="${GIT_BRANCH} (${GIT_HASH})" REACT_APP_API_BASE=/api npm run build
+RUN REACT_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" REACT_APP_API_BASE=/api npm run build
+
+# Copy runtime files after frontend build so backend/go changes don't force a React rebuild
+WORKDIR /opt/mirage
+COPY blockchain/miraged /opt/mirage/blockchain/miraged
+COPY scripts/ /opt/mirage/scripts/
+COPY web/backend/ /opt/mirage/web/backend/
+COPY indexer/ /opt/mirage/indexer/
+COPY shared/ /opt/mirage/shared/
+COPY referrals/ /opt/mirage/referrals/
+COPY deploy/ /opt/mirage/deploy/
 
 ## Note: We trust upstream build step to produce /opt/mirage/blockchain/miraged
 

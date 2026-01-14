@@ -30,17 +30,17 @@ Modes (exactly one required, except for --build-only):
                        REQUIRES --moniker to be explicitly provided.
   --update             Update image and restart container. Preserves data.
                        Re-renders configs on startup (idempotent).
-  --build-only         Build Docker image and create tarball without deploying.
+  --build-only         Build Docker image only (default: pushes to registry; use --file to save tarball).
 
 Options:
-  --file TARBALL       For deploy modes: skip build and use the provided tarball.
-                       For --build-only: specify output tarball path.
+  --file TARBALL       Use tarball flow (legacy fallback). If omitted, deploy uses GHCR by default.
   --moniker VALUE      Set CometBFT node moniker (default: mirage-node, REQUIRED for --init)
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
+  --prune              Run docker system prune during update (slow; not recommended).
 
 Local deployment:
-  deploy/deploy.sh --local --update --file deploy/mirage-docker-prod.tar.gz
+  deploy/deploy.sh --local --update
 
 Remote access:
   ssh user@host 'docker logs mirage'
@@ -72,11 +72,13 @@ MODE=""
 TARBALL_FILE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
+PRUNE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
+    --prune) PRUNE=1 ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
       shift
@@ -117,33 +119,153 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
+GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+
+REGISTRY_HOST="ghcr.io"
+REGISTRY_IMAGE="miragefoundation/mirage-node"
+IMAGE_REF="$REGISTRY_HOST/$REGISTRY_IMAGE"
+IMAGE_SHA_TAG="$IMAGE_REF:$GIT_HASH"
+IMAGE_MOVING_TAG=""
+if [ "$GIT_BRANCH" = "dev" ] || [ "$GIT_BRANCH" = "prod" ]; then
+  IMAGE_MOVING_TAG="$IMAGE_REF:$GIT_BRANCH"
+fi
+
+cache_dir() {
+  local base="${XDG_CACHE_HOME:-$HOME/.cache}/mirage/deploy"
+  mkdir -p "$base"
+  echo "$base"
+}
+
+hash_tree() {
+  # hash_tree <abs_path_1> [<abs_path_2> ...]
+  # Computes a stable hash of file contents under the provided paths.
+  local tmp
+  tmp="$(mktemp)"
+  for p in "$@"; do
+    if [ -e "$p" ]; then
+      find "$p" -type f -print0
+    fi
+  done | sort -z | xargs -0 sha256sum 2>/dev/null > "$tmp" || true
+  sha256sum "$tmp" | awk '{print $1}'
+  rm -f "$tmp"
+}
+
+maybe_proto_gen_and_go_build() {
+  echo "==> Checking whether proto/go rebuild is needed..."
+  local cdir
+  cdir="$(cache_dir)"
+
+  local proto_hash_file="$cdir/proto.${GIT_BRANCH}.sha256"
+  local go_hash_file="$cdir/go.${GIT_BRANCH}.sha256"
+
+  local new_proto_hash
+  new_proto_hash="$(hash_tree \
+    "$REPO_ROOT/blockchain/proto" \
+    "$REPO_ROOT/blockchain/buf.yaml" \
+    "$REPO_ROOT/blockchain/buf.lock" \
+    "$REPO_ROOT/blockchain/proto/buf.gen.gogo.yaml" \
+    "$REPO_ROOT/blockchain/proto/buf.gen.sta.yaml" \
+    "$REPO_ROOT/blockchain/proto/buf.gen.swagger.yaml" \
+    "$REPO_ROOT/blockchain/proto/buf.gen.ts.yaml" \
+    "$REPO_ROOT/blockchain/Makefile" \
+  )"
+
+  local old_proto_hash=""
+  if [ -f "$proto_hash_file" ]; then
+    old_proto_hash="$(cat "$proto_hash_file" 2>/dev/null || echo "")"
+  fi
+  if [ -z "$old_proto_hash" ] || [ "$old_proto_hash" != "$new_proto_hash" ]; then
+    echo "==> Protobuf inputs changed; running proto-gen..."
+    ( cd "$REPO_ROOT/blockchain" && make proto-gen )
+    echo "$new_proto_hash" > "$proto_hash_file"
+  else
+    echo "==> Protobuf inputs unchanged; skipping proto-gen."
+  fi
+
+  local new_go_hash
+  new_go_hash="$(hash_tree \
+    "$REPO_ROOT/blockchain/go.mod" \
+    "$REPO_ROOT/blockchain/go.sum" \
+    "$REPO_ROOT/blockchain/app" \
+    "$REPO_ROOT/blockchain/cmd" \
+    "$REPO_ROOT/blockchain/x" \
+  )"
+
+  local old_go_hash=""
+  if [ -f "$go_hash_file" ]; then
+    old_go_hash="$(cat "$go_hash_file" 2>/dev/null || echo "")"
+  fi
+  if [ -z "$old_go_hash" ] || [ "$old_go_hash" != "$new_go_hash" ]; then
+    echo "==> Go inputs changed; building miraged..."
+    ( cd "$REPO_ROOT/blockchain" && make install )
+    echo "$new_go_hash" > "$go_hash_file"
+  else
+    echo "==> Go inputs unchanged; skipping go build."
+  fi
+}
+
+docker_build() {
+  # docker_build <load_or_push>
+  local mode="$1"
+  local cache_base
+  cache_base="$(cache_dir)/buildx-cache"
+  mkdir -p "$cache_base"
+
+  local tags=()
+  local out_args=()
+  if [ "$mode" = "push" ]; then
+    out_args+=(--push)
+    tags+=(-t "$IMAGE_SHA_TAG")
+    if [ -n "$IMAGE_MOVING_TAG" ]; then
+      tags+=(-t "$IMAGE_MOVING_TAG")
+    fi
+  else
+    out_args+=(--load)
+    tags+=(-t "mirage:local")
+  fi
+
+  docker buildx build \
+    "${out_args[@]}" \
+    "${tags[@]}" \
+    --build-arg GIT_BRANCH="$GIT_BRANCH" \
+    --build-arg GIT_HASH="$GIT_HASH" \
+    --cache-from "type=local,src=$cache_base" \
+    --cache-to "type=local,dest=$cache_base,mode=max" \
+    -f "$REPO_ROOT/deploy/Dockerfile" \
+    "$REPO_ROOT"
+}
+
 # Handle --build-only mode
 if [ "$BUILD_ONLY" -eq 1 ]; then
-  echo "==> Build-only mode: building Docker image..."
-  
+  echo "==> Build-only mode"
+
   if [ -n "$TARBALL_FILE" ]; then
+    # Explicit tarball build (fallback path).
     TARBALL="$TARBALL_FILE"
+    echo "==> Building image locally and saving tarball to: $TARBALL"
+    maybe_proto_gen_and_go_build
+    docker_build load
+    mkdir -p "$(dirname "$TARBALL")"
+    docker save mirage:local | gzip > "$TARBALL"
+    echo "==> Build complete. Tarball saved to: $TARBALL"
   else
-    TARBALL="deploy/mirage-docker-dev.tar.gz"
+    # Default: push to registry (fast remote deploys).
+    echo "==> Building and pushing image to registry: $IMAGE_SHA_TAG"
+    if [ -n "$IMAGE_MOVING_TAG" ]; then
+      echo "==> Also updating moving tag: $IMAGE_MOVING_TAG"
+    fi
+    maybe_proto_gen_and_go_build
+    docker_build push
+    echo "==> Build complete. Image pushed:"
+    echo "    $IMAGE_SHA_TAG"
+    if [ -n "$IMAGE_MOVING_TAG" ]; then
+      echo "    $IMAGE_MOVING_TAG"
+    fi
   fi
-  
-  echo "==> Generating protobuf files and building miraged binary..."
-  (
-    cd "$(dirname "$0")/.."
-    cd blockchain && make proto-gen && make install && cd ..
-  )
-
-  echo "==> Building Docker image..."
-  (
-    cd "$(dirname "$0")/.."
-    docker buildx build --load -t mirage:prod -f deploy/Dockerfile .
-  )
-
-  echo "==> Saving Docker image to tarball..."
-  mkdir -p "$(dirname "$TARBALL")"
-  docker save mirage:prod | gzip > "$TARBALL"
-  
-  echo "==> Build complete. Tarball saved to: $TARBALL"
   exit 0
 fi
 
@@ -252,31 +374,33 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
 fi
 
 # No seed file verification required
-# Build binary and Docker image locally (unless --file is provided)
+DEPLOY_IMAGE="mirage:local"
+USE_TARBALL=0
+
 if [ -n "$TARBALL_FILE" ]; then
+  USE_TARBALL=1
   TARBALL="$TARBALL_FILE"
   echo "==> Using provided tarball: $TARBALL"
 else
-  TARBALL="deploy/mirage-docker-dev.tar.gz"
-  echo "==> Generating protobuf files and building miraged binary..."
-  (
-    cd "$(dirname "$0")/.."
-    cd blockchain && make proto-gen && make install && cd ..
-  )
+  echo "==> Default deploy: registry image ($IMAGE_SHA_TAG)"
+  if [ -n "$IMAGE_MOVING_TAG" ]; then
+    echo "==> Moving tag will be updated: $IMAGE_MOVING_TAG"
+  fi
 
-  echo "==> Building Docker image..."
-  (
-    cd "$(dirname "$0")/.."
-    docker buildx build --load -t mirage:prod -f deploy/Dockerfile .
-  )
+  maybe_proto_gen_and_go_build
 
-  echo "==> Saving Docker image to tarball..."
-  mkdir -p "$(dirname "$TARBALL")"
-  docker save mirage:prod | gzip > "$TARBALL"
+  if [ "$LOCAL_MODE" -eq 1 ]; then
+    echo "==> Building image locally..."
+    docker_build load
+  else
+    echo "==> Building and pushing image to registry..."
+    docker_build push
+    DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+  fi
 fi
 
-if [ "$LOCAL_MODE" -eq 0 ]; then
-  echo "==> Transferring image..."
+if [ "$USE_TARBALL" -eq 1 ] && [ "$LOCAL_MODE" -eq 0 ]; then
+  echo "==> Transferring image tarball..."
   # Optimization: avoid re-uploading the tarball if possible.
   # Priority: 1) Target has it, 2) Jump host has it (copy internally), 3) Upload from local
   LOCAL_SHA="$(sha256sum "$TARBALL" | awk '{print $1}')"
@@ -311,26 +435,41 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     docker stop --timeout=60 mirage || true
     docker rm mirage || true
   fi
-  if docker images --format "{{.Repository}}:{{.Tag}}" | grep -qx mirage:prod; then
-    docker rmi mirage:prod || true
-  fi
-  docker system prune -f
-  echo "==> Loading image locally..."
-  gunzip -c "$TARBALL" | docker load
-else
-  run_ssh '
-    set -euo pipefail
-    if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
-      docker stop --timeout=60 mirage
-      docker rm mirage
-    fi
-    if docker images --format "{{.Repository}}:{{.Tag}}" | grep -qx mirage:prod; then
-      docker rmi mirage:prod
-    fi
+  if [ "$PRUNE" -eq 1 ]; then
     docker system prune -f
-  '
-  echo "==> Loading image on remote..."
-  run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+  fi
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    echo "==> Loading image locally..."
+    gunzip -c "$TARBALL" | docker load
+  fi
+else
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    run_ssh '
+      set -euo pipefail
+      if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
+        docker stop --timeout=60 mirage
+        docker rm mirage
+      fi
+    '
+    if [ "$PRUNE" -eq 1 ]; then
+      run_ssh 'docker system prune -f'
+    fi
+    echo "==> Loading image on remote..."
+    run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+  else
+    run_ssh '
+      set -euo pipefail
+      if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
+        docker stop --timeout=60 mirage
+        docker rm mirage
+      fi
+    '
+    if [ "$PRUNE" -eq 1 ]; then
+      run_ssh 'docker system prune -f'
+    fi
+    echo "==> Pulling image on remote: $DEPLOY_IMAGE"
+    run_ssh "docker pull '$DEPLOY_IMAGE'"
+  fi
 fi
 
 # For --init: enforce --moniker is provided
@@ -373,7 +512,7 @@ if [ "$MODE" = "init" ]; then
   if ! echo "$MNEMONIC" | run_ssh "MIRAGE_DERIVATION_INDEX='$CONS_INDEX' docker run --rm -i \
     --entrypoint python3 \
     -v ~/.mirage:/root/.mirage \
-      mirage:prod /opt/mirage/deploy/derive_consensus_key.py"; then
+      '$DEPLOY_IMAGE' /opt/mirage/deploy/derive_consensus_key.py"; then
   echo "ERROR: Failed to derive consensus key." >&2
   exit 1
   fi
@@ -384,7 +523,7 @@ if [ "$MODE" = "init" ]; then
   if ! echo "$MNEMONIC" | run_ssh "docker run --rm -i \
     --entrypoint /bin/sh \
     -v ~/.mirage:/root/.mirage \
-      mirage:prod -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test >/dev/null 2>&1'"; then
+      '$DEPLOY_IMAGE' -lc '/opt/mirage/blockchain/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test >/dev/null 2>&1'"; then
   echo "ERROR: Failed to import mnemonic into keyring volume." >&2
   exit 1
   fi
@@ -465,9 +604,9 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     fi
   done
   # Add SKIP_VALIDATOR_CHECK and SKIP_PEERS for local testing
-  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" mirage:prod
+  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" "$DEPLOY_IMAGE"
 else
-  run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy mirage:prod"
+  run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy '$DEPLOY_IMAGE'"
 fi
 
 echo "==> Waiting briefly for container to become healthy..."

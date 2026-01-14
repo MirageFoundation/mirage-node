@@ -303,7 +303,7 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
             i += 1
 
         visible_len = len(stripped)
-        
+
         # Truncate if too long
         if visible_len > max_content_len:
             # Truncate the stripped version to find cutoff point
@@ -322,7 +322,7 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
                 j += 1
             line = line[:cutoff] + ".."
             visible_len = vis_count + 2
-        
+
         line_padding = inner_width - visible_len - 1
         if line_padding < 0:
             line_padding = 0

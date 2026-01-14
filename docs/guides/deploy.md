@@ -55,7 +55,19 @@ Replace:
 
 You'll be prompted for your funded mnemonic. Paste the 12 words when asked.
 
-That's it! The script builds the Docker image, uploads it to your server, and starts everything.
+That's it! The script builds the Docker image, pushes it to a registry, and starts everything on your server.
+
+### Registry auth (one-time)
+
+Deploy now uses a public Docker image on `ghcr.io` by default (fast updates: server pulls layers instead of uploading a tarball).
+
+To be able to **push** images, you must log in once on your local machine:
+
+```bash
+docker login ghcr.io
+```
+
+Use your GitHub username and a Personal Access Token with `write:packages`.
 
 ## Step 4: Enable HTTPS (optional)
 
@@ -83,8 +95,8 @@ This rebuilds the image and restarts the container while preserving all your dat
 The script handles everything automatically:
 
 1. **Installs Docker** on the server if it's not already installed
-2. **Builds the Docker image** on your local machine
-3. **Uploads the image** to your server
+2. **Builds the Docker image** on your local machine and pushes to GHCR
+3. **Pulls the image** on your server (fast: only downloads changed layers)
 4. **Prompts for your mnemonic** and securely imports your validator keys
 5. **Sets up PostgreSQL** inside the container (no manual database config needed)
 6. **Starts all services** (blockchain node, indexer, web backend, frontend)

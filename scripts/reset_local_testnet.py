@@ -47,9 +47,9 @@ def build_docker_image():
     """Build docker image and save to prod tarball."""
     tarball = get_docker_tarball_path()
     status("Building Docker image...")
-    run(["bash", "-lc", f"cd '{repo_root()}' && docker build -t mirage:prod -f deploy/Dockerfile ."])
+    run(["bash", "-lc", f"cd '{repo_root()}' && docker build -t mirage:local -f deploy/Dockerfile ."])
     status(f"Saving Docker image to {tarball.name}...")
-    run(["bash", "-lc", f"docker save mirage:prod | gzip > '{tarball}'"])
+    run(["bash", "-lc", f"docker save mirage:local | gzip > '{tarball}'"])
     status(f"Docker image saved to {tarball.name}")
 
 
@@ -102,7 +102,7 @@ def ensure_local_container():
             "-lc",
             "docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
             "--name mirage --restart unless-stopped -e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
-            f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy mirage:prod",
+            f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy mirage:local",
         ]
     )
     status("Waiting for container exec to be ready...")
