@@ -1489,9 +1489,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                     f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}✓{Colors.RESET} {ms}ms"
                 )
             else:
-                err = info.get("error", info.get("status", "fail"))
+                err = str(info.get("error", info.get("status", "fail")))[:15]
                 lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}✗ {err}{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}✗{Colors.RESET}"
                 )
 
     elif status.name == "Referrals":
