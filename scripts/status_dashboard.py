@@ -1351,7 +1351,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("chain_id"):
             lines.append(f"{bullet}{Colors.DIM}Chain:{Colors.RESET} {details['chain_id']}")
         if details.get("height"):
-            lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
+            try:
+                h = int(details['height'])
+                lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {h:,}")
+            except (ValueError, TypeError):
+                lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
         if "peers" in details:
             peers = details["peers"]
             peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_YELLOW
@@ -1397,7 +1401,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Moniker:{Colors.RESET} {truncate(moniker, 18)}")
         if details.get("tokens"):
             tok = details["tokens"]
-            lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok:,} MIRAGE")
+            if tok >= 1_000_000:
+                tok_m = tok / 1_000_000
+                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok_m:,.0f}M MIRAGE")
+            else:
+                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok:,} MIRAGE")
         if details.get("power_pct") is not None:
             pct = details["power_pct"]
             lines.append(f"{bullet}{Colors.DIM}Power:{Colors.RESET} {pct:.2f}%")
@@ -1452,11 +1460,15 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
         # Show HTTP status
         http_val = details.get("http")
+        https_ok = isinstance(details.get("https"), int) and details.get("https") < 400
         if http_val is not None:
             if isinstance(http_val, int) and http_val < 400:
                 lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}{http_val}{Colors.RESET}")
             elif isinstance(http_val, int):
                 lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_YELLOW}{http_val}{Colors.RESET}")
+            elif http_val == "refused" and https_ok:
+                # HTTP refused is expected when HTTPS is working
+                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}redirected{Colors.RESET}")
             else:
                 lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_RED}{http_val}{Colors.RESET}")
         # Show HTTPS status if domain is set
