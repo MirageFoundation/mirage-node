@@ -924,19 +924,34 @@ def check_endpoints() -> ServiceStatus:
         except Exception:
             pass
 
-    if not domain:
+    # Clean domain
+    if domain:
+        if domain.startswith("https://"):
+            domain = domain[8:]
+        elif domain.startswith("http://"):
+            domain = domain[7:]
+
+    # If no domain, fall back to external IP
+    use_https = bool(domain)
+    host = domain
+    if not host:
+        try:
+            resp = requests.get("https://ifconfig.me", timeout=3)
+            if resp.status_code == 200:
+                host = resp.text.strip()
+        except Exception:
+            pass
+
+    if not host:
         return ServiceStatus(
             name="Endpoints",
-            status=Status.UNKNOWN,
-            message="No domain configured",
+            status=Status.ERROR,
+            message="No domain or IP",
             details={"configured": False},
         )
 
-    # Clean domain
-    if domain.startswith("https://"):
-        domain = domain[8:]
-    elif domain.startswith("http://"):
-        domain = domain[7:]
+    # Build base URL
+    base_url = f"https://{host}" if use_https else f"http://{host}"
 
     results = {}
     all_ok = True
@@ -948,7 +963,7 @@ def check_endpoints() -> ServiceStatus:
         nonlocal all_ok, new_ok, legacy_ok, block_height
         try:
             start = time.time()
-            resp = requests.get(f"https://{domain}{path}/status", timeout=5, verify=True)
+            resp = requests.get(f"{base_url}{path}/status", timeout=5, verify=use_https)
             ms = int((time.time() - start) * 1000)
             if resp.status_code == 200:
                 data = resp.json()
@@ -986,7 +1001,7 @@ def check_endpoints() -> ServiceStatus:
         try:
             start = time.time()
             # Query bank module params to verify REST is functional
-            resp = requests.get(f"https://{domain}{path}/cosmos/bank/v1beta1/params", timeout=5, verify=True)
+            resp = requests.get(f"{base_url}{path}/cosmos/bank/v1beta1/params", timeout=5, verify=use_https)
             ms = int((time.time() - start) * 1000)
             if resp.status_code == 200:
                 data = resp.json()
@@ -1026,7 +1041,8 @@ def check_endpoints() -> ServiceStatus:
 
     details = {
         "configured": True,
-        "domain": domain,
+        "host": host,
+        "https": use_https,
         "block_height": block_height,
         "endpoints": results,
     }
