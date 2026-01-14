@@ -119,9 +119,9 @@ class Box:
 
 # Status icons
 ICONS = {
-    Status.OK: f"{Colors.BRIGHT_GREEN}●{Colors.RESET}",
-    Status.WARN: f"{Colors.BRIGHT_YELLOW}●{Colors.RESET}",
-    Status.ERROR: f"{Colors.BRIGHT_RED}●{Colors.RESET}",
+    Status.OK: f"{Colors.BRIGHT_GREEN}*{Colors.RESET}",
+    Status.WARN: f"{Colors.BRIGHT_YELLOW}*{Colors.RESET}",
+    Status.ERROR: f"{Colors.BRIGHT_RED}*{Colors.RESET}",
     Status.UNKNOWN: f"{Colors.BRIGHT_BLACK}○{Colors.RESET}",
 }
 
@@ -280,7 +280,7 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
     # Title line with icon
     title_text = f" {icon} {Colors.BOLD}{title}{Colors.RESET}"
     # Calculate visible length (excluding ANSI codes)
-    title_visible = f" ● {title}"
+    title_visible = f" {title}"
     padding = inner_width - len(title_visible)
     result.append(f"{color}{v}{Colors.RESET}{title_text}{' ' * padding}{color}{v}{Colors.RESET}")
 
@@ -1020,21 +1020,21 @@ def check_endpoints() -> ServiceStatus:
         return ServiceStatus(
             name="Endpoints",
             status=Status.WARN,
-            message="Legacy paths down",
+            message="Legacy unreachable",
             details=details,
         )
-    elif not new_ok:
+    elif not new_ok and legacy_ok:
         return ServiceStatus(
             name="Endpoints",
             status=Status.ERROR,
-            message="New paths down",
+            message="Primary unreachable",
             details=details,
         )
     else:
         return ServiceStatus(
             name="Endpoints",
-            status=Status.WARN,
-            message="Some paths down",
+            status=Status.ERROR,
+            message="Paths unreachable",
             details=details,
         )
 
@@ -1325,9 +1325,9 @@ def render_summary(statuses: list[ServiceStatus], width: int) -> list[str]:
     unknown_count = sum(1 for s in statuses if s.status == Status.UNKNOWN)
 
     summary = (
-        f"{Colors.BRIGHT_GREEN}● {ok_count} OK{Colors.RESET}  "
-        f"{Colors.BRIGHT_YELLOW}● {warn_count} WARN{Colors.RESET}  "
-        f"{Colors.BRIGHT_RED}● {error_count} ERROR{Colors.RESET}  "
+        f"{Colors.BRIGHT_GREEN}{ok_count} OK{Colors.RESET}  "
+        f"{Colors.BRIGHT_YELLOW}{warn_count} WARN{Colors.RESET}  "
+        f"{Colors.BRIGHT_RED}{error_count} ERR{Colors.RESET}  "
         f"{Colors.BRIGHT_BLACK}○ {unknown_count} N/A{Colors.RESET}"
     )
 
@@ -1365,11 +1365,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 )
             elif age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
                 lines.append(
-                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_RED}{age_human} ⚠{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_RED}{age_human} STALE{Colors.RESET}"
                 )
             elif age_secs >= NODE_LAST_BLOCK_WARN_SECS:
                 lines.append(
-                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_YELLOW}{age_human} ⚠{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}Last block:{Colors.RESET} {Colors.BRIGHT_YELLOW}{age_human} OLD{Colors.RESET}"
                 )
             else:
                 lines.append(
@@ -1384,7 +1384,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                     f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{extra}{Colors.RESET}"
                 )
             else:
-                lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD ⚠{Colors.RESET}")
+                lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD{Colors.RESET}")
 
     elif status.name == "Validator":
         if details.get("moniker"):
@@ -1405,7 +1405,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             vp = details["voting_power"]
             lines.append(f"{bullet}{Colors.DIM}Voting power:{Colors.RESET} {vp:,}")
         if details.get("jailed"):
-            lines.append(f"{bullet}{Colors.BRIGHT_RED}⚠ JAILED{Colors.RESET}")
+            lines.append(f"{bullet}{Colors.BRIGHT_RED}JAILED!{Colors.RESET}")
 
     elif status.name == "PostgreSQL":
         if details.get("tables") is not None:
@@ -1464,7 +1464,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if https_val is not None:
             if isinstance(https_val, int) and https_val < 400:
                 lines.append(
-                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val} ✓{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val}{Colors.RESET}"
                 )
             elif isinstance(https_val, int):
                 lines.append(
@@ -1486,12 +1486,13 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             if info.get("ok"):
                 ms = info.get("ms", "?")
                 lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}✓{Colors.RESET} {ms}ms"
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET} {ms}ms"
                 )
             else:
-                err = str(info.get("error", info.get("status", "fail")))[:15]
+                err = info.get("error") or info.get("status") or "fail"
+                err = str(err)[:12]
                 lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}✗{Colors.RESET}"
+                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}"
                 )
 
     elif status.name == "Referrals":
