@@ -9,14 +9,6 @@ Variables:
 - IGNORE_MOD_BLOCKED_USERS: Show content from users even if blocked by followed mods.
 """
 
-# Leaderboard Weights
-LEADERBOARD_COMMENT_WEIGHT = 1.5
-LEADERBOARD_POST_WEIGHT = 0.8
-LEADERBOARD_COMMUNITY_VOTES_WEIGHT = 0.5
-LEADERBOARD_VOTES_CAST_WEIGHT = 0.2
-LEADERBOARD_DELETED_POST_WEIGHT = -2.0
-LEADERBOARD_DELETED_COMMENT_WEIGHT = -3.0
-
 # Fee-related settings removed
 
 # Moderation Settings

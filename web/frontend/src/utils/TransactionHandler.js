@@ -3848,6 +3848,11 @@ class TransactionHandler {
                 // - the backend PoW digest uses the same uvarint(proof) encoding as the worker
                 const rawProof = Number(e.data);
                 const proof = rawProof >>> 0;
+
+                // Log PoW completion stats
+                const iterations = ((rawProof - start) >>> 0) + 1;
+                const hashesPerSec = taken > 0 ? (iterations / taken).toFixed(1) : 'N/A';
+                console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec} H/s`);
                 if (rawProof !== proof) {
                     try {
                         console.warn('[PoW] proof overflow normalized', { rawProof, proof, start });
@@ -3856,7 +3861,7 @@ class TransactionHandler {
                 this._setStatus("submitting");
                 try {
                     await this.handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
-                    updateNotification("Transaction submitted");
+                    updateNotification(`Transaction submitted (${hashesPerSec} H/s)`);
                 } finally {
                     this._setStatus("idle");
                 }
