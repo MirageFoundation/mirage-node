@@ -7,8 +7,7 @@ This migration re-renders the Caddyfile from the template to add:
 - Backwards compatibility for /rpc and /lcd (deprecated 2026-02-20)
 """
 
-import os
-import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -35,15 +34,15 @@ def run(config_dir: Path, logger) -> str:
             logger.info("    Caddyfile already has /chain/rpc and /chain/rest paths")
             return "already up to date"
 
-    # Backup existing Caddyfile
+    # Backup existing Caddyfile (copy, don't rename)
+    backup = caddyfile.with_suffix(".bak")
     if caddyfile.exists():
-        backup = caddyfile.with_suffix(".bak")
-        caddyfile.rename(backup)
+        shutil.copy2(caddyfile, backup)
         logger.info(f"    Backed up existing Caddyfile to {backup}")
 
-    # Re-render from template
+    # Re-render from template (overwrites existing)
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["python3", str(render_script), str(template), str(caddyfile)],
             capture_output=True,
             text=True,
@@ -54,7 +53,7 @@ def run(config_dir: Path, logger) -> str:
         logger.error(f"    Failed to render Caddyfile: {e.stderr}")
         # Restore backup
         if backup.exists():
-            backup.rename(caddyfile)
+            shutil.copy2(backup, caddyfile)
         return f"render failed: {e.stderr[:50]}"
 
     # Verify new paths exist
@@ -64,17 +63,23 @@ def run(config_dir: Path, logger) -> str:
             logger.error("    Rendered Caddyfile missing /chain/rpc")
             return "missing /chain/rpc after render"
 
-    # Reload Caddy
-    try:
-        subprocess.run(
-            ["caddy", "reload", "--config", str(caddyfile)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        logger.info("    Reloaded Caddy with new config")
-    except subprocess.CalledProcessError as e:
-        logger.warning(f"    Failed to reload Caddy (may need manual restart): {e.stderr}")
-        return "rendered, reload failed"
+    # Reload Caddy (try multiple times with delay)
+    import time
+    for attempt in range(3):
+        try:
+            subprocess.run(
+                ["caddy", "reload", "--config", str(caddyfile)],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            logger.info("    Reloaded Caddy with new config")
+            return "updated and reloaded"
+        except subprocess.CalledProcessError:
+            if attempt < 2:
+                time.sleep(1)
+                continue
+            logger.warning("    Failed to reload Caddy (may need manual restart)")
+            return "rendered, reload failed"
 
     return "updated and reloaded"
