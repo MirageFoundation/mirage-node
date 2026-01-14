@@ -4,7 +4,7 @@ set -euo pipefail
 # Deploy to all production servers using GHCR registry.
 #
 # Usage:
-#   scripts/deploy_all_prod.sh [--init|--update]
+#   scripts/deploy_all_prod.sh [--init|--update] [--proxyjump HOST]
 #
 # Default mode: --update
 #
@@ -25,15 +25,24 @@ DEPLOY_SH="${REPO_ROOT}/deploy/deploy.sh"
 
 # Parse arguments
 MODE=""
+PROXYJUMP=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --init|--update)
       MODE="$1"
       shift
       ;;
+    --proxyjump|-J)
+      if [[ -z "${2-}" ]]; then
+        echo "ERROR: --proxyjump requires a host argument" >&2
+        exit 1
+      fi
+      PROXYJUMP="$2"
+      shift 2
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [--init|--update]" >&2
+      echo "Usage: $0 [--init|--update] [--proxyjump HOST]" >&2
       exit 1
       ;;
   esac
@@ -41,6 +50,11 @@ done
 
 if [[ -z "${MODE}" ]]; then
   MODE="--update"
+fi
+
+PROXYJUMP_ARGS=()
+if [[ -n "${PROXYJUMP}" ]]; then
+  PROXYJUMP_ARGS=(--proxyjump "${PROXYJUMP}")
 fi
 
 # Hard-coded production hosts
@@ -86,7 +100,7 @@ for HOST in "${HOSTS[@]}"; do
   echo "=============================================================="
   echo "Deploying to ${SSH_USER}@${HOST}"
   echo "=============================================================="
-  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}"
+  "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}" "${PROXYJUMP_ARGS[@]}"
 done
 
 echo ""
