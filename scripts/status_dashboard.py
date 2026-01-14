@@ -288,6 +288,7 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
     result.append(f"{color}{v}{Colors.DIM}{Box.HORIZONTAL * inner_width}{Colors.RESET}{color}{v}{Colors.RESET}")
 
     # Content lines
+    max_content_len = inner_width - 2  # Leave space for padding
     for line in lines:
         # Strip ANSI for length calculation
         stripped = ""
@@ -302,6 +303,26 @@ def draw_card(title: str, status: Status, lines: list[str], width: int = 38, sty
             i += 1
 
         visible_len = len(stripped)
+        
+        # Truncate if too long
+        if visible_len > max_content_len:
+            # Truncate the stripped version to find cutoff point
+            cutoff = 0
+            vis_count = 0
+            j = 0
+            while j < len(line) and vis_count < max_content_len - 2:
+                if line[j] == "\033":
+                    k = line.find("m", j)
+                    if k != -1:
+                        cutoff = k + 1
+                        j = k + 1
+                        continue
+                vis_count += 1
+                cutoff = j + 1
+                j += 1
+            line = line[:cutoff] + ".."
+            visible_len = vis_count + 2
+        
         line_padding = inner_width - visible_len - 1
         if line_padding < 0:
             line_padding = 0
@@ -1352,7 +1373,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Chain:{Colors.RESET} {details['chain_id']}")
         if details.get("height"):
             try:
-                h = int(details['height'])
+                h = int(details["height"])
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {h:,}")
             except (ValueError, TypeError):
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
@@ -1403,7 +1424,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             tok = details["tokens"]
             if tok >= 1_000_000:
                 tok_m = tok / 1_000_000
-                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok_m:,.0f}M MIRAGE")
+                lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok_m:,.0f}mm MIRAGE")
             else:
                 lines.append(f"{bullet}{Colors.DIM}Stake:{Colors.RESET} {tok:,} MIRAGE")
         if details.get("power_pct") is not None:
@@ -1475,9 +1496,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         https_val = details.get("https")
         if https_val is not None:
             if isinstance(https_val, int) and https_val < 400:
-                lines.append(
-                    f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val}{Colors.RESET}"
-                )
+                lines.append(f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_GREEN}{https_val}{Colors.RESET}")
             elif isinstance(https_val, int):
                 lines.append(
                     f"{bullet}{Colors.DIM}HTTPS:{Colors.RESET} {Colors.BRIGHT_YELLOW}{https_val}{Colors.RESET}"
@@ -1497,15 +1516,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         for name, info in endpoints.items():
             if info.get("ok"):
                 ms = info.get("ms", "?")
-                lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET} {ms}ms"
-                )
+                lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET} {ms}ms")
             else:
                 err = info.get("error") or info.get("status") or "fail"
                 err = str(err)[:12]
-                lines.append(
-                    f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}"
-                )
+                lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}")
 
     elif status.name == "Referrals":
         if "links" in details:
