@@ -135,7 +135,7 @@ STATUS_COLORS = {
 
 # Debug logging (opt-in: dashboard output must stay clean by default).
 _DEBUG_LOG_ENABLED = os.environ.get("MIRAGE_CHECK_STATUS_DEBUG", "").strip() == "1"
-_DEBUG_LOG_PATH = os.environ.get("MIRAGE_CHECK_STATUS_LOG", "/tmp/mirage_check_status.log").strip()
+_DEBUG_LOG_PATH = os.environ.get("MIRAGE_STATUS_DASHBOARD_LOG", "/tmp/mirage_status_dashboard.log").strip()
 
 # Node staleness thresholds:
 # If your chain should be producing blocks regularly, "last block: 1m ago" is bad.

@@ -337,7 +337,7 @@ fi
 
 # Unified Status Dashboard (last window)
 tmux new-window -t "$SESSION" -n status -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/check_status.py" C-m
+tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scripts/status_dashboard.py" C-m
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
