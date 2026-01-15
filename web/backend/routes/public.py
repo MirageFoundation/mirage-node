@@ -1042,7 +1042,7 @@ def _score_magic(
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
     - P = sqrt(max(0, topic_pref + author_pref))
-    - R = 1 / (1 + (age_hours/18)^1.585) — gentle decay: 9h=0.75, 18h=0.5, 36h=0.25
+    - R = 1 / (1 + (age_hours/12)^1.585) — gentle decay: 6h=0.75, 12h=0.5, 24h=0.25
 
     Returns (score, debug_info, should_hide).
     """
@@ -1100,9 +1100,9 @@ def _score_magic(
     P = _sqrt_signed(combined_pref)
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
-    # 9h=0.75, 18h=0.50, 36h=0.25
+    # 6h=0.75, 12h=0.50, 24h=0.25
     age_hours = max(0, (now_ts - timestamp) / 3600)
-    R = 1 / (1 + (age_hours / 18) ** 1.585)
+    R = 1 / (1 + (age_hours / 12) ** 1.585)
 
     # Final score
     score = (S + V + U + P) * R
