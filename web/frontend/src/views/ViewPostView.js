@@ -26,7 +26,7 @@ import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
-import { getTierColor } from "../utils/tierColors";
+import { getTierColor, getTierName } from "../utils/tierColors";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -234,9 +234,35 @@ const StyledProfileLink = styled(Link)`
     color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
     text-decoration: none;
     font-weight: bold;
+    position: relative;
 
     &:hover {
         color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.linkHover || '#CCCCCC'} !important;
+    }
+
+    &::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        margin-bottom: 0.3rem;
+        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+        color: ${({ theme }) => theme?.colors?.text || '#eee'};
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: normal;
+        white-space: nowrap;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+
+    &[data-tooltip]:hover::after {
+        opacity: 1;
     }
 `;
 
@@ -1857,6 +1883,7 @@ function ViewPostView({ state, updatePost }) {
                         comments: 0,
                         children: [],
                         user_vote: 1,
+                        user_weight: 1,
                         _optimistic: true,
                     };
 
@@ -2357,8 +2384,9 @@ function ViewPostView({ state, updatePost }) {
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
         const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
         const tierColor = getTierColor(currentPost.author_level);
+        const tierName = getTierName(currentPost.author_level);
         const content = ownerAddress ? (
-            <StyledProfileLink to={href} $tierColor={tierColor}>{displayWithAt}</StyledProfileLink>
+            <StyledProfileLink to={href} $tierColor={tierColor} data-tooltip={tierName}>{displayWithAt}</StyledProfileLink>
         ) : displayWithAt;
         return content;
     };

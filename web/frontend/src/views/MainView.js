@@ -498,18 +498,18 @@ const InviteNoCodesText = styled.div`
 
 // Home feed info card for logged-in users
 const HomeFeedInfoCard = styled.div`
-    margin-top: var(--card-gap, 1rem);
+    margin-top: ${({ $size }) => $size === 'compact' ? '0.5rem' : 'var(--card-gap, 1rem)'};
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
     border: 1px solid rgba(99, 102, 241, 0.2);
-    border-radius: 10px;
-    padding: 0.6rem 0.9rem;
+    border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
+    padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
 
     @media (max-width: 1000px) {
-        border-radius: 8px;
-        padding: 0.5rem 0.75rem;
+        border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
+        padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
     @media (max-width: 768px) {
@@ -785,19 +785,19 @@ const LoadingMoreIndicator = styled.div`
  * This ensures same width as CardView cards.
  */
 const LoadingCard = styled.div`
-    margin: 1rem 0 0 0;
-    padding: 2rem 1rem;
+    margin: ${({ $size }) => $size === 'compact' ? '0.5rem 0 0 0' : '1rem 0 0 0'};
+    padding: ${({ $size }) => $size === 'compact' ? '1rem 0.6rem' : '2rem 1rem'};
     background-color: ${({ theme }) => theme?.colors?.cardAlt || theme?.colors?.panelAlt || '#2c323a'};
     border: 1px solid ${({ theme }) => theme?.colors?.cardBorder || theme?.colors?.border || '#393E46'};
-    border-radius: 12px;
+    border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '12px'};
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 0.75rem;
+    gap: ${({ $size }) => $size === 'compact' ? '0.5rem' : '0.75rem'};
 
     @media (max-width: 1000px) {
-        padding: 1.5rem 0.75rem;
+        padding: ${({ $size }) => $size === 'compact' ? '0.75rem 0.5rem' : '1.5rem 0.75rem'};
     }
 `;
 
@@ -2580,7 +2580,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                         {/* Home feed info card - permanent for logged-in users (hidden while NSFW hero is shown) */}
                         {isLoggedIn && urlTopic === 'home' && !showNsfwHero && (
-                            <HomeFeedInfoCard role="region" aria-label="Home feed information">
+                            <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Home feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>🏠</HomeFeedInfoEmoji> Your Home Feed
@@ -2615,7 +2615,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                         {/* Following feed info card - permanent for logged-in users */}
                         {isLoggedIn && urlTopic === 'following' && (
-                            <HomeFeedInfoCard role="region" aria-label="Following feed information">
+                            <HomeFeedInfoCard $size={cardSize} role="region" aria-label="Following feed information">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>👥</HomeFeedInfoEmoji> Your Following Feed
@@ -2650,7 +2650,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                         {/* Loading state - only show to logged-in users */}
                         {isLoggedIn && showLoadingPosts && (
-                            <LoadingCard>
+                            <LoadingCard $size={cardSize}>
                                 <LoadingSpinner />
                                 <LoadingText>Loading posts...</LoadingText>
                             </LoadingCard>
@@ -2661,7 +2661,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                         {/* No posts available - only show to logged-in users */}
                         {isLoggedIn && showNoPostsAvailable && (
-                            <LoadingCard>
+                            <LoadingCard $size={cardSize}>
                                 <LoadingText>No posts available</LoadingText>
                             </LoadingCard>
                         )}

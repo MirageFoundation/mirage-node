@@ -2,48 +2,36 @@ import styled, { css } from 'styled-components';
 
 /**
  * Tooltip behavior:
- * - Single unified layout: tooltip is always shown just below the trigger,
- *   aligned to the left and expanding to the right.
- * - Text wraps naturally inside a max‑width box; we don't try to be clever
- *   with different positions.
+ * - Default: tooltip shown ABOVE the trigger, left-aligned with first letter
+ * - Falls back to below if near top of viewport
+ * - No cursor change, no underline
  */
 
-// We keep this function for API compatibility, but ignore the position
-// argument and always use the same \"bottom-right\" layout:
-// tooltip appears slightly below and to the right of the trigger.
+// Default position: above the element, left-aligned
 const getPositionStyles = () => css`
-    top: 100%;
-    left: 2.5rem;
-    margin-top: 0.2rem;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 0.3rem;
 `;
 
-// On mobile, treat \"no space on the right\" as the default and pin to bottom-left.
+// Mobile: same as desktop (above, left-aligned)
 const getMobilePositionStyles = () => css`
-    top: 100%;
+    bottom: 100%;
     left: 0;
-    transform: none;
-    margin-top: 0.2rem;
-    margin-left: 0;
+    margin-bottom: 0.3rem;
 `;
 
 /**
  * Shared tooltip styles that can be applied to any element via css`` helper
  * Usage: Apply to a styled component that has data-tooltip attribute
- * 
- * @param {string} position - deprecated, ignored (kept only for call‑site compatibility)
  */
-export const tooltipStyles = (position = 'right') => css`
+export const tooltipStyles = () => css`
     position: relative;
-    cursor: help;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
-    transition: color 0.2s;
     -webkit-tap-highlight-color: transparent;
 
     &:hover,
     &:focus,
     &:active {
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
         outline: none;
     }
 
@@ -87,10 +75,10 @@ export const tooltipStyles = (position = 'right') => css`
 
 /**
  * TooltipText - A styled span with tooltip functionality
- * Usage: <TooltipText data-tooltip="Your tooltip text here" $position="bottom">Hover me</TooltipText>
+ * Usage: <TooltipText data-tooltip="Your tooltip text here">Hover me</TooltipText>
  */
 export const TooltipText = styled.span`
-    ${({ $position }) => tooltipStyles($position || 'right')}
+    ${() => tooltipStyles()}
 `;
 
 /**
@@ -98,7 +86,7 @@ export const TooltipText = styled.span`
  * Same as TooltipText but with label-specific styling (starts with subtle color)
  */
 export const TooltipLabel = styled.span`
-    ${({ $position }) => tooltipStyles($position || 'right')}
+    ${() => tooltipStyles()}
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
@@ -119,9 +107,7 @@ export const InfoIcon = styled.span`
     flex-shrink: 0;
     margin-left: 0.1rem;
     vertical-align: super;
-    ${tooltipStyles('top')}
-    /* Override: no underline for icon */
-    text-decoration: none;
+    ${tooltipStyles()}
 
     &::after {
         width: 250px;
@@ -130,5 +116,47 @@ export const InfoIcon = styled.span`
     }
 `;
 
-export default TooltipText;
+/**
+ * Minimal tooltip styles for links/clickable elements.
+ * Shows tooltip on hover without changing cursor or adding underline.
+ */
+export const linkTooltipStyles = css`
+    position: relative;
 
+    &::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        ${getPositionStyles()}
+        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+        color: ${({ theme }) => theme?.colors?.text || '#eee'};
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: normal;
+        white-space: pre-wrap;
+        width: max-content;
+        max-width: 260px;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        line-height: 1.4;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+        text-align: left;
+        text-transform: none;
+    }
+
+    &[data-tooltip]:hover::after {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    @media (max-width: 1000px) {
+        &::after {
+            ${getMobilePositionStyles()}
+        }
+    }
+`;
+
+export default TooltipText;

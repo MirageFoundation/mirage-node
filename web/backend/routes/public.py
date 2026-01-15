@@ -4718,11 +4718,288 @@ def stats_event():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_stats_signups(rid: int):
+    """Return recent signups via invite codes with referrer info."""
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            # Get recent signups (used_by is not null means invite was used)
+            # Join with profiles to get username/moniker for both signup and referrer
+            cur.execute(
+                """
+                SELECT 
+                    ic.code,
+                    ic.used_by,
+                    ic.owner as invited_by,
+                    ic.used_at,
+                    ic.created_at as code_created_at,
+                    p_signup.username as signup_username,
+                    p_signup.avatar as signup_avatar,
+                    p_signup.level as signup_level,
+                    p_signup.subscription_expiry as signup_sub_expiry,
+                    p_signup.created_at as signup_created_at,
+                    p_ref.username as referrer_username,
+                    p_ref.avatar as referrer_avatar,
+                    p_ref.level as referrer_level
+                FROM invite_codes ic
+                LEFT JOIN profiles p_signup ON LOWER(p_signup.owner) = LOWER(ic.used_by)
+                LEFT JOIN profiles p_ref ON LOWER(p_ref.owner) = LOWER(ic.owner)
+                WHERE ic.used_by IS NOT NULL
+                ORDER BY ic.used_at DESC NULLS LAST
+                LIMIT 100
+                """
+            )
+            rows = cur.fetchall()
+            now = int(time.time())
+            signups = []
+            for row in rows:
+                (
+                    code,
+                    used_by,
+                    invited_by,
+                    used_at,
+                    code_created_at,
+                    signup_username,
+                    signup_avatar,
+                    signup_level,
+                    signup_sub_expiry,
+                    signup_created_at,
+                    referrer_username,
+                    referrer_avatar,
+                    referrer_level,
+                ) = row
+                signups.append(
+                    {
+                        "code": code,
+                        "signup": {
+                            "address": used_by,
+                            "username": signup_username or None,
+                            "avatar": signup_avatar or None,
+                            "level": signup_level or 0,
+                            "is_subscriber": (signup_sub_expiry or 0) > now,
+                            "created_at": signup_created_at or used_at,
+                        },
+                        "referrer": {
+                            "address": invited_by,
+                            "username": referrer_username or None,
+                            "avatar": referrer_avatar or None,
+                            "level": referrer_level or 0,
+                        },
+                        "used_at": used_at,
+                    }
+                )
+
+            # Get summary stats
+            cur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NOT NULL")
+            total_used = cur.fetchone()[0] or 0
+            cur.execute("SELECT COUNT(*) FROM invite_codes WHERE used_by IS NULL")
+            total_available = cur.fetchone()[0] or 0
+            cur.execute("SELECT COUNT(DISTINCT owner) FROM invite_codes WHERE used_by IS NOT NULL")
+            unique_referrers = cur.fetchone()[0] or 0
+
+            # Get top referrers
+            cur.execute(
+                """
+                SELECT 
+                    ic.owner,
+                    COUNT(*) as invite_count,
+                    p.username,
+                    p.avatar
+                FROM invite_codes ic
+                LEFT JOIN profiles p ON LOWER(p.owner) = LOWER(ic.owner)
+                WHERE ic.used_by IS NOT NULL
+                GROUP BY ic.owner, p.username, p.avatar
+                ORDER BY invite_count DESC
+                LIMIT 10
+                """
+            )
+            top_referrers = [
+                {
+                    "address": r[0],
+                    "invite_count": r[1],
+                    "username": r[2] or None,
+                    "avatar": r[3] or None,
+                }
+                for r in cur.fetchall()
+            ]
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.signups.ok", total_signups=len(signups))
+        return jsonify(
+            {
+                "signups": signups,
+                "total_used": total_used,
+                "total_available": total_available,
+                "unique_referrers": unique_referrers,
+                "top_referrers": top_referrers,
+            }
+        )
+    except Exception as e:
+        log_event(rid, "get_stats.signups.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_stats_subscribers(rid: int):
+    """Return subscribers grouped by tier with activity stats."""
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            now = int(time.time())
+
+            # Get all active subscribers with activity stats, grouped by tier
+            cur.execute(
+                """
+                SELECT 
+                    p.owner,
+                    p.username,
+                    p.avatar,
+                    p.level,
+                    p.subscription_expiry,
+                    p.created_at,
+                    p.is_moderator,
+                    (SELECT COUNT(*) FROM posts WHERE LOWER(owner) = LOWER(p.owner) AND COALESCE(target,'') = '' AND deleted = FALSE) as post_count,
+                    (SELECT COUNT(*) FROM posts WHERE LOWER(owner) = LOWER(p.owner) AND LENGTH(COALESCE(target,'')) > 0 AND deleted = FALSE) as comment_count,
+                    (SELECT COUNT(*) FROM votes WHERE LOWER(owner) = LOWER(p.owner)) as vote_count,
+                    (SELECT COUNT(*) FROM followed_users WHERE LOWER(target) = LOWER(p.owner)) as follower_count
+                FROM profiles p
+                WHERE p.subscription_expiry > %s AND p.level > 0 AND p.level < 100
+                ORDER BY p.level DESC, p.created_at DESC
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+
+            # Group by tier
+            by_tier: dict[int, list] = {1: [], 2: [], 3: []}
+            for row in rows:
+                (
+                    owner,
+                    username,
+                    avatar,
+                    level,
+                    sub_expiry,
+                    created_at,
+                    is_moderator,
+                    post_count,
+                    comment_count,
+                    vote_count,
+                    follower_count,
+                ) = row
+                tier = level if level in (1, 2, 3) else 1
+                by_tier[tier].append(
+                    {
+                        "address": owner,
+                        "username": username or None,
+                        "avatar": avatar or None,
+                        "level": level or 0,
+                        "is_moderator": is_moderator or False,
+                        "created_at": created_at or 0,
+                        "post_count": post_count or 0,
+                        "comment_count": comment_count or 0,
+                        "vote_count": vote_count or 0,
+                        "follower_count": follower_count or 0,
+                    }
+                )
+
+            # Get summary counts
+            total_subscribers = len(rows)
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.subscribers.ok", total_subscribers=total_subscribers)
+        return jsonify(
+            {
+                "tier_1": by_tier[1],
+                "tier_2": by_tier[2],
+                "tier_3": by_tier[3],
+                "total_subscribers": total_subscribers,
+                "count_tier_1": len(by_tier[1]),
+                "count_tier_2": len(by_tier[2]),
+                "count_tier_3": len(by_tier[3]),
+            }
+        )
+    except Exception as e:
+        log_event(rid, "get_stats.subscribers.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_stats_accounts(rid: int):
+    """Return top 100 accounts by wallet balance."""
+    try:
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+
+            # Get all accounts with usernames
+            cur.execute(
+                """
+                SELECT p.owner, p.username
+                FROM profiles p
+                """
+            )
+            all_profiles = cur.fetchall()
+
+            # Get summary
+            cur.execute("SELECT COUNT(*) FROM profiles")
+            total_accounts = cur.fetchone()[0] or 0
+
+        finally:
+            conn.close()
+
+        # Fetch balances for all profiles in batch
+        addresses = [row[0] for row in all_profiles]
+        username_map = {row[0].lower(): row[1] for row in all_profiles}
+
+        if addresses:
+            balances = _get_balances_batch(addresses)
+            # Sort by balance descending, take top 100
+            balances.sort(key=lambda x: x[1], reverse=True)
+            top_100 = balances[:100]
+
+            accounts = [
+                {
+                    "address": addr,
+                    "username": username_map.get(addr.lower()) or None,
+                    "balance": bal,
+                }
+                for addr, bal in top_100
+            ]
+        else:
+            accounts = []
+
+        log_event(rid, "get_stats.accounts.ok", total_accounts=len(accounts))
+        return jsonify(
+            {
+                "accounts": accounts,
+                "total_accounts": total_accounts,
+            }
+        )
+    except Exception as e:
+        log_event(rid, "get_stats.accounts.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 @public_bp.route("/api/get_stats")
 def get_stats():
-    """Return a concise set of stats for the stats page."""
+    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts."""
     rid = next_request_id()
-    log_event(rid, "get_stats.begin")
+    tab = request.args.get("tab", "overview").lower()
+    log_event(rid, "get_stats.begin", tab=tab)
+
+    # Route to tab-specific handlers
+    if tab == "signups":
+        return _get_stats_signups(rid)
+    elif tab == "subscribers":
+        return _get_stats_subscribers(rid)
+    elif tab == "accounts":
+        return _get_stats_accounts(rid)
+
+    # Default: overview stats
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         try:

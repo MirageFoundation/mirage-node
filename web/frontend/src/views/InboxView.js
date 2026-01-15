@@ -9,7 +9,7 @@ import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
 import Button from "../components/Button";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
-import { getTierColor } from '../utils/tierColors';
+import { getTierColor, getTierName } from '../utils/tierColors';
 
 const HeaderRow = styled.div`
     display: flex;
@@ -111,6 +111,32 @@ const ReplyHeader = styled.div`
 const ReplyUsername = styled.span`
     color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
     font-weight: bold;
+    position: relative;
+
+    &::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 0;
+        margin-bottom: 0.3rem;
+        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+        color: ${({ theme }) => theme?.colors?.text || '#eee'};
+        padding: 0.5rem 0.75rem;
+        border-radius: 4px;
+        font-size: 0.7rem;
+        font-weight: normal;
+        white-space: nowrap;
+        z-index: 1000;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+    }
+
+    &[data-tooltip]:hover::after {
+        opacity: 1;
+    }
 `;
 
 const ParentContent = styled.span`
@@ -339,7 +365,7 @@ export default function InboxView({ state }) {
                     >
                         <ReplyHeaderRow>
                             <ReplyHeader $isUnread={isUnread}>
-                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)}>{displayUsername}</ReplyUsername> replied to <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
+                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername> replied to <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
                             </ReplyHeader>
                             {isUnread && (
                                 <MarkReadButton

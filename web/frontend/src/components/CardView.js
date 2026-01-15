@@ -13,7 +13,7 @@ import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
-import { getTierColor } from "../utils/tierColors";
+import { getTierColor, getTierName } from "../utils/tierColors";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -456,6 +456,21 @@ const StyledProfileLink = styled(Link)`
     }
 `
 
+// Portal-based tooltip for tier names (avoids overflow clipping)
+const TierTooltip = styled.div`
+    position: fixed;
+    z-index: 10000;
+    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
+    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
+    border-radius: 6px;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
+    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+`
+
 
 // Success box styled like the delete confirmation but in green
 const ShareSuccessMessage = styled.div`
@@ -640,7 +655,6 @@ const FeedReasonInline = styled.span`
     font-size: 0.60rem;
     font-weight: 600;
     font-style: italic;
-    cursor: help;
 `;
 
 // Debug tooltip for feed explanation (rendered via portal)
@@ -835,7 +849,6 @@ const TimeTooltip = styled.div`
 `;
 
 const TimeWrapper = styled.span`
-    cursor: help;
 `;
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
@@ -902,6 +915,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [timeTooltipOpen, setTimeTooltipOpen] = useState(false);
     const [timeTooltipPosition, setTimeTooltipPosition] = useState({ top: 0, left: 0 });
     const timeRef = useRef(null);
+    const [tierTooltipOpen, setTierTooltipOpen] = useState(false);
+    const [tierTooltipPosition, setTierTooltipPosition] = useState({ top: 0, left: 0 });
+    const [tierTooltipText, setTierTooltipText] = useState('');
+    const authorRef = useRef(null);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);
@@ -1286,8 +1303,27 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
         const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
         const tierColor = getTierColor(post.author_level);
+        const tierName = getTierName(post.author_level);
         const content = ownerAddress ? (
-            <StyledProfileLink to={href} $tierColor={tierColor}>{display}</StyledProfileLink>
+            <StyledProfileLink
+                to={href}
+                $tierColor={tierColor}
+                ref={authorRef}
+                onMouseEnter={() => {
+                    if (tierName && authorRef.current) {
+                        const rect = authorRef.current.getBoundingClientRect();
+                        setTierTooltipPosition({
+                            top: rect.top - 8,
+                            left: rect.left
+                        });
+                        setTierTooltipText(tierName);
+                        setTierTooltipOpen(true);
+                    }
+                }}
+                onMouseLeave={() => setTierTooltipOpen(false)}
+            >
+                {display}
+            </StyledProfileLink>
         ) : display;
         return content;
     };
@@ -1537,7 +1573,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         const rect = timeRef.current.getBoundingClientRect();
                                         setTimeTooltipPosition({
                                             top: rect.top - 8,
-                                            left: rect.left + rect.width / 2
+                                            left: rect.left
                                         });
                                         setTimeTooltipOpen(true);
                                     }
@@ -1551,11 +1587,23 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     style={{
                                         top: timeTooltipPosition.top,
                                         left: timeTooltipPosition.left,
-                                        transform: 'translate(-50%, -100%)'
+                                        transform: 'translateY(-100%)'
                                     }}
                                 >
                                     {formatTimeStamp(post.timestamp)}
                                 </TimeTooltip>,
+                                document.body
+                            )}
+                            {tierTooltipOpen && tierTooltipText && ReactDOM.createPortal(
+                                <TierTooltip
+                                    style={{
+                                        top: tierTooltipPosition.top,
+                                        left: tierTooltipPosition.left,
+                                        transform: 'translateY(-100%)'
+                                    }}
+                                >
+                                    {tierTooltipText}
+                                </TierTooltip>,
                                 document.body
                             )}
                             {post && post.tag ? (
@@ -1573,7 +1621,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             if (post.feed_debug && feedReasonRef.current) {
                                                 const rect = feedReasonRef.current.getBoundingClientRect();
                                                 setFeedTooltipPosition({
-                                                    top: rect.bottom + 8,
+                                                    top: rect.top - 8,
                                                     left: Math.max(10, rect.left)
                                                 });
                                                 setFeedTooltipOpen(true);
@@ -1594,7 +1642,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     </FeedReasonWrapper>
                                     {feedTooltipOpen && post.feed_debug && ReactDOM.createPortal(
                                         <FeedDebugTooltip
-                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left }}
+                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left, transform: 'translateY(-100%)' }}
                                             onMouseEnter={() => setFeedTooltipOpen(true)}
                                             onMouseLeave={() => setFeedTooltipOpen(false)}
                                         >

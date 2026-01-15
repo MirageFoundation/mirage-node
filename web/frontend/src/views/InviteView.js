@@ -199,15 +199,13 @@ const TreeLevel = styled.span`
     padding: 0.1rem 0.35rem;
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1a1d21'};
     border-radius: 4px;
-    cursor: help;
 `;
 
 const TreeLevelTooltip = styled.span`
     visibility: hidden;
     position: absolute;
     bottom: 125%;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
     background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     color: ${({ theme }) => theme?.colors?.text || '#eee'};
