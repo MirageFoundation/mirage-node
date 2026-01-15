@@ -7,6 +7,7 @@ import Api from '../lib/api';
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
+import Button from "../components/Button";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import { getTierColor } from '../utils/tierColors';
 

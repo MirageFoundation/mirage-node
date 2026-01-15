@@ -1042,7 +1042,7 @@ def _score_magic(
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
     - P = sqrt(max(0, topic_pref + author_pref))
-    - R = 1 / (1 + (age_hours/24)^1.585) — gentle decay: 12h=0.75, 24h=0.5, 48h=0.25
+    - R = 1 / (1 + (age_hours/18)^1.585) — gentle decay: 9h=0.75, 18h=0.5, 36h=0.25
 
     Returns (score, debug_info, should_hide).
     """
@@ -1100,9 +1100,9 @@ def _score_magic(
     P = _sqrt_signed(combined_pref)
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
-    # 12h=0.75, 24h=0.50, 48h=0.25
+    # 9h=0.75, 18h=0.50, 36h=0.25
     age_hours = max(0, (now_ts - timestamp) / 3600)
-    R = 1 / (1 + (age_hours / 24) ** 1.585)
+    R = 1 / (1 + (age_hours / 18) ** 1.585)
 
     # Final score
     score = (S + V + U + P) * R
@@ -2124,6 +2124,69 @@ def get_supply_history():
 # Cache for circulation stats (expensive query)
 _circulation_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _CIRCULATION_CACHE_TTL = 60  # 60 seconds
+
+# Wallets excluded from circulating supply (team/founder controlled)
+_EXCLUDED_FROM_CIRCULATING = [
+    "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",  # Founders Fund
+    "mirage1zjs7qn3chramktnu96wft4cs6ry2srddv27dmr",  # Marketing Fund
+    "mirage13e3rxansuzneayrf9nwrxdpp38sphshz7ly8xd",  # Development Fund
+]
+
+
+@public_bp.route("/api/get_total_supply")
+def get_total_supply():
+    """CoinGecko-compliant total supply endpoint.
+
+    Returns total supply as plain text with 6 decimals.
+    Example response: 1234567.890000
+    """
+    rid = next_request_id()
+    log_event(rid, "get_total_supply.begin")
+    try:
+        if _is_catching_up():
+            return "0", 503, {"Content-Type": "text/plain"}
+
+        total_supply_umirage = _get_total_supply()
+        supply_mirage = total_supply_umirage / 1_000_000
+        result = f"{supply_mirage:.6f}"
+        log_event(rid, "get_total_supply.ok", supply=result)
+        return result, 200, {"Content-Type": "text/plain"}
+    except Exception as e:
+        log_event(rid, "get_total_supply.err", error=str(e))
+        return "0", 500, {"Content-Type": "text/plain"}
+
+
+@public_bp.route("/api/get_circulating_supply")
+def get_circulating_supply():
+    """CoinGecko-compliant circulating supply endpoint.
+
+    Returns circulating supply as plain text with 6 decimals.
+    Circulating = Total - Excluded wallets (Founders, Marketing, Development funds).
+    Example response: 1234567.890000
+    """
+    rid = next_request_id()
+    log_event(rid, "get_circulating_supply.begin")
+    try:
+        if _is_catching_up():
+            return "0", 503, {"Content-Type": "text/plain"}
+
+        total_supply_umirage = _get_total_supply()
+        excluded_balances = _get_balances_batch(_EXCLUDED_FROM_CIRCULATING)
+        excluded_total = sum(bal for _, bal in excluded_balances)
+        circulating_umirage = total_supply_umirage - excluded_total
+        circulating_mirage = circulating_umirage / 1_000_000
+        result = f"{circulating_mirage:.6f}"
+        log_event(
+            rid,
+            "get_circulating_supply.ok",
+            total=total_supply_umirage,
+            excluded=excluded_total,
+            circulating=result,
+        )
+        return result, 200, {"Content-Type": "text/plain"}
+    except Exception as e:
+        log_event(rid, "get_circulating_supply.err", error=str(e))
+        return "0", 500, {"Content-Type": "text/plain"}
 
 
 @public_bp.route("/api/get_circulation_stats")
@@ -3729,7 +3792,20 @@ def get_user_posts():
         result = []
         for row in rows:
             if len(row) >= 12:
-                txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail, author_level = row
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                ) = row
             elif len(row) >= 11:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row
                 author_level = 0
@@ -5246,13 +5322,15 @@ def get_invite_codes():
 
         codes = []
         for row in rows:
-            codes.append({
-                "code": row[0],
-                "used_by": row[1],
-                "created_at": row[2],
-                "used_at": row[3],
-                "is_used": row[1] is not None,
-            })
+            codes.append(
+                {
+                    "code": row[0],
+                    "used_by": row[1],
+                    "created_at": row[2],
+                    "used_at": row[3],
+                    "is_used": row[1] is not None,
+                }
+            )
 
         available_count = sum(1 for c in codes if not c["is_used"])
         log_event(rid, "invite.get_codes.ok", address=address[:12], total=len(codes), available=available_count)

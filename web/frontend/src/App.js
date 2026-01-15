@@ -11,25 +11,61 @@ import { sendDeviceFingerprint } from './utils/fp';
 import MobileBottomNav from './components/MobileBottomNav';
 import Toast from './components/Toast';
 import { getMaxUsernameSize } from './config/chainParams';
-const MainView = React.lazy(() => import('./views/MainView'));
-const CreatePostView = React.lazy(() => import('./views/CreatePostView'));
-const CreateAccountView = React.lazy(() => import('./views/CreateAccountView'));
-const LoginView = React.lazy(() => import('./views/LoginView'));
-const ChangeUsernameView = React.lazy(() => import('./views/ChangeUsernameView'));
-const SignOutView = React.lazy(() => import('./views/SignOutView'));
-const ViewPostView = React.lazy(() => import('./views/ViewPostView'));
-const ProfileView = React.lazy(() => import('./views/ProfileView'));
-const NetworkView = React.lazy(() => import('./views/NetworkView'));
-const SubscriptionView = React.lazy(() => import('./views/SubscriptionView'));
-const ReportsView = React.lazy(() => import('./views/ReportsView'));
+
+// Lazy import wrapper that handles chunk load failures after deployments.
+// When a new version is deployed, old chunk files are replaced. Users with stale
+// main.js will fail to load missing chunks. This wrapper detects chunk errors and
+// triggers a page reload to fetch the new main.js with correct chunk references.
+const CHUNK_RELOAD_KEY = 'chunk_reload_attempted';
+
+function lazyWithRetry(importFn) {
+    return React.lazy(() =>
+        importFn().catch((error) => {
+            // Check if this is a chunk load error (typically ChunkLoadError or similar)
+            const isChunkError =
+                error?.name === 'ChunkLoadError' ||
+                error?.message?.includes('Loading chunk') ||
+                error?.message?.includes('Failed to fetch dynamically imported module') ||
+                error?.message?.includes("expected expression, got '<'");
+
+            if (isChunkError) {
+                // Prevent infinite reload loops: only reload once per session
+                const hasReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY);
+                if (!hasReloaded) {
+                    console.warn('[Mirage] Chunk load error detected, reloading to fetch updated app...');
+                    sessionStorage.setItem(CHUNK_RELOAD_KEY, 'true');
+                    window.location.reload();
+                    // Return a never-resolving promise to prevent React from rendering an error
+                    return new Promise(() => {});
+                } else {
+                    console.error('[Mirage] Chunk load error persists after reload:', error);
+                }
+            }
+            // Re-throw if not a chunk error or if reload already attempted
+            throw error;
+        })
+    );
+}
+
+const MainView = lazyWithRetry(() => import('./views/MainView'));
+const CreatePostView = lazyWithRetry(() => import('./views/CreatePostView'));
+const CreateAccountView = lazyWithRetry(() => import('./views/CreateAccountView'));
+const LoginView = lazyWithRetry(() => import('./views/LoginView'));
+const ChangeUsernameView = lazyWithRetry(() => import('./views/ChangeUsernameView'));
+const SignOutView = lazyWithRetry(() => import('./views/SignOutView'));
+const ViewPostView = lazyWithRetry(() => import('./views/ViewPostView'));
+const ProfileView = lazyWithRetry(() => import('./views/ProfileView'));
+const NetworkView = lazyWithRetry(() => import('./views/NetworkView'));
+const SubscriptionView = lazyWithRetry(() => import('./views/SubscriptionView'));
+const ReportsView = lazyWithRetry(() => import('./views/ReportsView'));
 // REFERRALS DISABLED FOR NOW
-// const InviteView = React.lazy(() => import('./views/InviteView'));
-const InboxView = React.lazy(() => import('./views/InboxView'));
-const SettingsView = React.lazy(() => import('./views/SettingsView'));
-const DiscoverView = React.lazy(() => import('./views/DiscoverView'));
-const StatsView = React.lazy(() => import('./views/StatsView'));
-const WelcomeView = React.lazy(() => import('./views/WelcomeView'));
-const SearchResultsView = React.lazy(() => import('./views/SearchResultsView'));
+// const InviteView = lazyWithRetry(() => import('./views/InviteView'));
+const InboxView = lazyWithRetry(() => import('./views/InboxView'));
+const SettingsView = lazyWithRetry(() => import('./views/SettingsView'));
+const DiscoverView = lazyWithRetry(() => import('./views/DiscoverView'));
+const StatsView = lazyWithRetry(() => import('./views/StatsView'));
+const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
+const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
 const darkTheme = {
@@ -384,6 +420,11 @@ class App extends Component {
     }
 
     componentDidMount() {
+        // Clear chunk reload flag on successful mount - this allows future deploys to trigger
+        // a fresh reload if needed. We clear it here because if we got to componentDidMount,
+        // the app has loaded successfully.
+        try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch (_) { }
+
         // Security: if user hasn't used the site in 30 days, force logout and clear ALL local storage.
         // (We also clear sessionStorage to avoid restoring stale feed caches.)
         try {
