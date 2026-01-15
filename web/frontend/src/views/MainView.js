@@ -178,11 +178,21 @@ const InviteOnlyHeroButtons = styled.div`
     flex-wrap: wrap;
     justify-content: center;
 
+    & > a {
+        min-width: 140px;
+        text-align: center;
+    }
+
     @media (max-width: 768px) {
         flex-direction: column;
         width: 100%;
         max-width: 280px;
         gap: 0.5rem;
+
+        & > a {
+            min-width: unset;
+            width: 100%;
+        }
     }
 `;
 
@@ -2667,8 +2677,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </LoadingCard>
                         )}
 
-                        {/* Invite-only hero - shown to logged-out users on home feed */}
-                        {!isLoggedIn && urlTopic === 'home' && (
+                        {/* Invite-only hero - shown to logged-out users on all feeds */}
+                        {!isLoggedIn && (
                             <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
                                 <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
                                 <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{ fontSize: '0.5em', marginLeft: '0.3em', verticalAlign: 'super', opacity: 0.8 }}>BETA</sup></InviteOnlyHeroTitle>

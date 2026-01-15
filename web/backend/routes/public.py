@@ -2867,7 +2867,8 @@ def search():
                            COALESCE(pr.username, '') as username,
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
-                           COALESCE(p.thumbnail_url, '') as thumbnail
+                           COALESCE(p.thumbnail_url, '') as thumbnail,
+                           COALESCE(pr.level, 0) as author_level
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE LOWER(p.owner) = LOWER(%s)
@@ -3046,7 +3047,8 @@ def search():
                            COALESCE(pr.username, '') as username,
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
-                           COALESCE(p.thumbnail_url, '') as thumbnail
+                           COALESCE(p.thumbnail_url, '') as thumbnail,
+                           COALESCE(pr.level, 0) as author_level
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE COALESCE(p.target, '') = ''
@@ -3164,13 +3166,14 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
 
     posts = []
     for row in filtered:
-        txhash, owner, ts, topic, title, content, username, target, tag, thumbnail = row
+        txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
         pid = (txhash or "").lower()
         posts.append(
             {
                 "post_id": pid,
                 "user_id": owner,
                 "username": username or None,
+                "author_level": int(author_level) if author_level else 0,
                 "timestamp": int(ts) if ts else None,
                 "topic": topic,
                 "title": title,
@@ -4239,7 +4242,8 @@ def get_inbox():
                     CASE WHEN COALESCE(p9.target, '') = '' THEN p9.txhash ELSE NULL END,
                     CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
                 ) as root_post_id,
-                COUNT(*) OVER () as total_count
+                COUNT(*) OVER () as total_count,
+                COALESCE(pr.level, 0) as reply_author_level
             FROM posts r
             INNER JOIN posts p ON p.txhash = r.target
             LEFT JOIN profiles pr ON pr.owner = r.owner
@@ -4284,6 +4288,7 @@ def get_inbox():
             parent_owner = (row[8] or "").lower()
             reply_username = row[9] or ""
             root_post_id = (row[10] or "").lower()
+            reply_author_level = int(row[12]) if len(row) > 12 and row[12] else 0
 
             if reply_id in blocked_posts or reply_owner in blocked_users:
                 continue
@@ -4305,6 +4310,7 @@ def get_inbox():
                     "reply_id": reply_id,
                     "reply_owner": reply_owner,
                     "reply_username": reply_username,
+                    "reply_author_level": reply_author_level,
                     "reply_content": reply_content,
                     "reply_timestamp": reply_timestamp,
                     "parent_id": parent_id,

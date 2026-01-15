@@ -9,6 +9,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
+import { getTierColor } from '../utils/tierColors';
 
 const HeaderRow = styled.div`
     display: flex;
@@ -108,7 +109,7 @@ const ReplyHeader = styled.div`
 `;
 
 const ReplyUsername = styled.span`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
     font-weight: bold;
 `;
 
@@ -125,6 +126,11 @@ const Separator = styled.div`
     height: 1px;
     background: ${({ theme }) => theme?.colors?.border || '#444'};
     margin: 0.25rem 0;
+`;
+
+const LoginRequiredContent = styled.div`
+    text-align: center;
+    padding: 1rem 0;
 `;
 
 // removed unused Actions
@@ -293,7 +299,18 @@ export default function InboxView({ state }) {
 
     if (!viewerAddress) {
         return renderShell(
-            <div>Please sign in to view your inbox.</div>,
+            <LoginRequiredContent>
+                <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: 700 }}>
+                    Login Required
+                </h2>
+                <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                    Mirage is currently invite-only. Please log in to view your inbox.
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                    <Button to="/login" size="sm">Log In</Button>
+                    <Button to="/create_account" variant="ghost" size="sm">Create Account</Button>
+                </div>
+            </LoginRequiredContent>,
             'Inbox'
         );
     }
@@ -340,7 +357,7 @@ export default function InboxView({ state }) {
                     >
                         <ReplyHeaderRow>
                             <ReplyHeader $isUnread={isUnread}>
-                                <ReplyUsername>{displayUsername}</ReplyUsername> replied to <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
+                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)}>{displayUsername}</ReplyUsername> replied to <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
                             </ReplyHeader>
                             {isUnread && (
                                 <MarkReadButton

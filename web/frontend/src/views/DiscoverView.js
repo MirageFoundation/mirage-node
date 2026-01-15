@@ -128,6 +128,15 @@ const TagBadge = styled.span`
     margin-left: 0.3rem;
 `;
 
+const LoginRequiredCard = styled.div`
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    margin-top: 1rem;
+`;
+
 export default function DiscoverView({ state }) {
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [topics, setTopics] = useState([]);
@@ -235,6 +244,37 @@ export default function DiscoverView({ state }) {
     }, [viewerAddress, isTopicPending, isSubscribedTopic]);
 
     const location = useLocation();
+    const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+
+    // Gate: require login for discover
+    if (!isLoggedIn) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>Discover | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    <TopBar state={state} />
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <LoginRequiredCard>
+                            <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: 700 }}>
+                                Login Required
+                            </h2>
+                            <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                                Mirage is currently invite-only. Please log in to discover topics.
+                            </p>
+                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                <Button to="/login" size="sm">Log In</Button>
+                                <Button to="/create_account" variant="ghost" size="sm">Create Account</Button>
+                            </div>
+                        </LoginRequiredCard>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    }
 
     return (
         <ContentGrid>
