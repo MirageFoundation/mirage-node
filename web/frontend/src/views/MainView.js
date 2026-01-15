@@ -172,27 +172,16 @@ const InviteOnlyHeroDescription = styled.p`
 `;
 
 const InviteOnlyHeroButtons = styled.div`
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 0.75rem;
     margin-top: 0.5rem;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    & > a {
-        min-width: 140px;
-        text-align: center;
-    }
 
     @media (max-width: 768px) {
-        flex-direction: column;
+        grid-template-columns: 1fr;
         width: 100%;
         max-width: 280px;
         gap: 0.5rem;
-
-        & > a {
-            min-width: unset;
-            width: 100%;
-        }
     }
 `;
 
@@ -2473,7 +2462,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                     <ModernPostFeed>
                         <MobileHeader />
 
-                        {isCurrentTopic && (
+                        {isLoggedIn && isCurrentTopic && (
                             <TopicHeroCard>
                                 <TopicHeroHeader>
                                     <TopicHeroTitle>#{urlTopic}</TopicHeroTitle>

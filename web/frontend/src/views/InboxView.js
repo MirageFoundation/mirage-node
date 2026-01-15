@@ -300,15 +300,16 @@ export default function InboxView({ state }) {
     if (!viewerAddress) {
         return renderShell(
             <LoginRequiredContent>
+                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</div>
                 <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: 700 }}>
                     Login Required
                 </h2>
                 <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
                     Mirage is currently invite-only. Please log in to view your inbox.
                 </p>
-                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                    <Button to="/login" size="sm">Log In</Button>
-                    <Button to="/create_account" variant="ghost" size="sm">Create Account</Button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <Button to="/create_account" size="sm">Create Account</Button>
+                    <Button to="/login" variant="ghost" size="sm">Log In</Button>
                 </div>
             </LoginRequiredContent>,
             'Inbox'

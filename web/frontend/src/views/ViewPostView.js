@@ -3184,9 +3184,9 @@ function ViewPostView({ state, updatePost }) {
                                 <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
                                     Mirage is currently invite-only. Please log in to view posts and join the conversation.
                                 </p>
-                                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                                    <Button to="/login" size="sm">Log In</Button>
-                                    <Button to="/create_account" size="sm" variant="outline">Create Account</Button>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                    <Button to="/create_account" size="sm">Create Account</Button>
+                                    <Button to="/login" size="sm" variant="ghost">Log In</Button>
                                 </div>
                             </div>
                         </PostCard>
