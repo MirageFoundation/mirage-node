@@ -85,6 +85,129 @@ const WelcomeText = styled.a`
 
 // Mobile header branding for home/following feeds
 
+// Invite-only banner - permanent, non-dismissable
+const InviteOnlyBanner = styled.div`
+    margin-top: 1rem;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%)'
+        : 'linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%)'};
+    border: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.25)'
+        : 'rgba(102, 126, 234, 0.3)'};
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 8px;
+        padding: 0.6rem 0.85rem;
+    }
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.6rem;
+        border-radius: 6px;
+        padding: 0.5rem 0.7rem;
+        margin-top: 0.5rem;
+    }
+`;
+
+const InviteBannerContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1;
+    min-width: 0;
+`;
+
+const InviteBannerTitle = styled.div`
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    line-height: 1;
+
+    @media (max-width: 1000px) {
+        font-size: 0.62rem;
+    }
+`;
+
+const InviteBannerEmoji = styled.span`
+    font-size: 0.9rem;
+    line-height: 1;
+    display: inline-block;
+
+    @media (max-width: 1000px) {
+        font-size: 0.8rem;
+    }
+`;
+
+const InviteBannerDescription = styled.div`
+    font-size: 0.65rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    line-height: 1.4;
+
+    @media (max-width: 1000px) {
+        font-size: 0.55rem;
+    }
+`;
+
+const InviteBannerButton = styled.button`
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.45rem 0.9rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    font-family: inherit;
+    color: #FFFFFF;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    flex-shrink: 0;
+
+    &:hover {
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+
+    @media (max-width: 1000px) {
+        padding: 0.4rem 0.75rem;
+        font-size: 0.6rem;
+    }
+
+    @media (max-width: 768px) {
+        width: 100%;
+        padding: 0.5rem 1rem;
+        font-size: 0.65rem;
+    }
+`;
+
+const InviteBannerCount = styled.span`
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+
+    @media (max-width: 1000px) {
+        font-size: 0.5rem;
+    }
+`;
+
 // Home feed info card for logged-in users
 const HomeFeedInfoCard = styled.div`
     margin-top: 1rem;
@@ -1946,6 +2069,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     Topic feed for #{urlTopic}. Follow this community to stay up to date with the latest posts, discussions, and updates from people actively contributing to this topic.
                                 </TopicHeroDescription>
                             </TopicHeroCard>
+                        )}
+
+                        {/* Invite-only banner - permanent, shown to all logged-in users on home/following feeds */}
+                        {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
+                            <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
+                                <InviteBannerContent>
+                                    <InviteBannerTitle>
+                                        <InviteBannerEmoji>✨</InviteBannerEmoji> Exclusive Community
+                                    </InviteBannerTitle>
+                                    <InviteBannerDescription>
+                                        Mirage is now invite-only — because great conversations require great people!<br />
+                                        But don't fret, we've given you some invite codes for your friends. Use them wisely.
+                                    </InviteBannerDescription>
+                                </InviteBannerContent>
+                                <InviteBannerButton onClick={() => { /* TODO: wire up invite code generation */ }}>
+                                    Generate Invite Code <InviteBannerCount>(3 left)</InviteBannerCount>
+                                </InviteBannerButton>
+                            </InviteOnlyBanner>
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
