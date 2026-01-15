@@ -106,6 +106,10 @@ const UsernameLabel = styled.div`
     color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
 `;
 
+// Check if we're on the main site (mirage.talk or localhost)
+const hostname = window.location.hostname;
+const isMainSite = hostname === 'mirage.talk' || hostname === 'localhost';
+
 function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
@@ -113,6 +117,10 @@ function CreateAccountView({ state, setCredentials }) {
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
     const fromRecovery = location.state?.fromRecovery || false;
+
+    // Get invite code from URL parameter if present
+    const urlParams = new URLSearchParams(location.search);
+    const inviteFromUrl = urlParams.get('invite') || '';
 
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
@@ -124,6 +132,14 @@ function CreateAccountView({ state, setCredentials }) {
     // Set up state for seed_phrase and publicKey (privateKey derived from seed)
     const [seedPhrase, setSeedPhrase] = useState("");
     const [publicKey, setPublicKey] = useState("");
+    const [inviteCode, setInviteCode] = useState(() => {
+        // Pre-populate from URL if present, format it properly
+        if (inviteFromUrl) {
+            const clean = inviteFromUrl.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+            return clean.length > 4 ? clean.slice(0, 4) + '-' + clean.slice(4) : clean;
+        }
+        return "";
+    });
     const [usernameInput, setUsernameInput] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
@@ -178,6 +194,28 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
+    // Validate invite code via backend
+    const validateInviteCode = async (code) => {
+        try {
+            const resp = await Api.post('validate_invite_code', { code }, { timeoutMs: 10000 });
+            if (resp && resp.valid) {
+                return { valid: true, owner: resp.owner };
+            }
+            return { valid: false, error: resp?.error || 'Invalid invite code' };
+        } catch (e) {
+            return { valid: false, error: 'Could not validate invite code' };
+        }
+    };
+
+    // Mark invite code as used after successful account creation
+    const markInviteCodeUsed = async (code, newUserAddress) => {
+        try {
+            await Api.post('use_invite_code', { code, used_by: newUserAddress }, { timeoutMs: 10000 });
+        } catch (_) {
+            // Best effort - don't fail account creation if this fails
+        }
+    };
+
     // Function to initialize account (use imported seed or generate new)
     const initializeAccount = (existingSeed = null) => {
         // Preserve referrer before clearing storage
@@ -227,6 +265,16 @@ function CreateAccountView({ state, setCredentials }) {
         const base = (usernameInput || "").trim();
         if (!base) return;
 
+        // Validate invite code format (must be XXXX-XXXX)
+        const codeClean = (inviteCode || "").trim().toUpperCase();
+        if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
+            setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
+            const until = Date.now() + 1000;
+            setCooldownUntil(until);
+            setTimeout(() => setCooldownUntil(0), 1000);
+            return;
+        }
+
         const usernameFinal = `Anon-${base}`;
 
         // Validate username length (use defaults if params not cached yet)
@@ -247,8 +295,18 @@ function CreateAccountView({ state, setCredentials }) {
             return;
         }
 
-        // Preflight: ensure username is still available
+        // Validate invite code with backend
         setSubmitError("");
+        const inviteRes = await validateInviteCode(codeClean);
+        if (!inviteRes || !inviteRes.valid) {
+            setSubmitError(inviteRes?.error || "Invalid invite code");
+            const until = Date.now() + 1000;
+            setCooldownUntil(until);
+            setTimeout(() => setCooldownUntil(0), 1000);
+            return;
+        }
+
+        // Preflight: ensure username is still available
         const availRes = await checkUsernameAvailable(usernameFinal);
         if (!availRes || availRes.error) {
             setSubmitError("Cannot check username – server unavailable");
@@ -319,6 +377,8 @@ function CreateAccountView({ state, setCredentials }) {
                 if (!pollResult.success) {
                     throw new Error(pollResult.error_details?.message || 'transaction rejected');
                 }
+                // Mark invite code as used (best effort, don't fail if this errors)
+                await markInviteCodeUsed(codeClean, publicKey);
                 // Navigate to welcome FIRST (before setCredentials triggers useEffect redirect to /profile)
                 const finalUsername = `Anon-${base}`;
                 try { Storage.remove('username_pending'); } catch (_) { }
@@ -347,6 +407,47 @@ function CreateAccountView({ state, setCredentials }) {
     };
 
     const usernameFinal = (usernameInput || "").trim();
+
+    // If not on main site, show redirect message
+    if (!isMainSite) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>Create Account | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    <TopBar state={state} />
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <AuthPageShell activeTab="create">
+                            <Centered>
+                                <StyledInfo>
+                                    <WelcomeTitle>Account Creation Unavailable</WelcomeTitle>
+                                    <IntroP>
+                                        Account creation is only available on the main Mirage site.
+                                    </IntroP>
+                                    <IntroP>
+                                        Please visit <a href="https://mirage.talk/create_account" style={{ color: '#667eea', textDecoration: 'underline' }}>mirage.talk</a> to create your account.
+                                    </IntroP>
+                                    <ButtonWrapper>
+                                        <Button
+                                            as="a"
+                                            href="https://mirage.talk/create_account"
+                                            fullWidth
+                                            size="sm"
+                                        >
+                                            Go to mirage.talk
+                                        </Button>
+                                    </ButtonWrapper>
+                                </StyledInfo>
+                            </Centered>
+                        </AuthPageShell>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    }
 
     return (
         <ContentGrid>
@@ -385,6 +486,35 @@ function CreateAccountView({ state, setCredentials }) {
                                         </>
                                     )}
                                 </div>
+                                <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                <StyledInputBox
+                                    placeholder="XXXX-XXXX"
+                                    value={inviteCode}
+                                    onChange={(e) => {
+                                        const raw = e.target.value.toUpperCase();
+                                        // Only allow uppercase alphanumeric
+                                        const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+                                        // Limit to 8 alphanumeric chars
+                                        const limited = alphanumOnly.slice(0, 8);
+                                        // Auto-insert dash after 4 chars
+                                        const formatted = limited.length > 4
+                                            ? limited.slice(0, 4) + '-' + limited.slice(4)
+                                            : limited;
+                                        setInviteCode(formatted);
+                                        setSubmitError("");
+                                    }}
+                                    maxLength={9}
+                                    name="invite-code-entry"
+                                    id="invite-code-entry"
+                                    autoComplete="one-time-code"
+                                    autoCorrect="off"
+                                    autoCapitalize="characters"
+                                    spellCheck="false"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-bwignore="true"
+                                    data-form-type="other"
+                                />
                                 <UsernameLabel>Choose your username:</UsernameLabel>
                                 <StyledInputBox
                                     placeholder=""
@@ -408,6 +538,16 @@ function CreateAccountView({ state, setCredentials }) {
                                         e.preventDefault();
                                     }}
                                     maxLength={getMaxInputLength(true) || 100}
+                                    name="display-name-entry"
+                                    id="display-name-entry"
+                                    autoComplete="one-time-code"
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck="false"
+                                    data-lpignore="true"
+                                    data-1p-ignore="true"
+                                    data-bwignore="true"
+                                    data-form-type="other"
                                 />
                                 <ButtonWrapper>
                                     <Button

@@ -26,6 +26,7 @@ import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
+import { getTierColor } from "../utils/tierColors";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -230,12 +231,12 @@ const TitleDivider = styled.div`
 // BreadcrumbLink removed (unused)
 
 const StyledProfileLink = styled(Link)`
-    color: ${({ theme }) => theme?.colors?.link || '#FFFFFF'};
+    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
     text-decoration: none;
     font-weight: bold;
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.linkHover || '#CCCCCC'};
+        color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.linkHover || '#CCCCCC'} !important;
     }
 `;
 
@@ -2355,8 +2356,9 @@ function ViewPostView({ state, updatePost }) {
         const displayWithAt = `@${display}`;
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
         const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
+        const tierColor = getTierColor(currentPost.author_level);
         const content = ownerAddress ? (
-            <StyledProfileLink to={href}>{displayWithAt}</StyledProfileLink>
+            <StyledProfileLink to={href} $tierColor={tierColor}>{displayWithAt}</StyledProfileLink>
         ) : displayWithAt;
         return content;
     };
@@ -3157,6 +3159,42 @@ function ViewPostView({ state, updatePost }) {
             document.body
         );
     };
+
+    // Check if user is logged in
+    const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+
+    // If not logged in, show login required message
+    if (!isLoggedIn) {
+        return (
+            <ContentGrid>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <MainContentWrapper>
+                    <TopBar state={state} />
+                    <Helmet>
+                        <title>Login Required | Mirage</title>
+                    </Helmet>
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <PostCard style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
+                            <div style={{ width: '100%' }}>
+                                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</div>
+                                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.75rem', color: 'inherit' }}>
+                                    Login Required
+                                </h2>
+                                <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
+                                    Mirage is currently invite-only. Please log in to view posts and join the conversation.
+                                </p>
+                                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                                    <Button to="/login" size="sm">Log In</Button>
+                                    <Button to="/create_account" size="sm" variant="outline">Create Account</Button>
+                                </div>
+                            </div>
+                        </PostCard>
+                    </ModernPostFeed>
+                </MainContentWrapper>
+            </ContentGrid>
+        );
+    }
 
     if (root) {
         const origin = typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : 'https://mirage.vote';

@@ -13,6 +13,7 @@ import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
+import { getTierColor } from "../utils/tierColors";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -446,12 +447,12 @@ const StyledLink = styled(Link)`
 
 const StyledProfileLink = styled(Link)`
     font-size: inherit;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.subtleText || '#CCCCCC'} !important;
     text-decoration: none;
     font-weight: bold;
 
     &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#EEEEEE'};
+        color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.text || '#EEEEEE'} !important;
     }
 `
 
@@ -1284,8 +1285,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const display = username ? `@${username}` : `@${shortenAddress(post.user_id)}`;
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
         const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
+        const tierColor = getTierColor(post.author_level);
         const content = ownerAddress ? (
-            <StyledProfileLink to={href}>{display}</StyledProfileLink>
+            <StyledProfileLink to={href} $tierColor={tierColor}>{display}</StyledProfileLink>
         ) : display;
         return content;
     };

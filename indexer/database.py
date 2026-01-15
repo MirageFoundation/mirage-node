@@ -665,6 +665,21 @@ class DatabaseManager:
                     """
                 )
 
+                # invite_codes: invite-only registration system
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS invite_codes (
+                        code VARCHAR(9) PRIMARY KEY,
+                        owner TEXT NOT NULL,
+                        used_by TEXT,
+                        created_at BIGINT NOT NULL,
+                        used_at BIGINT
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_owner ON invite_codes(LOWER(owner))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_used_by ON invite_codes(LOWER(used_by))")
+
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
         with self._connect() as conn:

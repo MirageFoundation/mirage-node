@@ -83,23 +83,128 @@ const WelcomeText = styled.a`
     }
 `;
 
+// Invite-only hero for logged-out users on the front page
+const InviteOnlyHero = styled.div`
+    margin-top: 1rem;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)'
+        : 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)'};
+    border: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.3)'
+        : 'rgba(102, 126, 234, 0.35)'};
+    border-radius: 16px;
+    padding: 2rem 2.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 12px;
+        padding: 1.5rem 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 10px;
+        padding: 1.25rem 1rem;
+        gap: 0.75rem;
+    }
+`;
+
+const InviteOnlyHeroEmoji = styled.span`
+    font-size: 2.5rem;
+    line-height: 1;
+    display: block;
+    margin-bottom: 0.25rem;
+
+    @media (max-width: 768px) {
+        font-size: 2rem;
+    }
+`;
+
+const InviteOnlyHeroTitle = styled.h1`
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    margin: 0;
+    line-height: 1.2;
+
+    @media (max-width: 1000px) {
+        font-size: 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 1.1rem;
+    }
+`;
+
+const InviteOnlyHeroSubtitle = styled.div`
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #667eea;
+    margin-top: -0.25rem;
+
+    @media (max-width: 1000px) {
+        font-size: 0.8rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.7rem;
+    }
+`;
+
+const InviteOnlyHeroDescription = styled.p`
+    font-size: 0.85rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
+    line-height: 1.6;
+    margin: 0;
+    max-width: 500px;
+
+    @media (max-width: 1000px) {
+        font-size: 0.7rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.65rem;
+        line-height: 1.5;
+    }
+`;
+
+const InviteOnlyHeroButtons = styled.div`
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: center;
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+        width: 100%;
+        max-width: 280px;
+        gap: 0.5rem;
+    }
+`;
+
 // Mobile header branding for home/following feeds
 
 // Invite-only banner - permanent, non-dismissable
 const InviteOnlyBanner = styled.div`
-    margin-top: 1rem;
     background: ${({ theme }) => theme?.name === 'light'
-        ? 'linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%)'
-        : 'linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%)'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(102, 126, 234, 0.25)'
-        : 'rgba(102, 126, 234, 0.3)'};
+        ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
+        : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
+    border: 2px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(59, 130, 246, 0.5)'
+        : 'rgba(96, 165, 250, 0.6)'};
     border-radius: 10px;
     padding: 0.75rem 1rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 1rem;
+    box-shadow: ${({ theme }) => theme?.name === 'light'
+        ? '0 0 12px rgba(59, 130, 246, 0.2)'
+        : '0 0 15px rgba(96, 165, 250, 0.25)'};
 
     @media (max-width: 1000px) {
         border-radius: 8px;
@@ -112,7 +217,6 @@ const InviteOnlyBanner = styled.div`
         gap: 0.6rem;
         border-radius: 6px;
         padding: 0.5rem 0.7rem;
-        margin-top: 0.5rem;
     }
 `;
 
@@ -158,6 +262,12 @@ const InviteBannerDescription = styled.div`
     }
 `;
 
+const DesktopBr = styled.br`
+    @media (max-width: 768px) {
+        display: none;
+    }
+`;
+
 const InviteBannerButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -168,22 +278,29 @@ const InviteBannerButton = styled.button`
     font-weight: 600;
     font-family: inherit;
     color: #FFFFFF;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #FF8C00 0%, #FF5722 100%);
     border: none;
     border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.15s ease;
-    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
     flex-shrink: 0;
 
     &:hover {
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.45);
+        box-shadow: 0 4px 14px rgba(255, 140, 0, 0.55);
         transform: translateY(-1px);
     }
 
     &:active {
         transform: translateY(0);
+    }
+
+    &:disabled {
+        background: linear-gradient(135deg, #666 0%, #555 100%);
+        box-shadow: none;
+        cursor: not-allowed;
+        opacity: 0.7;
     }
 
     @media (max-width: 1000px) {
@@ -208,9 +325,181 @@ const InviteBannerCount = styled.span`
     }
 `;
 
+// Invite Code Modal
+const InviteModalOverlay = styled.div`
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+`;
+
+const InviteModalContent = styled.div`
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 16px;
+    padding: 1.5rem;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+    @media (max-width: 768px) {
+        padding: 1.25rem;
+        border-radius: 12px;
+    }
+`;
+
+const InviteModalHeader = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+`;
+
+const InviteModalTitle = styled.h2`
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+`;
+
+const InviteModalClose = styled.button`
+    background: none;
+    border: none;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    cursor: pointer;
+    font-size: 1.5rem;
+    line-height: 1;
+    padding: 0;
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    }
+`;
+
+const InviteCodeDisplay = styled.div`
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+    border: 2px dashed rgba(102, 126, 234, 0.4);
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    margin-bottom: 1rem;
+`;
+
+const InviteCodeText = styled.div`
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+
+    @media (max-width: 768px) {
+        font-size: 1.5rem;
+    }
+`;
+
+const InviteCodeSubtext = styled.div`
+    font-size: 0.75rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+`;
+
+const InviteShareButtons = styled.div`
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+
+    @media (max-width: 400px) {
+        grid-template-columns: 1fr;
+    }
+`;
+
+const InviteShareButton = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    font-family: inherit;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#33373C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover {
+        background: ${({ theme }) => theme?.colors?.accent || '#3A3F46'};
+        border-color: ${({ theme }) => theme?.colors?.text || '#666'};
+    }
+`;
+
+const InviteCopyButton = styled(InviteShareButton)`
+    grid-column: 1 / -1;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: #FFFFFF;
+    font-weight: 600;
+
+    &:hover {
+        background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%);
+        border: none;
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        transform: translateY(-1px);
+    }
+
+    &:active {
+        transform: translateY(0);
+    }
+`;
+
+const InviteNativeShareButton = styled(InviteCopyButton)`
+    background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+
+    &:hover {
+        background: linear-gradient(135deg, #0d9668 0%, #047857 100%);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    }
+`;
+
+const InviteDesktopShareButtons = styled.div`
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+
+    @media (max-width: 600px) {
+        display: none;
+    }
+`;
+
+const InviteRemainingText = styled.div`
+    text-align: center;
+    font-size: 0.7rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+`;
+
+const InviteNoCodesText = styled.div`
+    text-align: center;
+    padding: 1rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.85rem;
+`;
+
 // Home feed info card for logged-in users
 const HomeFeedInfoCard = styled.div`
-    margin-top: 1rem;
+    margin-top: var(--card-gap, 1rem);
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
     border: 1px solid rgba(99, 102, 241, 0.2);
     border-radius: 10px;
@@ -227,7 +516,7 @@ const HomeFeedInfoCard = styled.div`
     @media (max-width: 768px) {
         border-radius: 6px;
         padding: 0.4rem 0.6rem;
-        margin-top: 0.5rem;
+        margin-top: var(--card-gap-mobile, 0.5rem);
     }
 `;
 
@@ -1013,6 +1302,182 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // handleNsfwChoice is defined after getPosts (see below)
 
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
+
+    // Invite code state
+    const [inviteCodes, setInviteCodes] = useState([]);
+    const [inviteModalOpen, setInviteModalOpen] = useState(false);
+    const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
+
+    // Fetch invite codes for logged-in users
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        let cancelled = false;
+        const loadInviteCodes = async () => {
+            try {
+                const resp = await Api.get('get_invite_codes', { address: viewerAddress });
+                if (cancelled) return;
+                if (resp && Array.isArray(resp.codes)) {
+                    setInviteCodes(resp.codes);
+                }
+            } catch (_) { }
+        };
+        loadInviteCodes();
+        return () => { cancelled = true; };
+    }, [isLoggedIn, viewerAddress]);
+
+    // Get next available invite code
+    const nextAvailableCode = inviteCodes.find(c => !c.is_used);
+    const availableCodeCount = inviteCodes.filter(c => !c.is_used).length;
+
+    // Handle opening invite modal
+    const handleOpenInviteModal = () => {
+        setInviteModalOpen(true);
+        setInviteCodeCopied(false);
+    };
+
+    // Handle copying invite code
+    const handleCopyInviteCode = () => {
+        if (!nextAvailableCode) return;
+        const shareUrl = `${window.location.origin}/create_account?invite=${nextAvailableCode.code}`;
+        navigator.clipboard.writeText(shareUrl);
+        setInviteCodeCopied(true);
+        setTimeout(() => setInviteCodeCopied(false), 2000);
+    };
+
+    // Handle native share (mobile)
+    const handleNativeShare = async () => {
+        if (!nextAvailableCode || !navigator.share) return;
+        try {
+            await navigator.share({
+                title: 'Join me on Mirage',
+                text: getShareText(),
+                url: getShareUrl(),
+            });
+        } catch (err) {
+            // User cancelled or share failed - ignore
+        }
+    };
+
+    // Check if native share is available (typically mobile)
+    const canNativeShare = typeof navigator !== 'undefined' && !!navigator.share;
+
+    // Generate share URLs
+    const getShareUrl = () => {
+        if (!nextAvailableCode) return '';
+        return `${window.location.origin}/create_account?invite=${nextAvailableCode.code}`;
+    };
+
+    const SHARE_TEXTS = [
+        // Tame / Descriptive
+        'Join me on Mirage: a decentralized social network.',
+        'Join me on Mirage: social media, decentralized.',
+        'Join me on Mirage: the decentralized social platform.',
+        'Join me on Mirage: where conversations happen on-chain.',
+        'Join me on Mirage: social media built on blockchain.',
+        'Join me on Mirage: a new kind of social network.',
+        'Join me on Mirage: decentralized and user-controlled.',
+        'Join me on Mirage: social media you actually own.',
+        'Join me on Mirage: your posts live on the blockchain.',
+        'Join me on Mirage: decentralized discourse awaits.',
+        'Join me on Mirage: where you control your experience.',
+        'Join me on Mirage: social media with transparency built in.',
+        'Join me on Mirage: open, decentralized, community-driven.',
+        'Join me on Mirage: the user-first social network.',
+        'Join me on Mirage: social media redesigned for users.',
+        'Join me on Mirage: simple, decentralized, yours.',
+        'Join me on Mirage: a platform built for real conversations.',
+        'Join me on Mirage: where your data stays yours.',
+        'Join me on Mirage: social media without the middleman.',
+        'Join me on Mirage: decentralized by design.',
+        // User Control Focus
+        'Join me on Mirage: you control your feed, not an algorithm.',
+        'Join me on Mirage: no black box algorithms here.',
+        'Join me on Mirage: you own your algorithm.',
+        'Join me on Mirage: your feed, your rules.',
+        'Join me on Mirage: take back control of your feed.',
+        'Join me on Mirage: transparent algorithms, real control.',
+        'Join me on Mirage: no hidden manipulation, just content you choose.',
+        'Join me on Mirage: the algorithm works for you, not against you.',
+        'Join me on Mirage: see what you want, not what they want.',
+        'Join me on Mirage: your timeline, your choice.',
+        'Join me on Mirage: no engagement tricks, just real content.',
+        'Join me on Mirage: social media that respects your attention.',
+        'Join me on Mirage: finally, a feed you understand.',
+        'Join me on Mirage: no mystery algorithms deciding what you see.',
+        'Join me on Mirage: user-centric from day one.',
+        'Join me on Mirage: built around you, not advertisers.',
+        'Join me on Mirage: your experience, your control.',
+        'Join me on Mirage: social media that puts users first.',
+        'Join me on Mirage: no data harvesting, just discourse.',
+        'Join me on Mirage: privacy and control by default.',
+        // Anti-Corporate
+        'Join me on Mirage: no corporate overlords.',
+        'Join me on Mirage: social media without corporate control.',
+        'Join me on Mirage: free from corporate censorship.',
+        'Join me on Mirage: no faceless corporations deciding what\'s allowed.',
+        'Join me on Mirage: discourse without corporate interference.',
+        'Join me on Mirage: not owned by billionaires.',
+        'Join me on Mirage: social media that can\'t be bought.',
+        'Join me on Mirage: no shareholders to please, just users.',
+        'Join me on Mirage: built for people, not profits.',
+        'Join me on Mirage: no ads, no corporate agenda.',
+        'Join me on Mirage: social media without the corporate BS.',
+        'Join me on Mirage: where corporations don\'t control the conversation.',
+        'Join me on Mirage: no CEO can change the rules on you.',
+        'Join me on Mirage: your voice isn\'t a product here.',
+        'Join me on Mirage: social media that doesn\'t sell you out.',
+        'Join me on Mirage: no corporate content moderation.',
+        'Join me on Mirage: escape the corporate walled gardens.',
+        'Join me on Mirage: owned by everyone, controlled by no one.',
+        'Join me on Mirage: social media without the suits.',
+        'Join me on Mirage: decentralized means no corporate master.',
+        // Censorship / Free Speech
+        'Join me on Mirage: censorship-proof by design.',
+        'Join me on Mirage: where speech is protected, not policed.',
+        'Join me on Mirage: built to protect speech, not suppress it.',
+        'Join me on Mirage: your voice can\'t be silenced here.',
+        'Join me on Mirage: no arbitrary bans, no shadow banning.',
+        'Join me on Mirage: speak freely, permanently.',
+        'Join me on Mirage: censorship-resistant social media.',
+        'Join me on Mirage: your posts can\'t be erased by moderators.',
+        'Join me on Mirage: where deplatforming isn\'t possible.',
+        'Join me on Mirage: true freedom of expression.',
+        'Join me on Mirage: your speech doesn\'t need approval.',
+        'Join me on Mirage: no trust & safety theater here.',
+        'Join me on Mirage: post without fear of removal.',
+        'Join me on Mirage: uncensorable discourse.',
+        'Join me on Mirage: where no one can memory-hole your posts.',
+        'Join me on Mirage: permanent, immutable, yours.',
+        'Join me on Mirage: the platform that can\'t censor you.',
+        'Join me on Mirage: your words, preserved forever on-chain.',
+        'Join me on Mirage: no one decides what you can say.',
+        'Join me on Mirage: discourse without gatekeepers.',
+        // Provocative / Bold
+        'Join me on Mirage: the social network they can\'t shut down.',
+        'Join me on Mirage: unstoppable.',
+        'Join me on Mirage: decentralized, unstoppable, yours.',
+        'Join me on Mirage: true discourse, decentralized, unstoppable.',
+        'Join me on Mirage: what Reddit could have been.',
+        'Join me on Mirage: what Twitter should have been.',
+        'Join me on Mirage: what social media was meant to be.',
+        'Join me on Mirage: social media, unchained.',
+        'Join me on Mirage: the revolution is decentralized.',
+        'Join me on Mirage: they can\'t stop the signal.',
+        'Join me on Mirage: immune to takedowns.',
+        'Join me on Mirage: no kill switch.',
+        'Join me on Mirage: built to survive.',
+        'Join me on Mirage: the platform that fights back.',
+        'Join me on Mirage: ungovernable social media.',
+        'Join me on Mirage: where free speech isn\'t negotiable.',
+        'Join me on Mirage: the network no government can silence.',
+        'Join me on Mirage: decentralized means unstoppable.',
+        'Join me on Mirage: burn the algorithm, own your feed.',
+        'Join me on Mirage: social media with teeth.',
+    ];
+
+    const getShareText = () => {
+        return SHARE_TEXTS[Math.floor(Math.random() * SHARE_TEXTS.length)];
+    };
 
     useEffect(() => {
         let cancelled = false;
@@ -2076,15 +2541,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
                                 <InviteBannerContent>
                                     <InviteBannerTitle>
-                                        <InviteBannerEmoji>✨</InviteBannerEmoji> Exclusive Community
+                                        <InviteBannerEmoji>✨</InviteBannerEmoji> Exclusive Beta Community
                                     </InviteBannerTitle>
                                     <InviteBannerDescription>
-                                        Mirage is now invite-only — because great conversations require great people!<br />
-                                        But don't fret, we've given you some invite codes for your friends. Use them wisely.
+                                        Mirage is now invite-only — because great conversations require great people!<DesktopBr />
+                                        {' '}{availableCodeCount > 0
+                                            ? "But don't fret, we've given you some invite codes for your friends. Use them wisely."
+                                            : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
                                     </InviteBannerDescription>
                                 </InviteBannerContent>
-                                <InviteBannerButton onClick={() => { /* TODO: wire up invite code generation */ }}>
-                                    Generate Invite Code <InviteBannerCount>(3 left)</InviteBannerCount>
+                                <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
+                                    {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
                                 </InviteBannerButton>
                             </InviteOnlyBanner>
                         )}
@@ -2182,43 +2649,49 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </HomeFeedInfoCard>
                         )}
 
-                        {/* Loading state */}
-                        {showLoadingPosts && (
+                        {/* Loading state - only show to logged-in users */}
+                        {isLoggedIn && showLoadingPosts && (
                             <LoadingCard>
                                 <LoadingSpinner />
                                 <LoadingText>Loading posts...</LoadingText>
                             </LoadingCard>
                         )}
 
-                        {/* Empty home feed */}
-                        {showEmptyHome && <EmptyHomeMessage />}
+                        {/* Empty home feed - only show to logged-in users */}
+                        {isLoggedIn && showEmptyHome && <EmptyHomeMessage />}
 
-                        {/* No posts available */}
-                        {showNoPostsAvailable && (
+                        {/* No posts available - only show to logged-in users */}
+                        {isLoggedIn && showNoPostsAvailable && (
                             <LoadingCard>
                                 <LoadingText>No posts available</LoadingText>
                             </LoadingCard>
                         )}
 
-                        {/* Welcome card - only for guests (not logged in) */}
-                        {!showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && !isLoggedIn && (urlTopic === 'all' && showWelcomeCard) && (
-                            <WelcomeCard role="region" aria-label="Welcome">
-                                <WelcomeDescription>
-                                    What is Mirage you ask? Well, Mirage is what old Reddit could have been if it never sold out. It has the same simple, community-first design that lets you browse, post, comment, and vote without the noise of algorithms. The difference is that Mirage is built so that no one person, company, or government can control it or force their rules on you.
-                                </WelcomeDescription>
-                                <WelcomeFooter>
-                                    <WelcomeText href="https://mirage.foundation/" target="_blank" rel="noopener noreferrer" onClick={dismissWelcomeCard}>
-                                        Welcome to Mirage! Click here to learn more.
-                                    </WelcomeText>
-                                    <Button variant="warning" size="sm" onClick={dismissWelcomeCard} aria-label="Close welcome" mobileFullWidth>
-                                        Dismiss
+                        {/* Invite-only hero - shown to logged-out users on home feed */}
+                        {!isLoggedIn && urlTopic === 'home' && (
+                            <InviteOnlyHero role="region" aria-label="Welcome to Mirage">
+                                <InviteOnlyHeroEmoji>✨</InviteOnlyHeroEmoji>
+                                <InviteOnlyHeroTitle>Welcome to Mirage<sup style={{ fontSize: '0.5em', marginLeft: '0.3em', verticalAlign: 'super', opacity: 0.8 }}>BETA</sup></InviteOnlyHeroTitle>
+                                <InviteOnlyHeroSubtitle>Currently in Private Beta — Invite Only</InviteOnlyHeroSubtitle>
+                                <InviteOnlyHeroDescription>
+                                    Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
+                                </InviteOnlyHeroDescription>
+                                <InviteOnlyHeroDescription>
+                                    Have an invite code? Join the community today.
+                                </InviteOnlyHeroDescription>
+                                <InviteOnlyHeroButtons>
+                                    <Button to="/create_account" size="md">
+                                        Create Account
                                     </Button>
-                                </WelcomeFooter>
-                            </WelcomeCard>
+                                    <Button to="/login" variant="ghost" size="md">
+                                        Sign In
+                                    </Button>
+                                </InviteOnlyHeroButtons>
+                            </InviteOnlyHero>
                         )}
 
-                        {/* Posts grid */}
-                        {!showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (
+                        {/* Posts grid - only show to logged-in users */}
+                        {isLoggedIn && !showLoadingPosts && !showEmptyHome && !showNoPostsAvailable && orderedPosts.length > 0 && (
                             <PostGrid>
                                 {orderedPosts.map((post, index) => {
                                     // Skip posts that would render as empty (no title/topic)
@@ -2259,31 +2732,107 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </PostGrid>
                         )}
 
-                        {isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
+                        {isLoggedIn && isLoadingMore && !showEmptyHome && !showNoPostsAvailable && (
                             <LoadingMoreIndicator>Loading more content...</LoadingMoreIndicator>
                         )}
-                        <button
-                            ref={bottomSentinelRef}
-                            type="button"
-                            onClick={loadMore}
-                            aria-label="Load more"
-                            tabIndex={-1}
-                            style={{
-                                width: '100%',
-                                height: '32px',
-                                minHeight: '32px',
-                                border: 'none',
-                                padding: 0,
-                                margin: 0,
-                                background: 'transparent',
-                                opacity: 0,
-                                cursor: 'default',
-                            }}
-                        >
-                            Load more
-                        </button>
+                        {isLoggedIn && (
+                            <button
+                                ref={bottomSentinelRef}
+                                type="button"
+                                onClick={loadMore}
+                                aria-label="Load more"
+                                tabIndex={-1}
+                                style={{
+                                    width: '100%',
+                                    height: '32px',
+                                    minHeight: '32px',
+                                    border: 'none',
+                                    padding: 0,
+                                    margin: 0,
+                                    background: 'transparent',
+                                    opacity: 0,
+                                    cursor: 'default',
+                                }}
+                            >
+                                Load more
+                            </button>
+                        )}
                     </ModernPostFeed>
                 </div>
+
+                {/* Invite Code Modal */}
+                {inviteModalOpen && (
+                    <InviteModalOverlay onClick={() => setInviteModalOpen(false)}>
+                        <InviteModalContent onClick={(e) => e.stopPropagation()}>
+                            <InviteModalHeader>
+                                <InviteModalTitle>
+                                    <span role="img" aria-label="sparkles">✨</span> Share Your Invite Code
+                                </InviteModalTitle>
+                                <InviteModalClose onClick={() => setInviteModalOpen(false)}>&times;</InviteModalClose>
+                            </InviteModalHeader>
+
+                            {nextAvailableCode ? (
+                                <>
+                                    <InviteCodeDisplay>
+                                        <InviteCodeText>{nextAvailableCode.code}</InviteCodeText>
+                                        <InviteCodeSubtext>Share this code with a friend to invite them</InviteCodeSubtext>
+                                    </InviteCodeDisplay>
+
+                                    <InviteShareButtons>
+                                        <InviteCopyButton onClick={handleCopyInviteCode}>
+                                            {inviteCodeCopied ? '✓ Copied!' : 'Copy Invite Link'}
+                                        </InviteCopyButton>
+                                        {canNativeShare && (
+                                            <InviteNativeShareButton onClick={handleNativeShare}>
+                                                <span role="img" aria-label="share">📤</span> Share via...
+                                            </InviteNativeShareButton>
+                                        )}
+                                    </InviteShareButtons>
+                                    <InviteDesktopShareButtons>
+                                        <InviteShareButton
+                                            as="a"
+                                            href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(getShareText())}&url=${encodeURIComponent(getShareUrl())}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            <span role="img" aria-label="X">𝕏</span> Twitter/X
+                                        </InviteShareButton>
+                                        <InviteShareButton
+                                            as="a"
+                                            href={`https://t.me/share/url?url=${encodeURIComponent(getShareUrl())}&text=${encodeURIComponent(getShareText())}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            <span role="img" aria-label="telegram">📨</span> Telegram
+                                        </InviteShareButton>
+                                        <InviteShareButton
+                                            as="a"
+                                            href={`https://wa.me/?text=${encodeURIComponent(getShareText() + ' ' + getShareUrl())}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                        >
+                                            <span role="img" aria-label="whatsapp">💬</span> WhatsApp
+                                        </InviteShareButton>
+                                        <InviteShareButton
+                                            as="a"
+                                            href={`mailto:?subject=${encodeURIComponent('Join me on Mirage!')}&body=${encodeURIComponent(getShareText() + '\n\n' + getShareUrl())}`}
+                                        >
+                                            <span role="img" aria-label="email">📧</span> Email
+                                        </InviteShareButton>
+                                    </InviteDesktopShareButtons>
+
+                                    <InviteRemainingText>
+                                        You have {availableCodeCount} invite{availableCodeCount !== 1 ? 's' : ''} remaining
+                                    </InviteRemainingText>
+                                </>
+                            ) : (
+                                <InviteNoCodesText>
+                                    You don't have any invite codes available. Check back later!
+                                </InviteNoCodesText>
+                            )}
+                        </InviteModalContent>
+                    </InviteModalOverlay>
+                )}
             </ContentGrid>
         );
     };

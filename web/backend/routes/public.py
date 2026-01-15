@@ -534,7 +534,8 @@ def _load_candidate_posts(
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
-               COALESCE(p.thumbnail_url, '') AS thumbnail
+               COALESCE(p.thumbnail_url, '') AS thumbnail,
+               COALESCE(pr.level, 0) AS author_level
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -563,6 +564,7 @@ def _load_candidate_posts(
             username,
             edited_at,
             thumbnail,
+            author_level,
         ) = row
 
         pid = (txhash or "").lower()
@@ -586,6 +588,7 @@ def _load_candidate_posts(
                 "author": author,
                 "user_id": author,
                 "username": username or "",
+                "author_level": int(author_level) if author_level else 0,
                 "timestamp": int(ts) if ts else 0,
                 "topic": topic_raw,
                 "topic_lower": topic_lower,
@@ -683,51 +686,6 @@ def _load_vote_and_comment_stats(
     return vote_totals, comment_counts, user_votes, user_weight_map
 
 
-def _log_recency(timestamp: int) -> float:
-    """
-    Calculate recency boost for a post.
-
-    Uses inverse quadratic decay: R = 1 / (1 + (age_hours / 6)^2)
-
-    - 1h old: 0.97
-    - 2h old: 0.90
-    - 3h old: 0.80
-    - 6h old: 0.50
-    - 12h old: 0.20
-    - 24h old: 0.06
-    """
-    import time as _time
-
-    if not timestamp:
-        return 0.0
-
-    now = int(_time.time())
-    age_seconds = max(0, now - timestamp)
-    age_hours = age_seconds / 3600.0
-
-    # Inverse quadratic decay
-    return 1.0 / (1.0 + (age_hours / 6.0) ** 2)
-
-
-def _log_signed(x: float) -> float:
-    """Signed log transform: sign(x) * log(1 + abs(x))."""
-    import math
-
-    xf = float(x or 0.0)
-    if xf == 0.0:
-        return 0.0
-    return (1.0 if xf > 0 else -1.0) * math.log1p(abs(xf))
-
-
-def _log_comments(comment_count: int) -> float:
-    import math
-
-    c = int(comment_count or 0)
-    if c <= 0:
-        return 0.0
-    return math.log1p(c)
-
-
 def _get_following_feed(
     cur,
     viewer: str,
@@ -786,7 +744,8 @@ def _get_following_feed(
                COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
-               COALESCE(p.thumbnail_url, '') AS thumbnail
+               COALESCE(p.thumbnail_url, '') AS thumbnail,
+               COALESCE(pr.level, 0) AS author_level
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -1280,7 +1239,8 @@ def _load_home_candidates(
         placeholders = ",".join(["%s"] * len(similar_list))
         query = f"""
             SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url
+                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+                   COALESCE(pr.level, 0) AS author_level
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
@@ -1304,7 +1264,8 @@ def _load_home_candidates(
         query = f"""
             SELECT DISTINCT ON (p.txhash) 
                    p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url
+                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+                   COALESCE(pr.level, 0) AS author_level
             FROM votes v
             JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
@@ -1326,7 +1287,8 @@ def _load_home_candidates(
     # Source 3: Recent posts (discovery - not from blocked, with topics)
     query = """
         SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-               p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url
+               p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+               COALESCE(pr.level, 0) AS author_level
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
@@ -1360,6 +1322,7 @@ def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict 
         username,
         edited_at,
         thumbnail,
+        author_level,
     ) = row
 
     pid = (txhash or "").lower()
@@ -1376,6 +1339,7 @@ def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict 
         "author": author,
         "user_id": author,
         "username": username or "",
+        "author_level": int(author_level) if author_level else 0,
         "timestamp": int(ts) if ts else 0,
         "topic": (topic or "").strip(),
         "root_topic": (root_topic or topic or "").strip(),
@@ -1416,127 +1380,6 @@ def _load_similar_user_upvotes(cur, post_ids: list[str], similar_addrs: set[str]
             result[target] = []
         result[target].append(voter)
     return result
-
-
-def _score_home_post(
-    post: dict,
-    topic_prefs: dict[str, float],
-    author_prefs: dict[str, float],
-    sim_lookup: dict[str, float],
-    similar_upvotes: dict[str, list[str]],
-    comment_counts: dict[str, int],
-    vote_totals: dict[str, float],
-) -> tuple[float, dict]:
-    """
-    Score + bucket assignment for home feed.
-
-    Magic buckets:
-    - liked: (log_community_net_vote + log_comments) * log_recency
-      Requires (topic_pref + author_pref) >= 0 and at least one positive pref.
-    - similar: similarity * log_recency
-    - discovery: (log_community_net_vote + log_comments) * log_recency
-      Anything not already in liked.
-    - second_chance: (log_community_net_vote + log_comments) * log_recency
-      Requires -5 <= (topic_pref + author_pref) < 0
-    """
-    SIM_CAP = 3.0
-    SECOND_CHANCE_MIN = -5.0
-    HIDE_THRESHOLD = -5.0
-    SIM_MIN = 0.05
-
-    pid = post["post_id"]
-    author = post["author"]
-    topic_lower = (post.get("topic") or "").strip().lower()
-    timestamp = post.get("timestamp", 0)
-    source = post.get("_source", "unknown")
-    comments = comment_counts.get(pid, 0)
-    net_vote = float(vote_totals.get(pid, 0.0) or 0.0)
-
-    # Check user preference for topic/author (for bucket labeling)
-    topic_pref = topic_prefs.get(topic_lower, 0)
-    author_pref = author_prefs.get(author, 0)
-    # Dislike is additive: topic + author
-    combined_pref = topic_pref + author_pref
-    is_severely_disliked = combined_pref < HIDE_THRESHOLD
-    is_disliked = (combined_pref < 0.0) and (combined_pref >= SECOND_CHANCE_MIN)
-    is_liked = (combined_pref >= 0.0) and ((topic_pref > 0.0) or (author_pref > 0.0))
-
-    # similarity (0-1): sum of similar-upvoter similarities, capped then normalized
-    upvoters = similar_upvotes.get(pid, [])
-    raw_sum = sum(sim_lookup.get(v, 0) for v in upvoters)
-    S = min(raw_sum, SIM_CAP) / SIM_CAP
-
-    # Scoring components:
-    # R = recency (inverse quadratic decay: 1h=0.97, 6h=0.5, 12h=0.2, 24h=0.06, 72h=0.01)
-    # V = log(1 + |net_votes|) * sign(net_votes)
-    # C = log(1 + comments)
-    R = _log_recency(timestamp)
-    V = _log_signed(net_vote)
-    C = _log_comments(comments)
-
-    # Scores:
-    # - liked/discovery/second_chance: (V + C) * R
-    # - similar: S * R
-    score_quality = (V + C) * R
-    score_similar = S * R
-
-    # Determine bucket (non-overlapping)
-    if is_disliked:
-        bucket = "second_chance"
-        score = score_quality
-        if topic_pref < 0 and author_pref < 0:
-            reason = "Shown despite disliked topic and author"
-        elif topic_pref < 0:
-            reason = "Shown despite disliked topic"
-        else:
-            reason = "Shown despite disliked author"
-        formula = f"(V:{V:.2f} + C:{C:.2f}) * R:{R:.2f} = {score:.2f}"
-    elif is_liked:
-        bucket = "liked"
-        score = score_quality
-        if topic_pref > 0 and author_pref > 0:
-            reason = "Shown because you like the topic and author"
-        elif topic_pref > 0:
-            reason = "Shown because you like the topic"
-        else:
-            reason = "Shown because you like the author"
-        formula = f"(V:{V:.2f} + C:{C:.2f}) * R:{R:.2f} = {score:.2f}"
-    elif S > SIM_MIN:
-        bucket = "similar"
-        score = score_similar
-        reason = "Shown because similar users liked it"
-        formula = f"S:{S:.2f} * R:{R:.2f} = {score:.2f}"
-    else:
-        bucket = "discovery"
-        score = score_quality
-        reason = "discovery"
-        formula = f"(V:{V:.2f} + C:{C:.2f}) * R:{R:.2f} = {score:.2f}"
-
-    post["feed_bucket"] = bucket
-    post["_is_severely_disliked"] = is_severely_disliked
-    post["_is_disliked"] = is_disliked
-    post["_is_liked"] = is_liked
-
-    debug = {
-        "bucket": bucket,
-        "reason": reason,
-        "score": round(float(score or 0.0), 2),
-        "equation": (
-            "S × R" if bucket == "similar" else "(V + C) × R  (V=sign(votes)·ln(1+|votes|), C=ln(1+comments))"
-        ),
-        "formula": formula,
-        "S": round(S, 2),
-        "R": round(R, 2),
-        "V": round(V, 2),
-        "C": round(C, 2),
-        "points": round(net_vote, 1),
-        "comments": comments,
-        "t_pref": round(topic_pref, 1),
-        "a_pref": round(author_pref, 1),
-        "source": source,
-    }
-
-    return score, debug
 
 
 def _get_guest_feed(
@@ -3463,7 +3306,8 @@ def get_posts():
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
-                       COALESCE(p.thumbnail_url, '') as thumbnail
+                       COALESCE(p.thumbnail_url, '') as thumbnail,
+                       COALESCE(pr.level, 0) as author_level
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 LEFT JOIN (
@@ -3497,7 +3341,8 @@ def get_posts():
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
-                       COALESCE(p.thumbnail_url, '') as thumbnail
+                       COALESCE(p.thumbnail_url, '') as thumbnail,
+                       COALESCE(pr.level, 0) as author_level
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 LEFT JOIN (
@@ -3519,17 +3364,17 @@ def get_posts():
             )
         rows = cur.fetchall()
         # Opportunistic backfill of thumbnails for direct images
+        # Thumbnail is at index 11 (0-indexed), author_level is at index 12
         try:
             for i, row in enumerate(rows):
                 txhash = row[0] if len(row) > 0 else ""
                 content = row[5] if len(row) > 5 else ""
-                thumbnail = row[-1] if len(row) > 11 else ""
+                thumbnail = row[11] if len(row) > 11 else ""
                 if not thumbnail:
                     new_thumb = _backfill_thumbnail_if_missing(cur, txhash, content or "", thumbnail or "")
                     if new_thumb:
                         lst = list(rows[i])
-                        # Thumbnail is the last column in the select
-                        lst[-1] = new_thumb
+                        lst[11] = new_thumb
                         rows[i] = tuple(lst)
             try:
                 conn.commit()
@@ -3769,7 +3614,8 @@ def get_user_posts():
                    COALESCE(p.target, '') as target,
                    (p.edited_at IS NOT NULL) as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
-                   COALESCE(p.thumbnail_url, '') as thumbnail
+                   COALESCE(p.thumbnail_url, '') as thumbnail,
+                   COALESCE(pr.level, 0) as author_level
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
@@ -3879,21 +3725,27 @@ def get_user_posts():
 
         result = []
         for row in rows:
-            if len(row) >= 11:
+            if len(row) >= 12:
+                txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail, author_level = row
+            elif len(row) >= 11:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row
+                author_level = 0
             elif len(row) == 10:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at = row
                 thumbnail = ""
+                author_level = 0
             else:
                 txhash, owner_addr, ts, topic, title, content, uname, target = row
                 edited, edited_at = 0, 0
                 thumbnail = ""
+                author_level = 0
             pid = (txhash or "").lower()
             result.append(
                 {
                     "post_id": pid,
                     "user_id": owner_addr,
                     "username": uname,
+                    "author_level": int(author_level) if author_level else 0,
                     "timestamp": int(ts) if ts is not None else None,
                     "topic": topic,
                     "title": title,
@@ -4003,7 +3855,8 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
                COALESCE(pr.username, '') AS username,
                CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                COALESCE(p.edited_at, 0) as edited_at,
-               COALESCE(p.thumbnail_url, '') as thumbnail
+               COALESCE(p.thumbnail_url, '') as thumbnail,
+               COALESCE(pr.level, 0) as author_level
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -4027,6 +3880,7 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
     edited_flag = bool(row[11] if len(row) > 11 else 0)
     edited_at_val = int(row[12] or 0) if len(row) > 12 else 0
     thumbnail_val = (row[13] or "") if len(row) > 13 else ""
+    author_level_val = int(row[14]) if len(row) > 14 and row[14] else 0
 
     # Filter if post ID is blocked
     if pid in blocked_posts:
@@ -4103,6 +3957,7 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
         "target": target_val,
         "user_id": owner,
         "username": username_val,
+        "author_level": author_level_val,
         "timestamp": int(created_at) if created_at is not None else None,
         "topic": topic_val,
         "root_topic": root_topic_val,
@@ -5346,6 +5201,157 @@ def get_referral_stats():
     except Exception as e:
         log_event(rid, "referral.stats.err", error=str(e))
         return jsonify({"error": str(e)}), 500
+
+
+# =============================================================================
+# Invite Code System (mirage.talk / localhost only)
+# =============================================================================
+
+
+def _is_main_site() -> bool:
+    """Check if request is from mirage.talk or localhost (where invite codes work)."""
+    host = request.host.split(":")[0].lower()
+    return host in ("mirage.talk", "localhost", "127.0.0.1")
+
+
+@public_bp.route("/api/get_invite_codes")
+def get_invite_codes():
+    """Get all invite codes owned by the given address."""
+    rid = next_request_id()
+    address = request.args.get("address", "", type=str).strip()
+    if not address:
+        return jsonify({"error": "address required"}), 400
+
+    try:
+        conn = connect_db(timeout=5.0)
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT code, used_by, created_at, used_at
+            FROM invite_codes
+            WHERE LOWER(owner) = LOWER(%s)
+            ORDER BY created_at ASC
+            """,
+            (address,),
+        )
+        rows = cur.fetchall()
+        conn.close()
+
+        codes = []
+        for row in rows:
+            codes.append({
+                "code": row[0],
+                "used_by": row[1],
+                "created_at": row[2],
+                "used_at": row[3],
+                "is_used": row[1] is not None,
+            })
+
+        available_count = sum(1 for c in codes if not c["is_used"])
+        log_event(rid, "invite.get_codes.ok", address=address[:12], total=len(codes), available=available_count)
+        return jsonify({"codes": codes, "total": len(codes), "available": available_count})
+    except Exception as e:
+        log_event(rid, "invite.get_codes.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@public_bp.route("/api/validate_invite_code", methods=["POST"])
+def validate_invite_code():
+    """Validate that an invite code exists and is unused. Only works on mirage.talk/localhost."""
+    rid = next_request_id()
+
+    if not _is_main_site():
+        log_event(rid, "invite.validate.blocked", host=request.host)
+        return jsonify({"error": "Invite codes only work on mirage.talk"}), 403
+
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip().upper()
+
+    if not code or len(code) != 9 or code[4] != "-":
+        return jsonify({"valid": False, "error": "Invalid code format"}), 400
+
+    try:
+        conn = connect_db(timeout=5.0)
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
+            (code,),
+        )
+        row = cur.fetchone()
+        conn.close()
+
+        if not row:
+            log_event(rid, "invite.validate.notfound", code=code)
+            return jsonify({"valid": False, "error": "Invalid invite code"})
+
+        owner, used_by = row
+        if used_by:
+            log_event(rid, "invite.validate.used", code=code)
+            return jsonify({"valid": False, "error": "This invite code has already been used"})
+
+        log_event(rid, "invite.validate.ok", code=code)
+        return jsonify({"valid": True, "owner": owner})
+    except Exception as e:
+        log_event(rid, "invite.validate.err", error=str(e))
+        return jsonify({"valid": False, "error": str(e)}), 500
+
+
+@public_bp.route("/api/use_invite_code", methods=["POST"])
+def use_invite_code():
+    """Mark an invite code as used by a new user. Only works on mirage.talk/localhost."""
+    rid = next_request_id()
+
+    if not _is_main_site():
+        log_event(rid, "invite.use.blocked", host=request.host)
+        return jsonify({"error": "Invite codes only work on mirage.talk"}), 403
+
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip().upper()
+    used_by = (data.get("used_by") or "").strip()
+
+    if not code or len(code) != 9 or code[4] != "-":
+        return jsonify({"success": False, "error": "Invalid code format"}), 400
+
+    if not used_by:
+        return jsonify({"success": False, "error": "used_by address required"}), 400
+
+    try:
+        conn = connect_db(timeout=5.0)
+        cur = conn.cursor()
+
+        # Check if code exists and is unused
+        cur.execute(
+            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
+            (code,),
+        )
+        row = cur.fetchone()
+
+        if not row:
+            conn.close()
+            log_event(rid, "invite.use.notfound", code=code)
+            return jsonify({"success": False, "error": "Invalid invite code"})
+
+        owner, existing_used_by = row
+        if existing_used_by:
+            conn.close()
+            log_event(rid, "invite.use.already_used", code=code)
+            return jsonify({"success": False, "error": "This invite code has already been used"})
+
+        # Mark as used
+        now_ts = int(time.time())
+        cur.execute(
+            "UPDATE invite_codes SET used_by = %s, used_at = %s WHERE UPPER(code) = %s",
+            (used_by, now_ts, code),
+        )
+        conn.close()
+
+        log_event(rid, "invite.use.ok", code=code, used_by=used_by[:12])
+        return jsonify({"success": True, "owner": owner})
+    except Exception as e:
+        log_event(rid, "invite.use.err", error=str(e))
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 __all__ = ["public_bp"]
