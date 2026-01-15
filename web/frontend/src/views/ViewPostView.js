@@ -1853,10 +1853,10 @@ function ViewPostView({ state, updatePost }) {
                         content: replyString,
                         target: commentId,
                         timestamp: Math.floor(Date.now() / 1000),
-                        points: 0,
+                        points: 1,
                         comments: 0,
                         children: [],
-                        user_vote: 0,
+                        user_vote: 1,
                         _optimistic: true,
                     };
 
