@@ -22,7 +22,8 @@ const ProfileView = React.lazy(() => import('./views/ProfileView'));
 const NetworkView = React.lazy(() => import('./views/NetworkView'));
 const SubscriptionView = React.lazy(() => import('./views/SubscriptionView'));
 const ReportsView = React.lazy(() => import('./views/ReportsView'));
-const InviteView = React.lazy(() => import('./views/InviteView'));
+// REFERRALS DISABLED FOR NOW
+// const InviteView = React.lazy(() => import('./views/InviteView'));
 const InboxView = React.lazy(() => import('./views/InboxView'));
 const SettingsView = React.lazy(() => import('./views/SettingsView'));
 const DiscoverView = React.lazy(() => import('./views/DiscoverView'));
@@ -128,16 +129,17 @@ function RouteTracker({ children }) {
         // Record activity for inactivity auto-logout
         try { Storage.touchLastSeen(); } catch (_) { }
 
+        // REFERRALS DISABLED FOR NOW
         // Capture referrer parameter from URL (for referral system)
-        try {
-            const params = new URLSearchParams(location.search);
-            const referrerAddr = params.get('referrer');
-            console.log('[Referral] URL search:', location.search, 'referrer param:', referrerAddr);
-            if (referrerAddr && referrerAddr.startsWith('mirage1') && referrerAddr.length >= 39) {
-                localStorage.setItem('referrer_address', referrerAddr);
-                console.log('[Referral] Saved referrer to localStorage:', referrerAddr);
-            }
-        } catch (e) { console.error('[Referral] Error capturing referrer:', e); }
+        // try {
+        //     const params = new URLSearchParams(location.search);
+        //     const referrerAddr = params.get('referrer');
+        //     console.log('[Referral] URL search:', location.search, 'referrer param:', referrerAddr);
+        //     if (referrerAddr && referrerAddr.startsWith('mirage1') && referrerAddr.length >= 39) {
+        //         localStorage.setItem('referrer_address', referrerAddr);
+        //         console.log('[Referral] Saved referrer to localStorage:', referrerAddr);
+        //     }
+        // } catch (e) { console.error('[Referral] Error capturing referrer:', e); }
 
         // Skip tracking root path since it redirects to the last route
         if (location.pathname === '/') return;
@@ -818,7 +820,8 @@ class App extends Component {
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
                                             <Route path="/network" element={<NetworkView state={this.state} />} />
-                                            <Route path="/invite" element={<InviteView state={this.state} />} />
+                                            {/* REFERRALS DISABLED FOR NOW */}
+                                            {/* <Route path="/invite" element={<InviteView state={this.state} />} /> */}
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />

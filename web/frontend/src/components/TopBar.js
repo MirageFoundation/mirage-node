@@ -241,6 +241,7 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
             >
                 Network
             </MenuItem>
+            {/* REFERRALS DISABLED FOR NOW
             {(window.location.hostname === 'mirage.talk' || window.location.hostname === 'localhost') && (
                 <MenuItem
                     to="/invite"
@@ -249,6 +250,7 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
                     Invite &amp; Earn
                 </MenuItem>
             )}
+            */}
             {isAdmin && (
                 <>
                     <MenuDivider />

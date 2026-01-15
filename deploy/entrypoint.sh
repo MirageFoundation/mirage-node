@@ -311,9 +311,9 @@ tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
 
-# Referral accrual daemon (fifth)
-tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
-tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
+# Referral accrual daemon (fifth) - DISABLED FOR NOW
+# tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
+# tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
 # IBC Relayer (sixth) - only if Hermes is configured
 # NOTE: This hermes startup code is duplicated in deploy/setup_hermes_relayer.sh
