@@ -112,7 +112,7 @@ const restorableRoutePrefixes = [
     '/server',
     '/reports',
     '/inbox',
-    '/discover',
+    '/topics',
     '/stats',
     '/search',
 ];
@@ -825,7 +825,7 @@ class App extends Component {
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
-                                            <Route path="/discover" element={<DiscoverView state={this.state} />} />
+                                            <Route path="/topics" element={<DiscoverView state={this.state} />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
                                         </Routes>

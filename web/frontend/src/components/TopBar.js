@@ -541,8 +541,8 @@ function TopBar({ state }) {
                     Following
                 </TabletNavItem>
                 <TabletNavItem
-                    to="/discover"
-                    $active={isNavActive('/discover')}
+                    to="/topics"
+                    $active={isNavActive('/topics')}
                 >
                     Topics
                 </TabletNavItem>

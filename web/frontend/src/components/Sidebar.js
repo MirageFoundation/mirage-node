@@ -365,7 +365,7 @@ const Sidebar = ({ currentPath, state }) => {
                 >
                     Following
                 </NavItem>
-                <NavItem to="/discover" className={isActive('/discover') ? 'active' : ''}>
+                <NavItem to="/topics" className={isActive('/topics') ? 'active' : ''}>
                     Topics
                 </NavItem>
             </NavSection>

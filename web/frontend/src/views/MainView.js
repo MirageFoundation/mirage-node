@@ -943,7 +943,7 @@ const EmptyHomeMessage = () => (
     <EmptyHomeCard role="region" aria-label="Empty home feed">
         <EmptyHomeTitle>Your home feed is empty</EmptyHomeTitle>
         <EmptyHomeBody>
-            Your home feed mixes posts from the topics you follow with new communities to discover. Browse <InlineLink to="/discover">topics</InlineLink> to follow a few and personalize your feed.
+            Your home feed mixes posts from the topics you follow with new communities to discover. Browse <InlineLink to="/topics">topics</InlineLink> to follow a few and personalize your feed.
         </EmptyHomeBody>
     </EmptyHomeCard>
 );
