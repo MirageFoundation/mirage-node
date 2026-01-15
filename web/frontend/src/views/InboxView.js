@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Helmet } from 'react-helmet-async';
 import styled from 'styled-components';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
-import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
 import { getTierColor } from '../utils/tierColors';
@@ -126,11 +125,6 @@ const Separator = styled.div`
     height: 1px;
     background: ${({ theme }) => theme?.colors?.border || '#444'};
     margin: 0.25rem 0;
-`;
-
-const LoginRequiredContent = styled.div`
-    text-align: center;
-    padding: 1rem 0;
 `;
 
 // removed unused Actions
@@ -297,23 +291,9 @@ export default function InboxView({ state }) {
         </ContentGrid>
     );
 
+    // Redirect non-logged-in users to home (shows welcome banner)
     if (!viewerAddress) {
-        return renderShell(
-            <LoginRequiredContent>
-                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</div>
-                <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', fontWeight: 700 }}>
-                    Login Required
-                </h2>
-                <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
-                    Mirage is currently invite-only. Please log in to view your inbox.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <Button to="/create_account" size="sm">Create Account</Button>
-                    <Button to="/login" variant="ghost" size="sm">Log In</Button>
-                </div>
-            </LoginRequiredContent>,
-            'Inbox'
-        );
+        return <Navigate to="/home" replace />;
     }
 
     if (loading) {

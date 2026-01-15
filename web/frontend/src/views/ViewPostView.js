@@ -3,7 +3,7 @@ import ReactDOM from "react-dom";
 import styled from "styled-components";
 import { Helmet } from 'react-helmet-async';
 import Button from "../components/Button";
-import { useLocation, Link, useNavigate } from 'react-router-dom';
+import { useLocation, Link, useNavigate, Navigate } from 'react-router-dom';
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../utils/tx.js";
 import Sidebar from "../components/Sidebar";
@@ -3163,37 +3163,9 @@ function ViewPostView({ state, updatePost }) {
     // Check if user is logged in
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
-    // If not logged in, show login required message
+    // Redirect non-logged-in users to home (shows welcome banner)
     if (!isLoggedIn) {
-        return (
-            <ContentGrid>
-                <Sidebar currentPath={location.pathname} state={state} />
-                <MainContentWrapper>
-                    <TopBar state={state} />
-                    <Helmet>
-                        <title>Login Required | Mirage</title>
-                    </Helmet>
-                    <ModernPostFeed>
-                        <MobileHeader />
-                        <PostCard style={{ textAlign: 'center', padding: '2rem 1.5rem' }}>
-                            <div style={{ width: '100%' }}>
-                                <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔒</div>
-                                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '0.75rem', color: 'inherit' }}>
-                                    Login Required
-                                </h2>
-                                <p style={{ fontSize: '0.85rem', color: '#888', marginBottom: '1.5rem', lineHeight: '1.6' }}>
-                                    Mirage is currently invite-only. Please log in to view posts and join the conversation.
-                                </p>
-                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                                    <Button to="/create_account" size="sm">Create Account</Button>
-                                    <Button to="/login" size="sm" variant="ghost">Log In</Button>
-                                </div>
-                            </div>
-                        </PostCard>
-                    </ModernPostFeed>
-                </MainContentWrapper>
-            </ContentGrid>
-        );
+        return <Navigate to="/home" replace />;
     }
 
     if (root) {
