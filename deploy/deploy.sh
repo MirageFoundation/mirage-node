@@ -588,9 +588,21 @@ fi
 PORTS="-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443"
 MONIKER_ARG=""
 HOSTNAME_ARG=""
-if [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
+
+# Try to get DOMAIN from env file for hostname
+DOMAIN_VALUE=""
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  [ -f "$HOME/.mirage/env/node.env" ] && DOMAIN_VALUE=$(grep -E '^DOMAIN=' "$HOME/.mirage/env/node.env" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+else
+  DOMAIN_VALUE=$(run_ssh "grep -E '^DOMAIN=' \$HOME/.mirage/env/node.env 2>/dev/null | cut -d= -f2- | tr -d '\"' | tr -d \"'\"" 2>/dev/null || true)
+fi
+
+# Set hostname: prefer DOMAIN, fallback to MONIKER
+if [ -n "$DOMAIN_VALUE" ]; then
+  CLEAN_HOSTNAME=$(echo "$DOMAIN_VALUE" | tr './:' '-')
+  HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
+elif [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-  # Strip protocol and replace invalid chars for valid hostname
   CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi

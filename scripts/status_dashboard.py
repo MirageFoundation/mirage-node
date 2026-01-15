@@ -1539,20 +1539,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 err = str(err)[:12]
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}")
 
-    elif status.name == "Referrals":
-        if "links" in details:
-            lines.append(f"{bullet}{Colors.DIM}Links:{Colors.RESET} {details['links']:,}")
-        if "pending" in details:
-            pending = details["pending"]
-            if pending > 0:
-                lines.append(
-                    f"{bullet}{Colors.DIM}Pending:{Colors.RESET} {Colors.BRIGHT_YELLOW}{pending}{Colors.RESET}"
-                )
-            else:
-                lines.append(f"{bullet}{Colors.DIM}Pending:{Colors.RESET} 0")
-        if details.get("total_accrued") is not None:
-            lines.append(f"{bullet}{Colors.DIM}Accrued:{Colors.RESET} {details['total_accrued']:,}")
-
     elif status.name == "Hermes IBC":
         if details.get("keys_missing"):
             lines.append(f"{bullet}{Colors.BRIGHT_RED}Keys missing:{Colors.RESET} {details['keys_missing']}")
@@ -1586,7 +1572,6 @@ def render_dashboard(refresh_secs: int):
         check_indexer(),
         check_caddy(),
         check_endpoints(),
-        check_referrals(),
         check_hermes(),
     ]
 
@@ -1596,7 +1581,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "Referrals")
+        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints")
     ]
 
     # Render header
