@@ -22,17 +22,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// If not enabled, log and idle (don't exit - keeps tmux window alive)
+	// If explicitly disabled, log and exit
 	if !cfg.Enabled {
-		logger.Printf("INFO orchestrator disabled (ORCHESTRATOR_ENABLED != true)")
-		logger.Printf("INFO to enable, set ORCHESTRATOR_ENABLED=true in ~/.mirage/env/orchestrator.env")
-		logger.Printf("INFO idling...")
-		
-		// Wait for shutdown signal
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer cancel()
-		<-ctx.Done()
-		logger.Printf("INFO shutdown")
+		logger.Printf("INFO orchestrator disabled (ORCHESTRATOR_ENABLED=false)")
 		return
 	}
 
