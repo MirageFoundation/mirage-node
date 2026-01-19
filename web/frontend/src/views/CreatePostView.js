@@ -278,6 +278,13 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const [tagManuallySet, setTagManuallySet] = useState(false);
     const titleInputRef = React.useRef(null);
     const contentEditorRef = React.useRef(null);
+    const mountedRef = React.useRef(true);
+
+    // Track component mount status
+    React.useEffect(() => {
+        mountedRef.current = true;
+        return () => { mountedRef.current = false; };
+    }, []);
 
     const isSafeImageUrl = (url) => {
         try {
@@ -605,7 +612,10 @@ function CreatePostView({ state, setPosts, updatePost }) {
             if (isEditMode && overrideId) {
                 const res = await tx.editPost(overrideId, { topic, title, content, target: '', tag });
                 if (res && res.success) {
-                    navigate(`/view_post?post_id=${overrideId}`);
+                    // Only navigate if user is still on this page
+                    if (mountedRef.current) {
+                        navigate(`/view_post?post_id=${overrideId}`);
+                    }
                 } else {
                     setSubmitError(res && res.error ? String(res.error) : 'Edit failed');
                     setIsSubmitting(false);
@@ -678,7 +688,10 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             thumbnail: thumb,
                         }
                     }));
-                    navigate(`/view_post?post_id=${txHash}`);
+                    // Only navigate if user is still on this page
+                    if (mountedRef.current) {
+                        navigate(`/view_post?post_id=${txHash}`);
+                    }
                 } catch (e) {
                     setSubmitError(String(e && e.message ? e.message : 'Failed to confirm transaction'));
                     setIsSubmitting(false);
