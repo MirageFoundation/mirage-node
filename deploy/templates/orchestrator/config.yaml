@@ -1,0 +1,48 @@
+# Mirage Bridge Orchestrator Configuration
+# This file is rendered by deploy/render_template.py using environment variables.
+# Copy to ~/.mirage/orchestrator/config.yaml and customize for your validator.
+
+mirage:
+  # gRPC endpoint for Mirage chain queries and tx broadcast
+  grpc: "127.0.0.1:9090"
+  # RPC endpoint for event subscriptions
+  rpc: "http://127.0.0.1:26657"
+  # Chain ID
+  chain_id: "${CHAIN_ID:-mirage-1}"
+  # Keyring directory (validator's keyring)
+  keyring_dir: "${HOME}/.mirage/node"
+  # Keyring backend (file, os, test)
+  keyring_backend: "${ORCHESTRATOR_KEYRING_BACKEND:-file}"
+  # Key name in keyring to use for signing attestations
+  key_name: "${ORCHESTRATOR_KEY_NAME:-validator}"
+  # Gas limit for attestation transactions
+  gas_limit: 200000
+  # Fee amount in base denom
+  fee_amount: 1000
+  # Fee denomination
+  fee_denom: "umirage"
+
+chains:
+  solana:
+    # Enable/disable Solana bridge (disabled by default until configured)
+    enabled: ${ORCHESTRATOR_SOLANA_ENABLED:-false}
+    # Solana RPC endpoint
+    rpc: "${ORCHESTRATOR_SOLANA_RPC:-https://api.mainnet-beta.solana.com}"
+    # Solana WebSocket endpoint
+    ws: "${ORCHESTRATOR_SOLANA_WS:-wss://api.mainnet-beta.solana.com}"
+    # Mirage bridge program ID on Solana
+    program_id: "${ORCHESTRATOR_SOLANA_PROGRAM_ID:-}"
+    # Path to Solana keypair JSON file for signing mint transactions
+    keypair: "${ORCHESTRATOR_SOLANA_KEYPAIR:-${HOME}/.mirage/orchestrator/solana-keypair.json}"
+    # Number of confirmations required (32+ for finalized, lower for confirmed)
+    confirmations: ${ORCHESTRATOR_SOLANA_CONFIRMATIONS:-32}
+    # How often to poll for new burn events
+    poll_interval: "${ORCHESTRATOR_SOLANA_POLL_INTERVAL:-5s}"
+
+attestor:
+  # Number of events to batch before submitting attestations
+  batch_size: ${ORCHESTRATOR_BATCH_SIZE:-10}
+  # How long to wait before retrying failed operations
+  retry_interval: "${ORCHESTRATOR_RETRY_INTERVAL:-10s}"
+  # Maximum number of retries for failed operations
+  max_retries: ${ORCHESTRATOR_MAX_RETRIES:-5}
