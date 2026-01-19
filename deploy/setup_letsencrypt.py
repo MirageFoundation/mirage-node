@@ -3,6 +3,38 @@
 Let's Encrypt HTTPS setup for Caddy.
 
 Usage: python3 deploy/setup_letsencrypt.py --domain=example.com
+
+## Cloudflare Integration (Optional)
+
+This script assumes DIRECT traffic (no Cloudflare Proxy). If you want to use
+Cloudflare Proxy (Orange Cloud) for DDoS protection and CDN:
+
+1. **Cloudflare Free tier is sufficient** - includes:
+   - IP-based rate limiting at the edge
+   - Unmetered DDoS protection
+   - Global CDN for static assets
+   - Universal SSL
+
+2. **To enable Cloudflare Proxy mode:**
+   - In Cloudflare DNS, enable Orange Cloud (Proxied) on your A record
+   - This script's IP check will fail (domain resolves to Cloudflare, not your server)
+   - Run with --skip-ip-check to bypass (ensure DNS is correct first!)
+
+3. **Update Caddyfile to trust Cloudflare IPs:**
+   Add to the site block in deploy/templates/caddy/Caddyfile:
+   
+       trusted_proxies cloudflare
+   
+   And change rate_limit key from:
+       key {http.request.remote_ip}
+   To:
+       key {http.request.header.CF-Connecting-IP}
+   
+   This ensures rate limiting uses the real visitor IP, not Cloudflare's IP.
+
+4. **Defense in depth:** Caddy rate limiting (100 req/s per IP) works as a
+   fallback even with Cloudflare. Cloudflare blocks at the edge (saves bandwidth),
+   Caddy blocks anything that gets through.
 """
 
 import argparse
@@ -92,6 +124,8 @@ def main():
         epilog="Ensure ports 80 and 443 are open and forwarded to this host."
     )
     parser.add_argument("--domain", required=True, help="Domain name (e.g., example.com)")
+    parser.add_argument("--skip-ip-check", action="store_true",
+                        help="Skip IP validation (use when behind Cloudflare Proxy)")
     args = parser.parse_args()
     
     domain = args.domain.strip().lower()
@@ -122,12 +156,18 @@ def main():
         return 1
     
     if host_ip and domain_ip != host_ip:
-        print()
-        print(f"ERROR: Domain resolves to {domain_ip}, but this server's IP is {host_ip}")
-        print("       Update your DNS A record to point to this server.")
-        return 1
-    
-    print("    ✓ DNS configured correctly")
+        if args.skip_ip_check:
+            print()
+            print(f"    ⚠ Domain resolves to {domain_ip}, not this server ({host_ip})")
+            print("      --skip-ip-check: Assuming Cloudflare Proxy or similar is configured")
+        else:
+            print()
+            print(f"ERROR: Domain resolves to {domain_ip}, but this server's IP is {host_ip}")
+            print("       If using Cloudflare Proxy, run with --skip-ip-check")
+            print("       Otherwise, update your DNS A record to point to this server.")
+            return 1
+    else:
+        print("    ✓ DNS configured correctly")
     
     # Check www subdomain
     www_ip = get_domain_ip(f"www.{domain}")

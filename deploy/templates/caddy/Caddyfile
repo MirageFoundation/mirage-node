@@ -1,5 +1,19 @@
+{
+	order rate_limit before basicauth
+}
+
 ${DOMAIN:-:80} {
 	encode zstd gzip
+
+	# Rate limit: 100 requests per second per IP
+	# If using Cloudflare Proxy, change key to: {http.request.header.CF-Connecting-IP}
+	rate_limit {
+		zone global_limit {
+			key {http.request.remote_ip}
+			events 100
+			window 1s
+		}
+	}
 
 	@api {
 		path /api/*
