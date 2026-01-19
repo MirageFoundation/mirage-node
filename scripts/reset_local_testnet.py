@@ -77,7 +77,8 @@ def ensure_local_container(image_ref: str):
             "bash",
             "-lc",
             f"docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
-            f"--name mirage --restart unless-stopped -e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
+            f"--name mirage --hostname local-testnet --restart unless-stopped "
+            f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
             f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy '{image_ref}'",
         ]
     )
