@@ -29,7 +29,7 @@ HERMES_HOME = Path.home() / ".mirage" / "hermes"
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
 # Minimum balances
-MIN_MIRAGE = 1_000_000  # 1 MIRAGE
+MIN_MIRAGE = 100_000_000  # 100 MIRAGE
 MIN_OSMO = 100_000_000  # 100 OSMO
 
 # BIP39 wordlist

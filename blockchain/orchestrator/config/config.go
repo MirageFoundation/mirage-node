@@ -31,13 +31,14 @@ type ChainsConfig struct {
 }
 
 type SolanaConfig struct {
-	Enabled       bool
-	RPC           string
-	WS            string
-	ProgramID     string
-	Keypair       string
-	Confirmations uint64
-	PollInterval  time.Duration
+	Enabled        bool
+	RPC            string
+	WS             string
+	ProgramID      string
+	Keypair        string
+	Confirmations  uint64
+	PollIntervalMin time.Duration
+	PollIntervalMax time.Duration
 }
 
 type AttestorConfig struct {
@@ -94,7 +95,11 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
-	solanaPollInterval, err := envRequiredDuration("ORCHESTRATOR_SOLANA_POLL_INTERVAL")
+	solanaPollIntervalMin, err := envRequiredDuration("ORCHESTRATOR_SOLANA_POLL_INTERVAL_MIN")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	solanaPollIntervalMax, err := envRequiredDuration("ORCHESTRATOR_SOLANA_POLL_INTERVAL_MAX")
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
@@ -163,15 +168,16 @@ func LoadFromEnv() (*Config, error) {
 			FeeDenom:       "umirage",
 		},
 		Chains: ChainsConfig{
-			Solana: SolanaConfig{
-				Enabled:       true,
-				RPC:           solanaRPC,
-				WS:            solanaWS,
-				ProgramID:     solanaProgramID,
-				Keypair:       solanaKeypair,
-				Confirmations: solanaConfirmations,
-				PollInterval:  solanaPollInterval,
-			},
+		Solana: SolanaConfig{
+			Enabled:         true,
+			RPC:             solanaRPC,
+			WS:              solanaWS,
+			ProgramID:       solanaProgramID,
+			Keypair:         solanaKeypair,
+			Confirmations:   solanaConfirmations,
+			PollIntervalMin: solanaPollIntervalMin,
+			PollIntervalMax: solanaPollIntervalMax,
+		},
 		},
 		Attestor: AttestorConfig{
 			BatchSize:     batchSize,

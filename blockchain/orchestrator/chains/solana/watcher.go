@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"log"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -89,14 +90,16 @@ func (w *Watcher) WatchBurns(ctx context.Context, events chan<- chains.ExternalB
 		return fmt.Errorf("events channel cannot be nil")
 	}
 
-	ticker := time.NewTicker(w.cfg.PollInterval)
-	defer ticker.Stop()
-
 	for {
+		// Random interval between min and max to avoid rate limiting
+		jitter := w.cfg.PollIntervalMax - w.cfg.PollIntervalMin
+		interval := w.cfg.PollIntervalMin + time.Duration(rand.Int63n(int64(jitter)))
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case <-time.After(interval):
+			w.logger.Printf("DEBUG polling solana burns")
 			if err := w.pollBurns(ctx, events); err != nil {
 				w.logger.Printf("ERROR polling burns: %v", err)
 				// Don't return on transient errors, just log and continue
