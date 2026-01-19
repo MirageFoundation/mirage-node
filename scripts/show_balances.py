@@ -458,7 +458,7 @@ def main():
         print(f"Showing accounts with >= {args.min:,.1f} MIRAGE", file=sys.stderr)
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bin_path = os.path.join(root_dir, "blockchain", "miraged")
+    bin_path = os.path.join(root_dir, "blockchain", "bin", "miraged")
     if not os.path.exists(bin_path):
         bin_path = "/opt/mirage/blockchain/bin/miraged"
     if not os.path.exists(bin_path):

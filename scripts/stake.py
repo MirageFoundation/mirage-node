@@ -84,7 +84,7 @@ def main():
         sys.exit(1)
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bin_path = os.path.join(root_dir, "blockchain", "miraged")
+    bin_path = os.path.join(root_dir, "blockchain", "bin", "miraged")
 
     if not os.path.exists(bin_path):
         print(f"Binary not found: {bin_path}", file=sys.stderr)

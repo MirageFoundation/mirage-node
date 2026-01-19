@@ -148,7 +148,7 @@ def backend_to_rpc(backend_url: str) -> str:
 
 
 def get_miraged_path() -> str:
-    bin_path = ROOT / "blockchain" / "miraged"
+    bin_path = ROOT / "blockchain" / "bin" / "miraged"
     if bin_path.exists():
         return str(bin_path)
     return "miraged"

@@ -19,7 +19,7 @@ RECIPIENTS = [
 
 
 def get_miraged():
-    p = ROOT / "blockchain" / "miraged"
+    p = ROOT / "blockchain" / "bin" / "miraged"
     return str(p) if p.exists() else "miraged"
 
 
