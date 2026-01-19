@@ -31,6 +31,21 @@ service Query {
   rpc Profiles(QueryProfilesRequest) returns (QueryProfilesResponse) {
     option (google.api.http).get = "/mirage/core/v1/profiles";
   }
+
+  // BridgeStatus queries the current bridge status including enabled chains.
+  rpc BridgeStatus(QueryBridgeStatusRequest) returns (QueryBridgeStatusResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/status";
+  }
+
+  // BridgeAttestation queries a specific attestation by chain and burn_id.
+  rpc BridgeAttestation(QueryBridgeAttestationRequest) returns (QueryBridgeAttestationResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/attestation/{source_chain}/{burn_id}";
+  }
+
+  // BridgeConfig queries the bridge configuration parameters.
+  rpc BridgeConfig(QueryBridgeConfigRequest) returns (QueryBridgeConfigResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/config";
+  }
 }
 
 // QueryParamsRequest is request type for the Query/Params RPC method.
@@ -100,4 +115,58 @@ message QueryProfilesRequest {
 message QueryProfilesResponse {
   repeated QueryProfileResponse profiles = 1;
   cosmos.base.query.v1beta1.PageResponse pagination = 2;
+}
+
+// QueryBridgeStatusRequest is the request type for the Query/BridgeStatus RPC method.
+message QueryBridgeStatusRequest {}
+
+// QueryBridgeStatusResponse is the response type for the Query/BridgeStatus RPC method.
+message QueryBridgeStatusResponse {
+  // enabled_chains lists all chains with bridging currently enabled
+  repeated BridgeChainConfig enabled_chains = 1;
+  // pending_attestations_count is the number of attestations awaiting threshold
+  uint64 pending_attestations_count = 2;
+}
+
+// QueryBridgeAttestationRequest is the request type for the Query/BridgeAttestation RPC method.
+message QueryBridgeAttestationRequest {
+  string source_chain = 1;
+  string burn_id = 2;
+}
+
+// QueryBridgeAttestationResponse is the response type for the Query/BridgeAttestation RPC method.
+message QueryBridgeAttestationResponse {
+  // found indicates whether the attestation exists
+  bool found = 1;
+  // source_chain is the external chain where the burn occurred
+  string source_chain = 2;
+  // burn_id is the unique identifier of the burn
+  string burn_id = 3;
+  // mirage_recipient is the destination address on Mirage chain
+  string mirage_recipient = 4;
+  // amount is the amount to be minted (in umirage)
+  uint64 amount = 5;
+  // attestors lists the validator addresses that have attested
+  repeated string attestors = 6;
+  // attested_power is the total voting power that has attested
+  int64 attested_power = 7;
+  // required_power is the voting power required to mint
+  int64 required_power = 8;
+  // minted indicates whether tokens have been minted
+  bool minted = 9;
+  // created_at is the block height when attestation was first created
+  int64 created_at = 10;
+}
+
+// QueryBridgeConfigRequest is the request type for the Query/BridgeConfig RPC method.
+message QueryBridgeConfigRequest {}
+
+// QueryBridgeConfigResponse is the response type for the Query/BridgeConfig RPC method.
+message QueryBridgeConfigResponse {
+  // chains lists all configured bridge chains
+  repeated BridgeChainConfig chains = 1;
+  // attestation_threshold is the voting power threshold (basis points, e.g., 6667 = 66.67%)
+  uint64 attestation_threshold = 2;
+  // bridge_fee is the flat fee in umirage for bridge transfers
+  uint64 bridge_fee = 3;
 }

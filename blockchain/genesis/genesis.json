@@ -121,6 +121,9 @@
                 "relay_min_gas_price": "5000",
                 "relay_max_gas_fee": "500000000",
                 "max_envelope_age": "60",
+                "bridge_chains": [],
+                "bridge_attestation_threshold": "6667",
+                "bridge_fee": "1000000",
                 "tiers": [
                     {
                         "period_fee": "0",

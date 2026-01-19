@@ -110,4 +110,38 @@ message Params {
   // This provides replay protection by ensuring stale transactions cannot be resubmitted.
   // Default: 60 (reject transactions older than 60 seconds).
   uint64 max_envelope_age = 45;
+
+  // Bridge parameters (field numbers 50+)
+
+  // bridge_chains defines the configuration for each supported bridge chain
+  repeated BridgeChainConfig bridge_chains = 50;
+
+  // bridge_attestation_threshold is the voting power threshold for minting (basis points)
+  // Default: 6667 = 66.67% of total voting power required
+  uint64 bridge_attestation_threshold = 51;
+
+  // bridge_fee is the flat fee in umirage charged and burned for all bridge transfers
+  // Default: 1000000 = 1 MIRAGE
+  uint64 bridge_fee = 52;
+}
+
+// BridgeChainConfig defines the configuration for a bridgeable chain.
+message BridgeChainConfig {
+  option (gogoproto.equal) = true;
+
+  // chain_id is the unique identifier for this chain (e.g., "solana", "ethereum", "osmosis")
+  string chain_id = 1;
+
+  // contract_address is the bridge contract/program address on the external chain
+  // For IBC chains, this can be empty or contain the channel info
+  string contract_address = 2;
+
+  // enabled indicates whether bridging to/from this chain is currently allowed
+  bool enabled = 3;
+
+  // is_ibc indicates whether this chain uses IBC (true) or attested bridge (false)
+  bool is_ibc = 4;
+
+  // ibc_channel is the IBC channel ID for IBC-enabled chains (e.g., "channel-1")
+  string ibc_channel = 5;
 }

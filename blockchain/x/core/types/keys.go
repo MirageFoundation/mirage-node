@@ -35,4 +35,8 @@ const (
 
 	// MintDenom is the base denom used for minting and burning
 	MintDenom = "umirage"
+
+	// Bridge-related prefixes (defined in bridge.go for detailed comments)
+	// BridgeAttestationsPrefix = "bridge_attestations/"
+	// BridgePendingCountKey = "bridge_pending_count"
 )
