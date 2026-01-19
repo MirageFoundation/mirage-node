@@ -107,12 +107,12 @@ fi
 
 echo "✓ Orchestrator config created: $ORCHESTRATOR_CONFIG"
 
-# Build orchestrator binary if it doesn't exist
+# Check orchestrator binary exists
 ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/mirage-orchestrator"
 if [ ! -f "$ORCHESTRATOR_BIN" ]; then
-  echo "==> Building orchestrator binary..."
-  (cd "$ROOT_DIR/blockchain" && go build -o mirage-orchestrator ./cmd/orchestrator)
-  echo "✓ Orchestrator binary built: $ORCHESTRATOR_BIN"
+  echo "WARNING: Orchestrator binary not found at $ORCHESTRATOR_BIN" >&2
+  echo "         The binary should be included in the Docker image." >&2
+  echo "         If running locally, build with: cd blockchain && make build-orchestrator" >&2
 fi
 
 # Validate Solana setup if enabled

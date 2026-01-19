@@ -50,6 +50,7 @@ RUN REACT_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" REACT_APP_API_BASE=/ap
 # Copy runtime files after frontend build so backend/go changes don't force a React rebuild
 WORKDIR /opt/mirage
 COPY blockchain/miraged /opt/mirage/blockchain/miraged
+COPY blockchain/mirage-orchestrator /opt/mirage/blockchain/mirage-orchestrator
 COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
@@ -102,9 +103,10 @@ COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/pytho
 # Copy only runtime files (not source code)
 WORKDIR /opt/mirage
 
-# Copy compiled binary (not Go source)
+# Copy compiled binaries (not Go source)
 COPY --from=builder /opt/mirage/blockchain/miraged /opt/mirage/blockchain/miraged
-RUN chmod +x /opt/mirage/blockchain/miraged
+COPY --from=builder /opt/mirage/blockchain/mirage-orchestrator /opt/mirage/blockchain/mirage-orchestrator
+RUN chmod +x /opt/mirage/blockchain/miraged /opt/mirage/blockchain/mirage-orchestrator
 
 # Copy built frontend (not source)
 COPY --from=builder /opt/mirage/web/frontend/build /opt/mirage/web/frontend/build
@@ -139,6 +141,9 @@ COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/depl
 
 # IBC relayer setup
 COPY --from=builder /opt/mirage/deploy/setup_hermes_relayer.sh /opt/mirage/deploy/setup_hermes_relayer.sh
+
+# Bridge orchestrator setup
+COPY --from=builder /opt/mirage/deploy/enable_orchestrator.sh /opt/mirage/deploy/enable_orchestrator.sh
 
 # Set working directory
 WORKDIR /opt/mirage
