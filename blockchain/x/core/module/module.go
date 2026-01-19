@@ -18,6 +18,7 @@ import (
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	"github.com/cosmos/cosmos-sdk/types/query"
 
 	// txtypes removed; no longer needed
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
@@ -508,9 +509,6 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 // EndBlock adjusts PoW difficulty based on message volume and processes subscription renewals
 func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	// Always print block delimiter at function exit, regardless of branch taken
-	// defer sdkCtx.Logger().Info(logDelimiter)
-	defer func() { fmt.Println(logDelimiter) }()
 	params := am.k.GetParams(sdkCtx)
 
 	// Process subscription renewals/expirations
@@ -524,12 +522,9 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	messageCount := am.k.GetPoWMessageCount(sdkCtx, params)
 	calmSeq := am.k.GetConsecutiveLowUsage(sdkCtx)
 
-	sdkCtx.Logger().Info("PoW difficulty adjustment",
+	sdkCtx.Logger().Debug("PoW difficulty status",
 		"block", sdkCtx.BlockHeight(),
 		"current_difficulty", currentDifficulty,
-		"pow_message_window", params.PowMessageWindow,
-		"pow_message_limit", params.PowMessageLimit,
-		"pow_calm_period_definition", params.PowCalmPeriodDefinition,
 		"messages_in_window", messageCount,
 		"calm_sequence", calmSeq,
 	)
@@ -833,11 +828,21 @@ func (am AppModule) Profile(ctx context.Context, req *types.QueryProfileRequest)
 	}, nil
 }
 
-// Profiles Query (lists all profiles with pagination)
+// Profiles Query (lists profiles with pagination)
 func (am AppModule) Profiles(ctx context.Context, req *types.QueryProfilesRequest) (*types.QueryProfilesResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	profilesData, err := am.k.GetAllProfiles(sdkCtx)
+	// Extract pagination params
+	var pageKey []byte
+	var limit uint64 = 100 // Default limit
+	if req.Pagination != nil {
+		pageKey = req.Pagination.Key
+		if req.Pagination.Limit > 0 {
+			limit = req.Pagination.Limit
+		}
+	}
+
+	profilesData, nextKey, err := am.k.GetProfilesPaginated(sdkCtx, pageKey, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get profiles: %w", err)
 	}
@@ -878,8 +883,15 @@ func (am AppModule) Profiles(ctx context.Context, req *types.QueryProfilesReques
 		})
 	}
 
+	// Build pagination response
+	var paginationResp *query.PageResponse
+	if nextKey != nil {
+		paginationResp = &query.PageResponse{NextKey: nextKey}
+	}
+
 	return &types.QueryProfilesResponse{
-		Profiles: profiles,
+		Profiles:   profiles,
+		Pagination: paginationResp,
 	}, nil
 }
 
@@ -2720,10 +2732,10 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		return nil, fmt.Errorf("chain %s uses IBC, use IBCTransfer instead", destChain)
 	}
 
-	// Validate destination address
+	// Validate destination address format for the target chain
 	destAddr := strings.TrimSpace(req.GetDestinationAddress())
-	if destAddr == "" {
-		return nil, fmt.Errorf("destination_address cannot be empty")
+	if err := types.ValidateBridgeDestinationAddress(destChain, destAddr); err != nil {
+		return nil, err
 	}
 
 	// Burn the total amount (fee + transfer amount)

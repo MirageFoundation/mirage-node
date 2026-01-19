@@ -73,7 +73,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		w.logger.Printf("DEBUG creating ATA for recipient=%s", recipient.String())
 	}
 
-	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, burn.Amount)
+	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, burn.Amount, recipient)
 	if err != nil {
 		return err
 	}
@@ -183,19 +183,20 @@ func decodeBurnHash(burnID string) ([32]byte, error) {
 	return out, nil
 }
 
-func signMintAttestation(key solana.PrivateKey, burnHash [32]byte, mirageSender string, amount uint64) ([64]byte, error) {
-	payload := buildMintAttestationPayload(burnHash, mirageSender, amount)
+func signMintAttestation(key solana.PrivateKey, burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey) ([64]byte, error) {
+	payload := buildMintAttestationPayload(burnHash, mirageSender, amount, recipient)
 	sig := ed25519.Sign(ed25519.PrivateKey(key), payload)
 	var out [64]byte
 	copy(out[:], sig)
 	return out, nil
 }
 
-func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount uint64) []byte {
+func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey) []byte {
 	buf := bytes.NewBuffer(nil)
 	buf.Write(burnHash[:])
 	writeBorshString(buf, mirageSender)
 	_ = binary.Write(buf, binary.LittleEndian, amount)
+	buf.Write(recipient[:]) // 32 bytes - binds recipient to prevent redirection attacks
 	return buf.Bytes()
 }
 

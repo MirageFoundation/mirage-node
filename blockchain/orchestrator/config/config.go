@@ -31,14 +31,15 @@ type ChainsConfig struct {
 }
 
 type SolanaConfig struct {
-	Enabled        bool
-	RPC            string
-	WS             string
-	ProgramID      string
-	Keypair        string
-	Confirmations  uint64
+	Enabled         bool
+	RPC             string
+	WS              string
+	ProgramID       string
+	Keypair         string
+	Confirmations   uint64
 	PollIntervalMin time.Duration
 	PollIntervalMax time.Duration
+	StateDir        string // Directory to persist watcher state (lastSig)
 }
 
 type AttestorConfig struct {
@@ -177,6 +178,7 @@ func LoadFromEnv() (*Config, error) {
 			Confirmations:   solanaConfirmations,
 			PollIntervalMin: solanaPollIntervalMin,
 			PollIntervalMax: solanaPollIntervalMax,
+			StateDir:        home + "/.mirage/orchestrator",
 		},
 		},
 		Attestor: AttestorConfig{

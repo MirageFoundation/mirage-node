@@ -274,6 +274,7 @@ func (k Keeper) GetProfileQualityPosts(ctx sdk.Context, addr string) ([]string, 
 }
 
 // GetAllProfiles returns all profiles from the store
+// WARNING: This loads all profiles into memory - use GetProfilesPaginated for query endpoints
 func (k Keeper) GetAllProfiles(ctx sdk.Context) ([][]byte, error) {
 	store := k.storeService.OpenKVStore(ctx)
 	profilesPrefix := []byte(types.ProfilesPrefix)
@@ -291,6 +292,50 @@ func (k Keeper) GetAllProfiles(ctx sdk.Context) ([][]byte, error) {
 	}
 
 	return profiles, nil
+}
+
+// GetProfilesPaginated returns profiles with pagination support
+// limit is capped at MaxProfilesQueryLimit (100) to prevent memory exhaustion
+const MaxProfilesQueryLimit = 100
+
+func (k Keeper) GetProfilesPaginated(ctx sdk.Context, key []byte, limit uint64) (profiles [][]byte, nextKey []byte, err error) {
+	store := k.storeService.OpenKVStore(ctx)
+	profilesPrefix := []byte(types.ProfilesPrefix)
+
+	// Cap limit to prevent abuse
+	if limit == 0 || limit > MaxProfilesQueryLimit {
+		limit = MaxProfilesQueryLimit
+	}
+
+	// Determine start key
+	var startKey []byte
+	if len(key) > 0 {
+		startKey = append(profilesPrefix, key...)
+	} else {
+		startKey = profilesPrefix
+	}
+
+	iterator, err := store.Iterator(startKey, storetypes.PrefixEndBytes(profilesPrefix))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer iterator.Close()
+
+	count := uint64(0)
+	for ; iterator.Valid() && count < limit; iterator.Next() {
+		profiles = append(profiles, iterator.Value())
+		count++
+	}
+
+	// If there are more results, return the next key (without prefix)
+	if iterator.Valid() {
+		fullKey := iterator.Key()
+		if len(fullKey) > len(profilesPrefix) {
+			nextKey = fullKey[len(profilesPrefix):]
+		}
+	}
+
+	return profiles, nextKey, nil
 }
 
 // GetAllKVPairs returns ALL key-value pairs from the module's KV store.
@@ -927,9 +972,48 @@ func (k Keeper) GetPoWMessageCount(ctx sdk.Context, params types.Params) uint64 
 func (k Keeper) CleanupOldCounters(ctx sdk.Context, params types.Params) error {
 	store := k.storeService.OpenKVStore(ctx)
 	currentHeight := ctx.BlockHeight()
-	cutoffHeight := currentHeight - int64(params.PowMessageWindow)*2 // Keep 2 windows worth
-	_ = cutoffHeight
-	_ = store
+	// Keep 2 windows worth of data for safety margin
+	cutoffHeight := currentHeight - int64(params.PowMessageWindow)*2
+
+	if cutoffHeight < 1 {
+		return nil // Nothing to clean up yet
+	}
+
+	// Clean up in batches to avoid expensive operations in a single block
+	// Delete up to 100 old counter keys per block
+	const maxDeletesPerBlock = 100
+	deleted := 0
+
+	// Start from the oldest possible height (genesis = 1) and work up to cutoff
+	// We use a stored marker to track cleanup progress across blocks
+	markerKey := []byte("pow_cleanup_marker")
+	startHeight := int64(1)
+	if bz, err := store.Get(markerKey); err == nil && len(bz) == 8 {
+		startHeight = int64(binary.BigEndian.Uint64(bz))
+	}
+
+	for height := startHeight; height <= cutoffHeight && deleted < maxDeletesPerBlock; height++ {
+		key := k.powMessageCountKey(height)
+		// Try to delete - it's fine if the key doesn't exist
+		if err := store.Delete(key); err != nil {
+			return fmt.Errorf("failed to delete pow counter at height %d: %w", height, err)
+		}
+		deleted++
+		startHeight = height + 1
+	}
+
+	// Store progress marker for next block
+	if deleted > 0 {
+		bz := make([]byte, 8)
+		binary.BigEndian.PutUint64(bz, uint64(startHeight))
+		if err := store.Set(markerKey, bz); err != nil {
+			return fmt.Errorf("failed to update cleanup marker: %w", err)
+		}
+	}
+
+	if deleted > 0 {
+		ctx.Logger().Debug("CleanupOldCounters", "deleted", deleted, "next_start", startHeight)
+	}
 	return nil
 }
 
