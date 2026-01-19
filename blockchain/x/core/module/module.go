@@ -146,6 +146,10 @@ func (am AppModule) validateAndDeductFee(ctx sdk.Context, owner string, feeAmt, 
 // fee = gasConsumed * minGasPrice, capped at maxGasFee.
 func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
 	// Fee = gasConsumed * minGasPrice (minGasPrice is umirage per gas unit)
+	// Check for overflow before multiplication
+	if gasConsumed > 0 && minGasPrice > math.MaxUint64/gasConsumed {
+		return maxGasFee // Would overflow, return max
+	}
 	fee := gasConsumed * minGasPrice
 
 	// Cap at maximum
@@ -160,10 +164,10 @@ func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
 // relayMinGasPrice is in umirage per gas unit (e.g., 5000 = 5000 umirage per gas).
 // Only deducts from users with level >= 1; free users (level 0) use PoW instead.
 // If reserve is insufficient, burns remainder, zeros reserve, and downgrades user to level 0.
-func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int) {
+func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int) error {
 	// Only charge paid users (level >= 1)
 	if userLevel < 1 {
-		return
+		return nil
 	}
 
 	params := am.k.GetParams(ctx)
@@ -175,7 +179,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	fee := calculateRelayFee(gasConsumed, minGasPrice, maxGasFee)
 
 	if fee == 0 {
-		return
+		return nil
 	}
 
 	// Special rule for admins (level >= 100): deduct gas directly from on-chain balance,
@@ -184,7 +188,8 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		// Attempt to transfer fee from owner's balance to module, then burn it.
 		// If balance is insufficient or transfer fails, FAIL the tx.
 		if err := am.k.DeductFeeFromOwner(ctx, owner, fee); err != nil {
-			panic(fmt.Errorf("admin insufficient balance for relay fee: need >= %d umirage", fee))
+			// Do not panic, return error to fail the tx gracefully
+			return fmt.Errorf("admin insufficient balance for relay fee: need >= %d umirage: %w", fee, err)
 		}
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
 			ctx.Logger().Warn("relay gas fee (admin): failed to burn from module after deduction",
@@ -199,20 +204,20 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 				"gasConsumed", gasConsumed,
 				"fee", fee)
 		}
-		return
+		return nil
 	}
 
 	// Load profile core to access reserve
 	bz, found, err := am.k.GetProfileCore(ctx, owner)
 	if err != nil || !found {
 		ctx.Logger().Warn("deductRelayGasFee: profile not found", "owner", owner)
-		return
+		return nil
 	}
 
 	var core types.ProfileCore
 	if err := json.Unmarshal(bz, &core); err != nil {
 		ctx.Logger().Warn("deductRelayGasFee: failed to unmarshal profile", "owner", owner, "err", err)
-		return
+		return nil
 	}
 
 	// Deduct from reserve
@@ -257,11 +262,12 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	newBz, err := json.Marshal(core)
 	if err != nil {
 		ctx.Logger().Warn("deductRelayGasFee: failed to marshal profile", "owner", owner, "err", err)
-		return
+		return nil
 	}
 	if err := am.k.SetProfileCore(ctx, owner, newBz); err != nil {
 		ctx.Logger().Warn("deductRelayGasFee: failed to save profile", "owner", owner, "err", err)
 	}
+	return nil
 }
 
 // AppModule implements the AppModule interface for the minimal core module.
@@ -1041,7 +1047,9 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgPostResponse{}, nil
 }
@@ -1083,7 +1091,9 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 
 	// Deduct gas fee from paid users
 	if owner != "" {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgVoteResponse{}, nil
@@ -1185,7 +1195,9 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgEditResponse{}, nil
 }
@@ -1372,7 +1384,9 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgSetUsernameResponse{}, nil
 }
@@ -1473,7 +1487,9 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgFollowModeratorResponse{}, nil
 }
@@ -1544,7 +1560,9 @@ func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollo
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgUnfollowModeratorResponse{}, nil
 }
@@ -1649,7 +1667,9 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 	sdkCtx.Logger().Info("UnblockPost", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgUnblockPostResponse{}, nil
@@ -1707,7 +1727,9 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 	sdkCtx.Logger().Info("BlockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgBlockUserResponse{}, nil
@@ -1755,7 +1777,9 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	sdkCtx.Logger().Info("UnblockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgUnblockUserResponse{}, nil
@@ -1828,7 +1852,9 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 	sdkCtx.Logger().Info("FollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgFollowUserResponse{}, nil
@@ -1884,7 +1910,9 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	sdkCtx.Logger().Info("UnfollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgUnfollowUserResponse{}, nil
@@ -1957,7 +1985,9 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 	sdkCtx.Logger().Info("FollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgFollowTopicResponse{}, nil
@@ -2013,7 +2043,9 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 	sdkCtx.Logger().Info("UnfollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgUnfollowTopicResponse{}, nil
@@ -2065,7 +2097,9 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 	)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgDeleteResponse{}, nil
 }
@@ -2130,7 +2164,7 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 	}
 
 	// Transfer tokens from sender to target using bank module
-	coins := sdk.NewCoins(sdk.NewInt64Coin("umirage", int64(req.GetAmount())))
+	coins := sdk.NewCoins(sdk.NewCoin("umirage", sdkmath.NewIntFromUint64(req.GetAmount())))
 	if err := am.k.SendCoins(sdkCtx, senderAddr, targetAddr, coins); err != nil {
 		return nil, fmt.Errorf("failed to send tokens: %w", err)
 	}
@@ -2142,7 +2176,9 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 	)
 
 	// Deduct gas fee from paid users
-	am.deductRelayGasFee(sdkCtx, sender, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, sender, userLevel); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgSendTokensResponse{}, nil
 }
@@ -2469,7 +2505,9 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	)
 
 	// Deduct gas fee from paid users using their escrowed reserve
-	am.deductRelayGasFee(sdkCtx, owner, int(core.Level))
+	if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level)); err != nil {
+		return nil, err
+	}
 
 	return &types.MsgSetAutoRenewalResponse{}, nil
 }
@@ -2593,7 +2631,9 @@ func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) 
 	}
 
 	// Deduct relay gas fee
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	// Emit event
 	sdkCtx.EventManager().EmitEvent(
@@ -2687,7 +2727,9 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 	burnID := hex.EncodeToString(tmhash.Sum(sdkCtx.TxBytes()))
 
 	// Deduct relay gas fee
-	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
 
 	// Emit event for orchestrators to pick up
 	sdkCtx.EventManager().EmitEvent(
