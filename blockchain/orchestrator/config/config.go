@@ -47,7 +47,7 @@ type AttestorConfig struct {
 }
 
 // LoadFromEnv loads configuration from environment variables.
-// All values are required when ORCHESTRATOR_ENABLED=true.
+// Enabled by default - set ORCHESTRATOR_ENABLED=false to disable.
 // Missing or invalid values will cause an error.
 func LoadFromEnv() (*Config, error) {
 	home := os.Getenv("HOME")
@@ -55,10 +55,10 @@ func LoadFromEnv() (*Config, error) {
 		home = "/root"
 	}
 
-	// Main enable flag (only one with a default)
-	enabled := envBool("ORCHESTRATOR_ENABLED", false)
+	// Enabled by default - must explicitly disable
+	enabled := envBool("ORCHESTRATOR_ENABLED", true)
 
-	// If not enabled, return minimal config
+	// If explicitly disabled, return minimal config
 	if !enabled {
 		return &Config{Enabled: false}, nil
 	}
