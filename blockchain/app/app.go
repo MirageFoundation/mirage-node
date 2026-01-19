@@ -224,12 +224,10 @@ func New(
 	// Signature-less ante chain for relay flow
 	if app.App != nil {
 		if base := app.App.GetBaseApp(); base != nil {
-			// Build a minimal auth ante chain skipping tx-level signature verification
-			sigless := sdk.ChainAnteDecorators(
-				authante.NewSetUpContextDecorator(),
-				authante.NewTxTimeoutHeightDecorator(),
-				authante.NewConsumeGasForTxSizeDecorator(app.AuthKeeper),
-			)
+			// Build individual decorators for granular control
+			setup := authante.NewSetUpContextDecorator()
+			timeout := authante.NewTxTimeoutHeightDecorator()
+			gasSize := authante.NewConsumeGasForTxSizeDecorator(app.AuthKeeper)
 
 			ensure := NewEnsureAccountsDecorator(app.AuthKeeper)
 
@@ -255,6 +253,11 @@ func New(
 				SigGasConsumer:  authante.DefaultSigVerificationGasConsumer,
 			}
 			stdAnte, _ := authante.NewAnteHandler(stdOpts)
+
+			// Define no-op terminator for the end of the chain
+			terminator := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
+				return ctx, nil
+			}
 
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 				// Detect if this tx contains any relay core messages
@@ -294,36 +297,64 @@ func New(
 				}
 
 				// Relay flow for core messages
-				ctx2, err := logDec.AnteHandle(ctx, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
+				// 1. Setup Context (Must be first)
+				ctx1, err := setup.AnteHandle(ctx, tx, simulate, terminator)
+				if err != nil {
+					return ctx1, err
+				}
+				
+				// 2. Timeout (Cheap check)
+				ctx2, err := timeout.AnteHandle(ctx1, tx, simulate, terminator)
 				if err != nil {
 					return ctx2, err
 				}
-				ctx3, err := ensure.AnteHandle(ctx2, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
+				
+				// 3. Gas/Size Limit (Cheap check - prevents large txs)
+				ctx3, err := gasSize.AnteHandle(ctx2, tx, simulate, terminator)
 				if err != nil {
 					return ctx3, err
 				}
-				ctx3b, err := metaFees.AnteHandle(ctx3, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
-				if err != nil {
-					return ctx3b, err
-				}
-				ctx3c, err := accDec.AnteHandle(ctx3b, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
-				if err != nil {
-					return ctx3c, err
-				}
-				// Proceed to PoW checks; SDK's ConsumeGasForTxSize already charges for tx size
-				ctx4, err := powDec.AnteHandle(ctx3c, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
+
+				// 4. Log
+				ctx4, err := logDec.AnteHandle(ctx3, tx, simulate, terminator)
 				if err != nil {
 					return ctx4, err
 				}
-				ctx4b, err := disableDel.AnteHandle(ctx4, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
-				if err != nil {
-					return ctx4b, err
-				}
-				ctx5, err := meta.AnteHandle(ctx4b, tx, simulate, func(c sdk.Context, t sdk.Tx, s bool) (sdk.Context, error) { return c, nil })
+
+				// 5. PoW Check (CPU intensive, but protects DB)
+				// Note: PoW runs BEFORE EnsureAccounts to prevent spam account creation
+				ctx5, err := powDec.AnteHandle(ctx4, tx, simulate, terminator)
 				if err != nil {
 					return ctx5, err
 				}
-				return sigless(ctx5, tx, simulate)
+
+				// 6. Ensure Accounts (DB intensive)
+				// Only runs if PoW passed
+				ctx6, err := ensure.AnteHandle(ctx5, tx, simulate, terminator)
+				if err != nil {
+					return ctx6, err
+				}
+
+				// 7. Check Fees (Needs accounts? No, usually handled by checking bank balance of payer)
+				ctx7, err := metaFees.AnteHandle(ctx6, tx, simulate, terminator)
+				if err != nil {
+					return ctx7, err
+				}
+
+				// 8. Relay Accounting
+				ctx8, err := accDec.AnteHandle(ctx7, tx, simulate, terminator)
+				if err != nil {
+					return ctx8, err
+				}
+
+				// 9. Disable Delegator Staking
+				ctx9, err := disableDel.AnteHandle(ctx8, tx, simulate, terminator)
+				if err != nil {
+					return ctx9, err
+				}
+
+				// 10. Verify Signatures (Relay)
+				return meta.AnteHandle(ctx9, tx, simulate, terminator)
 			})
 
 			// Always propose all txs and accept proposals to avoid filtering in proposal phases
