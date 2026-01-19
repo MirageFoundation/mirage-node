@@ -66,6 +66,7 @@ const DiscoverView = lazyWithRetry(() => import('./views/DiscoverView'));
 const StatsView = lazyWithRetry(() => import('./views/StatsView'));
 const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
 const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
+const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
 const darkTheme = {
@@ -151,6 +152,7 @@ const restorableRoutePrefixes = [
     '/topics',
     '/stats',
     '/search',
+    '/bridge',
 ];
 
 // Component to track and restore the last route
@@ -869,6 +871,7 @@ class App extends Component {
                                             <Route path="/topics" element={<DiscoverView state={this.state} />} />
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
+                                            <Route path="/bridge" element={<BridgeView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>
                                 </SiteContainer>
