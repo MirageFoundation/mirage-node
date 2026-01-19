@@ -1697,8 +1697,8 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "5")),
-        help="Refresh interval when visible in seconds (default: 5)",
+        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "3")),
+        help="Refresh interval when visible in seconds (default: 3)",
     )
     parser.add_argument(
         "--idle-interval",
