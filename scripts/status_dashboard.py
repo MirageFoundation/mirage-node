@@ -47,6 +47,34 @@ class Status(Enum):
     UNKNOWN = "unknown"
 
 
+def _find_miraged() -> str:
+    """Find the miraged binary path (handles both old and new directory structures)."""
+    candidates = [
+        "/opt/mirage/blockchain/miraged",  # new structure
+        "/opt/mirage/blockchain/bin/miraged",  # old structure
+        str(Path(__file__).resolve().parents[1] / "blockchain" / "miraged"),
+        str(Path(__file__).resolve().parents[1] / "blockchain" / "bin" / "miraged"),
+        "miraged",
+    ]
+    for c in candidates:
+        if c == "miraged":
+            return c
+        if os.path.exists(c) and os.access(c, os.X_OK):
+            return c
+    return "miraged"
+
+
+_MIRAGED_BIN: str | None = None
+
+
+def get_miraged_bin() -> str:
+    """Get cached miraged binary path."""
+    global _MIRAGED_BIN
+    if _MIRAGED_BIN is None:
+        _MIRAGED_BIN = _find_miraged()
+    return _MIRAGED_BIN
+
+
 # ANSI color codes
 class Colors:
     RESET = "\033[0m"
@@ -606,7 +634,7 @@ def check_validator() -> ServiceStatus:
         power_pct = None
         try:
             result = subprocess.run(
-                ["/opt/mirage/blockchain/bin/miraged", "query", "staking", "validators", "--home", node_home, "-o", "json"],
+                [get_miraged_bin(), "query", "staking", "validators", "--home", node_home, "-o", "json"],
                 capture_output=True,
                 text=True,
                 timeout=5,

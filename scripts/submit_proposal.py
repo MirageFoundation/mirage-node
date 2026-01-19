@@ -23,6 +23,35 @@ LOCAL_KEYRING_BACKEND = "test"
 LOCAL_KEYRING_HOME = "/root/.mirage/node"
 LOCAL_CONTAINER = "mirage"
 
+# Binary paths (new structure vs old structure)
+_local_miraged_path: str | None = None
+
+
+def get_local_miraged_path() -> str:
+    """Get the miraged binary path inside the local container.
+    
+    Handles both old (/opt/mirage/blockchain/bin/miraged) and
+    new (/opt/mirage/blockchain/miraged) directory structures.
+    """
+    global _local_miraged_path
+    if _local_miraged_path is not None:
+        return _local_miraged_path
+    
+    # Check new path first, then fall back to old path
+    new_path = "/opt/mirage/blockchain/miraged"
+    old_path = "/opt/mirage/blockchain/bin/miraged"
+    
+    result = subprocess.run(
+        ["docker", "exec", LOCAL_CONTAINER, "test", "-f", new_path],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        _local_miraged_path = new_path
+    else:
+        _local_miraged_path = old_path
+    
+    return _local_miraged_path
+
 # Account names
 FAUCET_ACCOUNT = "faucet"
 VALIDATOR_ACCOUNT = "validator"
@@ -124,7 +153,7 @@ def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = F
     """Run miraged command, via docker exec for local mode"""
     bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
     if _is_local_mode:
-        full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
+        full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
     else:
         full_cmd = [bin_path] + cmd
     log_debug(f"Running: {' '.join(full_cmd)}")
@@ -140,7 +169,7 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     """Query via miraged with --node (uses HTTP internally, no home required)"""
     cmd_with_node = cmd + ["--node", rpc_endpoint, "-o", "json"]
     if _is_local_mode:
-        full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd_with_node
+        full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd_with_node
     else:
         bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
         full_cmd = [bin_path] + cmd_with_node
@@ -213,7 +242,7 @@ def run_with_pexpect(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
     """Run a command with pexpect, handle keyring password prompt, and return (exit_code, output).
     For local mode (test backend), uses simple subprocess since no password is needed."""
     if _is_local_mode:
-        docker_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd[1:]
+        docker_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd[1:]
         log_debug(f"Docker exec: {' '.join(docker_cmd)}")
         result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=timeout)
         output = result.stdout + result.stderr
@@ -315,7 +344,7 @@ def get_address_from_seed(seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
+        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
     else:
         full_cmd = [bin_path] + cmd
 
@@ -398,7 +427,7 @@ def import_key_from_seed(account_name: str, seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
+        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
     else:
         full_cmd = [bin_path] + cmd
 
@@ -592,7 +621,7 @@ def main():
                         "json",
                     ]
                     if _is_local_mode:
-                        delegation_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + delegation_args
+                        delegation_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + delegation_args
                     else:
                         delegation_cmd = [bin_path] + delegation_args
                     delegation_result = subprocess.run(delegation_cmd, capture_output=True, text=True, check=False)
@@ -848,7 +877,7 @@ def main():
             try:
                 tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
                 if _is_local_mode:
-                    tx_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + tx_args
+                    tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
                 else:
                     bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
                     tx_cmd = [bin_path] + tx_args
