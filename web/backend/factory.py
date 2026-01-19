@@ -32,6 +32,7 @@ from node import initialize_runtime, require_runtime  # noqa: E402
 from params import load_params  # noqa: E402
 from routes.public import public_bp  # noqa: E402
 from routes.core import core_bp  # noqa: E402
+from routes.bridge import bridge_bp  # noqa: E402
 
 
 def create_app(init_runtime: bool = True) -> Flask:
@@ -47,6 +48,7 @@ def create_app(init_runtime: bool = True) -> Flask:
 
     app.register_blueprint(public_bp)
     app.register_blueprint(core_bp)
+    app.register_blueprint(bridge_bp)
 
     if init_runtime:
         initialize_runtime()

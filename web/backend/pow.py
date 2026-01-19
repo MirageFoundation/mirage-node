@@ -306,6 +306,37 @@ def canon_base_set_auto_renewal(
     )
 
 
+def canon_base_ibc_transfer(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    receiver: str,
+    amount: int,
+    source_channel: str,
+    timeout_seconds: int,
+) -> bytes:
+    return canon_shared.canon_base_ibc_transfer(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp),
+        receiver, int(amount), source_channel, int(timeout_seconds)
+    )
+
+
+def canon_base_bridge_burn(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    destination_chain: str,
+    destination_address: str,
+    amount: int,
+) -> bytes:
+    return canon_shared.canon_base_bridge_burn(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp),
+        destination_chain, destination_address, int(amount)
+    )
+
+
 def count_leading_zero_bits(b: bytes) -> int:
     total = 0
     for by in b:
@@ -400,6 +431,9 @@ __all__ = [
     "canon_base_delete",
     "canon_base_send_tokens",
     "canon_base_upgrade_level",
+    "canon_base_set_auto_renewal",
+    "canon_base_ibc_transfer",
+    "canon_base_bridge_burn",
     "count_leading_zero_bits",
     "argon2_digest",
     "decode_b64",
