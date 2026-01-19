@@ -607,11 +607,22 @@ func (app *App) RegisterUpgradeHandlers() {
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			changed := false
 
-			// Initialize bridge_chains if empty (no chains enabled by default)
-			if params.BridgeChains == nil {
-				params.BridgeChains = []*coretypes.BridgeChainConfig{}
+			// Enable Solana bridge (attested, non-IBC)
+			solanaEnabled := false
+			for _, chain := range params.BridgeChains {
+				if chain.ChainId == "solana" {
+					solanaEnabled = true
+					break
+				}
+			}
+			if !solanaEnabled {
+				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
+					ChainId:         "solana",
+					ContractAddress: "8uTqBhqHt8BCJNdS7aDX7vUXHmABevhqwyQsAoxv4jx9",
+					Enabled:         true,
+				})
 				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: initialized bridge_chains (empty)")
+				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge")
 			}
 
 			// Set attestation threshold: 66.67% (6667 basis points)

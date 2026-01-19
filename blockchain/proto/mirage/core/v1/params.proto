@@ -125,23 +125,17 @@ message Params {
   uint64 bridge_fee = 52;
 }
 
-// BridgeChainConfig defines the configuration for a bridgeable chain.
+// BridgeChainConfig defines the configuration for a bridgeable chain (attested bridge only).
+// IBC transfers are handled separately by the IBC module and don't need allowlisting.
 message BridgeChainConfig {
   option (gogoproto.equal) = true;
 
-  // chain_id is the unique identifier for this chain (e.g., "solana", "ethereum", "osmosis")
+  // chain_id is the unique identifier for this chain (e.g., "solana", "ethereum")
   string chain_id = 1;
 
   // contract_address is the bridge contract/program address on the external chain
-  // For IBC chains, this can be empty or contain the channel info
   string contract_address = 2;
 
   // enabled indicates whether bridging to/from this chain is currently allowed
   bool enabled = 3;
-
-  // is_ibc indicates whether this chain uses IBC (true) or attested bridge (false)
-  bool is_ibc = 4;
-
-  // ibc_channel is the IBC channel ID for IBC-enabled chains (e.g., "channel-1")
-  string ibc_channel = 5;
 }

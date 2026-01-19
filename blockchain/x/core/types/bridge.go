@@ -146,16 +146,6 @@ func ValidateBridgeChain(chainID string, chains []*BridgeChainConfig) (*BridgeCh
 	return nil, fmt.Errorf("unknown bridge chain: %s", chainID)
 }
 
-// IsIBCChain returns true if the chain uses IBC bridging
-func IsIBCChain(chainID string, chains []*BridgeChainConfig) bool {
-	for _, chain := range chains {
-		if chain.ChainId == chainID {
-			return chain.IsIbc
-		}
-	}
-	return false
-}
-
 // ValidateBridgeDestinationAddress validates the destination address format for a given chain
 func ValidateBridgeDestinationAddress(chainID, address string) error {
 	if address == "" {

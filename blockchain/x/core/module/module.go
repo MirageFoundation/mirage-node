@@ -963,6 +963,31 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if len(p.Tiers) > 0 {
 		cur.Tiers = p.Tiers
 	}
+	// Topic size limits
+	if p.MinTopicSize != 0 {
+		cur.MinTopicSize = p.MinTopicSize
+	}
+	// Relay fee settings
+	if p.RelayMinGasPrice != 0 {
+		cur.RelayMinGasPrice = p.RelayMinGasPrice
+	}
+	if p.RelayMaxGasFee != 0 {
+		cur.RelayMaxGasFee = p.RelayMaxGasFee
+	}
+	// Envelope age (replay protection)
+	if p.MaxEnvelopeAge != 0 {
+		cur.MaxEnvelopeAge = p.MaxEnvelopeAge
+	}
+	// Bridge parameters - replace entirely if provided
+	if len(p.BridgeChains) > 0 {
+		cur.BridgeChains = p.BridgeChains
+	}
+	if p.BridgeAttestationThreshold != 0 {
+		cur.BridgeAttestationThreshold = p.BridgeAttestationThreshold
+	}
+	if p.BridgeFee != 0 {
+		cur.BridgeFee = p.BridgeFee
+	}
 
 	if err := cur.Validate(); err != nil {
 		return nil, err
@@ -2594,17 +2619,7 @@ func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) 
 	if sourceChannel == "" {
 		return nil, fmt.Errorf("source_channel cannot be empty")
 	}
-	// Enforce IBC allowlist from params (prevents bridging via arbitrary channels)
-	allowedChannel := false
-	for _, c := range params.BridgeChains {
-		if c != nil && c.Enabled && c.IsIbc && strings.TrimSpace(c.IbcChannel) == sourceChannel {
-			allowedChannel = true
-			break
-		}
-	}
-	if !allowedChannel {
-		return nil, fmt.Errorf("IBC channel not enabled for bridging: %s", sourceChannel)
-	}
+	// Note: No IBC channel allowlist - IBC is trustless and handles its own security
 
 	// Burn the bridge fee (deflationary)
 	if bridgeFee > 0 {
@@ -2722,14 +2737,10 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 			totalBurn, amount, bridgeFee, balance.String())
 	}
 
-	// Validate destination chain
+	// Validate destination chain (must be in bridge_chains and enabled)
 	destChain := strings.TrimSpace(req.GetDestinationChain())
-	chainConfig, err := types.ValidateBridgeChain(destChain, params.BridgeChains)
-	if err != nil {
+	if _, err := types.ValidateBridgeChain(destChain, params.BridgeChains); err != nil {
 		return nil, err
-	}
-	if chainConfig.IsIbc {
-		return nil, fmt.Errorf("chain %s uses IBC, use IBCTransfer instead", destChain)
 	}
 
 	// Validate destination address format for the target chain
@@ -2801,14 +2812,10 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 		return nil, fmt.Errorf("failed to get validator power: %w", err)
 	}
 
-	// Validate source chain
+	// Validate source chain (must be in bridge_chains and enabled)
 	sourceChain := strings.TrimSpace(req.GetSourceChain())
-	chainConfig, err := types.ValidateBridgeChain(sourceChain, params.BridgeChains)
-	if err != nil {
+	if _, err := types.ValidateBridgeChain(sourceChain, params.BridgeChains); err != nil {
 		return nil, err
-	}
-	if chainConfig.IsIbc {
-		return nil, fmt.Errorf("chain %s uses IBC, attestation not needed", sourceChain)
 	}
 
 	// Validate burn_id
