@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/gagliardetto/solana-go"
 
 	"mirage/orchestrator/attestor"
 	"mirage/orchestrator/config"
@@ -28,7 +31,18 @@ func main() {
 		return
 	}
 
-	logger.Printf("INFO config loaded: chain_id=%s solana_enabled=%v", cfg.Mirage.ChainID, cfg.Chains.Solana.Enabled)
+	// Get Solana public key for banner
+	var solanaPubkey string
+	if cfg.Chains.Solana.Enabled && cfg.Chains.Solana.Keypair != "" {
+		if solanaKey, err := solana.PrivateKeyFromSolanaKeygenFile(cfg.Chains.Solana.Keypair); err != nil {
+			logger.Printf("WARN failed to read solana keypair: %v", err)
+			solanaPubkey = "(failed to load)"
+		} else {
+			solanaPubkey = solanaKey.PublicKey().String()
+		}
+	} else {
+		solanaPubkey = "(solana disabled)"
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -39,6 +53,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer mirageClient.Close()
+
+	// Print startup banner with key addresses
+	fmt.Println("------------------------------------------------------------------")
+	fmt.Printf("Mirage Valoper: %s\n", mirageClient.ValoperAddress())
+	fmt.Printf("Solana Pubkey:  %s\n", solanaPubkey)
+	fmt.Println("------------------------------------------------------------------")
 
 	runner, err := attestor.New(cfg, mirageClient, logger)
 	if err != nil {
