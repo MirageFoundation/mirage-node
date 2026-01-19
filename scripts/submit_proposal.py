@@ -140,10 +140,14 @@ def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = F
 
 def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     """Query via miraged with --node (uses HTTP internally, no home required)"""
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
-    cmd_with_node = [bin_path] + cmd + ["--node", rpc_endpoint, "-o", "json"]
-    log_debug(f"Query: {' '.join(cmd_with_node)}")
-    result = subprocess.run(cmd_with_node, capture_output=True, text=True, check=False)
+    cmd_with_node = cmd + ["--node", rpc_endpoint, "-o", "json"]
+    if _is_local_mode:
+        full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd_with_node
+    else:
+        bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+        full_cmd = [bin_path] + cmd_with_node
+    log_debug(f"Query: {' '.join(full_cmd)}")
+    result = subprocess.run(full_cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         error_msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
         log(f"RPC query failed: {error_msg}")
@@ -578,8 +582,7 @@ def main():
 
             for key_addr, key_name in address_to_keyname.items():
                 try:
-                    delegation_cmd = [
-                        bin_path,
+                    delegation_args = [
                         "q",
                         "staking",
                         "delegation",
@@ -590,6 +593,10 @@ def main():
                         "-o",
                         "json",
                     ]
+                    if _is_local_mode:
+                        delegation_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + delegation_args
+                    else:
+                        delegation_cmd = [bin_path] + delegation_args
                     delegation_result = subprocess.run(delegation_cmd, capture_output=True, text=True, check=False)
                     if delegation_result.returncode == 0:
                         delegation = json.loads(delegation_result.stdout)
@@ -835,14 +842,18 @@ def main():
         info(f"TX hash: {txhash}")
 
         # Retry tx query - it may take a few seconds to be included in a block
-        bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
         tx_verified = False
         max_attempts = 15
         for attempt in range(1, max_attempts + 1):
             print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
             time.sleep(1)
             try:
-                tx_cmd = [bin_path, "q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
+                tx_args = ["q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
+                if _is_local_mode:
+                    tx_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + tx_args
+                else:
+                    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+                    tx_cmd = [bin_path] + tx_args
                 log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
                 result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
                 if result.returncode == 0:

@@ -131,12 +131,26 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     status("Stopping remote container 'mirage' (briefly)...")
     run(["bash", "-lc", f"ssh -o StrictHostKeyChecking=accept-new {conn} 'docker stop --timeout 60 mirage || true'"])
 
-    status("Copying binary from remote container...")
+    status("Finding and copying binary from remote container...")
+    # Find the binary path dynamically (handles path changes across versions)
+    binary_path = run(
+        [
+            "bash",
+            "-lc",
+            f"ssh {conn} 'docker start mirage >/dev/null 2>&1; sleep 2; "
+            f"docker exec mirage which miraged || docker exec mirage find /opt -name miraged -type f 2>/dev/null | head -1'",
+        ],
+        capture=True,
+    ).strip()
+    if not binary_path:
+        raise RuntimeError("Could not find miraged binary in remote container")
+    status(f"Found binary at: {binary_path}")
+    run(["bash", "-lc", f"ssh {conn} 'docker stop mirage >/dev/null 2>&1 || true'"])
     run(
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'mkdir -p /root/.mirage/node/snapshot && docker cp mirage:/opt/mirage/blockchain/bin/miraged /root/.mirage/node/snapshot/miraged'",
+            f"ssh {conn} 'mkdir -p /root/.mirage/node/snapshot && docker cp mirage:{binary_path} /root/.mirage/node/snapshot/miraged'",
         ]
     )
 
@@ -848,24 +862,26 @@ def write_working_genesis(genesis_json: str):
         ]
     )
 
-    # Start orchestrator (reads config from env vars, handles disabled state internally)
+    # Start orchestrator (optional - may not exist in older builds)
     orchestrator_exists = run(
         ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/bin/orchestrator && echo yes || echo no"],
         capture=True,
     ).strip()
     if orchestrator_exists == "yes":
-        status("Starting orchestrator ...")
-        run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
-        run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator 2>/dev/null || true"])
-        run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:orchestrator C-c 2>/dev/null || true"])
-        time.sleep(0.5)
-        run(
-            [
-                "bash",
-                "-lc",
-                'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/bin/orchestrator 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
-            ]
-        )
+        try:
+            status("Starting orchestrator ...")
+            run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
+            run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator 2>/dev/null || true"])
+            time.sleep(0.5)
+            run(
+                [
+                    "bash",
+                    "-lc",
+                    'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/bin/orchestrator 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
+                ]
+            )
+        except Exception as e:
+            status(f"WARNING: Orchestrator startup failed (optional): {e}")
 
 
 def main():
