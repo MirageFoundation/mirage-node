@@ -65,7 +65,7 @@ else
 fi
 
 # MONIKER: derived from DOMAIN if set, otherwise fallback to "validator"
-# DOMAIN is only set after HTTPS is configured via letsencrypt_register.sh
+# DOMAIN is only set after HTTPS is configured via setup_letsencrypt.py
 if [ -n "${DOMAIN:-}" ]; then
   MONIKER="https://${DOMAIN}"
 else

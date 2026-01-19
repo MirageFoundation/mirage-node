@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # Notes:
 # - Moniker defaults to "mirage-node" and can be overridden with --moniker
-# - Domain/TLS: Configure HTTPS inside the container using letsencrypt_register.sh (domain is persisted automatically)
+# - Domain/TLS: Configure HTTPS inside the container using setup_letsencrypt.py (domain is persisted automatically)
 # - Use --local for local Docker deployment (no SSH)
 # - Use --proxyjump for slow/high-latency servers (routes traffic through a jump host)
 #
@@ -731,7 +731,7 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
 else
   echo "==> Done. Container 'mirage' is running on $REMOTE_HOST."
   echo "    To configure HTTPS (domain will persist for future deployments):"
-  echo "      ssh $REMOTE 'docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain=yourdomain.com'"
+  echo "      ssh $REMOTE 'docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain=yourdomain.com'"
   echo ""
   echo "Remote container access:"
   echo "  Attach tmux session:"
