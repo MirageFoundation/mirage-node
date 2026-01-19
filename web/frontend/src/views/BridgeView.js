@@ -27,7 +27,7 @@ const NETWORKS = {
         id: 'osmosis',
         name: 'Osmosis',
         symbol: 'OSMO',
-        icon: '🌊',
+        icon: '/bridges/osmosis.svg',
         color: '#5E12A0',
         colorLight: 'rgba(94, 18, 160, 0.15)',
         addressPrefix: 'osmo',
@@ -41,7 +41,7 @@ const NETWORKS = {
         id: 'solana',
         name: 'Solana',
         symbol: 'SOL',
-        icon: '◎',
+        icon: '/bridges/solana.svg',
         color: '#14F195',
         colorLight: 'rgba(20, 241, 149, 0.15)',
         addressPrefix: null, // Solana uses base58, not bech32
@@ -55,6 +55,8 @@ const NETWORKS = {
 
 // Bridge fee: free for subscribers (gas only), 1 MIRAGE for non-subscribers
 const NON_SUBSCRIBER_FEE = 1;
+// Minimum reserve required for subscriber free bridging (in umirage)
+const MIN_RESERVE_FOR_FREE_BRIDGE = 1_000_000; // 1 MIRAGE
 
 // Animations
 const fadeIn = keyframes`
@@ -122,6 +124,10 @@ const NetworkCard = styled.button`
     text-align: left;
     position: relative;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
     
     &:hover:not(:disabled) {
         border-color: ${({ $color }) => $color};
@@ -139,11 +145,16 @@ const NetworkCard = styled.button`
     `}
 `;
 
-const NetworkIcon = styled.span`
-    font-size: 1.25rem;
-    line-height: 1;
-    display: block;
-    margin-bottom: 0.4rem;
+const NetworkCardContent = styled.div`
+    flex: 1;
+    min-width: 0;
+`;
+
+const NetworkIcon = styled.img`
+    width: 2.5rem;
+    height: 2.5rem;
+    flex-shrink: 0;
+    object-fit: contain;
 `;
 
 const NetworkName = styled.div`
@@ -541,6 +552,7 @@ export default function BridgeView({ state }) {
     const [destinationAddress, setDestinationAddress] = useState('');
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(0);
+    const [reserveFunds, setReserveFunds] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStatus, setSubmitStatus] = useState(null); // 'success' | 'error' | null
     const [errors, setErrors] = useState({});
@@ -551,8 +563,11 @@ export default function BridgeView({ state }) {
         return userLevel > 0;
     }, []);
     
-    // Bridge fee: free for subscribers, 1 MIRAGE for non-subscribers
-    const bridgeFee = isSubscriber ? 0 : NON_SUBSCRIBER_FEE;
+    // Subscriber gets free bridging only if they have sufficient reserve funds
+    const hasEnoughReserve = reserveFunds >= MIN_RESERVE_FOR_FREE_BRIDGE;
+    
+    // Bridge fee: free for subscribers with sufficient reserve, 1 MIRAGE otherwise
+    const bridgeFee = (isSubscriber && hasEnoughReserve) ? 0 : NON_SUBSCRIBER_FEE;
     
     // Derive the user's address on the destination chain (for Cosmos chains)
     const derivedAddress = useMemo(() => {
@@ -570,7 +585,7 @@ export default function BridgeView({ state }) {
         return destinationAddress;
     }, [selectedNetwork, useDifferentAddress, derivedAddress, destinationAddress]);
     
-    // Load user balance from cached config
+    // Load user balance and reserve funds from cached config
     useEffect(() => {
         try {
             const cachedBalance = Storage.load('user_balance', 0);
@@ -579,13 +594,16 @@ export default function BridgeView({ state }) {
             }
         } catch (_) {}
         
-        // Also check configData for balance
+        // Also check configData for balance and reserve funds
         try {
             const configData = localStorage.getItem('configData');
             if (configData) {
                 const cached = JSON.parse(configData);
                 if (cached.balance !== undefined) {
                     setBalance(Number(cached.balance) || 0);
+                }
+                if (cached.reserve_funds !== undefined) {
+                    setReserveFunds(Number(cached.reserve_funds) || 0);
                 }
             }
         } catch (_) {}
@@ -647,12 +665,29 @@ export default function BridgeView({ state }) {
         setErrors({});
     };
     
+    // Format number with thousands separators for display
+    const formatAmountDisplay = useCallback((value) => {
+        if (!value || value === '') return '';
+        // Strip existing commas
+        const raw = value.replace(/,/g, '');
+        // Split by decimal
+        const parts = raw.split('.');
+        // Add thousands separators to integer part
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return parts.join('.');
+    }, []);
+    
+    // Get raw amount (without commas) for calculations
+    const rawAmount = amount.replace(/,/g, '');
+    
     const handleAmountChange = (e) => {
-        const value = e.target.value;
+        // Strip commas from input to get raw value
+        const rawValue = e.target.value.replace(/,/g, '');
         // Allow only numbers and single decimal point
-        if (/^\d*\.?\d*$/.test(value)) {
-            setAmount(value);
-            const error = validateAmount(value);
+        if (/^\d*\.?\d*$/.test(rawValue)) {
+            // Store formatted value with commas
+            setAmount(formatAmountDisplay(rawValue));
+            const error = validateAmount(rawValue);
             setErrors(prev => ({ ...prev, amount: error }));
         }
     };
@@ -660,7 +695,7 @@ export default function BridgeView({ state }) {
     const handleMaxAmount = () => {
         if (!selectedNetwork) return;
         const maxAmount = Math.max(0, (balance / 1_000_000) - bridgeFee);
-        setAmount(maxAmount.toFixed(6));
+        setAmount(formatAmountDisplay(maxAmount.toFixed(6)));
         setErrors(prev => ({ ...prev, amount: null }));
     };
     
@@ -672,8 +707,8 @@ export default function BridgeView({ state }) {
     };
     
     const handleSubmit = async () => {
-        // Validate all fields
-        const amountError = validateAmount(amount);
+        // Validate all fields (use raw amount without commas)
+        const amountError = validateAmount(rawAmount);
         // Only validate manual address entry
         const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
         const addressError = needsManualAddress ? validateAddress(destinationAddress, true) : null;
@@ -688,7 +723,7 @@ export default function BridgeView({ state }) {
             return;
         }
         
-        if (!amount) {
+        if (!rawAmount) {
             setErrors({ amount: 'Amount is required' });
             return;
         }
@@ -718,15 +753,15 @@ export default function BridgeView({ state }) {
     };
     
     // Calculate preview values
-    const parsedAmount = parseFloat(amount) || 0;
+    const parsedAmount = parseFloat(rawAmount) || 0;
     const receiveAmount = Math.max(0, parsedAmount - bridgeFee);
     
     // Determine if we can submit
     const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
     const hasValidDestination = needsManualAddress ? (destinationAddress && !errors.address) : !!derivedAddress;
     const canSubmit = selectedNetwork && 
-        amount && 
-        parseFloat(amount) > 0 && 
+        rawAmount && 
+        parseFloat(rawAmount) > 0 && 
         hasValidDestination && 
         !errors.amount && 
         !isSubmitting;
@@ -777,13 +812,15 @@ export default function BridgeView({ state }) {
                                                     onClick={() => handleNetworkSelect(network.id)}
                                                     disabled={!network.enabled}
                                                 >
-                                                    <NetworkIcon>{network.icon}</NetworkIcon>
-                                                    <NetworkName>{network.name}</NetworkName>
-                                                    <NetworkMeta>
-                                                        <NetworkBadge $color={network.color}>
-                                                            {network.estimatedTime}
-                                                        </NetworkBadge>
-                                                    </NetworkMeta>
+                                                    <NetworkCardContent>
+                                                        <NetworkName>{network.name}</NetworkName>
+                                                        <NetworkMeta>
+                                                            <NetworkBadge $color={network.color}>
+                                                                {network.estimatedTime}
+                                                            </NetworkBadge>
+                                                        </NetworkMeta>
+                                                    </NetworkCardContent>
+                                                    <NetworkIcon src={network.icon} alt={network.name} />
                                                     {selectedNetwork?.id === network.id && (
                                                         <SelectedIndicator $color={network.color}>
                                                             ✓
@@ -922,7 +959,7 @@ export default function BridgeView({ state }) {
                                                 <PreviewHeader>
                                                     <PreviewTitle>Summary</PreviewTitle>
                                                     <PreviewNetwork $color={selectedNetwork.color}>
-                                                        {selectedNetwork.icon} {selectedNetwork.name}
+                                                        <img src={selectedNetwork.icon} alt="" style={{ width: '1.25rem', height: '1.25rem' }} /> {selectedNetwork.name}
                                                     </PreviewNetwork>
                                                 </PreviewHeader>
                                                 <PreviewRow>
@@ -930,18 +967,22 @@ export default function BridgeView({ state }) {
                                                     <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
                                                 </PreviewRow>
                                                 <PreviewRow>
-                                                    <PreviewLabel data-tooltip={isSubscriber 
-                                                        ? "Subscribers bridge for free (gas only)" 
-                                                        : "1 MIRAGE fee for non-subscribers"}>
+                                                    <PreviewLabel data-tooltip={
+                                                        isSubscriber && hasEnoughReserve
+                                                            ? "Subscribers with sufficient reserve bridge for free (gas only)" 
+                                                            : isSubscriber
+                                                                ? "Insufficient reserve balance for free bridging (need at least 1 MIRAGE)"
+                                                                : "1 MIRAGE fee for non-subscribers"
+                                                    }>
                                                         Fee
                                                     </PreviewLabel>
                                                     <PreviewValue>
-                                                        {isSubscriber ? 'Free' : `${bridgeFee} MIRAGE`}
+                                                        {isSubscriber && hasEnoughReserve ? 'Free' : `${bridgeFee} MIRAGE`}
                                                     </PreviewValue>
                                                 </PreviewRow>
                                                 <Divider />
                                                 <PreviewRow>
-                                                    <PreviewLabel>Receive</PreviewLabel>
+                                                    <PreviewLabel>Receive on {selectedNetwork.name}</PreviewLabel>
                                                     <PreviewValue $highlight>
                                                         {formatBalance(receiveAmount * 1_000_000)} MIRAGE
                                                     </PreviewValue>
