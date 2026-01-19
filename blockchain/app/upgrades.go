@@ -617,9 +617,8 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 			if !solanaEnabled {
 				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
-					ChainId:         "solana",
-					ContractAddress: "8uTqBhqHt8BCJNdS7aDX7vUXHmABevhqwyQsAoxv4jx9",
-					Enabled:         true,
+					ChainId: "solana",
+					Enabled: true,
 				})
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge")

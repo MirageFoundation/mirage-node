@@ -124,7 +124,6 @@
                 "bridge_chains": [
                     {
                         "chain_id": "solana",
-                        "contract_address": "8uTqBhqHt8BCJNdS7aDX7vUXHmABevhqwyQsAoxv4jx9",
                         "enabled": true
                     }
                 ],
