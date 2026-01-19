@@ -11,8 +11,6 @@ from pathlib import Path
 import tempfile
 
 import requests
-from tqdm import tqdm
-
 import pexpect
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1182,8 +1180,14 @@ def main():
         sleep_duration = voting_end_timestamp - time.time()
         if sleep_duration > 0:
             total_secs = int(sleep_duration) + 1
-            for _ in tqdm(range(total_secs), desc="Waiting for voting to end", unit="s", ncols=60):
+            for remaining in range(total_secs, 0, -1):
+                mins, secs = divmod(remaining, 60)
+                if mins > 0:
+                    print(f"\rWaiting for voting to end: {mins}m {secs}s remaining  ", end="", flush=True)
+                else:
+                    print(f"\rWaiting for voting to end: {secs}s remaining  ", end="", flush=True)
                 time.sleep(1)
+            print()  # newline after countdown
 
     # Poll for final result
     info("Polling for result...")
