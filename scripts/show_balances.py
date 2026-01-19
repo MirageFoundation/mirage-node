@@ -497,7 +497,7 @@ def main():
 
     usernames: Dict[str, str] = {}
     try:
-        db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "").strip()
+        db_url = os.environ.get("INDEXER_DB_URL", "").strip()
         if db_url and need_username_lower:
             conn = psycopg.connect(db_url, autocommit=True)
             cur = conn.cursor()
