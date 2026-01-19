@@ -848,6 +848,33 @@ def write_working_genesis(genesis_json: str):
         ]
     )
 
+    # Start orchestrator if config exists (optional - for bridge testing)
+    orchestrator_config_exists = run(
+        ["bash", "-lc", "docker exec mirage test -f /root/.mirage/orchestrator/config.yaml && echo yes || echo no"],
+        capture=True,
+    ).strip()
+    if orchestrator_config_exists == "yes":
+        status("Starting orchestrator ...")
+        # Build if needed
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage bash -lc 'test -f /opt/mirage/blockchain/mirage-orchestrator || (cd /opt/mirage/blockchain && go build -o mirage-orchestrator ./cmd/orchestrator)'",
+            ]
+        )
+        # Create tmux window if it doesn't exist
+        run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator 2>/dev/null || true"])
+        run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:orchestrator C-c 2>/dev/null || true"])
+        time.sleep(0.5)
+        run(
+            [
+                "bash",
+                "-lc",
+                'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/mirage-orchestrator --config "/root/.mirage/orchestrator/config.yaml" 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
+            ]
+        )
+
 
 def main():
     parser = argparse.ArgumentParser(

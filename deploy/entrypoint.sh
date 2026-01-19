@@ -4,6 +4,10 @@ set -euo pipefail
 cleanup() {
   echo "Received shutdown signal, gracefully stopping services..."
   
+  # Stop orchestrator
+  pkill -TERM -f "mirage-orchestrator" 2>/dev/null || true
+  sleep 1
+  
   # Stop node
   pkill -TERM -f "miraged start" 2>/dev/null || true
   for i in $(seq 1 30); do
@@ -84,7 +88,7 @@ CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
 # Create centralized log directory structure
-mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy}
+mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy,orchestrator}
 
 # Clean up old log files (older than 30 days)
 find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
@@ -333,6 +337,22 @@ if [ -f "$HERMES_HOME/config.toml" ]; then
   echo "==> Starting Hermes IBC relayer..."
   tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
   tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
+fi
+
+# Bridge Orchestrator (optional) - only if config exists and validator mode is enabled
+ORCHESTRATOR_CONFIG="$DATA_DIR/orchestrator/config.yaml"
+ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/mirage-orchestrator"
+if [ -f "$ORCHESTRATOR_CONFIG" ] && [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
+  # Build orchestrator if binary doesn't exist
+  if [ ! -f "$ORCHESTRATOR_BIN" ]; then
+    echo "==> Building orchestrator binary..."
+    (cd "$ROOT_DIR/blockchain" && go build -o mirage-orchestrator ./cmd/orchestrator) || echo "WARNING: Failed to build orchestrator"
+  fi
+  if [ -f "$ORCHESTRATOR_BIN" ]; then
+    echo "==> Starting bridge orchestrator..."
+    tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
+    tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN --config \"$ORCHESTRATOR_CONFIG\" 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
+  fi
 fi
 
 # Unified Status Dashboard (last window)
