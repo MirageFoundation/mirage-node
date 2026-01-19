@@ -542,6 +542,48 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
         failures.append(f"core difficulty invalid: {e}")
 
 
+def check_deploy_migrations(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
+    """Check that required v1.9.0 deploy migrations have been applied."""
+    print("\n-> Checking deploy migrations...")
+    
+    migrations_file = home_dir / "env" / ".migrations"
+    if not migrations_file.exists():
+        print("   [WARN] .migrations file not found (fresh install?)")
+        warnings.append(".migrations file not found - migrations may not have run yet")
+        return
+    
+    try:
+        content = migrations_file.read_text()
+    except Exception as e:
+        print(f"   [FAIL] Cannot read .migrations: {e}")
+        failures.append(f"Cannot read .migrations file: {e}")
+        return
+    
+    # Required migrations for v1.9.0
+    required_migrations = [
+        "v1_9_0_indexer_env_rename",
+        "v1_9_0_p2p_rate_limiting",
+    ]
+    
+    for migration_key in required_migrations:
+        # Check if migration key appears in the file (format: "key|timestamp|result")
+        if migration_key in content:
+            # Check if it failed
+            for line in content.splitlines():
+                if line.startswith(migration_key + "|"):
+                    parts = line.split("|")
+                    result = parts[2] if len(parts) > 2 else "unknown"
+                    if result.startswith("FAILED"):
+                        print(f"   [FAIL] {migration_key}: {result}")
+                        failures.append(f"Migration {migration_key} failed: {result}")
+                    else:
+                        print(f"   [OK] {migration_key}: {result}")
+                    break
+        else:
+            print(f"   [WARN] {migration_key}: not applied")
+            warnings.append(f"Migration {migration_key} has not been applied")
+
+
 def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[str], warnings: list[str]) -> None:
     print("\n-> Checking local config...")
     cfg_dir = home_dir / "node" / "config"
@@ -650,6 +692,7 @@ def main() -> int:
 
     if not args.skip_config:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
+        check_deploy_migrations(home_dir, failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
