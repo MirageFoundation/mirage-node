@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Fully automated Hermes IBC relayer setup for Mirage <-> Osmosis
-# Usage: ./setup_hermes_relayer.sh [--create-new-channel]
+# Usage: ./setup_hermes.sh [--create-new-channel]
 #
 # Options:
 #   --create-new-channel  Allow creation of a NEW IBC channel (use with caution!)

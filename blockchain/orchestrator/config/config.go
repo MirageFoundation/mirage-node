@@ -3,123 +3,236 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Mirage   MirageConfig   `yaml:"mirage"`
-	Chains   ChainsConfig   `yaml:"chains"`
-	Attestor AttestorConfig `yaml:"attestor"`
+	Enabled  bool
+	Mirage   MirageConfig
+	Chains   ChainsConfig
+	Attestor AttestorConfig
 }
 
 type MirageConfig struct {
-	GRPC           string `yaml:"grpc"`
-	RPC            string `yaml:"rpc"`
-	ChainID        string `yaml:"chain_id"`
-	KeyringDir     string `yaml:"keyring_dir"`
-	KeyringBackend string `yaml:"keyring_backend"`
-	KeyName        string `yaml:"key_name"`
-	GasLimit       uint64 `yaml:"gas_limit"`
-	FeeAmount      uint64 `yaml:"fee_amount"`
-	FeeDenom       string `yaml:"fee_denom"`
+	GRPC           string
+	RPC            string
+	ChainID        string
+	KeyringDir     string
+	KeyringBackend string
+	KeyName        string
+	GasLimit       uint64
+	FeeAmount      uint64
+	FeeDenom       string
 }
 
 type ChainsConfig struct {
-	Solana SolanaConfig `yaml:"solana"`
+	Solana SolanaConfig
 }
 
 type SolanaConfig struct {
-	Enabled       bool          `yaml:"enabled"`
-	RPC           string        `yaml:"rpc"`
-	WS            string        `yaml:"ws"`
-	ProgramID     string        `yaml:"program_id"`
-	Keypair       string        `yaml:"keypair"`
-	Confirmations uint64        `yaml:"confirmations"`
-	PollInterval  time.Duration `yaml:"poll_interval"`
+	Enabled       bool
+	RPC           string
+	WS            string
+	ProgramID     string
+	Keypair       string
+	Confirmations uint64
+	PollInterval  time.Duration
 }
 
 type AttestorConfig struct {
-	BatchSize     int           `yaml:"batch_size"`
-	RetryInterval time.Duration `yaml:"retry_interval"`
-	MaxRetries    int           `yaml:"max_retries"`
+	BatchSize     int
+	RetryInterval time.Duration
+	MaxRetries    int
 }
 
-func Load(path string) (*Config, error) {
-	if path == "" {
-		return nil, fmt.Errorf("config path cannot be empty")
+// LoadFromEnv loads configuration from environment variables.
+// All values are required when ORCHESTRATOR_ENABLED=true.
+// Missing or invalid values will cause an error.
+func LoadFromEnv() (*Config, error) {
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/root"
 	}
-	bz, err := os.ReadFile(path)
+
+	// Main enable flag (only one with a default)
+	enabled := envBool("ORCHESTRATOR_ENABLED", false)
+
+	// If not enabled, return minimal config
+	if !enabled {
+		return &Config{Enabled: false}, nil
+	}
+
+	// All other values are required when enabled
+	var errs []string
+
+	// Solana config
+	solanaRPC := os.Getenv("ORCHESTRATOR_SOLANA_RPC")
+	if solanaRPC == "" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_RPC is required")
+	}
+	solanaWS := os.Getenv("ORCHESTRATOR_SOLANA_WS")
+	if solanaWS == "" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_WS is required")
+	}
+	solanaProgramID := os.Getenv("ORCHESTRATOR_SOLANA_PROGRAM_ID")
+	if solanaProgramID == "" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_PROGRAM_ID is required")
+	}
+	solanaKeypair := os.Getenv("ORCHESTRATOR_SOLANA_KEYPAIR")
+	if solanaKeypair == "" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_KEYPAIR is required")
+	}
+	solanaConfirmations, err := envRequiredUint64("ORCHESTRATOR_SOLANA_CONFIRMATIONS")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read config: %w", err)
+		errs = append(errs, err.Error())
 	}
-	var cfg Config
-	if err := yaml.Unmarshal(bz, &cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse config: %w", err)
+	solanaPollInterval, err := envRequiredDuration("ORCHESTRATOR_SOLANA_POLL_INTERVAL")
+	if err != nil {
+		errs = append(errs, err.Error())
 	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
+
+	// Mirage config (chain ID and fee denom are constants)
+	mirageGRPC := os.Getenv("ORCHESTRATOR_MIRAGE_GRPC")
+	if mirageGRPC == "" {
+		errs = append(errs, "ORCHESTRATOR_MIRAGE_GRPC is required")
 	}
-	return &cfg, nil
+	mirageRPC := os.Getenv("ORCHESTRATOR_MIRAGE_RPC")
+	if mirageRPC == "" {
+		errs = append(errs, "ORCHESTRATOR_MIRAGE_RPC is required")
+	}
+	mirageGasLimit, err := envRequiredUint64("ORCHESTRATOR_MIRAGE_GAS_LIMIT")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	mirageFeeAmount, err := envRequiredUint64("ORCHESTRATOR_MIRAGE_FEE_AMOUNT")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	keyringBackend := os.Getenv("ORCHESTRATOR_KEYRING_BACKEND")
+	if keyringBackend == "" {
+		errs = append(errs, "ORCHESTRATOR_KEYRING_BACKEND is required")
+	}
+	keyName := os.Getenv("ORCHESTRATOR_KEY_NAME")
+	if keyName == "" {
+		errs = append(errs, "ORCHESTRATOR_KEY_NAME is required")
+	}
+
+	// Attestor config
+	batchSize, err := envRequiredInt("ORCHESTRATOR_BATCH_SIZE")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	retryInterval, err := envRequiredDuration("ORCHESTRATOR_RETRY_INTERVAL")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+	maxRetries, err := envRequiredInt("ORCHESTRATOR_MAX_RETRIES")
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+
+	// Return all errors at once
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("missing or invalid config:\n  - %s", joinErrors(errs))
+	}
+
+	// Additional validation
+	if _, err := os.Stat(solanaKeypair); os.IsNotExist(err) {
+		return nil, fmt.Errorf("solana keypair file not found: %s", solanaKeypair)
+	}
+
+	cfg := &Config{
+		Enabled: true,
+		Mirage: MirageConfig{
+			GRPC:           mirageGRPC,
+			RPC:            mirageRPC,
+			ChainID:        "mirage-1",
+			KeyringDir:     home + "/.mirage/node",
+			KeyringBackend: keyringBackend,
+			KeyName:        keyName,
+			GasLimit:       mirageGasLimit,
+			FeeAmount:      mirageFeeAmount,
+			FeeDenom:       "umirage",
+		},
+		Chains: ChainsConfig{
+			Solana: SolanaConfig{
+				Enabled:       true,
+				RPC:           solanaRPC,
+				WS:            solanaWS,
+				ProgramID:     solanaProgramID,
+				Keypair:       solanaKeypair,
+				Confirmations: solanaConfirmations,
+				PollInterval:  solanaPollInterval,
+			},
+		},
+		Attestor: AttestorConfig{
+			BatchSize:     batchSize,
+			RetryInterval: retryInterval,
+			MaxRetries:    maxRetries,
+		},
+	}
+
+	return cfg, nil
 }
 
-func (c *Config) Validate() error {
-	if c.Mirage.GRPC == "" {
-		return fmt.Errorf("mirage.grpc is required")
+// Load is kept for backward compatibility but now just calls LoadFromEnv.
+func Load(_ string) (*Config, error) {
+	return LoadFromEnv()
+}
+
+func joinErrors(errs []string) string {
+	result := errs[0]
+	for i := 1; i < len(errs); i++ {
+		result += "\n  - " + errs[i]
 	}
-	if c.Mirage.RPC == "" {
-		return fmt.Errorf("mirage.rpc is required")
+	return result
+}
+
+func envBool(key string, defaultVal bool) bool {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
 	}
-	if c.Mirage.ChainID == "" {
-		return fmt.Errorf("mirage.chain_id is required")
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		return defaultVal
 	}
-	if c.Mirage.KeyringDir == "" {
-		return fmt.Errorf("mirage.keyring_dir is required")
+	return b
+}
+
+func envRequiredUint64(key string) (uint64, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return 0, fmt.Errorf("%s is required", key)
 	}
-	if c.Mirage.KeyringBackend == "" {
-		return fmt.Errorf("mirage.keyring_backend is required")
+	n, err := strconv.ParseUint(val, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid number: %v", key, err)
 	}
-	if c.Mirage.KeyName == "" {
-		return fmt.Errorf("mirage.key_name is required")
+	return n, nil
+}
+
+func envRequiredInt(key string) (int, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return 0, fmt.Errorf("%s is required", key)
 	}
-	if c.Mirage.GasLimit == 0 {
-		return fmt.Errorf("mirage.gas_limit must be > 0")
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid integer: %v", key, err)
 	}
-	if c.Mirage.FeeAmount == 0 {
-		return fmt.Errorf("mirage.fee_amount must be > 0")
+	return n, nil
+}
+
+func envRequiredDuration(key string) (time.Duration, error) {
+	val := os.Getenv(key)
+	if val == "" {
+		return 0, fmt.Errorf("%s is required", key)
 	}
-	if c.Mirage.FeeDenom == "" {
-		return fmt.Errorf("mirage.fee_denom is required")
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid duration (e.g., '5s', '10m'): %v", key, err)
 	}
-	if c.Attestor.BatchSize <= 0 {
-		return fmt.Errorf("attestor.batch_size must be > 0")
-	}
-	if c.Attestor.RetryInterval <= 0 {
-		return fmt.Errorf("attestor.retry_interval must be > 0")
-	}
-	if c.Attestor.MaxRetries <= 0 {
-		return fmt.Errorf("attestor.max_retries must be > 0")
-	}
-	if c.Chains.Solana.Enabled {
-		if c.Chains.Solana.RPC == "" {
-			return fmt.Errorf("chains.solana.rpc is required when solana enabled")
-		}
-		if c.Chains.Solana.WS == "" {
-			return fmt.Errorf("chains.solana.ws is required when solana enabled")
-		}
-		if c.Chains.Solana.ProgramID == "" {
-			return fmt.Errorf("chains.solana.program_id is required when solana enabled")
-		}
-		if c.Chains.Solana.Keypair == "" {
-			return fmt.Errorf("chains.solana.keypair is required when solana enabled")
-		}
-		if c.Chains.Solana.Confirmations == 0 {
-			return fmt.Errorf("chains.solana.confirmations must be > 0 when solana enabled")
-		}
-		if c.Chains.Solana.PollInterval <= 0 {
-			return fmt.Errorf("chains.solana.poll_interval must be > 0 when solana enabled")
-		}
-	}
-	return nil
+	return d, nil
 }

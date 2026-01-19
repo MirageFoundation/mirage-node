@@ -35,7 +35,7 @@ export PYTHONPATH="/opt/mirage"
 # Load persistent env files if present
 ENV_DIR="${HOME}/.mirage/env"
 load_env_files() {
-  for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env"; do
+  for envfile in "${ENV_DIR}/backend.env" "${ENV_DIR}/node.env" "${ENV_DIR}/indexer.env" "${ENV_DIR}/frontend.env" "${ENV_DIR}/secrets.env" "${ENV_DIR}/orchestrator.env"; do
     if [ -f "$envfile" ]; then
       set -a
       . "$envfile"
@@ -320,7 +320,7 @@ tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 P
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
 # IBC Relayer (sixth) - only if Hermes is configured
-# NOTE: This hermes startup code is duplicated in deploy/setup_hermes_relayer.sh
+# NOTE: This hermes startup code is duplicated in deploy/setup_hermes.sh
 #       If you change this, update the other file too!
 HERMES_HOME="$DATA_DIR/hermes"
 if [ -f "$HERMES_HOME/config.toml" ]; then
@@ -339,17 +339,15 @@ if [ -f "$HERMES_HOME/config.toml" ]; then
   tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
 fi
 
-# Bridge Orchestrator (optional) - only if config exists and validator mode is enabled
-ORCHESTRATOR_CONFIG="$DATA_DIR/orchestrator/config.yaml"
+# Bridge Orchestrator - always starts, handles enabled/disabled internally via ORCHESTRATOR_ENABLED env var
 ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/mirage-orchestrator"
-if [ -f "$ORCHESTRATOR_CONFIG" ] && [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
-  if [ -f "$ORCHESTRATOR_BIN" ]; then
-    echo "==> Starting bridge orchestrator..."
-    tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
-    tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN --config \"$ORCHESTRATOR_CONFIG\" 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
-  else
-    echo "WARNING: Orchestrator config exists but binary not found at $ORCHESTRATOR_BIN"
-  fi
+if [ -f "$ORCHESTRATOR_BIN" ]; then
+  echo "==> Starting bridge orchestrator..."
+  mkdir -p "$DATA_DIR/orchestrator"
+  tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
+  tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
+else
+  echo "WARNING: Orchestrator binary not found at $ORCHESTRATOR_BIN"
 fi
 
 # Unified Status Dashboard (last window)

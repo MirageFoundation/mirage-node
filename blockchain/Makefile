@@ -62,7 +62,7 @@ build: install
 
 build-orchestrator:
 	@echo "--> building orchestrator"
-	@go build $(BUILD_FLAGS) -mod=readonly -o ./mirage-orchestrator ./cmd/orchestrator
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./orchestrator ./cmd/orchestrator
 
 build-all: build build-orchestrator
 
