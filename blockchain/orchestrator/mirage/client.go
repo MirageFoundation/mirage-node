@@ -111,7 +111,7 @@ func buildClientContext() (client.Context, codec.Codec, error) {
 		depinject.Configs(app.AppConfig(),
 			depinject.Supply(cosmoslog.NewNopLogger()),
 			depinject.Provide(
-				ProvideClientContextAndCodec,
+				ProvideClientContext,
 			),
 		),
 		&clientCtx,
@@ -123,12 +123,12 @@ func buildClientContext() (client.Context, codec.Codec, error) {
 	return clientCtx, appCodec, nil
 }
 
-func ProvideClientContextAndCodec(
+func ProvideClientContext(
 	appCodec codec.Codec,
 	interfaceRegistry codectypes.InterfaceRegistry,
 	txConfigOpts tx.ConfigOptions,
 	legacyAmino *codec.LegacyAmino,
-) (client.Context, codec.Codec) {
+) client.Context {
 	clientCtx := client.Context{}.
 		WithCodec(appCodec).
 		WithInterfaceRegistry(interfaceRegistry).
@@ -144,5 +144,5 @@ func ProvideClientContextAndCodec(
 	}
 	clientCtx = clientCtx.WithTxConfig(txConfig)
 
-	return clientCtx, appCodec
+	return clientCtx
 }
