@@ -1,4 +1,11 @@
 # Multi-stage Dockerfile for Mirage production deployment
+# Stage 0: Build Caddy with rate-limit plugin
+FROM caddy:builder AS caddy-builder
+
+RUN xcaddy build \
+    --output /usr/bin/caddy \
+    --with github.com/mholt/caddy-ratelimit
+
 # Stage 1: Build frontend, install dependencies
 FROM ubuntu:24.04 AS builder
 
@@ -94,8 +101,9 @@ RUN apt-get update && apt-get install -y \
 # Add shell aliases
 RUN echo "alias m='micro'" >> /etc/bash.bashrc
 
-# Install Caddy (fail-fast)
+# Install Caddy (for deps), then overwrite with custom binary that has rate-limit plugin
 RUN apt-get update && apt-get install -y caddy && rm -rf /var/lib/apt/lists/*
+COPY --from=caddy-builder /usr/bin/caddy /usr/bin/caddy
 
 # Copy Python packages from builder
 COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/python3.12/dist-packages
