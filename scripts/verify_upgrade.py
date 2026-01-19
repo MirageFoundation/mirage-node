@@ -370,20 +370,15 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
             if isinstance(ch, dict):
                 chain_id = ch.get("chain_id", "?")
                 enabled = ch.get("enabled", False)
-                contract = ch.get("contract_address", "")
                 status = "enabled" if enabled else "disabled"
-                print(f"      - {chain_id}: {status}, contract={contract[:16]}..." if len(contract) > 16 else f"      - {chain_id}: {status}, contract={contract}")
+                print(f"      - {chain_id}: {status}")
                 
                 # Verify Solana config
                 if chain_id == "solana":
                     solana_found = True
-                    expected_contract = "8uTqBhqHt8BCJNdS7aDX7vUXHmABevhqwyQsAoxv4jx9"
                     if not enabled:
                         print(f"   [FAIL] Solana bridge is disabled")
                         failures.append("bridge_chains: Solana is disabled")
-                    if contract != expected_contract:
-                        print(f"   [FAIL] Solana contract mismatch: expected {expected_contract}")
-                        failures.append(f"bridge_chains: Solana contract expected {expected_contract}, got {contract}")
         
         if not solana_found:
             print("   [FAIL] Solana not found in bridge_chains")

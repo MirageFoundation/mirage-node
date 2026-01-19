@@ -133,9 +133,6 @@ message BridgeChainConfig {
   // chain_id is the unique identifier for this chain (e.g., "solana", "ethereum")
   string chain_id = 1;
 
-  // contract_address is the bridge contract/program address on the external chain
-  string contract_address = 2;
-
   // enabled indicates whether bridging to/from this chain is currently allowed
-  bool enabled = 3;
+  bool enabled = 2;
 }
