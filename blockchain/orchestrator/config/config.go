@@ -144,9 +144,9 @@ func LoadFromEnv() (*Config, error) {
 		return nil, fmt.Errorf("missing or invalid config:\n  - %s", joinErrors(errs))
 	}
 
-	// Additional validation
+	// Check Solana keypair exists
 	if _, err := os.Stat(solanaKeypair); os.IsNotExist(err) {
-		return nil, fmt.Errorf("solana keypair file not found: %s", solanaKeypair)
+		return nil, fmt.Errorf("solana keypair not found: %s\n\nRun setup script first:\n  ./deploy/setup_orchestrator.sh", solanaKeypair)
 	}
 
 	cfg := &Config{
