@@ -350,7 +350,7 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
                 for err in tier_errors:
                     failures.append(f"core params.tiers[{i}].{err}")
 
-    print("\n   Bridge chains:")
+    print("\n   Bridge chains (attested only, IBC handled separately):")
     bridge_chains = core.get("bridge_chains")
     if bridge_chains is None:
         print("   [FAIL] bridge_chains is None")
@@ -359,17 +359,33 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
         print(f"   [FAIL] bridge_chains expected list, got {type(bridge_chains)}")
         failures.append(f"core params.bridge_chains expected list, got {type(bridge_chains)}")
     elif len(bridge_chains) == 0:
-        print("   [OK] bridge_chains: [] (empty)")
+        print("   [FAIL] bridge_chains: [] (empty - expected at least Solana)")
+        failures.append("bridge_chains is empty, expected at least Solana")
     else:
         print(f"   [OK] bridge_chains: {len(bridge_chains)} chain(s)")
+        solana_found = False
         for idx, ch in enumerate(bridge_chains):
             if isinstance(ch, dict):
                 chain_id = ch.get("chain_id", "?")
                 enabled = ch.get("enabled", False)
-                is_ibc = ch.get("is_ibc", False)
-                bridge_type = "IBC" if is_ibc else "Attested"
+                contract = ch.get("contract_address", "")
                 status = "enabled" if enabled else "disabled"
-                print(f"      - {chain_id}: {bridge_type}, {status}")
+                print(f"      - {chain_id}: {status}, contract={contract[:16]}..." if len(contract) > 16 else f"      - {chain_id}: {status}, contract={contract}")
+                
+                # Verify Solana config
+                if chain_id == "solana":
+                    solana_found = True
+                    expected_contract = "8uTqBhqHt8BCJNdS7aDX7vUXHmABevhqwyQsAoxv4jx9"
+                    if not enabled:
+                        print(f"   [FAIL] Solana bridge is disabled")
+                        failures.append("bridge_chains: Solana is disabled")
+                    if contract != expected_contract:
+                        print(f"   [FAIL] Solana contract mismatch: expected {expected_contract}")
+                        failures.append(f"bridge_chains: Solana contract expected {expected_contract}, got {contract}")
+        
+        if not solana_found:
+            print("   [FAIL] Solana not found in bridge_chains")
+            failures.append("bridge_chains: Solana chain not configured")
 
     return core
 
