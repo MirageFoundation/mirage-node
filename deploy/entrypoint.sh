@@ -72,8 +72,8 @@ else
 fi
 
 # Safety fallback for DB URL (should already be set in indexer.env template)
-if [ -z "${MIRAGE_INDEXER_DB_URL:-}" ]; then
-  export MIRAGE_INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
+if [ -z "${INDEXER_DB_URL:-}" ]; then
+  export INDEXER_DB_URL="postgresql://mirage:mirage@127.0.0.1:5432/mirage"
 fi
 
 # Defaults if not provided
@@ -231,7 +231,7 @@ fi
 
 # Ensure local database and role exist if URL points to localhost
 ensure_local_postgres_db() {
-  local url="${MIRAGE_INDEXER_DB_URL:-}"
+  local url="${INDEXER_DB_URL:-}"
   # Extract components: user, pass, host, port, db
   # shellcheck disable=SC2001
   local user pass host port db
@@ -246,7 +246,7 @@ ensure_local_postgres_db() {
     return 0
   fi
   if [ -z "$user" ] || [ -z "$db" ]; then
-    echo "Invalid MIRAGE_INDEXER_DB_URL, missing user or db: $url" >&2
+    echo "Invalid INDEXER_DB_URL, missing user or db: $url" >&2
     exit 1
   fi
   echo "==> Ensuring Postgres role '$user' and database '$db' exist..."

@@ -706,7 +706,7 @@ def check_validator() -> ServiceStatus:
 
 def check_postgres() -> ServiceStatus:
     """Check PostgreSQL database status."""
-    db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
 
     if psycopg is None:
         return ServiceStatus(
@@ -823,7 +823,7 @@ def check_grpc() -> ServiceStatus:
 
 def check_indexer() -> ServiceStatus:
     """Check indexer status by comparing heights."""
-    db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
 
     # Check if indexer process is running
     try:
@@ -1191,7 +1191,7 @@ def check_referrals() -> ServiceStatus:
         return ServiceStatus(name="Referrals", status=Status.ERROR, message="Not running", details={"running": False})
 
     # Get additional info from database
-    db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
+    db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
 
     pending_count = 0
     total_links = 0

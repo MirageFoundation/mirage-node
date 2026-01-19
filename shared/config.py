@@ -166,18 +166,18 @@ class MirageConfig:
         """Get indexer configuration (derived from node HOME).
 
         - JSON-RPC/GRPC resolved from node ports
-        - Database URL must be provided via MIRAGE_INDEXER_DB_URL (no fallbacks)
-        - Enabled defaults to True (override MIRAGE_INDEXER_ENABLED)
+        - Database URL must be provided via INDEXER_DB_URL (no fallbacks)
+        - Enabled defaults to True (override INDEXER_ENABLED)
         """
         # Resolve ports directly from loaded config
         rpc = int(self.get("ports", "rpc", default=26657))
         grpc = int(self.get("ports", "grpc", default=9090))
 
-        enabled_env = os.environ.get("MIRAGE_INDEXER_ENABLED")
+        enabled_env = os.environ.get("INDEXER_ENABLED")
         enabled = True if enabled_env is None else enabled_env.lower() in ("1", "true", "yes")
-        db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "").strip()
+        db_url = os.environ.get("INDEXER_DB_URL", "").strip()
         if not db_url:
-            raise RuntimeError("MIRAGE_INDEXER_DB_URL is required (no fallbacks)")
+            raise RuntimeError("INDEXER_DB_URL is required (no fallbacks)")
         return {
             "enabled": enabled,
             "jsonrpc_url": f"http://127.0.0.1:{rpc}",

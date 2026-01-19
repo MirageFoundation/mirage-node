@@ -20,7 +20,7 @@ def connect_db(timeout: float = 10.0, busy_timeout_ms: int = 15000) -> psycopg.C
     idx: Dict[str, Any] = cfg.get_indexer_config()
     url = idx.get("database_url")
     if not url:
-        raise RuntimeError("MIRAGE_INDEXER_DB_URL is required")
+        raise RuntimeError("INDEXER_DB_URL is required")
     return psycopg.connect(url, autocommit=True)
 
 

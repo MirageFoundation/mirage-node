@@ -208,9 +208,9 @@ def main():
         print("Error: --target must be at least 1", file=sys.stderr)
         sys.exit(1)
 
-    db_url = os.environ.get("MIRAGE_INDEXER_DB_URL", "").strip()
+    db_url = os.environ.get("INDEXER_DB_URL", "").strip()
     if not db_url:
-        print("Error: MIRAGE_INDEXER_DB_URL environment variable not set", file=sys.stderr)
+        print("Error: INDEXER_DB_URL environment variable not set", file=sys.stderr)
         sys.exit(1)
 
     try:
