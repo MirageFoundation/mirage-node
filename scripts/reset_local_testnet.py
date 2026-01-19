@@ -366,22 +366,31 @@ def scrub_consensus_key():
 def ensure_test_keys():
     status("Creating test keys (validator, faucet)...")
 
+    # Ensure the node home directory exists
+    run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/node"])
+
     def _create_key(name: str):
         m = generate_random_mnemonic()
-        cmd = f"echo '{m}' | /opt/mirage/blockchain/bin/miraged keys add {name} --recover --home /root/.mirage/node --keyring-backend test >/dev/null 2>&1 || true"
-        run(["bash", "-lc", f'docker exec mirage bash -lc "{cmd}"'])
+        # Use a temp file to pass the mnemonic (avoids shell quoting issues)
+        run(
+            [
+                "bash",
+                "-lc",
+                f"echo '{m}' | docker exec -i mirage /opt/mirage/blockchain/miraged keys add {name} --recover --home /root/.mirage/node --keyring-backend test",
+            ]
+        )
 
     _create_key("validator")
     _create_key("faucet")
 
     # Fix keyring permissions so host user can access (Docker creates as root with 700)
-    run(["bash", "-lc", "docker exec mirage chmod -R 755 /root/.mirage/node/keyring-test"])
+    run(["bash", "-lc", "docker exec mirage chmod -R 755 /root/.mirage/node/keyring-test 2>/dev/null || true"])
 
     val_addr = run(
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/bin/miraged keys show validator -a --home /root/.mirage/node --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -389,7 +398,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/bin/miraged keys show validator --bech val -a --home /root/.mirage/node --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator --bech val -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -397,7 +406,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/bin/miraged keys show faucet -a --home /root/.mirage/node --keyring-backend test",
+            "docker exec mirage /opt/mirage/blockchain/miraged keys show faucet -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -877,7 +886,7 @@ def write_working_genesis(genesis_json: str):
     # No need to copy binary from snapshot
 
     status("Starting node in tmux ...")
-    start_cmd = '/opt/mirage/blockchain/bin/miraged start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
+    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
 
     status("Waiting for RPC ...")
@@ -939,7 +948,7 @@ def write_working_genesis(genesis_json: str):
     # Note: The entrypoint.sh can't create the orchestrator window because we killed the node
     # earlier (it waits for RPC before creating orchestrator window), so we create it here.
     orchestrator_exists = run(
-        ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/bin/orchestrator && echo yes || echo no"],
+        ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/orchestrator && echo yes || echo no"],
         capture=True,
     ).strip()
     if orchestrator_exists == "yes":
@@ -962,7 +971,7 @@ def write_working_genesis(genesis_json: str):
                 [
                     "bash",
                     "-lc",
-                    'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/bin/orchestrator 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
+                    'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
                 ]
             )
         except Exception as e:

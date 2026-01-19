@@ -37,8 +37,10 @@ def _http_get_json(url: str, timeout: int = 5) -> dict:
 
 def _find_miraged() -> str:
     candidates = [
-        "/opt/mirage/blockchain/bin/miraged",  # inside container
-        str(Path(__file__).resolve().parents[1] / "blockchain" / "bin" / "miraged"),  # repo checkout
+        "/opt/mirage/blockchain/miraged",  # inside container (new structure)
+        "/opt/mirage/blockchain/bin/miraged",  # inside container (old structure)
+        str(Path(__file__).resolve().parents[1] / "blockchain" / "miraged"),  # repo checkout (new)
+        str(Path(__file__).resolve().parents[1] / "blockchain" / "bin" / "miraged"),  # repo checkout (old)
         "miraged",
     ]
     for c in candidates:

@@ -12,6 +12,18 @@ import subprocess
 import json
 
 
+def get_remote_miraged_path(remote_host: str) -> str:
+    """Detect the miraged binary path on the remote container."""
+    # Check new path first
+    result = subprocess.run(
+        ["ssh", remote_host, "docker exec mirage test -f /opt/mirage/blockchain/miraged && echo new || echo old"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0 and "new" in result.stdout:
+        return "/opt/mirage/blockchain/miraged"
+    return "/opt/mirage/blockchain/bin/miraged"
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: deploy/import_key_to_os.py <remote_host>", file=sys.stderr)
@@ -20,18 +32,25 @@ def main():
     remote_host = sys.argv[1]
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    bin_path = os.path.join(root_dir, "blockchain", "bin", "miraged")
+    # Check new structure first, then old
+    bin_path = os.path.join(root_dir, "blockchain", "miraged")
+    if not os.path.exists(bin_path):
+        bin_path = os.path.join(root_dir, "blockchain", "bin", "miraged")
 
     if not os.path.exists(bin_path):
         print(f"Binary not found: {bin_path}", file=sys.stderr)
         sys.exit(1)
+
+    print(f"Detecting remote binary path...")
+    remote_bin = get_remote_miraged_path(remote_host)
+    print(f"Remote binary: {remote_bin}")
 
     print(f"Listing keys from remote server {remote_host}...")
 
     list_cmd = [
         "ssh",
         remote_host,
-        "docker exec mirage /opt/mirage/blockchain/bin/miraged keys list --keyring-backend test --home /root/.mirage/node --output json",
+        f"docker exec mirage {remote_bin} keys list --keyring-backend test --home /root/.mirage/node --output json",
     ]
 
     result = subprocess.run(list_cmd, capture_output=True, text=True)
@@ -75,7 +94,7 @@ def main():
             ssh_cmd = [
                 "ssh",
                 remote_host,
-                f"docker exec mirage /opt/mirage/blockchain/bin/miraged keys export {remote_key_name} --keyring-backend test --home /root/.mirage/node --unsafe --unarmored-hex -y",
+                f"docker exec mirage {remote_bin} keys export {remote_key_name} --keyring-backend test --home /root/.mirage/node --unsafe --unarmored-hex -y",
             ]
 
             result = subprocess.run(ssh_cmd, capture_output=True, text=True)
