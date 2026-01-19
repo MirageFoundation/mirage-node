@@ -157,6 +157,57 @@ def debug_log(msg: str) -> None:
         pass
 
 
+def get_tmux_visibility_state() -> tuple[bool, bool]:
+    """
+    Check if running inside tmux and whether the session is actively visible.
+    
+    Returns:
+        (is_in_tmux, is_visible)
+        - is_in_tmux: True if running inside a tmux session
+        - is_visible: True if the session has attached clients AND the current 
+                      window is the active window (user is looking at it)
+    """
+    # Check if we're inside tmux
+    if not os.environ.get("TMUX"):
+        return False, True  # Not in tmux, assume visible
+    
+    try:
+        # Check if session has any attached clients
+        result = subprocess.run(
+            ["tmux", "list-clients", "-F", "#{client_name}"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            # No clients attached = detached
+            debug_log("tmux: no clients attached (detached)")
+            return True, False
+        
+        # Session has clients - check if current window is active
+        # #{window_active} is 1 if this is the active window in the attached client
+        result = subprocess.run(
+            ["tmux", "display-message", "-p", "#{window_active}"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        window_active = result.stdout.strip() == "1"
+        
+        if not window_active:
+            debug_log("tmux: window not active")
+            return True, False
+        
+        # Window is active - user is looking at this
+        debug_log("tmux: visible and active")
+        return True, True
+        
+    except Exception as e:
+        debug_log(f"tmux: visibility check failed: {e}")
+        # On error, assume visible to avoid stale data
+        return True, True
+
+
 def format_age_secs(age_secs: float) -> str:
     if age_secs < 60:
         return f"{int(age_secs)}s ago"
@@ -1646,8 +1697,14 @@ def main():
     parser.add_argument(
         "--interval",
         type=int,
-        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "10")),
-        help="Refresh interval in seconds (default: 10)",
+        default=int(os.environ.get("MIRAGE_CHECK_STATUS_INTERVAL", "5")),
+        help="Refresh interval when visible in seconds (default: 5)",
+    )
+    parser.add_argument(
+        "--idle-interval",
+        type=int,
+        default=int(os.environ.get("MIRAGE_CHECK_STATUS_IDLE_INTERVAL", "600")),
+        help="Refresh interval when not visible in seconds (default: 600 = 10 min)",
     )
     parser.add_argument(
         "--no-clear",
@@ -1656,17 +1713,45 @@ def main():
     )
     args = parser.parse_args()
 
-    refresh_secs = max(1, int(args.interval))
+    active_interval = max(1, int(args.interval))
+    idle_interval = max(1, int(args.idle_interval))
+    
+    # Track last render time for idle mode
+    last_render_time = 0
 
     try:
         while True:
-            if not args.no_clear:
-                # Clear screen
-                print("\033[2J\033[H", end="")
-            render_dashboard(refresh_secs=refresh_secs)
-            if args.once:
-                return
-            time.sleep(refresh_secs)
+            is_in_tmux, is_visible = get_tmux_visibility_state()
+            
+            if is_visible:
+                # Actively visible - render and use short interval
+                if not args.no_clear:
+                    print("\033[2J\033[H", end="")
+                render_dashboard(refresh_secs=active_interval)
+                last_render_time = time.time()
+                
+                if args.once:
+                    return
+                time.sleep(active_interval)
+            else:
+                # Not visible (detached or different window)
+                # Only render if idle_interval has passed since last render
+                now = time.time()
+                time_since_render = now - last_render_time
+                
+                if time_since_render >= idle_interval:
+                    if not args.no_clear:
+                        print("\033[2J\033[H", end="")
+                    render_dashboard(refresh_secs=idle_interval)
+                    last_render_time = time.time()
+                
+                if args.once:
+                    return
+                    
+                # Sleep in shorter chunks to detect visibility changes quickly
+                # Check every 2 seconds if we became visible
+                time.sleep(2)
+                
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)

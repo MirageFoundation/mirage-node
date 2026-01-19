@@ -82,6 +82,24 @@ def info(msg: str) -> None:
         _logger.info(msg)
 
 
+def _format_umirage_in_text(text: str) -> str:
+    """Convert umirage amounts to MIRAGE in text for display.
+    
+    E.g., '521550umirage' -> '0.52 MIRAGE'
+    """
+    def replace_umirage(match: re.Match) -> str:
+        amount = int(match.group(1))
+        mirage = amount / 1_000_000
+        if mirage >= 1000:
+            return f"{mirage:,.0f} MIRAGE"
+        elif mirage >= 1:
+            return f"{mirage:,.2f} MIRAGE"
+        else:
+            return f"{mirage:.6f} MIRAGE"
+    
+    return re.sub(r'(\d+)umirage', replace_umirage, text)
+
+
 def get_keyring_backend() -> str:
     """Get keyring backend based on mode"""
     return LOCAL_KEYRING_BACKEND if _is_local_mode else KEYRING_BACKEND
@@ -692,16 +710,14 @@ def main():
     # Check if deposit should be auto-calculated
     proposal_deposit = proposal_json.get("deposit", "auto") if proposal_json else "auto"
     if proposal_deposit == "auto" or not proposal_deposit:
-        # Add 25% buffer and round to nice number (nearest million)
-        deposit_with_buffer = int(required_deposit * 1.25)
-        deposit_amount = ((deposit_with_buffer + 999_999) // 1_000_000) * 1_000_000
-        deposit_source = f"auto: {min_deposit_key} {required_deposit:,} + 25%"
+        # Use exact required deposit (no buffer needed - it's a fixed governance param)
+        deposit_amount = required_deposit
+        deposit_source = f"auto: {min_deposit_key}"
     else:
         # Use explicit deposit from proposal (but ensure it meets minimum)
         explicit_deposit = int(re.sub(r"[^0-9]", "", proposal_deposit))
         if explicit_deposit < required_deposit:
-            deposit_with_buffer = int(required_deposit * 1.25)
-            deposit_amount = ((deposit_with_buffer + 999_999) // 1_000_000) * 1_000_000
+            deposit_amount = required_deposit
             deposit_source = f"auto (explicit {explicit_deposit:,} < required {required_deposit:,})"
         else:
             deposit_amount = explicit_deposit
@@ -715,10 +731,13 @@ def main():
             with open(proposal_file, "w", encoding="utf-8") as wf:
                 json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
 
-    total_umirage = estimated_gas + deposit_amount  # gas fee + deposit
+    # Fee = gas * gas_price (5000 umirage per gas unit)
+    gas_price = 5000
+    fee_amount = estimated_gas * gas_price
+    total_umirage = fee_amount + deposit_amount  # gas fee + deposit
 
     print(f"\nEstimated costs:")
-    print(f"  Gas: {estimated_gas/1_000_000:,.2f} MIRAGE")
+    print(f"  Gas: {estimated_gas:,} units × {gas_price} = {fee_amount/1_000_000:,.2f} MIRAGE")
     print(f"  Deposit: {deposit_amount/1_000_000:,.2f} MIRAGE ({deposit_source})")
     print(f"  Total: {total_umirage/1_000_000:,.2f} MIRAGE")
 
@@ -746,6 +765,10 @@ def main():
         subprocess.run(["docker", "cp", str(proposal_file), f"{LOCAL_CONTAINER}:{container_proposal_path}"], check=True)
         proposal_path_for_cmd = container_proposal_path
 
+    # Fee = gas * gas_price (5000 umirage per gas unit)
+    gas_price = 5000
+    fee_amount = estimated_gas * gas_price
+    
     submit_cmd = [
         bin_path,
         "tx",
@@ -765,11 +788,27 @@ def main():
         "--gas",
         str(estimated_gas),
         "--fees",
-        f"{estimated_gas}umirage",
+        f"{fee_amount}umirage",
         "--yes",
     ]
 
     exit_status, output = run_with_pexpect(submit_cmd, timeout=60)
+    log(f"Broadcast output:\n{output}")
+    
+    # Check for non-zero code in broadcast response (sync mode returns code immediately)
+    code_match = re.search(r'code:\s*(\d+)', output)
+    if code_match and code_match.group(1) != "0":
+        error_code = code_match.group(1)
+        # Extract raw_log which contains the actual error message
+        raw_log_match = re.search(r"raw_log:\s*['\"]?(.+?)['\"]?\s*(?:\n|$)", output, re.DOTALL)
+        raw_log = raw_log_match.group(1).strip() if raw_log_match else "unknown error"
+        # Clean up the raw_log (remove trailing quotes, newlines)
+        raw_log = raw_log.rstrip("'\"").strip()
+        # Convert umirage amounts to MIRAGE for display
+        raw_log = _format_umirage_in_text(raw_log)
+        info(f"ERROR: TX rejected (code {error_code}): {raw_log}")
+        sys.exit(1)
+    
     if exit_status != 0:
         log(f"Submission failed: {output}")
         info(f"ERROR: Proposal submission failed (exit {exit_status})")
@@ -782,46 +821,128 @@ def main():
                     info(f"  {line}")
         sys.exit(1)
 
-    # Verify transaction
+    # Verify transaction and extract proposal ID from events
     txhash_match = re.search(r"txhash:\s*([A-F0-9]{64})", output, re.IGNORECASE)
+    proposal_id_from_tx: str | None = None
+    
     if txhash_match:
         txhash = txhash_match.group(1)
         log(f"TX hash: {txhash}")
-        time.sleep(5)
+        info(f"TX hash: {txhash}")
 
-        try:
-            tx_result = query_json_rpc(rpc_endpoint, ["q", "tx", txhash])
-            tx_code = tx_result.get("code", 0)
-            if tx_code != 0:
-                raw_log = tx_result.get("raw_log", "unknown error")
-                log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
-                info(f"ERROR: Transaction failed on-chain: {raw_log}")
-                sys.exit(1)
-            info("✅ Proposal submitted")
-        except Exception as e:
-            log(f"TX verification error: {e}")
+        # Retry tx query - it may take a few seconds to be included in a block
+        bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+        tx_verified = False
+        max_attempts = 15
+        for attempt in range(1, max_attempts + 1):
+            print(f"\rVerifying TX... ({attempt}/{max_attempts})", end="", flush=True)
+            time.sleep(1)
+            try:
+                tx_cmd = [bin_path, "q", "tx", txhash, "--node", rpc_endpoint, "-o", "json"]
+                log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
+                result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
+                if result.returncode == 0:
+                    tx_result = json.loads(result.stdout)
+                    tx_code = tx_result.get("code", 0)
+                    print()  # newline after progress
+                    if tx_code != 0:
+                        raw_log = tx_result.get("raw_log", "unknown error")
+                        log(f"TX failed on-chain: code={tx_code}, log={raw_log}")
+                        info(f"ERROR: Transaction failed on-chain: {raw_log}")
+                        sys.exit(1)
+                    
+                    # Extract proposal_id from tx events
+                    for event in tx_result.get("events", []):
+                        if event.get("type") == "submit_proposal":
+                            for attr in event.get("attributes", []):
+                                if attr.get("key") == "proposal_id":
+                                    proposal_id_from_tx = attr.get("value")
+                                    log(f"Extracted proposal_id from tx events: {proposal_id_from_tx}")
+                                    break
+                    
+                    info("✅ Proposal submitted")
+                    tx_verified = True
+                    break
+                else:
+                    # Check if it's just "not found" (still pending)
+                    if "not found" in result.stderr.lower():
+                        log_debug(f"TX not found yet (attempt {attempt}), retrying...")
+                        continue
+                    else:
+                        print()  # newline after progress
+                        log(f"TX query error: {result.stderr}")
+                        break
+            except Exception as e:
+                print()  # newline after progress
+                log(f"TX verification error: {e}")
+                break
+
+        if not tx_verified:
+            print()  # newline after progress
+            info("⚠️  Could not verify TX after 15s")
+            # Check if tx is in mempool
+            try:
+                mempool_resp = requests.get(f"{rpc_endpoint}/unconfirmed_txs?limit=100", timeout=5)
+                if mempool_resp.status_code == 200:
+                    mempool_data = mempool_resp.json()
+                    n_txs = mempool_data.get("result", {}).get("n_txs", "0")
+                    info(f"   Mempool has {n_txs} pending tx(s)")
+            except Exception as e:
+                log(f"Could not check mempool: {e}")
+            
+            # Show broadcast output for debugging
+            info("   Broadcast response was:")
+            for line in output.strip().split('\n')[-10:]:  # last 10 lines
+                line = line.strip()
+                if line:
+                    info(f"     {line}")
     else:
         log(f"Could not extract txhash from: {output}")
-        time.sleep(5)
+        info("⚠️  No txhash in output - continuing anyway")
+        time.sleep(3)
 
-    # Get proposal ID
-    proposals_before = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
-    proposals_list = proposals_before.get("proposals", [])
-
-    if not proposals_list:
-        info("ERROR: No proposals found")
-        return 1
-
-    proposal_id = proposals_list[-1]["id"]
-    proposal = proposals_list[-1]
-
-    # Verify proposal title
+    # Get proposal by ID (from tx events) or by matching title
     if proposal_json is None:
         print("FATAL: proposal_json not available", file=sys.stderr)
         sys.exit(1)
     expected_title = proposal_json.get("title", "")
-    if proposal.get("title") != expected_title:
-        log(f"Title mismatch: expected '{expected_title}', got '{proposal.get('title')}'")
+    
+    proposal: dict | None = None
+    proposal_id: str | None = proposal_id_from_tx
+    
+    if proposal_id_from_tx:
+        # We have the ID from tx events - query it directly
+        try:
+            prop_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposal", proposal_id_from_tx])
+            proposal = prop_result.get("proposal", prop_result)
+            proposal_id = proposal.get("id", proposal_id_from_tx)
+        except Exception as e:
+            log(f"Could not query proposal {proposal_id_from_tx}: {e}")
+            proposal = None
+    
+    if not proposal:
+        # Fallback: find proposal by matching title (must be exact match and recent)
+        proposals_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
+        proposals_list = proposals_result.get("proposals", [])
+        
+        if not proposals_list:
+            info("ERROR: No proposals found")
+            return 1
+        
+        # Search backwards (most recent first) for matching title
+        for prop in reversed(proposals_list):
+            if prop.get("title") == expected_title:
+                proposal = prop
+                proposal_id = prop.get("id")
+                log(f"Found proposal by title match: #{proposal_id}")
+                break
+        
+        if not proposal:
+            info(f"ERROR: Could not find proposal with title '{expected_title}'")
+            info("Recent proposals:")
+            for prop in proposals_list[-5:]:
+                info(f"  #{prop.get('id')}: {prop.get('title')} ({prop.get('status')})")
+            return 1
 
     info(f"Proposal #{proposal_id}: {proposal.get('status', 'N/A')}")
 
@@ -852,6 +973,7 @@ def main():
             info(f"Depositing {additional_needed/1_000_000:,.2f} MIRAGE...")
 
             deposit_gas = estimate_gas_for_deposit(buffer_percent=50.0)
+            deposit_fee = deposit_gas * gas_price
             deposit_cmd = [
                 bin_path,
                 "tx",
@@ -872,7 +994,7 @@ def main():
                 "--gas",
                 str(deposit_gas),
                 "--fees",
-                f"{deposit_gas}umirage",
+                f"{deposit_fee}umirage",
                 "--yes",
             ]
 
@@ -892,6 +1014,12 @@ def main():
 
             proposal = query_json_rpc(rpc_endpoint, ["q", "gov", "proposal", str(proposal_id)])["proposal"]
             status = proposal.get("status", "")
+
+    # Check if already passed (e.g., single validator with >66.67% voting power auto-passes)
+    if status == "PROPOSAL_STATUS_PASSED":
+        info(f"\n✅ PROPOSAL PASSED (auto-passed with sufficient voting power)")
+        info(f"\nLog file: {_log_file}")
+        return 0
 
     # Vote if in voting period
     if status != "PROPOSAL_STATUS_VOTING_PERIOD":
@@ -968,6 +1096,7 @@ def main():
 
     info(f"Voting with {len(valid_validator_accounts)} validator(s)...")
     vote_gas = estimate_gas_for_vote(buffer_percent=50.0)
+    vote_fee = vote_gas * gas_price
 
     for account_name in valid_validator_accounts:
         vote_cmd = [
@@ -990,7 +1119,7 @@ def main():
             "--gas",
             str(vote_gas),
             "--fees",
-            f"{vote_gas}umirage",
+            f"{vote_fee}umirage",
             "--yes",
         ]
 
