@@ -60,6 +60,12 @@ install:
 
 build: install
 
+build-orchestrator:
+	@echo "--> building orchestrator"
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./mirage-orchestrator ./cmd/orchestrator
+
+build-all: build build-orchestrator
+
 # Build a specific version for upgrades
 build-version:
 	@if [ -z "$(V)" ]; then echo "Usage: make build-version V=v2.0.0"; exit 1; fi
@@ -67,7 +73,7 @@ build-version:
 	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./$(APPNAME)d-$(V) ./cmd/$(APPNAME)d
 	@echo "--> Binary created: ./$(APPNAME)d-$(V)"
 
-.PHONY: all install build build-version
+.PHONY: all install build build-version build-orchestrator build-all
 
 ##################
 ###  Protobuf  ###
