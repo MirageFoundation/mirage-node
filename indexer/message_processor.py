@@ -954,7 +954,20 @@ class MessageProcessor:
             logger.error("Error handling MsgUnblockUser: %s", e, exc_info=True)
 
     def _handle_delete(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgDelete."""
+        """Handle MsgDelete.
+
+        Security model (enforced HERE, not on-chain):
+        - Governance (authority = governance module address): can delete any post
+        - Admin (user level >= 100): can delete any post
+        - Regular user: can only delete their own posts
+
+        The blockchain accepts Delete messages from anyone (they just pay gas),
+        but this indexer enforces the actual authorization. Invalid deletes are
+        rejected here and have no effect - the attacker just wasted gas.
+        """
+        # Governance module address (deterministic, derived from "gov" module name)
+        GOV_MODULE_ADDRESS = "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg"
+
         try:
             parsed = MsgDelete()
             parsed.ParseFromString(value)
@@ -966,9 +979,27 @@ class MessageProcessor:
                 logger.warning("Rejected delete: missing owner or target")
                 return
 
-            deleter_level = self.db.get_user_level(owner)
+            # Check authorization: governance > admin > owner
+            is_governance = owner.lower() == GOV_MODULE_ADDRESS.lower()
+            deleter_level = self.db.get_user_level(owner) if not is_governance else 0
+            is_admin = deleter_level >= 100
 
-            if deleter_level >= 100:
+            if is_governance:
+                # Governance can delete any post
+                rows_affected = self.db.delete_post(target, None)
+                if rows_affected > 0:
+                    self.log_yaml(
+                        "Delete post (GOVERNANCE)",
+                        {
+                            "target": target,
+                            "timestamp": int(ts),
+                            "time_iso": self.iso_timestamp(ts),
+                        },
+                    )
+                else:
+                    logger.warning("Governance delete rejected: target %s not found", target)
+            elif is_admin:
+                # Admin (level >= 100) can delete any post
                 rows_affected = self.db.delete_post(target, None)
                 if rows_affected > 0:
                     self.log_yaml(
@@ -984,6 +1015,7 @@ class MessageProcessor:
                 else:
                     logger.warning("Admin delete rejected: target %s not found", target)
             else:
+                # Regular user: must own the post
                 rows_affected = self.db.delete_post(target, owner)
                 if rows_affected > 0:
                     self.log_yaml(
