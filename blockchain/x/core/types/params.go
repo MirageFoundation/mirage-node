@@ -145,6 +145,11 @@ func DefaultParams() Params {
 
 		// Max age in seconds for envelope_timestamp (replay protection)
 		MaxEnvelopeAge: 60,
+
+		// Bridge parameters
+		BridgeChains:              []*BridgeChainConfig{}, // No chains enabled by default
+		BridgeAttestationThreshold: 6667,                  // 66.67% of voting power required
+		BridgeFee:                 1_000_000,              // 1 MIRAGE flat fee (burned)
 	}
 }
 
@@ -221,6 +226,10 @@ func (p Params) Validate() error {
 		if tier.VoteWeight < 0 {
 			return fmt.Errorf("tier %d: vote_weight must be >= 0", i)
 		}
+	}
+	// Validate bridge params
+	if p.BridgeAttestationThreshold > 10000 {
+		return fmt.Errorf("bridge_attestation_threshold must be <= 10000 (basis points)")
 	}
 	return nil
 }

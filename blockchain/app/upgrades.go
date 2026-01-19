@@ -587,4 +587,57 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.9.0-bridge: Cross-chain bridge functionality
+	// - IBC bridge transfers for Cosmos chains (Osmosis, etc.)
+	// - Attested bridge for non-IBC chains (Solana, Ethereum)
+	// - New params: bridge_chains, bridge_attestation_threshold, bridge_fee
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.0-bridge",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.0-bridge...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Update core params with bridge defaults
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			changed := false
+
+			// Initialize bridge_chains if empty (no chains enabled by default)
+			if params.BridgeChains == nil {
+				params.BridgeChains = []*coretypes.BridgeChainConfig{}
+				changed = true
+				sdkCtx.Logger().Info("v1.9.0-bridge: initialized bridge_chains (empty)")
+			}
+
+			// Set attestation threshold: 66.67% (6667 basis points)
+			if params.BridgeAttestationThreshold == 0 {
+				params.BridgeAttestationThreshold = 6667
+				changed = true
+				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_attestation_threshold", "value", params.BridgeAttestationThreshold)
+			}
+
+			// Set bridge fee: 1 MIRAGE (1,000,000 umirage)
+			if params.BridgeFee == 0 {
+				params.BridgeFee = 1_000_000
+				changed = true
+				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_fee", "value", params.BridgeFee)
+			}
+
+			if changed {
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.9.0-bridge: failed to update params", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.9.0-bridge: params updated successfully")
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.0-bridge complete - cross-chain bridge enabled")
+			return toVM, nil
+		},
+	)
 }

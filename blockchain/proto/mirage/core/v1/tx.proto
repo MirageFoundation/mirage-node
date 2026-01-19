@@ -82,6 +82,18 @@ service Msg {
   // Paid subscribers must pay via reserve; PoW is not allowed.
   rpc SetAutoRenewal(MsgSetAutoRenewal) returns (MsgSetAutoRenewalResponse);
 
+  // IBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis).
+  // Uses envelope fields for relay signature verification.
+  rpc IBCTransfer(MsgIBCTransfer) returns (MsgIBCTransferResponse);
+
+  // BridgeBurn burns MIRAGE tokens for bridging to an external chain (e.g., Solana).
+  // Uses envelope fields for relay signature verification.
+  rpc BridgeBurn(MsgBridgeBurn) returns (MsgBridgeBurnResponse);
+
+  // BridgeAttest allows validators to attest to a burn on an external chain.
+  // Does NOT use envelope - signed directly by validator's consensus key.
+  rpc BridgeAttest(MsgBridgeAttest) returns (MsgBridgeAttestResponse);
+
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
@@ -588,3 +600,84 @@ message MsgSetAutoRenewal {
 }
 
 message MsgSetAutoRenewalResponse {}
+
+// MsgIBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis)
+message MsgIBCTransfer {
+  option (cosmos.msg.v1.signer) = "authority";
+  
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1;
+  
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+  
+  // Payload
+  string receiver = 100;           // destination address on target chain (e.g., osmo1...)
+  uint64 amount = 101;             // amount in umirage to transfer
+  string source_channel = 102;     // IBC channel ID (e.g., "channel-1")
+  uint64 timeout_seconds = 103;    // timeout in seconds from now (default: 600 = 10 min)
+}
+
+message MsgIBCTransferResponse {
+  uint64 sequence = 1;  // IBC packet sequence number
+}
+
+// MsgBridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
+message MsgBridgeBurn {
+  option (cosmos.msg.v1.signer) = "authority";
+  
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1;
+  
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+  
+  // Payload
+  string destination_chain = 100;    // target chain identifier (e.g., "solana", "ethereum")
+  string destination_address = 101;  // recipient address on target chain
+  uint64 amount = 102;               // amount in umirage to burn and bridge
+}
+
+message MsgBridgeBurnResponse {
+  string burn_id = 1;  // unique burn identifier (tx hash)
+}
+
+// MsgBridgeAttest allows validators to attest to a burn on an external chain
+// NOTE: This message does NOT use envelope fields - it's signed directly by validator
+message MsgBridgeAttest {
+  option (cosmos.msg.v1.signer) = "validator";
+  option (amino.name) = "mirage/x/core/MsgBridgeAttest";
+
+  // validator is the validator operator address submitting the attestation
+  string validator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // source_chain is the external chain where the burn occurred
+  string source_chain = 2;
+
+  // burn_id is the unique identifier of the burn on the external chain (tx hash)
+  string burn_id = 3;
+
+  // mirage_recipient is the destination address on Mirage chain
+  string mirage_recipient = 4;
+
+  // amount is the amount burned on the external chain (in umirage equivalent)
+  uint64 amount = 5;
+}
+
+message MsgBridgeAttestResponse {
+  bool minted = 1;           // true if this attestation triggered minting
+  int64 attested_power = 2;  // total voting power that has attested
+  int64 required_power = 3;  // voting power required to mint (66.67% threshold)
+}

@@ -402,6 +402,58 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgIBCTransfer:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				// Paid users: require reserve and skip PoW
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgIBCTransfer", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForIBCTransfer(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgIBCTransfer", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
+		case *coretypes.MsgBridgeBurn:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				// Paid users: require reserve and skip PoW
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBridgeBurn", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForBridgeBurn(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBridgeBurn", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
 		case *coretypes.MsgFollowModerator:
 			if m.Authority == govAuthority {
 				continue
@@ -753,6 +805,33 @@ func buildCanonForSendTokens(m *coretypes.MsgSendTokens) []byte {
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeString(100, m.Sender)
 	cw.writeString(101, m.Target)
+	cw.writeUvarint(102, m.Amount)
+	return cw.buf
+}
+
+func buildCanonForIBCTransfer(m *coretypes.MsgIBCTransfer) []byte {
+	cw := newCanonWriter("MsgIBCTransfer")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Receiver)
+	cw.writeUvarint(101, m.Amount)
+	cw.writeString(102, m.SourceChannel)
+	cw.writeUvarint(103, m.TimeoutSeconds)
+	return cw.buf
+}
+
+func buildCanonForBridgeBurn(m *coretypes.MsgBridgeBurn) []byte {
+	cw := newCanonWriter("MsgBridgeBurn")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.DestinationChain)
+	cw.writeString(101, m.DestinationAddress)
 	cw.writeUvarint(102, m.Amount)
 	return cw.buf
 }

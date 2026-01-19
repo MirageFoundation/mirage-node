@@ -568,6 +568,379 @@ func (m *QueryProfilesResponse) GetPagination() *query.PageResponse {
 	return nil
 }
 
+// QueryBridgeStatusRequest is the request type for the Query/BridgeStatus RPC method.
+type QueryBridgeStatusRequest struct {
+}
+
+func (m *QueryBridgeStatusRequest) Reset()         { *m = QueryBridgeStatusRequest{} }
+func (m *QueryBridgeStatusRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeStatusRequest) ProtoMessage()    {}
+func (*QueryBridgeStatusRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{8}
+}
+func (m *QueryBridgeStatusRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeStatusRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeStatusRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeStatusRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeStatusRequest.Merge(m, src)
+}
+func (m *QueryBridgeStatusRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeStatusRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeStatusRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeStatusRequest proto.InternalMessageInfo
+
+// QueryBridgeStatusResponse is the response type for the Query/BridgeStatus RPC method.
+type QueryBridgeStatusResponse struct {
+	// enabled_chains lists all chains with bridging currently enabled
+	EnabledChains []*BridgeChainConfig `protobuf:"bytes,1,rep,name=enabled_chains,json=enabledChains,proto3" json:"enabled_chains,omitempty"`
+	// pending_attestations_count is the number of attestations awaiting threshold
+	PendingAttestationsCount uint64 `protobuf:"varint,2,opt,name=pending_attestations_count,json=pendingAttestationsCount,proto3" json:"pending_attestations_count,omitempty"`
+}
+
+func (m *QueryBridgeStatusResponse) Reset()         { *m = QueryBridgeStatusResponse{} }
+func (m *QueryBridgeStatusResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeStatusResponse) ProtoMessage()    {}
+func (*QueryBridgeStatusResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{9}
+}
+func (m *QueryBridgeStatusResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeStatusResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeStatusResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeStatusResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeStatusResponse.Merge(m, src)
+}
+func (m *QueryBridgeStatusResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeStatusResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeStatusResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeStatusResponse proto.InternalMessageInfo
+
+func (m *QueryBridgeStatusResponse) GetEnabledChains() []*BridgeChainConfig {
+	if m != nil {
+		return m.EnabledChains
+	}
+	return nil
+}
+
+func (m *QueryBridgeStatusResponse) GetPendingAttestationsCount() uint64 {
+	if m != nil {
+		return m.PendingAttestationsCount
+	}
+	return 0
+}
+
+// QueryBridgeAttestationRequest is the request type for the Query/BridgeAttestation RPC method.
+type QueryBridgeAttestationRequest struct {
+	SourceChain string `protobuf:"bytes,1,opt,name=source_chain,json=sourceChain,proto3" json:"source_chain,omitempty"`
+	BurnId      string `protobuf:"bytes,2,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+}
+
+func (m *QueryBridgeAttestationRequest) Reset()         { *m = QueryBridgeAttestationRequest{} }
+func (m *QueryBridgeAttestationRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeAttestationRequest) ProtoMessage()    {}
+func (*QueryBridgeAttestationRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{10}
+}
+func (m *QueryBridgeAttestationRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeAttestationRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeAttestationRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeAttestationRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeAttestationRequest.Merge(m, src)
+}
+func (m *QueryBridgeAttestationRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeAttestationRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeAttestationRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeAttestationRequest proto.InternalMessageInfo
+
+func (m *QueryBridgeAttestationRequest) GetSourceChain() string {
+	if m != nil {
+		return m.SourceChain
+	}
+	return ""
+}
+
+func (m *QueryBridgeAttestationRequest) GetBurnId() string {
+	if m != nil {
+		return m.BurnId
+	}
+	return ""
+}
+
+// QueryBridgeAttestationResponse is the response type for the Query/BridgeAttestation RPC method.
+type QueryBridgeAttestationResponse struct {
+	// found indicates whether the attestation exists
+	Found bool `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	// source_chain is the external chain where the burn occurred
+	SourceChain string `protobuf:"bytes,2,opt,name=source_chain,json=sourceChain,proto3" json:"source_chain,omitempty"`
+	// burn_id is the unique identifier of the burn
+	BurnId string `protobuf:"bytes,3,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+	// mirage_recipient is the destination address on Mirage chain
+	MirageRecipient string `protobuf:"bytes,4,opt,name=mirage_recipient,json=mirageRecipient,proto3" json:"mirage_recipient,omitempty"`
+	// amount is the amount to be minted (in umirage)
+	Amount uint64 `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	// attestors lists the validator addresses that have attested
+	Attestors []string `protobuf:"bytes,6,rep,name=attestors,proto3" json:"attestors,omitempty"`
+	// attested_power is the total voting power that has attested
+	AttestedPower int64 `protobuf:"varint,7,opt,name=attested_power,json=attestedPower,proto3" json:"attested_power,omitempty"`
+	// required_power is the voting power required to mint
+	RequiredPower int64 `protobuf:"varint,8,opt,name=required_power,json=requiredPower,proto3" json:"required_power,omitempty"`
+	// minted indicates whether tokens have been minted
+	Minted bool `protobuf:"varint,9,opt,name=minted,proto3" json:"minted,omitempty"`
+	// created_at is the block height when attestation was first created
+	CreatedAt int64 `protobuf:"varint,10,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+}
+
+func (m *QueryBridgeAttestationResponse) Reset()         { *m = QueryBridgeAttestationResponse{} }
+func (m *QueryBridgeAttestationResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeAttestationResponse) ProtoMessage()    {}
+func (*QueryBridgeAttestationResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{11}
+}
+func (m *QueryBridgeAttestationResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeAttestationResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeAttestationResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeAttestationResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeAttestationResponse.Merge(m, src)
+}
+func (m *QueryBridgeAttestationResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeAttestationResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeAttestationResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeAttestationResponse proto.InternalMessageInfo
+
+func (m *QueryBridgeAttestationResponse) GetFound() bool {
+	if m != nil {
+		return m.Found
+	}
+	return false
+}
+
+func (m *QueryBridgeAttestationResponse) GetSourceChain() string {
+	if m != nil {
+		return m.SourceChain
+	}
+	return ""
+}
+
+func (m *QueryBridgeAttestationResponse) GetBurnId() string {
+	if m != nil {
+		return m.BurnId
+	}
+	return ""
+}
+
+func (m *QueryBridgeAttestationResponse) GetMirageRecipient() string {
+	if m != nil {
+		return m.MirageRecipient
+	}
+	return ""
+}
+
+func (m *QueryBridgeAttestationResponse) GetAmount() uint64 {
+	if m != nil {
+		return m.Amount
+	}
+	return 0
+}
+
+func (m *QueryBridgeAttestationResponse) GetAttestors() []string {
+	if m != nil {
+		return m.Attestors
+	}
+	return nil
+}
+
+func (m *QueryBridgeAttestationResponse) GetAttestedPower() int64 {
+	if m != nil {
+		return m.AttestedPower
+	}
+	return 0
+}
+
+func (m *QueryBridgeAttestationResponse) GetRequiredPower() int64 {
+	if m != nil {
+		return m.RequiredPower
+	}
+	return 0
+}
+
+func (m *QueryBridgeAttestationResponse) GetMinted() bool {
+	if m != nil {
+		return m.Minted
+	}
+	return false
+}
+
+func (m *QueryBridgeAttestationResponse) GetCreatedAt() int64 {
+	if m != nil {
+		return m.CreatedAt
+	}
+	return 0
+}
+
+// QueryBridgeConfigRequest is the request type for the Query/BridgeConfig RPC method.
+type QueryBridgeConfigRequest struct {
+}
+
+func (m *QueryBridgeConfigRequest) Reset()         { *m = QueryBridgeConfigRequest{} }
+func (m *QueryBridgeConfigRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeConfigRequest) ProtoMessage()    {}
+func (*QueryBridgeConfigRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{12}
+}
+func (m *QueryBridgeConfigRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeConfigRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeConfigRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeConfigRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeConfigRequest.Merge(m, src)
+}
+func (m *QueryBridgeConfigRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeConfigRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeConfigRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeConfigRequest proto.InternalMessageInfo
+
+// QueryBridgeConfigResponse is the response type for the Query/BridgeConfig RPC method.
+type QueryBridgeConfigResponse struct {
+	// chains lists all configured bridge chains
+	Chains []*BridgeChainConfig `protobuf:"bytes,1,rep,name=chains,proto3" json:"chains,omitempty"`
+	// attestation_threshold is the voting power threshold (basis points, e.g., 6667 = 66.67%)
+	AttestationThreshold uint64 `protobuf:"varint,2,opt,name=attestation_threshold,json=attestationThreshold,proto3" json:"attestation_threshold,omitempty"`
+	// bridge_fee is the flat fee in umirage for bridge transfers
+	BridgeFee uint64 `protobuf:"varint,3,opt,name=bridge_fee,json=bridgeFee,proto3" json:"bridge_fee,omitempty"`
+}
+
+func (m *QueryBridgeConfigResponse) Reset()         { *m = QueryBridgeConfigResponse{} }
+func (m *QueryBridgeConfigResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeConfigResponse) ProtoMessage()    {}
+func (*QueryBridgeConfigResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{13}
+}
+func (m *QueryBridgeConfigResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *QueryBridgeConfigResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_QueryBridgeConfigResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *QueryBridgeConfigResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_QueryBridgeConfigResponse.Merge(m, src)
+}
+func (m *QueryBridgeConfigResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *QueryBridgeConfigResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_QueryBridgeConfigResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_QueryBridgeConfigResponse proto.InternalMessageInfo
+
+func (m *QueryBridgeConfigResponse) GetChains() []*BridgeChainConfig {
+	if m != nil {
+		return m.Chains
+	}
+	return nil
+}
+
+func (m *QueryBridgeConfigResponse) GetAttestationThreshold() uint64 {
+	if m != nil {
+		return m.AttestationThreshold
+	}
+	return 0
+}
+
+func (m *QueryBridgeConfigResponse) GetBridgeFee() uint64 {
+	if m != nil {
+		return m.BridgeFee
+	}
+	return 0
+}
+
 func init() {
 	proto.RegisterType((*QueryParamsRequest)(nil), "mirage.core.v1.QueryParamsRequest")
 	proto.RegisterType((*QueryParamsResponse)(nil), "mirage.core.v1.QueryParamsResponse")
@@ -577,73 +950,104 @@ func init() {
 	proto.RegisterType((*QueryProfileResponse)(nil), "mirage.core.v1.QueryProfileResponse")
 	proto.RegisterType((*QueryProfilesRequest)(nil), "mirage.core.v1.QueryProfilesRequest")
 	proto.RegisterType((*QueryProfilesResponse)(nil), "mirage.core.v1.QueryProfilesResponse")
+	proto.RegisterType((*QueryBridgeStatusRequest)(nil), "mirage.core.v1.QueryBridgeStatusRequest")
+	proto.RegisterType((*QueryBridgeStatusResponse)(nil), "mirage.core.v1.QueryBridgeStatusResponse")
+	proto.RegisterType((*QueryBridgeAttestationRequest)(nil), "mirage.core.v1.QueryBridgeAttestationRequest")
+	proto.RegisterType((*QueryBridgeAttestationResponse)(nil), "mirage.core.v1.QueryBridgeAttestationResponse")
+	proto.RegisterType((*QueryBridgeConfigRequest)(nil), "mirage.core.v1.QueryBridgeConfigRequest")
+	proto.RegisterType((*QueryBridgeConfigResponse)(nil), "mirage.core.v1.QueryBridgeConfigResponse")
 }
 
 func init() { proto.RegisterFile("mirage/core/v1/query.proto", fileDescriptor_c69a11bcea5c6b00) }
 
 var fileDescriptor_c69a11bcea5c6b00 = []byte{
-	// 972 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x8c, 0x55, 0x4d, 0x6f, 0xe3, 0x44,
-	0x18, 0xae, 0x9b, 0x36, 0x4d, 0xa6, 0x5f, 0xdb, 0x69, 0xb7, 0x58, 0xa1, 0x84, 0xac, 0xcb, 0x6e,
-	0x43, 0xc5, 0xc6, 0x6a, 0x39, 0x71, 0x83, 0x2e, 0x2c, 0x7b, 0x60, 0xa5, 0x62, 0xb1, 0x17, 0x0e,
-	0x58, 0x13, 0xe7, 0x8d, 0x33, 0xc2, 0xf1, 0xb8, 0x33, 0xe3, 0x64, 0x23, 0x84, 0x10, 0xfc, 0x02,
-	0x24, 0xfe, 0x01, 0x27, 0x8e, 0xfc, 0x8c, 0x3d, 0xae, 0xd4, 0x0b, 0xe2, 0x80, 0x50, 0x8b, 0xc4,
-	0x7f, 0xe0, 0x84, 0xe6, 0xc3, 0x89, 0xd3, 0x96, 0x96, 0x4b, 0xe4, 0x79, 0x9e, 0xe7, 0xfd, 0x98,
-	0x77, 0x5e, 0x3d, 0x41, 0x8d, 0x21, 0xe5, 0x24, 0x06, 0x3f, 0x62, 0x1c, 0xfc, 0xd1, 0x91, 0x7f,
-	0x96, 0x03, 0x9f, 0x74, 0x32, 0xce, 0x24, 0xc3, 0x1b, 0x86, 0xeb, 0x28, 0xae, 0x33, 0x3a, 0x6a,
-	0x6c, 0x91, 0x21, 0x4d, 0x99, 0xaf, 0x7f, 0x8d, 0xa4, 0xb1, 0x13, 0xb3, 0x98, 0xe9, 0x4f, 0x5f,
-	0x7d, 0x59, 0x74, 0x2f, 0x66, 0x2c, 0x4e, 0xc0, 0x27, 0x19, 0xf5, 0x49, 0x9a, 0x32, 0x49, 0x24,
-	0x65, 0xa9, 0xb0, 0xec, 0x61, 0xc4, 0xc4, 0x90, 0x09, 0xbf, 0x4b, 0x04, 0x98, 0x7a, 0xfe, 0xe8,
-	0xa8, 0x0b, 0x92, 0x1c, 0xf9, 0x19, 0x89, 0x69, 0xaa, 0xc5, 0x56, 0xfb, 0xe6, 0x95, 0xf6, 0x32,
-	0xc2, 0xc9, 0xd0, 0x26, 0xf2, 0x76, 0x10, 0xfe, 0x5c, 0x85, 0x9f, 0x6a, 0x30, 0x80, 0xb3, 0x1c,
-	0x84, 0xf4, 0x4e, 0xd1, 0xf6, 0x1c, 0x2a, 0x32, 0x96, 0x0a, 0xc0, 0x1f, 0xa0, 0xaa, 0x09, 0x76,
-	0x9d, 0x96, 0xd3, 0x5e, 0x3d, 0xde, 0xed, 0xcc, 0xdf, 0xae, 0x63, 0xf4, 0x27, 0xf5, 0x57, 0x7f,
-	0xbc, 0xbd, 0xf0, 0xcb, 0xdf, 0xbf, 0x1e, 0x3a, 0x81, 0x0d, 0xf0, 0x5c, 0xb4, 0xab, 0x33, 0x7e,
-	0x4c, 0xfb, 0x7d, 0x1a, 0xe5, 0x89, 0x9c, 0x14, 0xb5, 0x7e, 0x5f, 0x44, 0x6f, 0x5c, 0xa3, 0x6c,
-	0xc1, 0xc7, 0x08, 0x47, 0x39, 0xe7, 0x90, 0xca, 0xb0, 0x37, 0x65, 0x75, 0xf1, 0xa5, 0x60, 0xcb,
-	0x32, 0xb3, 0x30, 0xec, 0xa3, 0xed, 0x8c, 0xc3, 0x88, 0xb2, 0x5c, 0x94, 0xf5, 0x8b, 0x5a, 0x8f,
-	0x0b, 0xaa, 0x14, 0xf0, 0x1e, 0xc2, 0x09, 0x11, 0x32, 0x8c, 0x06, 0x24, 0x8d, 0x21, 0x1c, 0x00,
-	0x8d, 0x07, 0xd2, 0xad, 0xb4, 0x9c, 0x76, 0x25, 0xb8, 0xa7, 0x98, 0x27, 0x9a, 0x78, 0xa6, 0x71,
-	0x7c, 0x88, 0xb6, 0x32, 0x36, 0x0e, 0x87, 0x20, 0x04, 0x89, 0x21, 0x8c, 0x58, 0x9e, 0x4a, 0x77,
-	0x49, 0x27, 0xdf, 0xcc, 0xd8, 0xf8, 0xb9, 0xc1, 0x9f, 0x28, 0x18, 0x1f, 0xa3, 0xfb, 0x91, 0xba,
-	0x42, 0x94, 0x4b, 0x3a, 0x82, 0x30, 0x61, 0xe3, 0x30, 0x57, 0xac, 0xbb, 0xac, 0xf5, 0xdb, 0x25,
-	0xf2, 0x33, 0x36, 0x7e, 0xa1, 0x28, 0x95, 0x3f, 0x21, 0x12, 0x84, 0x0c, 0xbb, 0x09, 0x8b, 0xbe,
-	0x0e, 0x07, 0x44, 0x0c, 0xdc, 0x6a, 0xcb, 0x69, 0xd7, 0x83, 0x4d, 0x43, 0x9c, 0x28, 0xfc, 0x19,
-	0x11, 0x03, 0xfc, 0x10, 0x6d, 0x14, 0x93, 0xb1, 0x5d, 0xaf, 0xe8, 0xae, 0xd7, 0x2d, 0x6a, 0x5a,
-	0xf6, 0xfc, 0xe2, 0x21, 0x39, 0xeb, 0xd3, 0x04, 0xec, 0xcc, 0xb1, 0x8b, 0x56, 0x48, 0xaf, 0xc7,
-	0x41, 0x98, 0x97, 0xac, 0x07, 0xc5, 0xd1, 0x3b, 0x5f, 0x42, 0x3b, 0xf3, 0x11, 0xf6, 0x29, 0x76,
-	0xd0, 0x32, 0x1b, 0xa7, 0xc0, 0x6d, 0x80, 0x39, 0xe0, 0x06, 0xaa, 0xe5, 0x02, 0x78, 0x4a, 0x86,
-	0xa0, 0xc7, 0x5c, 0x0f, 0xa6, 0x67, 0x15, 0x91, 0xc0, 0x08, 0x12, 0x3d, 0xcf, 0xe5, 0xc0, 0x1c,
-	0xf0, 0x5b, 0x08, 0x45, 0x1c, 0x88, 0x84, 0x5e, 0x48, 0xcc, 0xf4, 0x2a, 0x41, 0xdd, 0x22, 0x1f,
-	0x49, 0xf5, 0x84, 0x22, 0xef, 0x8a, 0x88, 0xd3, 0x4c, 0xad, 0x70, 0x08, 0x2f, 0x33, 0xca, 0x27,
-	0x7a, 0x6a, 0x95, 0x00, 0x97, 0xa9, 0x4f, 0x34, 0xa3, 0xf2, 0x91, 0x5c, 0xb2, 0x90, 0x43, 0x0a,
-	0x63, 0x3d, 0xad, 0x5a, 0x50, 0x57, 0x48, 0xa0, 0x00, 0xbc, 0x8f, 0xd6, 0x39, 0x08, 0xe0, 0x23,
-	0x08, 0xfb, 0x79, 0xda, 0x13, 0x7a, 0x4c, 0x4b, 0xc1, 0x9a, 0x05, 0x9f, 0x2a, 0x0c, 0x3f, 0x40,
-	0x6b, 0x54, 0x84, 0x43, 0xd6, 0x03, 0x4e, 0x24, 0xe3, 0x6e, 0x4d, 0x67, 0x59, 0xa5, 0xe2, 0x79,
-	0x01, 0xe1, 0x3d, 0x54, 0xef, 0x52, 0x16, 0x73, 0x92, 0x0d, 0x26, 0x6e, 0x5d, 0xdf, 0x74, 0x06,
-	0xe0, 0x5d, 0x54, 0x25, 0x23, 0x22, 0x09, 0x77, 0x91, 0xa6, 0xec, 0x49, 0xe1, 0x5d, 0x92, 0xaa,
-	0xa9, 0xad, 0x1a, 0xdc, 0x9c, 0xd4, 0x2d, 0xfb, 0x2c, 0x49, 0xd8, 0x18, 0x7a, 0xb3, 0xb2, 0xc2,
-	0x5d, 0x6b, 0x55, 0xda, 0xf5, 0x00, 0x17, 0xd4, 0xb4, 0xba, 0x50, 0xcf, 0x3d, 0x0d, 0x50, 0x03,
-	0x16, 0xee, 0xba, 0xd6, 0xae, 0x17, 0xe8, 0x0b, 0x05, 0xe2, 0x03, 0xb4, 0x39, 0x95, 0x49, 0x96,
-	0xd1, 0x48, 0xb8, 0x1b, 0x5a, 0x37, 0x8d, 0xfe, 0x42, 0xa3, 0x6a, 0x2c, 0x7a, 0xc7, 0xa6, 0xe9,
-	0x36, 0xb5, 0x6c, 0xcd, 0x82, 0x26, 0x5b, 0x49, 0x94, 0x31, 0x21, 0x85, 0x7b, 0x6f, 0x4e, 0x74,
-	0xaa, 0x30, 0x25, 0x3a, 0xcb, 0x49, 0x42, 0xe5, 0xc4, 0x8a, 0xb6, 0x8c, 0xc8, 0x82, 0x5a, 0xe4,
-	0x7d, 0x35, 0xbf, 0x54, 0x85, 0xcf, 0xe0, 0xa7, 0x08, 0xcd, 0xec, 0xca, 0x9a, 0xca, 0xa3, 0x8e,
-	0xf1, 0xb6, 0x8e, 0xf2, 0xb6, 0x8e, 0xf1, 0x52, 0xeb, 0x6d, 0x9d, 0x53, 0x12, 0x17, 0x3b, 0x1c,
-	0x94, 0x22, 0xbd, 0x9f, 0x1d, 0x74, 0xff, 0x4a, 0x01, 0xbb, 0xb6, 0x1f, 0xa2, 0x5a, 0x66, 0x31,
-	0xd7, 0x69, 0x55, 0xda, 0xab, 0xc7, 0xef, 0x5c, 0x35, 0xad, 0x9b, 0xd6, 0x3d, 0x98, 0x46, 0xe1,
-	0x4f, 0xe7, 0x7a, 0x5c, 0xd4, 0x3d, 0x1e, 0xdc, 0xd9, 0xa3, 0x4d, 0x53, 0x0a, 0x3d, 0xfe, 0xa7,
-	0x82, 0x96, 0x75, 0x2d, 0x7c, 0x86, 0xaa, 0xc6, 0x29, 0xb1, 0x77, 0x73, 0x33, 0x65, 0x33, 0x6e,
-	0xec, 0xdf, 0xaa, 0x31, 0x85, 0xbc, 0xe6, 0x0f, 0xe7, 0x7f, 0xfd, 0xb4, 0xe8, 0xe2, 0x5d, 0xff,
-	0x46, 0xb7, 0xc7, 0xdf, 0x3b, 0x08, 0x95, 0x8c, 0xef, 0xd1, 0x8d, 0x39, 0xaf, 0x99, 0x73, 0xe3,
-	0xe0, 0x4e, 0x9d, 0xad, 0xef, 0xe9, 0xfa, 0x7b, 0xb8, 0x71, 0xb5, 0xfe, 0xcc, 0x87, 0xf1, 0x77,
-	0x68, 0xc5, 0x8e, 0x19, 0xef, 0xdf, 0xfe, 0x08, 0xa6, 0xf8, 0xff, 0x7a, 0x29, 0xef, 0x5d, 0x5d,
-	0x79, 0x1f, 0x3f, 0xb8, 0x76, 0x73, 0x23, 0xf4, 0xbf, 0xb1, 0xde, 0xf6, 0x2d, 0x9e, 0xa0, 0x5a,
-	0xb1, 0x20, 0xf8, 0xd6, 0xe4, 0xd3, 0xd9, 0x3f, 0xbc, 0x43, 0x65, 0x7b, 0x68, 0xe9, 0x1e, 0x1a,
-	0xd8, 0xfd, 0x8f, 0x1e, 0xc4, 0xc9, 0xe3, 0x57, 0x17, 0x4d, 0xe7, 0xf5, 0x45, 0xd3, 0xf9, 0xf3,
-	0xa2, 0xe9, 0xfc, 0x78, 0xd9, 0x5c, 0x78, 0x7d, 0xd9, 0x5c, 0xf8, 0xed, 0xb2, 0xb9, 0xf0, 0xe5,
-	0xb6, 0x0d, 0x79, 0x69, 0x82, 0xe4, 0x24, 0x03, 0xd1, 0xad, 0xea, 0x7f, 0xe7, 0xf7, 0xff, 0x0d,
-	0x00, 0x00, 0xff, 0xff, 0xa8, 0x8c, 0xae, 0x5e, 0x5b, 0x08, 0x00, 0x00,
+	// 1366 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0x94, 0x57, 0x4d, 0x6f, 0x1b, 0x45,
+	0x18, 0xce, 0xc6, 0x89, 0x63, 0x4f, 0xbe, 0x9a, 0x49, 0x9a, 0x2e, 0xa6, 0x75, 0x93, 0x0d, 0x6d,
+	0xd3, 0x8a, 0x7a, 0x95, 0xf4, 0x84, 0x00, 0x89, 0x26, 0x50, 0x8a, 0x44, 0xa5, 0xb0, 0xb4, 0x17,
+	0x90, 0x58, 0x8d, 0x77, 0xc7, 0xeb, 0x11, 0xeb, 0x9d, 0xcd, 0xcc, 0xac, 0x5d, 0xab, 0xaa, 0x10,
+	0x1c, 0x39, 0x21, 0xf1, 0x0f, 0xe0, 0x82, 0x38, 0x71, 0xe3, 0x2f, 0xf4, 0x84, 0x2a, 0xf5, 0x52,
+	0x71, 0x40, 0xa8, 0x45, 0xe2, 0x6f, 0xa0, 0xf9, 0x58, 0x7b, 0xfd, 0x51, 0xa7, 0x5c, 0x22, 0xcf,
+	0xf3, 0x3e, 0xef, 0xc7, 0xbc, 0xf3, 0xce, 0xb3, 0x13, 0x50, 0xeb, 0x10, 0x86, 0x22, 0xec, 0x06,
+	0x94, 0x61, 0xb7, 0x7b, 0xe0, 0x9e, 0x66, 0x98, 0xf5, 0x1b, 0x29, 0xa3, 0x82, 0xc2, 0x35, 0x6d,
+	0x6b, 0x48, 0x5b, 0xa3, 0x7b, 0x50, 0xdb, 0x40, 0x1d, 0x92, 0x50, 0x57, 0xfd, 0xd5, 0x94, 0xda,
+	0x56, 0x44, 0x23, 0xaa, 0x7e, 0xba, 0xf2, 0x97, 0x41, 0x2f, 0x46, 0x94, 0x46, 0x31, 0x76, 0x51,
+	0x4a, 0x5c, 0x94, 0x24, 0x54, 0x20, 0x41, 0x68, 0xc2, 0x8d, 0xf5, 0x46, 0x40, 0x79, 0x87, 0x72,
+	0xb7, 0x89, 0x38, 0xd6, 0xf9, 0xdc, 0xee, 0x41, 0x13, 0x0b, 0x74, 0xe0, 0xa6, 0x28, 0x22, 0x89,
+	0x22, 0x1b, 0xee, 0x9b, 0x63, 0xe5, 0xa5, 0x88, 0xa1, 0x8e, 0x09, 0xe4, 0x6c, 0x01, 0xf8, 0x99,
+	0x74, 0x3f, 0x51, 0xa0, 0x87, 0x4f, 0x33, 0xcc, 0x85, 0x73, 0x02, 0x36, 0x47, 0x50, 0x9e, 0xd2,
+	0x84, 0x63, 0xf8, 0x0e, 0x28, 0x6b, 0x67, 0xdb, 0xda, 0xb1, 0xf6, 0x97, 0x0f, 0xb7, 0x1b, 0xa3,
+	0xbb, 0x6b, 0x68, 0xfe, 0x51, 0xf5, 0xc9, 0x5f, 0x97, 0xe7, 0x7e, 0xf9, 0xf7, 0xb7, 0x1b, 0x96,
+	0x67, 0x1c, 0x1c, 0x1b, 0x6c, 0xab, 0x88, 0x1f, 0x92, 0x56, 0x8b, 0x04, 0x59, 0x2c, 0xfa, 0x79,
+	0xae, 0x3f, 0xe7, 0xc1, 0x85, 0x09, 0x93, 0x49, 0x78, 0x13, 0xc0, 0x20, 0x63, 0x0c, 0x27, 0xc2,
+	0x0f, 0x07, 0x56, 0x95, 0x7c, 0xc1, 0xdb, 0x30, 0x96, 0xa1, 0x1b, 0x74, 0xc1, 0x66, 0xca, 0x70,
+	0x97, 0xd0, 0x8c, 0x17, 0xf9, 0xf3, 0x8a, 0x0f, 0x73, 0x53, 0xc1, 0xe1, 0x6d, 0x00, 0x63, 0xc4,
+	0x85, 0x1f, 0xb4, 0x51, 0x12, 0x61, 0xbf, 0x8d, 0x49, 0xd4, 0x16, 0x76, 0x69, 0xc7, 0xda, 0x2f,
+	0x79, 0xe7, 0xa4, 0xe5, 0x58, 0x19, 0xee, 0x2a, 0x1c, 0xde, 0x00, 0x1b, 0x29, 0xed, 0xf9, 0x1d,
+	0xcc, 0x39, 0x8a, 0xb0, 0x1f, 0xd0, 0x2c, 0x11, 0xf6, 0x82, 0x0a, 0xbe, 0x9e, 0xd2, 0xde, 0x3d,
+	0x8d, 0x1f, 0x4b, 0x18, 0x1e, 0x82, 0xf3, 0x81, 0xdc, 0x42, 0x90, 0x09, 0xd2, 0xc5, 0x7e, 0x4c,
+	0x7b, 0x7e, 0x26, 0xad, 0xf6, 0xa2, 0xe2, 0x6f, 0x16, 0x8c, 0x9f, 0xd2, 0xde, 0x03, 0x69, 0x92,
+	0xf1, 0x63, 0x24, 0x30, 0x17, 0x7e, 0x33, 0xa6, 0xc1, 0xd7, 0x7e, 0x1b, 0xf1, 0xb6, 0x5d, 0xde,
+	0xb1, 0xf6, 0xab, 0xde, 0xba, 0x36, 0x1c, 0x49, 0xfc, 0x2e, 0xe2, 0x6d, 0x78, 0x05, 0xac, 0xe5,
+	0x9d, 0x31, 0x55, 0x2f, 0xa9, 0xaa, 0x57, 0x0d, 0xaa, 0x4b, 0x76, 0xdc, 0xfc, 0x20, 0x19, 0x6d,
+	0x91, 0x18, 0x9b, 0x9e, 0x43, 0x1b, 0x2c, 0xa1, 0x30, 0x64, 0x98, 0xeb, 0x93, 0xac, 0x7a, 0xf9,
+	0xd2, 0x79, 0xb6, 0x00, 0xb6, 0x46, 0x3d, 0xcc, 0x51, 0x6c, 0x81, 0x45, 0xda, 0x4b, 0x30, 0x33,
+	0x0e, 0x7a, 0x01, 0x6b, 0xa0, 0x92, 0x71, 0xcc, 0x12, 0xd4, 0xc1, 0xaa, 0xcd, 0x55, 0x6f, 0xb0,
+	0x96, 0x1e, 0x31, 0xee, 0xe2, 0x58, 0xf5, 0x73, 0xd1, 0xd3, 0x0b, 0x78, 0x09, 0x80, 0x80, 0x61,
+	0x24, 0x70, 0xe8, 0x23, 0xdd, 0xbd, 0x92, 0x57, 0x35, 0xc8, 0x6d, 0x21, 0x8f, 0x90, 0x67, 0x4d,
+	0x1e, 0x30, 0x92, 0xca, 0x11, 0xf6, 0xf1, 0xc3, 0x94, 0xb0, 0xbe, 0xea, 0x5a, 0xc9, 0x83, 0x45,
+	0xd3, 0x47, 0xca, 0x22, 0xe3, 0xa1, 0x4c, 0x50, 0x9f, 0xe1, 0x04, 0xf7, 0x54, 0xb7, 0x2a, 0x5e,
+	0x55, 0x22, 0x9e, 0x04, 0xe0, 0x1e, 0x58, 0x65, 0x98, 0x63, 0xd6, 0xc5, 0x7e, 0x2b, 0x4b, 0x42,
+	0xae, 0xda, 0xb4, 0xe0, 0xad, 0x18, 0xf0, 0x8e, 0xc4, 0xe0, 0x2e, 0x58, 0x21, 0xdc, 0xef, 0xd0,
+	0x10, 0x33, 0x24, 0x28, 0xb3, 0x2b, 0x2a, 0xca, 0x32, 0xe1, 0xf7, 0x72, 0x08, 0x5e, 0x04, 0xd5,
+	0x26, 0xa1, 0x11, 0x43, 0x69, 0xbb, 0x6f, 0x57, 0xd5, 0x4e, 0x87, 0x00, 0xdc, 0x06, 0x65, 0xd4,
+	0x45, 0x02, 0x31, 0x1b, 0x28, 0x93, 0x59, 0x49, 0xbc, 0x89, 0x12, 0xd9, 0xb5, 0x65, 0x8d, 0xeb,
+	0x95, 0xdc, 0x65, 0x8b, 0xc6, 0x31, 0xed, 0xe1, 0x70, 0x98, 0x96, 0xdb, 0x2b, 0x3b, 0xa5, 0xfd,
+	0xaa, 0x07, 0x73, 0xd3, 0x20, 0x3b, 0x97, 0xc7, 0x3d, 0x70, 0x90, 0x0d, 0xe6, 0xf6, 0xaa, 0xe2,
+	0xae, 0xe6, 0xe8, 0x03, 0x09, 0xc2, 0x6b, 0x60, 0x7d, 0x40, 0x13, 0x34, 0x25, 0x01, 0xb7, 0xd7,
+	0x14, 0x6f, 0xe0, 0x7d, 0x5f, 0xa1, 0xb2, 0x2d, 0x6a, 0xc6, 0x06, 0xe1, 0xd6, 0x15, 0x6d, 0xc5,
+	0x80, 0x3a, 0x5a, 0x81, 0x94, 0x52, 0x2e, 0xb8, 0x7d, 0x6e, 0x84, 0x74, 0x22, 0x31, 0x49, 0x3a,
+	0xcd, 0x50, 0x4c, 0x44, 0xdf, 0x90, 0x36, 0x34, 0xc9, 0x80, 0x8a, 0xe4, 0x7c, 0x35, 0x3a, 0x54,
+	0xb9, 0xce, 0xc0, 0x3b, 0x00, 0x0c, 0xe5, 0xca, 0x88, 0xca, 0xd5, 0x86, 0xd6, 0xb6, 0x86, 0xd4,
+	0xb6, 0x86, 0xd6, 0x52, 0xa3, 0x6d, 0x8d, 0x13, 0x14, 0xe5, 0x33, 0xec, 0x15, 0x3c, 0x9d, 0x9f,
+	0x2c, 0x70, 0x7e, 0x2c, 0x81, 0x19, 0xdb, 0x0f, 0x40, 0x25, 0x35, 0x98, 0x6d, 0xed, 0x94, 0xf6,
+	0x97, 0x0f, 0xdf, 0x1a, 0x17, 0xad, 0x69, 0xe3, 0xee, 0x0d, 0xbc, 0xe0, 0xc7, 0x23, 0x35, 0xce,
+	0xab, 0x1a, 0xaf, 0x9d, 0x59, 0xa3, 0x09, 0x53, 0x2c, 0xb2, 0x06, 0x6c, 0x95, 0xea, 0x88, 0x91,
+	0x30, 0xc2, 0x9f, 0x0b, 0x24, 0xb2, 0x81, 0xe0, 0xfe, 0x6c, 0x81, 0x37, 0xa6, 0x18, 0xcd, 0x26,
+	0xee, 0x82, 0x35, 0x9c, 0xa0, 0x66, 0x8c, 0x43, 0xa9, 0x54, 0x24, 0xc9, 0xb7, 0xb2, 0x3b, 0xbe,
+	0x15, 0xed, 0x7d, 0x2c, 0x39, 0xc7, 0x34, 0x69, 0x91, 0xc8, 0x5b, 0x35, 0x8e, 0x0a, 0xe3, 0xf0,
+	0x3d, 0x50, 0x4b, 0x71, 0x12, 0x92, 0x24, 0xf2, 0x91, 0x90, 0x8a, 0xa2, 0xbf, 0x2a, 0x46, 0xcb,
+	0xb4, 0x50, 0xda, 0x86, 0x71, 0xbb, 0x40, 0x50, 0xa2, 0xe6, 0x7c, 0x09, 0x2e, 0x15, 0x8a, 0x2c,
+	0xd8, 0xf3, 0xf3, 0xdc, 0x05, 0x2b, 0x9c, 0x66, 0x2c, 0xc0, 0xba, 0x4e, 0xa3, 0x15, 0xcb, 0x1a,
+	0x53, 0x25, 0xc0, 0x0b, 0x60, 0xa9, 0x99, 0xb1, 0xc4, 0x27, 0xa1, 0x11, 0x8c, 0xb2, 0x5c, 0x7e,
+	0x12, 0x3a, 0xcf, 0xe7, 0x41, 0xfd, 0x55, 0xd1, 0x87, 0x1a, 0xd4, 0xa2, 0x59, 0x12, 0xaa, 0xb8,
+	0x15, 0x4f, 0x2f, 0x26, 0x92, 0xce, 0xcf, 0x4c, 0x5a, 0x2a, 0x26, 0x85, 0xd7, 0xc1, 0x39, 0xdd,
+	0x42, 0x9f, 0xe1, 0x80, 0xa4, 0x04, 0x1b, 0x45, 0xaf, 0x7a, 0xeb, 0x1a, 0xf7, 0x72, 0x58, 0xdd,
+	0xf1, 0x8e, 0x6a, 0x93, 0x96, 0x70, 0xb3, 0x92, 0xca, 0xa0, 0x5b, 0x29, 0x6f, 0x70, 0x59, 0x0d,
+	0xff, 0x10, 0x90, 0x17, 0x57, 0x2f, 0xd4, 0x25, 0xea, 0x61, 0x96, 0xeb, 0x74, 0x8e, 0x9e, 0x48,
+	0x50, 0xd2, 0x18, 0x3e, 0xcd, 0x08, 0x1b, 0xd0, 0x2a, 0x9a, 0x96, 0xa3, 0x9a, 0xb6, 0x0d, 0xca,
+	0x1d, 0x92, 0x08, 0x1c, 0x2a, 0x09, 0xaa, 0x78, 0x66, 0x35, 0x26, 0xaa, 0x60, 0x4c, 0x54, 0xc7,
+	0x26, 0xcf, 0x4c, 0x86, 0x99, 0xbc, 0x5f, 0x47, 0x27, 0x2f, 0x37, 0x0e, 0xbf, 0xf8, 0xff, 0x77,
+	0xe2, 0x8c, 0x03, 0xbc, 0x05, 0xce, 0x17, 0x46, 0xcc, 0x17, 0x6d, 0x86, 0x79, 0x9b, 0xc6, 0xa1,
+	0x99, 0xb2, 0xad, 0x82, 0xf1, 0x7e, 0x6e, 0x93, 0x1b, 0x69, 0xaa, 0x88, 0x7e, 0x0b, 0x63, 0x75,
+	0x56, 0x0b, 0x5e, 0x55, 0x23, 0x77, 0x30, 0x3e, 0xfc, 0x63, 0x09, 0x2c, 0xaa, 0x62, 0xe1, 0x29,
+	0x28, 0xeb, 0xc7, 0x06, 0x74, 0xa6, 0xdf, 0xe7, 0xe2, 0x7b, 0xa6, 0xb6, 0x37, 0x93, 0xa3, 0xf7,
+	0xea, 0xd4, 0xbf, 0x7b, 0xf6, 0xcf, 0x8f, 0xf3, 0x36, 0xdc, 0x76, 0xa7, 0x3e, 0x98, 0xe0, 0xb7,
+	0x16, 0x00, 0x85, 0xb7, 0xc3, 0xd5, 0xa9, 0x31, 0x27, 0xde, 0x37, 0xb5, 0x6b, 0x67, 0xf2, 0x4c,
+	0x7e, 0x47, 0xe5, 0xbf, 0x08, 0x6b, 0xe3, 0xf9, 0x87, 0x4f, 0x19, 0xf8, 0x0d, 0x58, 0x32, 0x4a,
+	0x05, 0xf7, 0x66, 0xeb, 0x98, 0x4e, 0xfe, 0x5a, 0x62, 0xe7, 0x5c, 0x57, 0x99, 0xf7, 0xe0, 0xee,
+	0xc4, 0xce, 0x35, 0xd1, 0x7d, 0x64, 0x9e, 0x07, 0x8f, 0x61, 0x1f, 0x54, 0x72, 0x8d, 0x85, 0x33,
+	0x83, 0x0f, 0x7a, 0x7f, 0xe5, 0x0c, 0x96, 0xa9, 0x61, 0x47, 0xd5, 0x50, 0x83, 0xf6, 0x2b, 0x6a,
+	0xe0, 0xf0, 0x7b, 0x0b, 0xac, 0x14, 0xe5, 0x11, 0xee, 0x4f, 0x8d, 0x3c, 0x45, 0x5e, 0x6b, 0xd7,
+	0x5f, 0x83, 0x69, 0xea, 0xb8, 0xa2, 0xea, 0xb8, 0x0c, 0x2f, 0x8d, 0xd7, 0xa1, 0xa7, 0xd0, 0xe5,
+	0x3a, 0xf7, 0xef, 0x16, 0xd8, 0x98, 0x10, 0x2a, 0x78, 0x73, 0x46, 0x9e, 0x49, 0xb9, 0xac, 0x35,
+	0x5e, 0x97, 0x6e, 0x6a, 0x3b, 0x56, 0xb5, 0xbd, 0x0f, 0xdf, 0x7d, 0x45, 0x6d, 0x85, 0x2b, 0xe5,
+	0x3e, 0x2a, 0x6a, 0xe2, 0x63, 0xf7, 0x91, 0xd1, 0xbf, 0xc7, 0x85, 0x36, 0xea, 0x0b, 0x3b, 0xb3,
+	0x8d, 0x23, 0x5a, 0x31, 0xb3, 0x8d, 0xa3, 0xc2, 0x71, 0x66, 0x1b, 0x03, 0x45, 0x3f, 0xba, 0xf9,
+	0xe4, 0x45, 0xdd, 0x7a, 0xfa, 0xa2, 0x6e, 0xfd, 0xfd, 0xa2, 0x6e, 0xfd, 0xf0, 0xb2, 0x3e, 0xf7,
+	0xf4, 0x65, 0x7d, 0xee, 0xf9, 0xcb, 0xfa, 0xdc, 0x17, 0x9b, 0xc6, 0xef, 0xa1, 0xf6, 0x14, 0xfd,
+	0x14, 0xf3, 0x66, 0x59, 0xfd, 0xd3, 0x72, 0xeb, 0xbf, 0x00, 0x00, 0x00, 0xff, 0xff, 0x8a, 0x5a,
+	0xf3, 0x72, 0x72, 0x0d, 0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -666,6 +1070,12 @@ type QueryClient interface {
 	Profile(ctx context.Context, in *QueryProfileRequest, opts ...grpc.CallOption) (*QueryProfileResponse, error)
 	// Profiles queries all profiles with pagination.
 	Profiles(ctx context.Context, in *QueryProfilesRequest, opts ...grpc.CallOption) (*QueryProfilesResponse, error)
+	// BridgeStatus queries the current bridge status including enabled chains.
+	BridgeStatus(ctx context.Context, in *QueryBridgeStatusRequest, opts ...grpc.CallOption) (*QueryBridgeStatusResponse, error)
+	// BridgeAttestation queries a specific attestation by chain and burn_id.
+	BridgeAttestation(ctx context.Context, in *QueryBridgeAttestationRequest, opts ...grpc.CallOption) (*QueryBridgeAttestationResponse, error)
+	// BridgeConfig queries the bridge configuration parameters.
+	BridgeConfig(ctx context.Context, in *QueryBridgeConfigRequest, opts ...grpc.CallOption) (*QueryBridgeConfigResponse, error)
 }
 
 type queryClient struct {
@@ -712,6 +1122,33 @@ func (c *queryClient) Profiles(ctx context.Context, in *QueryProfilesRequest, op
 	return out, nil
 }
 
+func (c *queryClient) BridgeStatus(ctx context.Context, in *QueryBridgeStatusRequest, opts ...grpc.CallOption) (*QueryBridgeStatusResponse, error) {
+	out := new(QueryBridgeStatusResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Query/BridgeStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) BridgeAttestation(ctx context.Context, in *QueryBridgeAttestationRequest, opts ...grpc.CallOption) (*QueryBridgeAttestationResponse, error) {
+	out := new(QueryBridgeAttestationResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Query/BridgeAttestation", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *queryClient) BridgeConfig(ctx context.Context, in *QueryBridgeConfigRequest, opts ...grpc.CallOption) (*QueryBridgeConfigResponse, error) {
+	out := new(QueryBridgeConfigResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Query/BridgeConfig", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // QueryServer is the server API for Query service.
 type QueryServer interface {
 	// Parameters queries the parameters of the module.
@@ -722,6 +1159,12 @@ type QueryServer interface {
 	Profile(context.Context, *QueryProfileRequest) (*QueryProfileResponse, error)
 	// Profiles queries all profiles with pagination.
 	Profiles(context.Context, *QueryProfilesRequest) (*QueryProfilesResponse, error)
+	// BridgeStatus queries the current bridge status including enabled chains.
+	BridgeStatus(context.Context, *QueryBridgeStatusRequest) (*QueryBridgeStatusResponse, error)
+	// BridgeAttestation queries a specific attestation by chain and burn_id.
+	BridgeAttestation(context.Context, *QueryBridgeAttestationRequest) (*QueryBridgeAttestationResponse, error)
+	// BridgeConfig queries the bridge configuration parameters.
+	BridgeConfig(context.Context, *QueryBridgeConfigRequest) (*QueryBridgeConfigResponse, error)
 }
 
 // UnimplementedQueryServer can be embedded to have forward compatible implementations.
@@ -739,6 +1182,15 @@ func (*UnimplementedQueryServer) Profile(ctx context.Context, req *QueryProfileR
 }
 func (*UnimplementedQueryServer) Profiles(ctx context.Context, req *QueryProfilesRequest) (*QueryProfilesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Profiles not implemented")
+}
+func (*UnimplementedQueryServer) BridgeStatus(ctx context.Context, req *QueryBridgeStatusRequest) (*QueryBridgeStatusResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BridgeStatus not implemented")
+}
+func (*UnimplementedQueryServer) BridgeAttestation(ctx context.Context, req *QueryBridgeAttestationRequest) (*QueryBridgeAttestationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BridgeAttestation not implemented")
+}
+func (*UnimplementedQueryServer) BridgeConfig(ctx context.Context, req *QueryBridgeConfigRequest) (*QueryBridgeConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method BridgeConfig not implemented")
 }
 
 func RegisterQueryServer(s grpc1.Server, srv QueryServer) {
@@ -817,6 +1269,60 @@ func _Query_Profiles_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_BridgeStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryBridgeStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).BridgeStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Query/BridgeStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).BridgeStatus(ctx, req.(*QueryBridgeStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_BridgeAttestation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryBridgeAttestationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).BridgeAttestation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Query/BridgeAttestation",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).BridgeAttestation(ctx, req.(*QueryBridgeAttestationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Query_BridgeConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryBridgeConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).BridgeConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Query/BridgeConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).BridgeConfig(ctx, req.(*QueryBridgeConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 var Query_serviceDesc = _Query_serviceDesc
 var _Query_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "mirage.core.v1.Query",
@@ -837,6 +1343,18 @@ var _Query_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Profiles",
 			Handler:    _Query_Profiles_Handler,
+		},
+		{
+			MethodName: "BridgeStatus",
+			Handler:    _Query_BridgeStatus_Handler,
+		},
+		{
+			MethodName: "BridgeAttestation",
+			Handler:    _Query_BridgeAttestation_Handler,
+		},
+		{
+			MethodName: "BridgeConfig",
+			Handler:    _Query_BridgeConfig_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
@@ -1252,6 +1770,271 @@ func (m *QueryProfilesResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *QueryBridgeStatusRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeStatusRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeStatusRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryBridgeStatusResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeStatusResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeStatusResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.PendingAttestationsCount != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.PendingAttestationsCount))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.EnabledChains) > 0 {
+		for iNdEx := len(m.EnabledChains) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.EnabledChains[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintQuery(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryBridgeAttestationRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeAttestationRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeAttestationRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.BurnId) > 0 {
+		i -= len(m.BurnId)
+		copy(dAtA[i:], m.BurnId)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.BurnId)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.SourceChain) > 0 {
+		i -= len(m.SourceChain)
+		copy(dAtA[i:], m.SourceChain)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.SourceChain)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryBridgeAttestationResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeAttestationResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeAttestationResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.CreatedAt != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.CreatedAt))
+		i--
+		dAtA[i] = 0x50
+	}
+	if m.Minted {
+		i--
+		if m.Minted {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x48
+	}
+	if m.RequiredPower != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.RequiredPower))
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.AttestedPower != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.AttestedPower))
+		i--
+		dAtA[i] = 0x38
+	}
+	if len(m.Attestors) > 0 {
+		for iNdEx := len(m.Attestors) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Attestors[iNdEx])
+			copy(dAtA[i:], m.Attestors[iNdEx])
+			i = encodeVarintQuery(dAtA, i, uint64(len(m.Attestors[iNdEx])))
+			i--
+			dAtA[i] = 0x32
+		}
+	}
+	if m.Amount != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.Amount))
+		i--
+		dAtA[i] = 0x28
+	}
+	if len(m.MirageRecipient) > 0 {
+		i -= len(m.MirageRecipient)
+		copy(dAtA[i:], m.MirageRecipient)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.MirageRecipient)))
+		i--
+		dAtA[i] = 0x22
+	}
+	if len(m.BurnId) > 0 {
+		i -= len(m.BurnId)
+		copy(dAtA[i:], m.BurnId)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.BurnId)))
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.SourceChain) > 0 {
+		i -= len(m.SourceChain)
+		copy(dAtA[i:], m.SourceChain)
+		i = encodeVarintQuery(dAtA, i, uint64(len(m.SourceChain)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.Found {
+		i--
+		if m.Found {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryBridgeConfigRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeConfigRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeConfigRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *QueryBridgeConfigResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *QueryBridgeConfigResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *QueryBridgeConfigResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.BridgeFee != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.BridgeFee))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.AttestationThreshold != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.AttestationThreshold))
+		i--
+		dAtA[i] = 0x10
+	}
+	if len(m.Chains) > 0 {
+		for iNdEx := len(m.Chains) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Chains[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintQuery(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
 func encodeVarintQuery(dAtA []byte, offset int, v uint64) int {
 	offset -= sovQuery(v)
 	base := offset
@@ -1447,6 +2230,125 @@ func (m *QueryProfilesResponse) Size() (n int) {
 	if m.Pagination != nil {
 		l = m.Pagination.Size()
 		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryBridgeStatusRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *QueryBridgeStatusResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if len(m.EnabledChains) > 0 {
+		for _, e := range m.EnabledChains {
+			l = e.Size()
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
+	if m.PendingAttestationsCount != 0 {
+		n += 1 + sovQuery(uint64(m.PendingAttestationsCount))
+	}
+	return n
+}
+
+func (m *QueryBridgeAttestationRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.SourceChain)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	l = len(m.BurnId)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	return n
+}
+
+func (m *QueryBridgeAttestationResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Found {
+		n += 2
+	}
+	l = len(m.SourceChain)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	l = len(m.BurnId)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	l = len(m.MirageRecipient)
+	if l > 0 {
+		n += 1 + l + sovQuery(uint64(l))
+	}
+	if m.Amount != 0 {
+		n += 1 + sovQuery(uint64(m.Amount))
+	}
+	if len(m.Attestors) > 0 {
+		for _, s := range m.Attestors {
+			l = len(s)
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
+	if m.AttestedPower != 0 {
+		n += 1 + sovQuery(uint64(m.AttestedPower))
+	}
+	if m.RequiredPower != 0 {
+		n += 1 + sovQuery(uint64(m.RequiredPower))
+	}
+	if m.Minted {
+		n += 2
+	}
+	if m.CreatedAt != 0 {
+		n += 1 + sovQuery(uint64(m.CreatedAt))
+	}
+	return n
+}
+
+func (m *QueryBridgeConfigRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *QueryBridgeConfigResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if len(m.Chains) > 0 {
+		for _, e := range m.Chains {
+			l = e.Size()
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
+	if m.AttestationThreshold != 0 {
+		n += 1 + sovQuery(uint64(m.AttestationThreshold))
+	}
+	if m.BridgeFee != 0 {
+		n += 1 + sovQuery(uint64(m.BridgeFee))
 	}
 	return n
 }
@@ -2621,6 +3523,739 @@ func (m *QueryProfilesResponse) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeStatusRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeStatusRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeStatusRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeStatusResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeStatusResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeStatusResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnabledChains", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.EnabledChains = append(m.EnabledChains, &BridgeChainConfig{})
+			if err := m.EnabledChains[len(m.EnabledChains)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PendingAttestationsCount", wireType)
+			}
+			m.PendingAttestationsCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.PendingAttestationsCount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeAttestationRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeAttestationRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeAttestationRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceChain", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SourceChain = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BurnId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BurnId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeAttestationResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeAttestationResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeAttestationResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Found", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Found = bool(v != 0)
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SourceChain", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SourceChain = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BurnId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BurnId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MirageRecipient", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MirageRecipient = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Amount", wireType)
+			}
+			m.Amount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Amount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Attestors", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Attestors = append(m.Attestors, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AttestedPower", wireType)
+			}
+			m.AttestedPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AttestedPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequiredPower", wireType)
+			}
+			m.RequiredPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RequiredPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 9:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Minted", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Minted = bool(v != 0)
+		case 10:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CreatedAt", wireType)
+			}
+			m.CreatedAt = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.CreatedAt |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeConfigRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeConfigRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeConfigRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipQuery(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *QueryBridgeConfigResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowQuery
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: QueryBridgeConfigResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: QueryBridgeConfigResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Chains", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Chains = append(m.Chains, &BridgeChainConfig{})
+			if err := m.Chains[len(m.Chains)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AttestationThreshold", wireType)
+			}
+			m.AttestationThreshold = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AttestationThreshold |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BridgeFee", wireType)
+			}
+			m.BridgeFee = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.BridgeFee |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipQuery(dAtA[iNdEx:])

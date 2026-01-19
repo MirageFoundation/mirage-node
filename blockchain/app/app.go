@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	clienthelpers "cosmossdk.io/client/v2/helpers"
 	"cosmossdk.io/core/appmodule"
@@ -43,6 +44,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/x/genutil"
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	mintkeeper "github.com/cosmos/cosmos-sdk/x/mint/keeper"
 	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
@@ -257,17 +259,27 @@ func New(
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 				// Detect if this tx contains any relay core messages
 				containsMeta := false
+				govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 				for _, m := range tx.GetMsgs() {
+					// Governance messages must NEVER flow through the signature-less relay ante chain.
+					// If any message claims gov authority, force the standard ante handler which enforces tx signatures.
+					if am, ok := m.(interface{ GetAuthority() string }); ok {
+						if strings.TrimSpace(am.GetAuthority()) == govAuthority {
+							containsMeta = false
+							break
+						}
+					}
 					switch m.(type) {
-					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-						*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
-						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal:
-						containsMeta = true
+				case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+					*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
+					*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+					*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+					*coretypes.MsgIBCTransfer, *coretypes.MsgBridgeBurn:
+					containsMeta = true
 					}
 				}
 
@@ -329,6 +341,9 @@ func New(
 	if err := app.registerIBCModules(appOpts); err != nil {
 		panic(err)
 	}
+
+	// Set the IBC transfer keeper on the core keeper (needed for bridge operations)
+	app.CoreKeeper.SetTransferKeeper(&app.TransferKeeper)
 
 	// Register upgrade handlers
 	app.RegisterUpgradeHandlers()

@@ -53,10 +53,8 @@ const NETWORKS = {
     },
 };
 
-// Bridge fee: free for subscribers (gas only), 1 MIRAGE for non-subscribers
-const NON_SUBSCRIBER_FEE = 1;
-// Minimum reserve required for subscriber free bridging (in umirage)
-const MIN_RESERVE_FOR_FREE_BRIDGE = 1_000_000; // 1 MIRAGE
+// Bridge fee: flat 1 MIRAGE for all transfers (burned, deflationary)
+const BRIDGE_FEE = 1; // 1 MIRAGE
 
 // Animations
 const fadeIn = keyframes`
@@ -552,22 +550,12 @@ export default function BridgeView({ state }) {
     const [destinationAddress, setDestinationAddress] = useState('');
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(0);
-    const [reserveFunds, setReserveFunds] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStatus, setSubmitStatus] = useState(null); // 'success' | 'error' | null
     const [errors, setErrors] = useState({});
     
-    // Check subscriber status (user_level > 0 means subscriber)
-    const isSubscriber = useMemo(() => {
-        const userLevel = Number(Storage.load('user_level', '0')) || 0;
-        return userLevel > 0;
-    }, []);
-    
-    // Subscriber gets free bridging only if they have sufficient reserve funds
-    const hasEnoughReserve = reserveFunds >= MIN_RESERVE_FOR_FREE_BRIDGE;
-    
-    // Bridge fee: free for subscribers with sufficient reserve, 1 MIRAGE otherwise
-    const bridgeFee = (isSubscriber && hasEnoughReserve) ? 0 : NON_SUBSCRIBER_FEE;
+    // Bridge fee: flat 1 MIRAGE for all transfers (governance parameter, burned)
+    const bridgeFee = BRIDGE_FEE;
     
     // Derive the user's address on the destination chain (for Cosmos chains)
     const derivedAddress = useMemo(() => {
@@ -585,7 +573,7 @@ export default function BridgeView({ state }) {
         return destinationAddress;
     }, [selectedNetwork, useDifferentAddress, derivedAddress, destinationAddress]);
     
-    // Load user balance and reserve funds from cached config
+    // Load user balance from cached config
     useEffect(() => {
         try {
             const cachedBalance = Storage.load('user_balance', 0);
@@ -594,16 +582,13 @@ export default function BridgeView({ state }) {
             }
         } catch (_) {}
         
-        // Also check configData for balance and reserve funds
+        // Also check configData for balance
         try {
             const configData = localStorage.getItem('configData');
             if (configData) {
                 const cached = JSON.parse(configData);
                 if (cached.balance !== undefined) {
                     setBalance(Number(cached.balance) || 0);
-                }
-                if (cached.reserve_funds !== undefined) {
-                    setReserveFunds(Number(cached.reserve_funds) || 0);
                 }
             }
         } catch (_) {}
@@ -967,18 +952,10 @@ export default function BridgeView({ state }) {
                                                     <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
                                                 </PreviewRow>
                                                 <PreviewRow>
-                                                    <PreviewLabel data-tooltip={
-                                                        isSubscriber && hasEnoughReserve
-                                                            ? "Subscribers with sufficient reserve bridge for free (gas only)" 
-                                                            : isSubscriber
-                                                                ? "Insufficient reserve balance for free bridging (need at least 1 MIRAGE)"
-                                                                : "1 MIRAGE fee for non-subscribers"
-                                                    }>
+                                                    <PreviewLabel data-tooltip="Flat bridge fee (burned, deflationary)">
                                                         Fee
                                                     </PreviewLabel>
-                                                    <PreviewValue>
-                                                        {isSubscriber && hasEnoughReserve ? 'Free' : `${bridgeFee} MIRAGE`}
-                                                    </PreviewValue>
+                                                    <PreviewValue>{bridgeFee} MIRAGE</PreviewValue>
                                                 </PreviewRow>
                                                 <Divider />
                                                 <PreviewRow>

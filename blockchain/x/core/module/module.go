@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"unicode/utf8"
 
 	"cosmossdk.io/core/appmodule"
 	sdkmath "cosmossdk.io/math"
+	tmhash "github.com/cometbft/cometbft/crypto/tmhash"
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
@@ -34,6 +36,7 @@ import (
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
 	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
+	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 )
 
 var (
@@ -2469,4 +2472,489 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	am.deductRelayGasFee(sdkCtx, owner, int(core.Level))
 
 	return &types.MsgSetAutoRenewalResponse{}, nil
+}
+
+// ============================================
+// Bridge Handlers
+// ============================================
+
+// IBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis)
+func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) (*types.MsgIBCTransferResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	// Derive owner from envelope_pubkey
+	if len(req.GetEnvelopePubkey()) != 33 {
+		return nil, fmt.Errorf("invalid envelope_pubkey length")
+	}
+	owner, err := deriveOwnerFromPubkey(req.GetEnvelopePubkey())
+	if err != nil {
+		return nil, err
+	}
+
+	// Get user level for gas fee
+	var userLevel int
+	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+		var core types.ProfileCore
+		_ = json.Unmarshal(bz, &core)
+		userLevel = int(core.Level)
+	}
+
+	// Validate amount
+	amount := req.GetAmount()
+	if amount == 0 {
+		return nil, fmt.Errorf("amount must be > 0")
+	}
+
+	// Get bridge fee from params
+	bridgeFee := params.BridgeFee
+	if amount > (math.MaxUint64 - bridgeFee) {
+		return nil, fmt.Errorf("amount too large")
+	}
+	totalNeeded := amount + bridgeFee
+
+	// Check balance
+	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
+	if balance.LT(sdkmath.NewIntFromUint64(totalNeeded)) {
+		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
+			totalNeeded, amount, bridgeFee, balance.String())
+	}
+
+	// Validate owner address
+	if _, err := sdk.AccAddressFromBech32(owner); err != nil {
+		return nil, fmt.Errorf("invalid owner address: %w", err)
+	}
+
+	// Validate receiver address format
+	receiver := strings.TrimSpace(req.GetReceiver())
+	if receiver == "" {
+		return nil, fmt.Errorf("receiver cannot be empty")
+	}
+
+	// Validate source channel
+	sourceChannel := strings.TrimSpace(req.GetSourceChannel())
+	if sourceChannel == "" {
+		return nil, fmt.Errorf("source_channel cannot be empty")
+	}
+	// Enforce IBC allowlist from params (prevents bridging via arbitrary channels)
+	allowedChannel := false
+	for _, c := range params.BridgeChains {
+		if c != nil && c.Enabled && c.IsIbc && strings.TrimSpace(c.IbcChannel) == sourceChannel {
+			allowedChannel = true
+			break
+		}
+	}
+	if !allowedChannel {
+		return nil, fmt.Errorf("IBC channel not enabled for bridging: %s", sourceChannel)
+	}
+
+	// Burn the bridge fee (deflationary)
+	if bridgeFee > 0 {
+		if err := am.k.BurnFromAccount(sdkCtx, owner, bridgeFee); err != nil {
+			return nil, fmt.Errorf("failed to burn bridge fee: %w", err)
+		}
+	}
+
+	// Check if transfer keeper is set
+	transferKeeper := am.k.TransferKeeper()
+	if transferKeeper == nil {
+		return nil, fmt.Errorf("IBC transfer not available")
+	}
+
+	// Calculate timeout
+	timeoutSeconds := req.GetTimeoutSeconds()
+	if timeoutSeconds == 0 {
+		timeoutSeconds = 600 // Default 10 minutes
+	}
+	nowNs := uint64(sdkCtx.BlockTime().UnixNano())
+	if timeoutSeconds > (math.MaxUint64-nowNs)/1_000_000_000 {
+		return nil, fmt.Errorf("timeout_seconds too large")
+	}
+	timeoutTimestamp := nowNs + (timeoutSeconds * 1_000_000_000)
+
+	coin := sdk.NewCoin(types.MintDenom, sdkmath.NewIntFromUint64(amount))
+
+	// Execute IBC transfer
+	msgTransfer := ibctransfertypes.NewMsgTransfer(
+		ibctransfertypes.PortID,
+		sourceChannel,
+		coin,
+		owner,
+		receiver,
+		clienttypes.ZeroHeight(),
+		timeoutTimestamp,
+		"", // memo
+	)
+
+	// Use the transfer keeper to execute the transfer
+	resp, err := transferKeeper.Transfer(sdkCtx, msgTransfer)
+	if err != nil {
+		return nil, fmt.Errorf("IBC transfer failed: %w", err)
+	}
+
+	// Deduct relay gas fee
+	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+
+	// Emit event
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			"bridge_ibc_transfer",
+			sdk.NewAttribute("owner", owner),
+			sdk.NewAttribute("receiver", receiver),
+			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
+			sdk.NewAttribute("channel", sourceChannel),
+			sdk.NewAttribute("sequence", fmt.Sprintf("%d", resp.Sequence)),
+			sdk.NewAttribute("bridge_fee", fmt.Sprintf("%d", bridgeFee)),
+		),
+	)
+
+	sdkCtx.Logger().Info("IBCTransfer",
+		"owner", owner,
+		"receiver", receiver,
+		"amount", amount,
+		"channel", sourceChannel,
+		"sequence", resp.Sequence,
+		"bridge_fee", bridgeFee,
+	)
+
+	return &types.MsgIBCTransferResponse{Sequence: resp.Sequence}, nil
+}
+
+// BridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
+func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	// Derive owner from envelope_pubkey
+	if len(req.GetEnvelopePubkey()) != 33 {
+		return nil, fmt.Errorf("invalid envelope_pubkey length")
+	}
+	owner, err := deriveOwnerFromPubkey(req.GetEnvelopePubkey())
+	if err != nil {
+		return nil, err
+	}
+
+	// Get user level for gas fee
+	var userLevel int
+	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+		var core types.ProfileCore
+		_ = json.Unmarshal(bz, &core)
+		userLevel = int(core.Level)
+	}
+
+	// Validate amount
+	amount := req.GetAmount()
+	if amount == 0 {
+		return nil, fmt.Errorf("amount must be > 0")
+	}
+
+	// Get bridge fee from params
+	bridgeFee := params.BridgeFee
+	if amount > (math.MaxUint64 - bridgeFee) {
+		return nil, fmt.Errorf("amount too large")
+	}
+	totalBurn := amount + bridgeFee
+
+	// Check balance
+	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
+	if balance.LT(sdkmath.NewIntFromUint64(totalBurn)) {
+		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
+			totalBurn, amount, bridgeFee, balance.String())
+	}
+
+	// Validate destination chain
+	destChain := strings.TrimSpace(req.GetDestinationChain())
+	chainConfig, err := types.ValidateBridgeChain(destChain, params.BridgeChains)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.IsIbc {
+		return nil, fmt.Errorf("chain %s uses IBC, use IBCTransfer instead", destChain)
+	}
+
+	// Validate destination address
+	destAddr := strings.TrimSpace(req.GetDestinationAddress())
+	if destAddr == "" {
+		return nil, fmt.Errorf("destination_address cannot be empty")
+	}
+
+	// Burn the total amount (fee + transfer amount)
+	if err := am.k.BurnFromAccount(sdkCtx, owner, totalBurn); err != nil {
+		return nil, fmt.Errorf("failed to burn tokens: %w", err)
+	}
+
+	// Generate burn_id from tx hash
+	burnID := hex.EncodeToString(tmhash.Sum(sdkCtx.TxBytes()))
+
+	// Deduct relay gas fee
+	am.deductRelayGasFee(sdkCtx, owner, userLevel)
+
+	// Emit event for orchestrators to pick up
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			"bridge_burn",
+			sdk.NewAttribute("owner", owner),
+			sdk.NewAttribute("destination_chain", destChain),
+			sdk.NewAttribute("destination_address", destAddr),
+			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
+			sdk.NewAttribute("burn_id", burnID),
+			sdk.NewAttribute("bridge_fee", fmt.Sprintf("%d", bridgeFee)),
+		),
+	)
+
+	sdkCtx.Logger().Info("BridgeBurn",
+		"owner", owner,
+		"destination_chain", destChain,
+		"destination_address", destAddr,
+		"amount", amount,
+		"burn_id", burnID,
+		"bridge_fee", bridgeFee,
+	)
+
+	return &types.MsgBridgeBurnResponse{BurnId: burnID}, nil
+}
+
+// BridgeAttest allows validators to attest to a burn on an external chain
+func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest) (*types.MsgBridgeAttestResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	// Validate signer is a bonded validator
+	validator := strings.TrimSpace(req.GetValidator())
+	if validator == "" {
+		return nil, fmt.Errorf("validator cannot be empty")
+	}
+
+	bonded, err := am.k.IsValidatorBonded(sdkCtx, validator)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check validator status: %w", err)
+	}
+	if !bonded {
+		return nil, fmt.Errorf("validator %s is not bonded", validator)
+	}
+
+	// Get validator's voting power
+	valPower, err := am.k.GetValidatorPower(sdkCtx, validator)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get validator power: %w", err)
+	}
+
+	// Validate source chain
+	sourceChain := strings.TrimSpace(req.GetSourceChain())
+	chainConfig, err := types.ValidateBridgeChain(sourceChain, params.BridgeChains)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.IsIbc {
+		return nil, fmt.Errorf("chain %s uses IBC, attestation not needed", sourceChain)
+	}
+
+	// Validate burn_id
+	burnID := strings.TrimSpace(req.GetBurnId())
+	if burnID == "" {
+		return nil, fmt.Errorf("burn_id cannot be empty")
+	}
+	// Basic sanity limits (avoid store key weirdness / accidental DoS)
+	if len(burnID) > 128 {
+		return nil, fmt.Errorf("burn_id too long")
+	}
+	if strings.Contains(burnID, "/") {
+		return nil, fmt.Errorf("burn_id contains invalid character: /")
+	}
+
+	// Validate recipient
+	mirageRecipient := strings.TrimSpace(req.GetMirageRecipient())
+	if err := validateAddress(mirageRecipient); err != nil {
+		return nil, fmt.Errorf("invalid mirage_recipient: %w", err)
+	}
+
+	// Validate amount
+	amount := req.GetAmount()
+	if amount == 0 {
+		return nil, fmt.Errorf("amount must be > 0")
+	}
+
+	// Get or create attestation
+	attestation, err := am.k.GetOrCreateBridgeAttestation(sdkCtx, sourceChain, burnID, mirageRecipient, amount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get/create attestation: %w", err)
+	}
+
+	// Verify attestation details match
+	if attestation.MirageRecipient != mirageRecipient {
+		return nil, fmt.Errorf("recipient mismatch: existing %s, provided %s", attestation.MirageRecipient, mirageRecipient)
+	}
+	if attestation.Amount != amount {
+		return nil, fmt.Errorf("amount mismatch: existing %d, provided %d", attestation.Amount, amount)
+	}
+
+	// Check if already minted
+	if attestation.Minted {
+		return &types.MsgBridgeAttestResponse{
+			Minted:        true,
+			AttestedPower: attestation.AttestedPower,
+			RequiredPower: types.RequiredPower(0, params.BridgeAttestationThreshold),
+		}, nil
+	}
+
+	// Check if validator already attested
+	if attestation.HasAttested(validator) {
+		totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+		return &types.MsgBridgeAttestResponse{
+			Minted:        attestation.Minted,
+			AttestedPower: attestation.AttestedPower,
+			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+		}, nil
+	}
+
+	// Add attestation
+	attestation.AddAttestation(validator, valPower)
+
+	// Check if threshold is met
+	totalPower, err := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total voting power: %w", err)
+	}
+
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+	minted := false
+
+	if attestation.MeetsThreshold(totalPower, params.BridgeAttestationThreshold) {
+		// Mint tokens to recipient
+		if err := am.k.MintToAccount(sdkCtx, mirageRecipient, amount); err != nil {
+			return nil, fmt.Errorf("failed to mint tokens: %w", err)
+		}
+
+		attestation.Minted = true
+		minted = true
+
+		// Decrement pending count
+		_ = am.k.DecrementBridgePendingCount(sdkCtx)
+
+		// Emit mint event
+		sdkCtx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"bridge_mint",
+				sdk.NewAttribute("source_chain", sourceChain),
+				sdk.NewAttribute("burn_id", burnID),
+				sdk.NewAttribute("recipient", mirageRecipient),
+				sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
+				sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+				sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+			),
+		)
+
+		sdkCtx.Logger().Info("BridgeMint",
+			"source_chain", sourceChain,
+			"burn_id", burnID,
+			"recipient", mirageRecipient,
+			"amount", amount,
+			"attested_power", attestation.AttestedPower,
+		)
+	}
+
+	// Save attestation state
+	if err := am.k.SetBridgeAttestation(sdkCtx, attestation); err != nil {
+		return nil, fmt.Errorf("failed to save attestation: %w", err)
+	}
+
+	// Emit attestation event
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			"bridge_attest",
+			sdk.NewAttribute("validator", validator),
+			sdk.NewAttribute("source_chain", sourceChain),
+			sdk.NewAttribute("burn_id", burnID),
+			sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+			sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+			sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+			sdk.NewAttribute("minted", fmt.Sprintf("%t", minted)),
+		),
+	)
+
+	sdkCtx.Logger().Info("BridgeAttest",
+		"validator", validator,
+		"source_chain", sourceChain,
+		"burn_id", burnID,
+		"power", valPower,
+		"attested_power", attestation.AttestedPower,
+		"required_power", requiredPower,
+		"minted", minted,
+	)
+
+	return &types.MsgBridgeAttestResponse{
+		Minted:        minted,
+		AttestedPower: attestation.AttestedPower,
+		RequiredPower: requiredPower,
+	}, nil
+}
+
+// ============================================
+// Bridge Query Handlers
+// ============================================
+
+// BridgeStatus queries the current bridge status
+func (am AppModule) BridgeStatus(ctx context.Context, _ *types.QueryBridgeStatusRequest) (*types.QueryBridgeStatusResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	enabledChains := am.k.GetEnabledBridgeChains(sdkCtx)
+	pendingCount, err := am.k.GetBridgePendingCount(sdkCtx)
+	if err != nil {
+		pendingCount = 0
+	}
+
+	return &types.QueryBridgeStatusResponse{
+		EnabledChains:            enabledChains,
+		PendingAttestationsCount: pendingCount,
+	}, nil
+}
+
+// BridgeAttestation queries a specific attestation
+func (am AppModule) BridgeAttestation(ctx context.Context, req *types.QueryBridgeAttestationRequest) (*types.QueryBridgeAttestationResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	sourceChain := strings.TrimSpace(req.GetSourceChain())
+	burnID := strings.TrimSpace(req.GetBurnId())
+
+	if sourceChain == "" || burnID == "" {
+		return nil, fmt.Errorf("source_chain and burn_id are required")
+	}
+
+	attestation, found, err := am.k.GetBridgeAttestation(sdkCtx, sourceChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get attestation: %w", err)
+	}
+
+	if !found {
+		return &types.QueryBridgeAttestationResponse{Found: false}, nil
+	}
+
+	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+	return &types.QueryBridgeAttestationResponse{
+		Found:           true,
+		SourceChain:     attestation.SourceChain,
+		BurnId:          attestation.BurnID,
+		MirageRecipient: attestation.MirageRecipient,
+		Amount:          attestation.Amount,
+		Attestors:       attestation.AttestorList(),
+		AttestedPower:   attestation.AttestedPower,
+		RequiredPower:   requiredPower,
+		Minted:          attestation.Minted,
+		CreatedAt:       attestation.CreatedAt,
+	}, nil
+}
+
+// BridgeConfig queries the bridge configuration
+func (am AppModule) BridgeConfig(ctx context.Context, _ *types.QueryBridgeConfigRequest) (*types.QueryBridgeConfigResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	return &types.QueryBridgeConfigResponse{
+		Chains:               params.BridgeChains,
+		AttestationThreshold: params.BridgeAttestationThreshold,
+		BridgeFee:            params.BridgeFee,
+	}, nil
 }

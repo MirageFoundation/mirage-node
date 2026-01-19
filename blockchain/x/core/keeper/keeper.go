@@ -19,6 +19,7 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
 
 	"mirage/x/core/types"
 )
@@ -30,10 +31,21 @@ type Keeper struct {
 	staking      *stakingkeeper.Keeper
 	distribution *distrkeeper.Keeper
 	slashing     slashingkeeper.Keeper
+	transfer     *ibctransferkeeper.Keeper // for IBC bridge transfers
 }
 
 func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec, bank bankkeeper.Keeper, staking *stakingkeeper.Keeper, distribution *distrkeeper.Keeper, slashing slashingkeeper.Keeper) Keeper {
-	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing}
+	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing, transfer: nil}
+}
+
+// SetTransferKeeper sets the IBC transfer keeper (called after IBC module initialization)
+func (k *Keeper) SetTransferKeeper(transfer *ibctransferkeeper.Keeper) {
+	k.transfer = transfer
+}
+
+// TransferKeeper returns the IBC transfer keeper for bridge operations
+func (k Keeper) TransferKeeper() *ibctransferkeeper.Keeper {
+	return k.transfer
 }
 
 func (k Keeper) profileKey(addr string) []byte   { return []byte(types.ProfilesPrefix + addr) }
@@ -1109,4 +1121,151 @@ func (k Keeper) BurnFromAccount(ctx sdk.Context, addr string, amount uint64) err
 	}
 	// Then burn from module
 	return k.bank.BurnCoins(ctx, types.ModuleName, coins)
+}
+
+// ============================================
+// Bridge Attestation State Management
+// ============================================
+
+// GetBridgeAttestation retrieves a bridge attestation from state
+func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string) (*types.BridgeAttestation, bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeAttestationKey(sourceChain, burnID)
+	bz, err := store.Get(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bz) == 0 {
+		return nil, false, nil
+	}
+	attestation, err := types.UnmarshalBridgeAttestation(bz)
+	if err != nil {
+		return nil, false, err
+	}
+	return attestation, true, nil
+}
+
+// SetBridgeAttestation stores a bridge attestation in state
+func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeAttestationKey(attestation.SourceChain, attestation.BurnID)
+	bz, err := attestation.Marshal()
+	if err != nil {
+		return err
+	}
+	return store.Set(key, bz)
+}
+
+// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation
+func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error) {
+	attestation, found, err := k.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return attestation, nil
+	}
+	// Create new attestation
+	attestation = types.NewBridgeAttestation(sourceChain, burnID, mirageRecipient, amount, ctx.BlockHeight())
+	if err := k.SetBridgeAttestation(ctx, attestation); err != nil {
+		return nil, err
+	}
+	// Increment pending count
+	if err := k.IncrementBridgePendingCount(ctx); err != nil {
+		return nil, err
+	}
+	return attestation, nil
+}
+
+// GetBridgePendingCount returns the count of pending (unminted) attestations
+func (k Keeper) GetBridgePendingCount(ctx sdk.Context) (uint64, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	bz, err := store.Get([]byte(types.BridgePendingCountKey))
+	if err != nil {
+		return 0, err
+	}
+	if len(bz) == 0 {
+		return 0, nil
+	}
+	return binary.BigEndian.Uint64(bz), nil
+}
+
+// SetBridgePendingCount sets the pending attestation count
+func (k Keeper) SetBridgePendingCount(ctx sdk.Context, count uint64) error {
+	store := k.storeService.OpenKVStore(ctx)
+	bz := make([]byte, 8)
+	binary.BigEndian.PutUint64(bz, count)
+	return store.Set([]byte(types.BridgePendingCountKey), bz)
+}
+
+// IncrementBridgePendingCount increments the pending attestation count
+func (k Keeper) IncrementBridgePendingCount(ctx sdk.Context) error {
+	count, err := k.GetBridgePendingCount(ctx)
+	if err != nil {
+		return err
+	}
+	return k.SetBridgePendingCount(ctx, count+1)
+}
+
+// DecrementBridgePendingCount decrements the pending attestation count
+func (k Keeper) DecrementBridgePendingCount(ctx sdk.Context) error {
+	count, err := k.GetBridgePendingCount(ctx)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return k.SetBridgePendingCount(ctx, count-1)
+	}
+	return nil
+}
+
+// GetTotalBondedValidatorPower returns the total voting power of all bonded validators
+func (k Keeper) GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error) {
+	var totalPower int64
+	err := k.staking.IterateBondedValidatorsByPower(ctx, func(_ int64, validator stakingtypes.ValidatorI) bool {
+		totalPower += validator.GetConsensusPower(k.staking.PowerReduction(ctx))
+		return false
+	})
+	return totalPower, err
+}
+
+// GetValidatorPower returns the voting power of a specific validator
+func (k Keeper) GetValidatorPower(ctx sdk.Context, valoper string) (int64, error) {
+	valAddr, err := sdk.ValAddressFromBech32(valoper)
+	if err != nil {
+		return 0, fmt.Errorf("invalid validator address: %w", err)
+	}
+	validator, err := k.staking.GetValidator(ctx, valAddr)
+	if err != nil {
+		return 0, fmt.Errorf("validator not found: %w", err)
+	}
+	if !validator.IsBonded() {
+		return 0, fmt.Errorf("validator not bonded")
+	}
+	return validator.GetConsensusPower(k.staking.PowerReduction(ctx)), nil
+}
+
+// IsValidatorBonded returns true if the validator is currently bonded
+func (k Keeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error) {
+	valAddr, err := sdk.ValAddressFromBech32(valoper)
+	if err != nil {
+		return false, err
+	}
+	validator, err := k.staking.GetValidator(ctx, valAddr)
+	if err != nil {
+		return false, nil // Not found = not bonded
+	}
+	return validator.IsBonded(), nil
+}
+
+// GetEnabledBridgeChains returns all enabled bridge chains from params
+func (k Keeper) GetEnabledBridgeChains(ctx sdk.Context) []*types.BridgeChainConfig {
+	params := k.GetParams(ctx)
+	var enabled []*types.BridgeChainConfig
+	for _, chain := range params.BridgeChains {
+		if chain.Enabled {
+			enabled = append(enabled, chain)
+		}
+	}
+	return enabled
 }
