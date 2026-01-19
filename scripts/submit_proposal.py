@@ -154,13 +154,16 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     return json.loads(result.stdout)
 
 
-def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0) -> int:
+def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0) -> tuple[int, int]:
     """Estimate gas needed for a proposal based on message count and byte size.
     
     Gas cost includes:
     - Base tx overhead: 100,000
     - Per message: 75,000
     - WritePerByte: ~10 gas per byte of serialized JSON
+    
+    Returns:
+        Tuple of (raw_estimate, buffered_estimate)
     """
     msgs = proposal_json.get("messages", [])
     num_messages = len(msgs) if msgs else 1
@@ -176,7 +179,7 @@ def estimate_gas_for_proposal(proposal_json: dict, buffer_percent: float = 50.0)
     estimated_gas = base_gas + per_message_gas + per_byte_gas
     gas_with_buffer = int(estimated_gas * (1 + buffer_percent / 100))
     log_debug(f"Gas estimate: base={base_gas} + msgs={per_message_gas} + bytes={per_byte_gas} ({proposal_bytes}B) = {estimated_gas}, +{buffer_percent}% = {gas_with_buffer}")
-    return gas_with_buffer
+    return estimated_gas, gas_with_buffer
 
 
 def estimate_gas_for_vote(buffer_percent: float = 50.0) -> int:
@@ -693,7 +696,7 @@ def main():
         return 1
 
     # Show gas estimates before confirmation
-    estimated_gas = estimate_gas_for_proposal(proposal_json, buffer_percent=50.0)
+    raw_gas, estimated_gas = estimate_gas_for_proposal(proposal_json, buffer_percent=50.0)
 
     # Query gov params to get the required deposit
     gov_params = query_json_rpc(rpc_endpoint, ["q", "gov", "params"])
@@ -737,7 +740,7 @@ def main():
     total_umirage = fee_amount + deposit_amount  # gas fee + deposit
 
     print(f"\nEstimated costs:")
-    print(f"  Gas: {estimated_gas:,} units × {gas_price} = {fee_amount/1_000_000:,.2f} MIRAGE")
+    print(f"  Gas: {raw_gas:,} + 50% = {estimated_gas:,} units × {gas_price} = {fee_amount/1_000_000:,.2f} MIRAGE")
     print(f"  Deposit: {deposit_amount/1_000_000:,.2f} MIRAGE ({deposit_source})")
     print(f"  Total: {total_umirage/1_000_000:,.2f} MIRAGE")
 
