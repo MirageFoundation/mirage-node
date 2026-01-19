@@ -38,19 +38,8 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def get_docker_tarball_path() -> Path:
-    """Get docker tarball path: always use prod tarball for local testnet."""
-    return repo_root() / "deploy" / "mirage-docker-prod.tar.gz"
-
-
-def build_docker_image():
-    """Build docker image and save to prod tarball."""
-    tarball = get_docker_tarball_path()
-    status("Building Docker image...")
-    run(["bash", "-lc", f"cd '{repo_root()}' && docker build -t mirage:local -f deploy/Dockerfile ."])
-    status(f"Saving Docker image to {tarball.name}...")
-    run(["bash", "-lc", f"docker save mirage:local | gzip > '{tarball}'"])
-    status(f"Docker image saved to {tarball.name}")
+# Registry for pulling production images
+REGISTRY_IMAGE = "ghcr.io/miragefoundation/mirage-node"
 
 
 def stop_local_container():
@@ -66,43 +55,30 @@ def stop_local_container():
     status("Container stopped and removed")
 
 
-def ensure_local_container():
-    tarball = get_docker_tarball_path()
+def ensure_local_container(image_ref: str):
+    """Ensure local container is running with the specified image.
 
-    status("Checking local Docker container 'mirage'...")
-    names = run(["bash", "-lc", "docker ps -a --format '{{.Names}}'"], capture=True).splitlines()
-    if "mirage" in [n.strip() for n in names]:
-        status("Container exists")
-        state = run(["bash", "-lc", "docker inspect -f '{{.State.Status}}' mirage"], capture=True).strip()
-        if state != "running":
-            status("Starting existing container...")
-            run(["bash", "-lc", "docker start mirage || true"])
-        status("Waiting for container exec to be ready...")
-        for _ in range(60):
-            try:
-                run(["bash", "-lc", "docker exec mirage echo ready >/dev/null 2>&1 || true"])
-                break
-            except Exception:
-                time.sleep(1)
-        status("Local container is ready")
-        return
+    Always removes existing container and creates fresh one from the exact image.
+    This ensures we use the same binary as the source chain.
+    """
+    status(f"Pulling image: {image_ref}")
+    run(["bash", "-lc", f"docker pull '{image_ref}'"])
 
-    if not tarball.exists():
-        status(f"Docker tarball not found: {tarball.name}, building...")
-        build_docker_image()
-    status(f"Loading Docker image from {tarball.name}...")
-    run(["bash", "-lc", f"gunzip -c '{tarball}' | docker load"])
+    # Remove any existing container (we want fresh state with exact image)
+    run(["bash", "-lc", "docker rm -f mirage 2>/dev/null || true"])
+
     home = str(Path.home())
     status("Creating persistent volumes (~/.mirage, ~/.caddy)...")
     run(["bash", "-lc", f"mkdir -p '{home}/.mirage' '{home}/.caddy'"])
-    status("Starting local container 'mirage'...")
+
+    status(f"Starting local container with image: {image_ref}")
     run(
         [
             "bash",
             "-lc",
-            "docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
-            "--name mirage --restart unless-stopped -e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
-            f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy mirage:local",
+            f"docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
+            f"--name mirage --restart unless-stopped -e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
+            f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy '{image_ref}'",
         ]
     )
     status("Waiting for container exec to be ready...")
@@ -121,17 +97,31 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     This avoids copying ~5GB of blockchain databases, reducing transfer to ~200MB.
 
     The archive contains (in node/snapshot/):
-    - miraged (production binary, ~150MB)
+    - image_ref.txt (exact docker image reference, e.g., ghcr.io/.../mirage-node:abc123)
     - export.json (chain state export, ~50MB)
     - indexer.sql (PostgreSQL dump, ~20MB)
     And node/config/ (node configuration)
+
+    Note: We no longer copy the miraged binary - instead we capture the exact image
+    reference and pull that image during reset.
     """
     conn = f"{ssh_user}@{source_host}"
     status(f"Connecting to source host: {conn}")
-    status("Stopping remote container 'mirage' (briefly)...")
-    run(["bash", "-lc", f"ssh -o StrictHostKeyChecking=accept-new {conn} 'docker stop --timeout 60 mirage || true'"])
 
-    status("Finding and copying binary from remote container...")
+    # Capture the exact docker image reference BEFORE stopping the container
+    status("Capturing docker image reference...")
+    image_ref = run(
+        ["bash", "-lc", f"ssh -o StrictHostKeyChecking=accept-new {conn} 'docker inspect mirage --format \"{{{{.Config.Image}}}}\"'"],
+        capture=True,
+    ).strip()
+    if not image_ref or ":" not in image_ref:
+        raise RuntimeError(f"Could not get valid image reference from remote container: {image_ref}")
+    status(f"Remote image: {image_ref}")
+
+    status("Stopping remote container 'mirage' (briefly)...")
+    run(["bash", "-lc", f"ssh {conn} 'docker stop --timeout 60 mirage || true'"])
+
+    status("Finding miraged binary path...")
     # Find the binary path dynamically (handles path changes across versions)
     binary_path = run(
         [
@@ -146,11 +136,22 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
         raise RuntimeError("Could not find miraged binary in remote container")
     status(f"Found binary at: {binary_path}")
     run(["bash", "-lc", f"ssh {conn} 'docker stop mirage >/dev/null 2>&1 || true'"])
+
+    # Create snapshot directory and save image reference
     run(
         [
             "bash",
             "-lc",
-            f"ssh {conn} 'mkdir -p /root/.mirage/node/snapshot && docker cp mirage:{binary_path} /root/.mirage/node/snapshot/miraged'",
+            f"ssh {conn} 'mkdir -p /root/.mirage/node/snapshot && echo \"{image_ref}\" > /root/.mirage/node/snapshot/image_ref.txt'",
+        ]
+    )
+
+    # Copy binary for export (we need it to run the export command)
+    run(
+        [
+            "bash",
+            "-lc",
+            f"ssh {conn} 'docker cp mirage:{binary_path} /root/.mirage/node/snapshot/miraged'",
         ]
     )
 
@@ -173,6 +174,9 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
             f"docker stop --timeout 10 mirage || true'",
         ]
     )
+
+    # Remove the binary from snapshot (we'll pull the image instead)
+    run(["bash", "-lc", f"ssh {conn} 'rm -f /root/.mirage/node/snapshot/miraged'"])
 
     status("Creating lightweight remote archive...")
     run(
@@ -200,10 +204,10 @@ def remote_snapshot(source_host: str, ssh_user: str = "root") -> Path:
     return local_tar
 
 
-def copy_snapshot_into_container(local_tar: Path) -> Path:
+def extract_snapshot(local_tar: Path) -> tuple[Path, str]:
     """
-    Extract the lightweight snapshot and copy into container.
-    Returns the path to the local export.json file.
+    Extract the snapshot tarball locally.
+    Returns (extract_dir, image_ref) where extract_dir contains the snapshot files.
     """
     status("Extracting snapshot locally...")
     ensure_mirage_tmp()
@@ -212,17 +216,44 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
         shutil.rmtree(extract_dir)
     extract_dir.mkdir(parents=True)
     run(["bash", "-lc", f"tar xzf '{local_tar}' -C '{extract_dir}' --no-same-owner --no-same-permissions"])
+
     # Support both new (node/) and old (main/) tarball structures
     src_dir = extract_dir / "node"
     if not src_dir.exists():
         src_dir = extract_dir / "main"  # fallback for old tarballs
-    snapshot_dir = src_dir / "snapshot"
     if not src_dir.exists():
         raise RuntimeError(f"Expected directory not found after extraction: {extract_dir}/node or {extract_dir}/main")
+
+    snapshot_dir = src_dir / "snapshot"
+
+    # Read image reference (new snapshots have this file)
+    image_ref_file = snapshot_dir / "image_ref.txt"
+    if image_ref_file.exists():
+        image_ref = image_ref_file.read_text().strip()
+        status(f"Snapshot image: {image_ref}")
+    else:
+        # Legacy snapshot without image_ref - use latest from registry
+        status("WARNING: Snapshot missing image_ref.txt, using latest from registry")
+        image_ref = f"{REGISTRY_IMAGE}:dev"
 
     export_json = snapshot_dir / "export.json"
     if not export_json.exists():
         raise RuntimeError(f"export.json not found in snapshot: {export_json}")
+
+    return extract_dir, image_ref
+
+
+def copy_snapshot_into_container(extract_dir: Path) -> Path:
+    """
+    Copy extracted snapshot files into the container.
+    Returns the path to the local export.json file.
+    """
+    # Support both new (node/) and old (main/) tarball structures
+    src_dir = extract_dir / "node"
+    if not src_dir.exists():
+        src_dir = extract_dir / "main"
+    snapshot_dir = src_dir / "snapshot"
+    export_json = snapshot_dir / "export.json"
 
     status("Preparing target directories inside container...")
     # Only reset the staging clone; leave /root/.mirage/node and /root/.mirage/postgres
@@ -233,13 +264,13 @@ def copy_snapshot_into_container(local_tar: Path) -> Path:
             "-lc",
             "docker exec mirage bash -lc '"
             "rm -rf /root/.mirage/node.clone; "
-            "mkdir -p /root/.mirage/node.clone/bin /root/.mirage/node'",
+            "mkdir -p /root/.mirage/node.clone /root/.mirage/node'",
         ]
     )
 
-    status("Copying config and binary into container...")
+    status("Copying config into container...")
     run(["bash", "-lc", f"docker cp '{src_dir}/config' mirage:/root/.mirage/node.clone/"])
-    run(["bash", "-lc", f"docker cp '{snapshot_dir}/miraged' mirage:/root/.mirage/node.clone/bin/miraged"])
+    # Note: We don't copy the miraged binary anymore - we use the one from the pulled image
 
     indexer_sql = snapshot_dir / "indexer.sql"
     if indexer_sql.exists():
@@ -563,6 +594,16 @@ print(json.dumps(profiles))
         return []
 
 
+def find_module_account_address(auth_accounts: list, module_name: str) -> str | None:
+    """Find a module account address by name in auth accounts."""
+    for acc in auth_accounts:
+        if acc.get("@type") == "/cosmos.auth.v1beta1.ModuleAccount":
+            base = acc.get("base_account") or {}
+            if acc.get("name") == module_name:
+                return base.get("address")
+    return None
+
+
 def transform_to_single_validator(
     export_path: Path, val_addr: str, valoper: str, valcons: str, cons_pub_b64: str, faucet_addr: str
 ) -> str:
@@ -601,6 +642,14 @@ def transform_to_single_validator(
             core_state["initial_profiles"] = indexer_profiles
             app_state["core"] = core_state
             status(f"Injected {len(indexer_profiles)} profiles from indexer DB into genesis")
+
+    # Find staking module account addresses (needed to fix bank balances)
+    auth_accounts = auth.get("accounts") or []
+    bonded_pool_addr = find_module_account_address(auth_accounts, "bonded_tokens_pool")
+    not_bonded_pool_addr = find_module_account_address(auth_accounts, "not_bonded_tokens_pool")
+    if not bonded_pool_addr or not not_bonded_pool_addr:
+        raise RuntimeError(f"Could not find staking module accounts in genesis: bonded={bonded_pool_addr}, not_bonded={not_bonded_pool_addr}")
+    status(f"Staking pools: bonded={bonded_pool_addr}, not_bonded={not_bonded_pool_addr}")
 
     total_bonded = 0
     for v in staking.get("validators") or []:
@@ -673,21 +722,54 @@ def transform_to_single_validator(
     faucet_amount = 100_000_000_000_000_000  # 100 billion MIRAGE
     validator_extra = 100_000_000_000_000  # 100 million MIRAGE
     balances = bank.get("balances") or []
-    balances.append({"address": faucet_addr, "coins": [{"denom": "umirage", "amount": str(faucet_amount)}]})
-    balances.append({"address": val_addr, "coins": [{"denom": "umirage", "amount": str(validator_extra)}]})
-    bank["balances"] = balances
-    total_new = faucet_amount + validator_extra
+
+    # Track supply changes
+    supply_delta = faucet_amount + validator_extra
+
+    # Fix staking module account balances to match our new staking state:
+    # - bonded_tokens_pool should have exactly total_bonded (all our validator's stake)
+    # - not_bonded_tokens_pool should have 0 (no unbonding delegations)
+    old_bonded_balance = 0
+    old_not_bonded_balance = 0
+    new_balances = []
+    for bal in balances:
+        addr = bal.get("address", "")
+        if addr == bonded_pool_addr:
+            for coin in bal.get("coins") or []:
+                if coin.get("denom") == "umirage":
+                    old_bonded_balance = int(coin.get("amount", "0"))
+            # Replace with new bonded amount
+            new_balances.append({"address": addr, "coins": [{"denom": "umirage", "amount": str(total_bonded)}]})
+        elif addr == not_bonded_pool_addr:
+            for coin in bal.get("coins") or []:
+                if coin.get("denom") == "umirage":
+                    old_not_bonded_balance = int(coin.get("amount", "0"))
+            # Skip (don't add) - not_bonded_pool should be empty since we have no unbonding delegations
+            continue
+        else:
+            new_balances.append(bal)
+
+    # Add faucet and validator balances
+    new_balances.append({"address": faucet_addr, "coins": [{"denom": "umirage", "amount": str(faucet_amount)}]})
+    new_balances.append({"address": val_addr, "coins": [{"denom": "umirage", "amount": str(validator_extra)}]})
+    bank["balances"] = new_balances
+
+    # Adjust supply for module account changes
+    supply_delta += (total_bonded - old_bonded_balance)  # bonded pool change
+    supply_delta -= old_not_bonded_balance  # removed not_bonded pool entirely
+    status(f"Supply delta: +{faucet_amount + validator_extra} (faucet+validator), "
+           f"bonded: {old_bonded_balance} -> {total_bonded}, not_bonded: {old_not_bonded_balance} -> 0")
+
     supply_list = bank.get("supply") or []
     for c in supply_list:
         if c.get("denom") == "umirage":
-            c["amount"] = str(int(c.get("amount", "0")) + total_new)
+            c["amount"] = str(int(c.get("amount", "0")) + supply_delta)
             break
     else:
-        supply_list.append({"denom": "umirage", "amount": str(total_new)})
+        supply_list.append({"denom": "umirage", "amount": str(supply_delta)})
     bank["supply"] = supply_list
     app_state["bank"] = bank
 
-    auth_accounts = auth.get("accounts") or []
     auth_accounts.append(
         {
             "@type": "/cosmos.auth.v1beta1.BaseAccount",
@@ -791,17 +873,8 @@ def write_working_genesis(genesis_json: str):
     # Restore full indexer DB before starting services
     restore_indexer_database()
 
-    status("Restoring production binary from snapshot ...")
-    # Ensure no process is using the binary
-    run(["bash", "-lc", "docker exec mirage pkill -9 -f miraged 2>/dev/null || true"])
-    time.sleep(1)
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage bash -lc 'cp /root/.mirage/node.clone/bin/miraged /opt/mirage/blockchain/bin/miraged && chmod +x /opt/mirage/blockchain/bin/miraged'",
-        ]
-    )
+    # Note: We use the binary from the pulled image (same version as source chain)
+    # No need to copy binary from snapshot
 
     status("Starting node in tmux ...")
     start_cmd = '/opt/mirage/blockchain/bin/miraged start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
@@ -906,11 +979,7 @@ def main():
 
     status("Reset local testnet: BEGIN")
 
-    stop_local_container()
-    ensure_local_container()
-    # Important: prevent the entrypoint from running the node while we rewrite home
-    stop_node_in_container()
-
+    # Step 1: Get snapshot (fetch remote or use local file)
     if args.snapshot_file:
         tarball = Path(args.snapshot_file).expanduser().resolve()
         if not tarball.exists():
@@ -920,7 +989,19 @@ def main():
         tarball = remote_snapshot(args.source)
         status(f"Snapshot saved to: {tarball}")
 
-    export_path = copy_snapshot_into_container(tarball)
+    # Step 2: Extract snapshot to get image reference
+    extract_dir, image_ref = extract_snapshot(tarball)
+
+    # Step 3: Stop old container, pull exact image, start new container
+    stop_local_container()
+    ensure_local_container(image_ref)
+
+    # Important: prevent the entrypoint from running the node while we rewrite home
+    stop_node_in_container()
+
+    # Step 4: Copy snapshot files into container
+    export_path = copy_snapshot_into_container(extract_dir)
+
     scrub_consensus_key()
     val_addr, valoper, faucet_addr = ensure_test_keys()
     cons_pub_b64 = read_priv_validator_pubkey_b64()
