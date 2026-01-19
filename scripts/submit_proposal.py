@@ -3,6 +3,7 @@ import getpass
 import json
 import logging
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -242,9 +243,12 @@ def run_with_pexpect(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
     """Run a command with pexpect, handle keyring password prompt, and return (exit_code, output).
     For local mode (test backend), uses simple subprocess since no password is needed."""
     if _is_local_mode:
-        docker_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd[1:]
-        log_debug(f"Docker exec: {' '.join(docker_cmd)}")
-        result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=timeout)
+        # Build shell command string for docker exec (more reliable than list for complex args)
+        miraged_path = get_local_miraged_path()
+        args_str = " ".join(shlex.quote(arg) for arg in cmd[1:])
+        shell_cmd = f"docker exec {LOCAL_CONTAINER} {miraged_path} {args_str}"
+        log_debug(f"Docker exec: {shell_cmd}")
+        result = subprocess.run(shell_cmd, shell=True, capture_output=True, text=True, timeout=timeout)
         output = result.stdout + result.stderr
         log_debug(f"Output: {output}")
         return result.returncode, output
