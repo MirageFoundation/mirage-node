@@ -56,13 +56,15 @@ install:
 	@echo "--> ensure dependencies have not been modified"
 	@go mod verify
 	@echo "--> building $(APPNAME)d version $(VERSION)"
-	@go build $(BUILD_FLAGS) -mod=readonly -o ./$(APPNAME)d ./cmd/$(APPNAME)d
+	@mkdir -p ./bin
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
 
 build: install
 
 build-orchestrator:
 	@echo "--> building orchestrator"
-	@go build $(BUILD_FLAGS) -mod=readonly -o ./orchestrator ./cmd/orchestrator
+	@mkdir -p ./bin
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/orchestrator ./cmd/orchestrator
 
 build-all: build build-orchestrator
 

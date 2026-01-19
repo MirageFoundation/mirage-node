@@ -59,7 +59,7 @@ EOF
   if [ "$RESTART_AFTER" = "--restart" ]; then
     # Restart the node process inside tmux pane 0
     SESSION="${SESSION:-mirage}"
-    BIN="${BIN:-/opt/mirage/blockchain/miraged}"
+    BIN="${BIN:-/opt/mirage/blockchain/bin/miraged}"
     
     # Kill miraged and tail processes
     tmux send-keys -t "$SESSION:mirage.0" C-c

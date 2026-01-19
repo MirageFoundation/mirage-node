@@ -126,7 +126,7 @@ def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = F
     """Run miraged command, via docker exec for local mode"""
     bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
     if _is_local_mode:
-        full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + cmd
+        full_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
     else:
         full_cmd = [bin_path] + cmd
     log_debug(f"Running: {' '.join(full_cmd)}")
@@ -211,7 +211,7 @@ def run_with_pexpect(cmd: list[str], timeout: int = 60) -> tuple[int, str]:
     """Run a command with pexpect, handle keyring password prompt, and return (exit_code, output).
     For local mode (test backend), uses simple subprocess since no password is needed."""
     if _is_local_mode:
-        docker_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + cmd[1:]
+        docker_cmd = ["docker", "exec", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd[1:]
         log_debug(f"Docker exec: {' '.join(docker_cmd)}")
         result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=timeout)
         output = result.stdout + result.stderr
@@ -313,7 +313,7 @@ def get_address_from_seed(seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + cmd
+        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
     else:
         full_cmd = [bin_path] + cmd
 
@@ -396,7 +396,7 @@ def import_key_from_seed(account_name: str, seed: str) -> str:
     ]
 
     if _is_local_mode:
-        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/miraged"] + cmd
+        full_cmd = ["docker", "exec", "-i", LOCAL_CONTAINER, "/opt/mirage/blockchain/bin/miraged"] + cmd
     else:
         full_cmd = [bin_path] + cmd
 

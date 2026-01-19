@@ -61,7 +61,7 @@ docker exec "${CONTAINER}" tmux capture-pane -t mirage:0 -p | tail -50 || true
 | Path | Description |
 |------|-------------|
 | `/opt/mirage/` | Application root |
-| `/opt/mirage/blockchain/miraged` | Blockchain binary |
+| `/opt/mirage/blockchain/bin/miraged` | Blockchain binary |
 | `/opt/mirage/web/frontend/` | Frontend build |
 | `/opt/mirage/web/backend/` | Backend API |
 | `/opt/mirage/indexer/` | Transaction indexer |

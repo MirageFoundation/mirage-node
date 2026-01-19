@@ -49,8 +49,7 @@ web/frontend/node_modules/
 
 # Blockchain data
 .mirage
-blockchain/miraged
-blockchain/orchestrator
+blockchain/bin/
 
 # Databases
 *.sqlite

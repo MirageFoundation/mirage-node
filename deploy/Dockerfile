@@ -49,8 +49,8 @@ RUN REACT_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" REACT_APP_API_BASE=/ap
 
 # Copy runtime files after frontend build so backend/go changes don't force a React rebuild
 WORKDIR /opt/mirage
-COPY blockchain/miraged /opt/mirage/blockchain/miraged
-COPY blockchain/mirage-orchestrator /opt/mirage/blockchain/mirage-orchestrator
+COPY blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
+COPY blockchain/bin/orchestrator /opt/mirage/blockchain/bin/orchestrator
 COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
@@ -58,7 +58,7 @@ COPY shared/ /opt/mirage/shared/
 COPY referrals/ /opt/mirage/referrals/
 COPY deploy/ /opt/mirage/deploy/
 
-## Note: We trust upstream build step to produce /opt/mirage/blockchain/miraged
+## Note: We trust upstream build step to produce /opt/mirage/blockchain/bin/miraged
 
 # Stage 2: Minimal runtime image
 FROM ubuntu:24.04
@@ -104,9 +104,9 @@ COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/pytho
 WORKDIR /opt/mirage
 
 # Copy compiled binaries (not Go source)
-COPY --from=builder /opt/mirage/blockchain/miraged /opt/mirage/blockchain/miraged
-COPY --from=builder /opt/mirage/blockchain/mirage-orchestrator /opt/mirage/blockchain/mirage-orchestrator
-RUN chmod +x /opt/mirage/blockchain/miraged /opt/mirage/blockchain/mirage-orchestrator
+COPY --from=builder /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
+COPY --from=builder /opt/mirage/blockchain/bin/orchestrator /opt/mirage/blockchain/bin/orchestrator
+RUN chmod +x /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/orchestrator
 
 # Copy built frontend (not source)
 COPY --from=builder /opt/mirage/web/frontend/build /opt/mirage/web/frontend/build

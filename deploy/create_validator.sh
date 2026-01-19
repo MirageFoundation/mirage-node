@@ -6,7 +6,7 @@ set -euo pipefail
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
 NODE_HOME="/root/.mirage/node"
-BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
+BIN="${BIN:-$ROOT_DIR/blockchain/bin/miraged}"
 MONIKER="${MONIKER:-validator}"
 RPC_URL="${RPC_URL:-http://127.0.0.1:26657}"
 CHAIN_ID="${CHAIN_ID:-mirage-1}"

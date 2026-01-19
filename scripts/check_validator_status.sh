@@ -8,7 +8,7 @@ trap 'echo "ERROR: Script failed at line $LINENO. Command: $BASH_COMMAND" >&2' E
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
 NODE_HOME="$HOME/.mirage/node"
-BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
+BIN="${BIN:-$ROOT_DIR/blockchain/bin/miraged}"
 RPC_URL="${RPC_URL:-http://127.0.0.1:26657}"
 CHAIN_ID="${CHAIN_ID:-mirage-1}"
 KEYRING_BACKEND="${KEYRING_BACKEND:-test}"
