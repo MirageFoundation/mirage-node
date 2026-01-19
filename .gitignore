@@ -40,6 +40,9 @@ htmlcov/
 .tox/
 .nox/
 
+# we specifically want the env templates to be committed
+!deploy/templates/env/
+
 # Frontend
 web/frontend/build/
 web/frontend/node_modules/
@@ -47,6 +50,7 @@ web/frontend/node_modules/
 # Blockchain data
 .mirage
 blockchain/miraged
+blockchain/orchestrator
 
 # Databases
 *.sqlite

@@ -140,10 +140,7 @@ COPY --from=builder /opt/mirage/deploy/letsencrypt_register.sh /opt/mirage/deplo
 COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/deploy/enable_validator_mode.sh
 
 # IBC relayer setup
-COPY --from=builder /opt/mirage/deploy/setup_hermes_relayer.sh /opt/mirage/deploy/setup_hermes_relayer.sh
-
-# Bridge orchestrator setup
-COPY --from=builder /opt/mirage/deploy/enable_orchestrator.sh /opt/mirage/deploy/enable_orchestrator.sh
+COPY --from=builder /opt/mirage/deploy/setup_hermes.sh /opt/mirage/deploy/setup_hermes.sh
 
 # Set working directory
 WORKDIR /opt/mirage
