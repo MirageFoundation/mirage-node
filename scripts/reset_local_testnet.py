@@ -863,6 +863,8 @@ def write_working_genesis(genesis_json: str):
     )
 
     # Start orchestrator (optional - may not exist in older builds)
+    # Note: The entrypoint.sh can't create the orchestrator window because we killed the node
+    # earlier (it waits for RPC before creating orchestrator window), so we create it here.
     orchestrator_exists = run(
         ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/bin/orchestrator && echo yes || echo no"],
         capture=True,
@@ -871,8 +873,18 @@ def write_working_genesis(genesis_json: str):
         try:
             status("Starting orchestrator ...")
             run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
-            run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator 2>/dev/null || true"])
-            time.sleep(0.5)
+            # Check if orchestrator window exists, create if not
+            window_exists = run(
+                [
+                    "bash",
+                    "-lc",
+                    "docker exec mirage tmux list-windows -t mirage -F '#{window_name}' 2>/dev/null | grep -q '^orchestrator$' && echo yes || echo no",
+                ],
+                capture=True,
+            ).strip()
+            if window_exists != "yes":
+                run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator -c /opt/mirage"])
+                time.sleep(0.3)
             run(
                 [
                     "bash",
