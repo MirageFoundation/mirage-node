@@ -126,8 +126,11 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     log_debug(f"Query: {' '.join(cmd_with_node)}")
     result = subprocess.run(cmd_with_node, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        log(f"RPC query failed: {result.stderr}")
-        print(f"ERROR: RPC query failed", file=sys.stderr)
+        error_msg = result.stderr.strip() or result.stdout.strip() or "unknown error"
+        log(f"RPC query failed: {error_msg}")
+        print(f"ERROR: RPC query failed (exit {result.returncode})", file=sys.stderr)
+        print(f"  Command: {' '.join(cmd)}", file=sys.stderr)
+        print(f"  {error_msg}", file=sys.stderr)
         sys.exit(1)
     log_debug(f"Response: {result.stdout[:500]}...")
     return json.loads(result.stdout)
@@ -387,8 +390,10 @@ def import_key_from_seed(account_name: str, seed: str) -> str:
                 existing_key = find_key_by_address(address)
                 if existing_key:
                     return existing_key
-        log(f"Key import failed: {stderr}")
-        print(f"ERROR: Key import failed", file=sys.stderr)
+        error_msg = stderr.strip() or stdout.strip() or "unknown error"
+        log(f"Key import failed: {error_msg}")
+        print(f"ERROR: Key import failed (exit {process.returncode})", file=sys.stderr)
+        print(f"  {error_msg}", file=sys.stderr)
         sys.exit(1)
 
     info(f"Key '{account_name}' imported")
@@ -767,7 +772,14 @@ def main():
     exit_status, output = run_with_pexpect(submit_cmd, timeout=60)
     if exit_status != 0:
         log(f"Submission failed: {output}")
-        info("ERROR: Proposal submission failed")
+        info(f"ERROR: Proposal submission failed (exit {exit_status})")
+        # Show the actual error from output
+        if output:
+            # Try to extract meaningful error message
+            for line in output.strip().split('\n'):
+                line = line.strip()
+                if line and not line.startswith('gas estimate:'):
+                    info(f"  {line}")
         sys.exit(1)
 
     # Verify transaction
@@ -867,7 +879,12 @@ def main():
             exit_status, output = run_with_pexpect(deposit_cmd, timeout=60)
             if exit_status != 0:
                 log(f"Deposit failed: {output}")
-                info("ERROR: Deposit failed")
+                info(f"ERROR: Deposit failed (exit {exit_status})")
+                if output:
+                    for line in output.strip().split('\n'):
+                        line = line.strip()
+                        if line:
+                            info(f"  {line}")
                 sys.exit(1)
 
             info("✅ Deposit submitted")
@@ -980,7 +997,14 @@ def main():
         exit_status, output = run_with_pexpect(vote_cmd, timeout=60)
         if exit_status != 0:
             log(f"Vote failed for {account_name}: {output}")
-            info(f"⚠️ {account_name} vote failed")
+            info(f"⚠️ {account_name} vote failed (exit {exit_status})")
+            if output:
+                # Show first meaningful error line
+                for line in output.strip().split('\n'):
+                    line = line.strip()
+                    if line and ('error' in line.lower() or 'failed' in line.lower() or 'invalid' in line.lower()):
+                        info(f"  {line}")
+                        break
         else:
             info(f"✅ {account_name} voted YES")
 
