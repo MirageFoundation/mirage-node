@@ -137,11 +137,7 @@ def main():
     rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
     
     # Prompt for mnemonic
-    print("Enter your 12-word Solana seed phrase.")
-    print("(Create one at https://solflare.com or any Solana wallet)")
-    print()
-    
-    mnemonic = getpass.getpass("Enter 12-word mnemonic: ")
+    mnemonic = getpass.getpass("Enter 12-word Solana mnemonic: ")
     
     # Validate
     valid, error = validate_mnemonic(mnemonic)
@@ -208,4 +204,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n    Aborted.")
+        sys.exit(0)
