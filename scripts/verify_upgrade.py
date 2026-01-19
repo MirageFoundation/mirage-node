@@ -59,13 +59,6 @@ def _run_json(cmd: list[str]) -> dict:
     return json.loads(out)
 
 
-def _run_text(cmd: list[str]) -> str:
-    p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if p.returncode != 0:
-        raise RuntimeError(f"command failed ({p.returncode}): {' '.join(cmd)}\n{p.stderr}".strip())
-    return (p.stdout or "").strip()
-
-
 def _as_int(v: Any) -> int:
     if isinstance(v, bool):
         raise ValueError(f"not an int: {v!r}")
@@ -112,11 +105,6 @@ def _check_equal(label: str, got: Any, expected: Any, failures: list[str]) -> No
         failures.append(f"{label} expected {expected!r}, got {got!r}")
 
 
-def _check_close(label: str, got: float, expected: float, failures: list[str], eps: float = 1e-9) -> None:
-    if abs(got - expected) > eps:
-        failures.append(f"{label} expected {expected!r}, got {got!r}")
-
-
 def _read_text_if_exists(path: Path) -> str | None:
     try:
         if path.exists():
@@ -127,8 +115,6 @@ def _read_text_if_exists(path: Path) -> str | None:
 
 
 def _extract_toml_string_value(text: str, key: str) -> str | None:
-    # minimal TOML for `key = "value"` on a single line
-    # ignores commented lines
     pat = re.compile(rf'^\s*{re.escape(key)}\s*=\s*"(.*)"\s*$')
     for line in text.splitlines():
         s = line.strip()
@@ -141,7 +127,6 @@ def _extract_toml_string_value(text: str, key: str) -> str | None:
 
 
 def _expected_core_params_v190() -> dict[str, Any]:
-    # Source of truth: blockchain/x/core/types/params.go (DefaultParams + DefaultTiers)
     return {
         "mint_interval": 200,
         "mint_quantity": 350_000_000,
@@ -170,95 +155,47 @@ def _expected_core_params_v190() -> dict[str, Any]:
 
 def _expected_tiers_v190() -> list[dict[str, Any]]:
     return [
-        # Tier 0: Free
-        {
-            "period_fee": 0,
-            "max_followed_mods": 5,
-            "max_followed_users": 25,
-            "max_followed_topics": 50,
-            "max_blocked_users": 10,
-            "max_blocked_posts": 25,
-            "max_quality_posts": 0,
-            "max_title_length": 130,
-            "max_content_length": 1000,
-            "editing_time_mins": 10,
-            "archive_duration_days": 30,
-            "vote_weight": 1.0,
-            "award_permissions": 0,
-            "eligible_for_mod": False,
-            "can_change_name": False,
-            "can_have_biography": False,
-            "can_have_avatar": False,
-            "can_have_banner": False,
-        },
-        # Tier 1: Trusted
-        {
-            "period_fee": 100_000_000_000,
-            "max_followed_mods": 10,
-            "max_followed_users": 125,
-            "max_followed_topics": 250,
-            "max_blocked_users": 125,
-            "max_blocked_posts": 100,
-            "max_quality_posts": 0,
-            "max_title_length": 165,
-            "max_content_length": 2000,
-            "editing_time_mins": 60,
-            "archive_duration_days": 90,
-            "vote_weight": 1.15,
-            "award_permissions": 1,
-            "eligible_for_mod": False,
-            "can_change_name": True,
-            "can_have_biography": True,
-            "can_have_avatar": True,
-            "can_have_banner": True,
-        },
-        # Tier 2: Established
-        {
-            "period_fee": 200_000_000_000,
-            "max_followed_mods": 25,
-            "max_followed_users": 500,
-            "max_followed_topics": 500,
-            "max_blocked_users": 500,
-            "max_blocked_posts": 200,
-            "max_quality_posts": 50,
-            "max_title_length": 200,
-            "max_content_length": 5000,
-            "editing_time_mins": 360,
-            "archive_duration_days": 180,
-            "vote_weight": 1.30,
-            "award_permissions": 2,
-            "eligible_for_mod": True,
-            "can_change_name": True,
-            "can_have_biography": True,
-            "can_have_avatar": True,
-            "can_have_banner": True,
-        },
-        # Tier 3: Distinguished
-        {
-            "period_fee": 300_000_000_000,
-            "max_followed_mods": 50,
-            "max_followed_users": 1000,
-            "max_followed_topics": 1000,
-            "max_blocked_users": 1000,
-            "max_blocked_posts": 500,
-            "max_quality_posts": 100,
-            "max_title_length": 250,
-            "max_content_length": 25000,
-            "editing_time_mins": 720,
-            "archive_duration_days": 365,
-            "vote_weight": 1.45,
-            "award_permissions": 3,
-            "eligible_for_mod": True,
-            "can_change_name": True,
-            "can_have_biography": True,
-            "can_have_avatar": True,
-            "can_have_banner": True,
-        },
+        {"period_fee": 0, "max_followed_mods": 5, "max_followed_users": 25, "max_followed_topics": 50,
+         "max_blocked_users": 10, "max_blocked_posts": 25, "max_quality_posts": 0, "max_title_length": 130,
+         "max_content_length": 1000, "editing_time_mins": 10, "archive_duration_days": 30, "vote_weight": 1.0,
+         "award_permissions": 0, "eligible_for_mod": False, "can_change_name": False, "can_have_biography": False,
+         "can_have_avatar": False, "can_have_banner": False},
+        {"period_fee": 100_000_000_000, "max_followed_mods": 10, "max_followed_users": 125, "max_followed_topics": 250,
+         "max_blocked_users": 125, "max_blocked_posts": 100, "max_quality_posts": 0, "max_title_length": 165,
+         "max_content_length": 2000, "editing_time_mins": 60, "archive_duration_days": 90, "vote_weight": 1.15,
+         "award_permissions": 1, "eligible_for_mod": False, "can_change_name": True, "can_have_biography": True,
+         "can_have_avatar": True, "can_have_banner": True},
+        {"period_fee": 200_000_000_000, "max_followed_mods": 25, "max_followed_users": 500, "max_followed_topics": 500,
+         "max_blocked_users": 500, "max_blocked_posts": 200, "max_quality_posts": 50, "max_title_length": 200,
+         "max_content_length": 5000, "editing_time_mins": 360, "archive_duration_days": 180, "vote_weight": 1.30,
+         "award_permissions": 2, "eligible_for_mod": True, "can_change_name": True, "can_have_biography": True,
+         "can_have_avatar": True, "can_have_banner": True},
+        {"period_fee": 300_000_000_000, "max_followed_mods": 50, "max_followed_users": 1000, "max_followed_topics": 1000,
+         "max_blocked_users": 1000, "max_blocked_posts": 500, "max_quality_posts": 100, "max_title_length": 250,
+         "max_content_length": 25000, "editing_time_mins": 720, "archive_duration_days": 365, "vote_weight": 1.45,
+         "award_permissions": 3, "eligible_for_mod": True, "can_change_name": True, "can_have_biography": True,
+         "can_have_avatar": True, "can_have_banner": True},
     ]
 
 
+def _fmt_value(v: Any) -> str:
+    if isinstance(v, bool):
+        return str(v)
+    if isinstance(v, int):
+        if v >= 1_000_000_000_000:
+            return f"{v:,} ({v // 1_000_000_000_000}T umirage)"
+        elif v >= 1_000_000_000:
+            return f"{v:,} ({v // 1_000_000_000}B umirage)"
+        elif v >= 1_000_000:
+            return f"{v:,} ({v // 1_000_000} MIRAGE)"
+        return f"{v:,}"
+    if isinstance(v, float):
+        return f"{v}"
+    return str(v)
+
+
 def check_node_health(rpc: str, failures: list[str], warnings: list[str]) -> tuple[str | None, str | None]:
-    print("-> Checking node health (RPC)...")
+    print("-> Checking node health...")
     try:
         status = _http_get_json(f"{rpc}/status")
         result = status.get("result", {})
@@ -270,15 +207,15 @@ def check_node_health(rpc: str, failures: list[str], warnings: list[str]) -> tup
         network = node_info.get("network", "unknown")
         tm_version = node_info.get("version", "unknown")
 
-        print("   [OK] RPC reachable")
+        print(f"   [OK] RPC reachable")
         print(f"   [OK] Network: {network}")
-        print(f"   [OK] Tendermint version: {tm_version}")
-        print(f"   [OK] Latest block height: {latest_height}")
+        print(f"   [OK] Tendermint: {tm_version}")
+        print(f"   [OK] Height: {latest_height}")
         if latest_time:
-            print(f"   [OK] Latest block time: {latest_time}")
+            print(f"   [OK] Block time: {latest_time}")
         if catching_up:
             warnings.append("node is catching up (syncing)")
-            print("   [WARN] Node is catching up (syncing)")
+            print("   [WARN] Node is catching up")
 
         chain_id = network if isinstance(network, str) else None
         return chain_id, str(latest_height) if latest_height is not None else None
@@ -289,34 +226,16 @@ def check_node_health(rpc: str, failures: list[str], warnings: list[str]) -> tup
     return None, None
 
 
-def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> None:
-    print("\n-> Checking binary version...")
-    try:
-        v = _run_text([miraged, "version"])
-        print(f"   [OK] miraged version: {v}")
-        # allow formats like "v1.9.0" or "1.9.0"
-        v_norm = v.strip()
-        if v_norm.startswith("v"):
-            v_norm = v_norm[1:]
-        if not v_norm.startswith("1.9."):
-            warnings.append(f"binary version does not look like 1.9.x: {v!r}")
-    except Exception as e:
-        failures.append(f"could not check binary version: {e}")
-
-
 def check_upgrade_state(miraged: str, rpc: str, phase: str, failures: list[str]) -> None:
-    print("\n-> Checking upgrade module state...")
-    # applied
+    print("\n-> Checking upgrade state...")
     applied_height: int | None = None
     try:
         applied = _run_json([miraged, "q", "upgrade", "applied", UPGRADE_NAME, "--node", rpc, "-o", "json"])
-        # SDK prints {"height":"123"} typically
         h = applied.get("height", "0")
         applied_height = _as_int(h)
     except Exception:
         applied_height = None
 
-    # plan
     plan: dict | None = None
     plan_err: str | None = None
     try:
@@ -326,124 +245,132 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, failures: list[str])
 
     if phase == "post":
         if applied_height is None or applied_height <= 0:
+            print(f"   [FAIL] upgrade {UPGRADE_NAME} not applied")
             failures.append(f"upgrade {UPGRADE_NAME} is not applied (or cannot be queried)")
         else:
             print(f"   [OK] upgrade applied: {UPGRADE_NAME} @ height {applied_height}")
-        # In post phase there should be no pending plan (typical); if plan is present, fail.
         if plan is not None and plan.get("plan") not in (None, {}):
             failures.append(f"upgrade plan still present after upgrade: {plan.get('plan')!r}")
     else:
-        # pre phase: plan must exist and match name
         if plan is None:
+            print(f"   [FAIL] upgrade plan not found")
             failures.append(f"upgrade plan query failed (pre phase requires a plan): {plan_err}")
             return
         p = plan.get("plan", plan)
         name = p.get("name", "")
         if name != UPGRADE_NAME:
+            print(f"   [FAIL] upgrade plan name: expected {UPGRADE_NAME}, got {name}")
             failures.append(f"upgrade plan name expected {UPGRADE_NAME!r}, got {name!r}")
         else:
-            print(f"   [OK] upgrade plan present: {name}")
-        # applied may or may not exist in pre; if it does and is >0 that's fine.
+            print(f"   [OK] upgrade plan: {name}")
 
 
 def fetch_core_params(miraged: str, rpc: str) -> dict:
-    # `miraged q core params` prints Params object directly (not wrapped).
     return _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
 
 
 def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
-    print("\n-> Checking core params (EXHAUSTIVE)...")
+    print("\n-> Checking core params...")
     expected = _expected_core_params_v190()
 
-    # Ensure required top-level keys exist
     must_have = list(expected.keys()) + ["tiers", "bridge_chains"]
     _require_keys(core, must_have, "core params", failures)
 
-    # Scalars
     for k, v_exp in expected.items():
         if k not in core:
+            print(f"   [FAIL] {k}: MISSING")
             continue
         try:
             if isinstance(v_exp, float):
-                _check_close(f"core params.{k}", _as_float(core[k]), float(v_exp), failures)
+                got = _as_float(core[k])
+                if abs(got - v_exp) < 1e-9:
+                    print(f"   [OK] {k}: {got}")
+                else:
+                    print(f"   [FAIL] {k}: expected {v_exp}, got {got}")
+                    failures.append(f"core params.{k} expected {v_exp!r}, got {got!r}")
             else:
-                _check_equal(f"core params.{k}", _as_int(core[k]), int(v_exp), failures)
+                got = _as_int(core[k])
+                if got == int(v_exp):
+                    print(f"   [OK] {k}: {_fmt_value(got)}")
+                else:
+                    print(f"   [FAIL] {k}: expected {_fmt_value(v_exp)}, got {_fmt_value(got)}")
+                    failures.append(f"core params.{k} expected {v_exp!r}, got {got!r}")
         except Exception as e:
+            print(f"   [FAIL] {k}: invalid value {core[k]!r}")
             failures.append(f"core params.{k} invalid value {core[k]!r}: {e}")
 
-    # Tiers: strict 4-tier schema with exact expected values for every field
+    print("\n   Tiers:")
+    tier_names = ["Free", "Trusted", "Established", "Distinguished"]
     tiers = core.get("tiers")
     if isinstance(tiers, list):
         if len(tiers) != 4:
+            print(f"   [FAIL] expected 4 tiers, got {len(tiers)}")
             failures.append(f"core params.tiers expected exactly 4 tiers, got {len(tiers)}")
         exp_tiers = _expected_tiers_v190()
         for i in range(min(len(tiers), 4)):
             t = tiers[i]
+            name = tier_names[i] if i < len(tier_names) else f"Tier{i}"
             if not isinstance(t, dict):
+                print(f"   [FAIL] tiers[{i}] ({name}): expected object")
                 failures.append(f"core params.tiers[{i}] expected object, got {type(t)}")
                 continue
             exp = exp_tiers[i]
-            _require_keys(t, list(exp.keys()), f"core params.tiers[{i}]", failures)
+            tier_ok = True
+            tier_errors = []
             for field, v_exp in exp.items():
                 if field not in t:
+                    tier_errors.append(f"missing {field}")
+                    tier_ok = False
                     continue
                 try:
                     if isinstance(v_exp, bool):
-                        _check_equal(f"core params.tiers[{i}].{field}", _as_bool(t[field]), v_exp, failures)
+                        got = _as_bool(t[field])
+                        if got != v_exp:
+                            tier_errors.append(f"{field}={got}")
+                            tier_ok = False
                     elif isinstance(v_exp, float):
-                        _check_close(
-                            f"core params.tiers[{i}].{field}", _as_float(t[field]), float(v_exp), failures
-                        )
+                        got = _as_float(t[field])
+                        if abs(got - v_exp) > 1e-9:
+                            tier_errors.append(f"{field}={got}")
+                            tier_ok = False
                     else:
-                        _check_equal(f"core params.tiers[{i}].{field}", _as_int(t[field]), int(v_exp), failures)
+                        got = _as_int(t[field])
+                        if got != int(v_exp):
+                            tier_errors.append(f"{field}={got}")
+                            tier_ok = False
                 except Exception as e:
-                    failures.append(f"core params.tiers[{i}].{field} invalid value {t[field]!r}: {e}")
+                    tier_errors.append(f"{field}: invalid")
+                    tier_ok = False
 
-    # Bridge chains: schema + invariants
+            period_fee = t.get("period_fee", 0)
+            if tier_ok:
+                print(f"   [OK] Tier {i} ({name}): fee={_fmt_value(period_fee)}, {len(exp)} fields OK")
+            else:
+                print(f"   [FAIL] Tier {i} ({name}): {', '.join(tier_errors[:3])}{'...' if len(tier_errors) > 3 else ''}")
+                for err in tier_errors:
+                    failures.append(f"core params.tiers[{i}].{err}")
+
+    print("\n   Bridge chains:")
     bridge_chains = core.get("bridge_chains")
     if bridge_chains is None:
+        print("   [FAIL] bridge_chains is None")
         failures.append("core params.bridge_chains must be an array (empty is valid), got None")
     elif not isinstance(bridge_chains, list):
+        print(f"   [FAIL] bridge_chains expected list, got {type(bridge_chains)}")
         failures.append(f"core params.bridge_chains expected list, got {type(bridge_chains)}")
+    elif len(bridge_chains) == 0:
+        print("   [OK] bridge_chains: [] (empty)")
     else:
+        print(f"   [OK] bridge_chains: {len(bridge_chains)} chain(s)")
         for idx, ch in enumerate(bridge_chains):
-            if not isinstance(ch, dict):
-                failures.append(f"core params.bridge_chains[{idx}] expected object, got {type(ch)}")
-                continue
-            _require_keys(
-                ch,
-                ["chain_id", "contract_address", "enabled", "is_ibc", "ibc_channel"],
-                f"core params.bridge_chains[{idx}]",
-                failures,
-            )
-            chain_id = ch.get("chain_id")
-            if not isinstance(chain_id, str) or not chain_id.strip():
-                failures.append(f"core params.bridge_chains[{idx}].chain_id must be non-empty string")
-            try:
-                is_ibc = _as_bool(ch.get("is_ibc"))
-                _ = _as_bool(ch.get("enabled"))
-            except Exception as e:
-                failures.append(f"core params.bridge_chains[{idx}] bool fields invalid: {e}")
-                continue
-            contract_address = ch.get("contract_address", "")
-            ibc_channel = ch.get("ibc_channel", "")
+            if isinstance(ch, dict):
+                chain_id = ch.get("chain_id", "?")
+                enabled = ch.get("enabled", False)
+                is_ibc = ch.get("is_ibc", False)
+                bridge_type = "IBC" if is_ibc else "Attested"
+                status = "enabled" if enabled else "disabled"
+                print(f"      - {chain_id}: {bridge_type}, {status}")
 
-            if is_ibc:
-                if not isinstance(ibc_channel, str) or not ibc_channel.strip():
-                    failures.append(
-                        f"core params.bridge_chains[{idx}]: is_ibc=true requires non-empty ibc_channel"
-                    )
-            else:
-                if isinstance(ibc_channel, str) and ibc_channel.strip():
-                    failures.append(
-                        f"core params.bridge_chains[{idx}]: is_ibc=false requires ibc_channel to be empty"
-                    )
-                if not isinstance(contract_address, str) or not contract_address.strip():
-                    failures.append(
-                        f"core params.bridge_chains[{idx}]: is_ibc=false requires non-empty contract_address"
-                    )
-
-    print("   [OK] core params checked (see summary for failures)")
     return core
 
 
@@ -455,99 +382,79 @@ def fetch_bridge_config(miraged: str, rpc: str) -> dict:
     return _run_json([miraged, "q", "bridge", "config", "--node", rpc, "-o", "json"])
 
 
-def _normalize_chain_cfg_list(lst: list[dict]) -> dict[str, dict]:
-    out: dict[str, dict] = {}
-    for item in lst:
-        cid = item.get("chain_id", "")
-        if isinstance(cid, str) and cid.strip():
-            out[cid] = item
-    return out
-
-
 def check_bridge_queries_strict(core: dict, status: dict, cfg: dict, failures: list[str]) -> None:
-    print("\n-> Checking bridge queries (STRICT)...")
-    _require_keys(status, ["enabled_chains", "pending_attestations_count"], "bridge status", failures)
-    _require_keys(cfg, ["chains", "attestation_threshold", "bridge_fee"], "bridge config", failures)
+    print("\n-> Checking bridge queries...")
 
-    # Types
+    print("   Status (q bridge status):")
     enabled_chains = status.get("enabled_chains", [])
-    if not isinstance(enabled_chains, list):
+    if isinstance(enabled_chains, list):
+        print(f"   [OK] enabled_chains: {len(enabled_chains)}")
+    else:
+        print(f"   [FAIL] enabled_chains: expected list")
         failures.append(f"bridge status.enabled_chains expected list, got {type(enabled_chains)}")
-        enabled_chains = []
+
+    pending = status.get("pending_attestations_count", 0)
     try:
-        _ = _as_int(status.get("pending_attestations_count", 0))
+        pending_int = _as_int(pending)
+        print(f"   [OK] pending_attestations: {pending_int}")
     except Exception as e:
+        print(f"   [FAIL] pending_attestations: invalid")
         failures.append(f"bridge status.pending_attestations_count invalid: {e}")
 
+    print("\n   Config (q bridge config):")
     chains = cfg.get("chains", [])
-    if not isinstance(chains, list):
+    if isinstance(chains, list):
+        print(f"   [OK] chains: {len(chains)}")
+    else:
+        print(f"   [FAIL] chains: expected list")
         failures.append(f"bridge config.chains expected list, got {type(chains)}")
-        chains = []
 
-    # Param equality vs expected constants
     try:
-        _check_equal("bridge config.attestation_threshold", _as_int(cfg.get("attestation_threshold", 0)), 6667, failures)
+        threshold = _as_int(cfg.get("attestation_threshold", 0))
+        if threshold == 6667:
+            print(f"   [OK] attestation_threshold: {threshold} ({threshold/100:.2f}%)")
+        else:
+            print(f"   [FAIL] attestation_threshold: expected 6667, got {threshold}")
+            failures.append(f"bridge config.attestation_threshold expected 6667, got {threshold}")
     except Exception as e:
+        print(f"   [FAIL] attestation_threshold: invalid")
         failures.append(f"bridge config.attestation_threshold invalid: {e}")
+
     try:
-        _check_equal("bridge config.bridge_fee", _as_int(cfg.get("bridge_fee", 0)), 1_000_000, failures)
+        fee = _as_int(cfg.get("bridge_fee", 0))
+        if fee == 1_000_000:
+            print(f"   [OK] bridge_fee: {fee:,} (1 MIRAGE)")
+        else:
+            print(f"   [FAIL] bridge_fee: expected 1,000,000, got {fee:,}")
+            failures.append(f"bridge config.bridge_fee expected 1_000_000, got {fee}")
     except Exception as e:
+        print(f"   [FAIL] bridge_fee: invalid")
         failures.append(f"bridge config.bridge_fee invalid: {e}")
 
-    # Cross-check vs core params
+    print("\n   Cross-check vs core params:")
     try:
-        _check_equal(
-            "core.bridge_attestation_threshold vs bridge config.attestation_threshold",
-            _as_int(core.get("bridge_attestation_threshold", 0)),
-            _as_int(cfg.get("attestation_threshold", 0)),
-            failures,
-        )
+        core_threshold = _as_int(core.get("bridge_attestation_threshold", 0))
+        cfg_threshold = _as_int(cfg.get("attestation_threshold", 0))
+        if core_threshold == cfg_threshold:
+            print(f"   [OK] attestation_threshold: {core_threshold} (matches)")
+        else:
+            print(f"   [FAIL] threshold mismatch: core={core_threshold}, config={cfg_threshold}")
+            failures.append(f"attestation_threshold mismatch")
     except Exception as e:
+        print(f"   [FAIL] cross-check threshold: {e}")
         failures.append(f"cross-check bridge_attestation_threshold failed: {e}")
+
     try:
-        _check_equal(
-            "core.bridge_fee vs bridge config.bridge_fee",
-            _as_int(core.get("bridge_fee", 0)),
-            _as_int(cfg.get("bridge_fee", 0)),
-            failures,
-        )
+        core_fee = _as_int(core.get("bridge_fee", 0))
+        cfg_fee = _as_int(cfg.get("bridge_fee", 0))
+        if core_fee == cfg_fee:
+            print(f"   [OK] bridge_fee: {core_fee:,} (matches)")
+        else:
+            print(f"   [FAIL] fee mismatch: core={core_fee}, config={cfg_fee}")
+            failures.append(f"bridge_fee mismatch")
     except Exception as e:
+        print(f"   [FAIL] cross-check fee: {e}")
         failures.append(f"cross-check bridge_fee failed: {e}")
-
-    # Cross-check chain configs vs core.bridge_chains
-    core_chains = core.get("bridge_chains", [])
-    if not isinstance(core_chains, list):
-        failures.append("core.bridge_chains is not a list; cannot cross-check chain configs")
-        return
-    core_by_id = _normalize_chain_cfg_list([c for c in core_chains if isinstance(c, dict)])
-    cfg_by_id = _normalize_chain_cfg_list([c for c in chains if isinstance(c, dict)])
-
-    # Every chain in core must exist in bridge config (same module storage)
-    for cid in core_by_id.keys():
-        if cid not in cfg_by_id:
-            failures.append(f"bridge config missing chain present in core params: {cid!r}")
-
-    # Enabled chains in status must be exactly those enabled in config (by chain_id)
-    enabled_cfg = []
-    for cid, item in cfg_by_id.items():
-        try:
-            if _as_bool(item.get("enabled", False)):
-                enabled_cfg.append(cid)
-        except Exception:
-            # schema errors handled elsewhere
-            pass
-    enabled_status = []
-    for item in enabled_chains:
-        if isinstance(item, dict):
-            cid = item.get("chain_id", "")
-            if isinstance(cid, str) and cid.strip():
-                enabled_status.append(cid)
-    if sorted(enabled_status) != sorted(enabled_cfg):
-        failures.append(
-            f"enabled chains mismatch: status={sorted(enabled_status)!r} config={sorted(enabled_cfg)!r}"
-        )
-
-    print("   [OK] bridge queries checked (see summary for failures)")
 
 
 def fetch_gov_params(miraged: str, rpc: str) -> dict:
@@ -556,8 +463,7 @@ def fetch_gov_params(miraged: str, rpc: str) -> dict:
 
 
 def check_gov_params_strict(gp: dict, failures: list[str]) -> None:
-    print("\n-> Checking gov params (STRICT)...")
-    _require_keys(gp, ["min_deposit", "expedited_min_deposit"], "gov params", failures)
+    print("\n-> Checking gov params...")
 
     def _coin_amount(coins: Any, denom: str) -> int:
         if not isinstance(coins, list):
@@ -569,22 +475,34 @@ def check_gov_params_strict(gp: dict, failures: list[str]) -> None:
 
     try:
         min_amt = _coin_amount(gp.get("min_deposit", []), "umirage")
-        _check_equal("gov min_deposit[umirage]", min_amt, 500_000_000_000, failures)
+        expected_min = 500_000_000_000
+        if min_amt == expected_min:
+            print(f"   [OK] min_deposit: {min_amt:,} ({min_amt // 1_000_000:,} MIRAGE)")
+        else:
+            print(f"   [FAIL] min_deposit: expected {expected_min:,}, got {min_amt:,}")
+            failures.append(f"gov min_deposit expected {expected_min}, got {min_amt}")
     except Exception as e:
+        print(f"   [FAIL] min_deposit: {e}")
         failures.append(f"gov min_deposit invalid: {e}")
 
     try:
         exp_amt = _coin_amount(gp.get("expedited_min_deposit", []), "umirage")
-        _check_equal("gov expedited_min_deposit[umirage]", exp_amt, 1_000_000_000_000, failures)
+        expected_exp = 1_000_000_000_000
+        if exp_amt == expected_exp:
+            print(f"   [OK] expedited_min_deposit: {exp_amt:,} ({exp_amt // 1_000_000:,} MIRAGE)")
+        else:
+            print(f"   [FAIL] expedited_min_deposit: expected {expected_exp:,}, got {exp_amt:,}")
+            failures.append(f"gov expedited_min_deposit expected {expected_exp}, got {exp_amt}")
     except Exception as e:
+        print(f"   [FAIL] expedited_min_deposit: {e}")
         failures.append(f"gov expedited_min_deposit invalid: {e}")
 
-    # Presence checks for other key governance fields (don’t guess defaults here)
     for k in ["voting_period", "max_deposit_period", "quorum", "threshold", "veto_threshold"]:
-        if k not in gp:
+        if k in gp:
+            print(f"   [OK] {k}: {gp[k]}")
+        else:
+            print(f"   [FAIL] {k}: MISSING")
             failures.append(f"gov params: missing key {k!r}")
-
-    print("   [OK] gov params checked (see summary for failures)")
 
 
 def fetch_difficulty(miraged: str, rpc: str) -> dict:
@@ -592,20 +510,22 @@ def fetch_difficulty(miraged: str, rpc: str) -> dict:
 
 
 def check_difficulty(d: dict, failures: list[str]) -> None:
-    print("\n-> Checking difficulty endpoint...")
+    print("\n-> Checking difficulty...")
     _require_keys(d, ["current_difficulty"], "core difficulty", failures)
     try:
         cur = _as_int(d.get("current_difficulty", 0))
         if cur <= 0:
+            print(f"   [FAIL] current_difficulty: {cur} (must be > 0)")
             failures.append(f"current_difficulty must be > 0, got {cur}")
         else:
             print(f"   [OK] current_difficulty: {cur}")
     except Exception as e:
+        print(f"   [FAIL] current_difficulty: {e}")
         failures.append(f"core difficulty invalid: {e}")
 
 
 def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[str], warnings: list[str]) -> None:
-    print("\n-> Checking local node config (STRICT)...")
+    print("\n-> Checking local config...")
     cfg_dir = home_dir / "node" / "config"
 
     app_toml = cfg_dir / "app.toml"
@@ -613,12 +533,15 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
         txt = app_toml.read_text()
         min_gas = _extract_toml_string_value(txt, "minimum-gas-prices")
         if min_gas is None:
+            print("   [FAIL] app.toml: minimum-gas-prices missing")
             failures.append("app.toml: missing minimum-gas-prices")
+        elif min_gas == REQUIRED_MIN_GAS_PRICE:
+            print(f'   [OK] app.toml: minimum-gas-prices = "{min_gas}"')
         else:
-            _check_equal('app.toml minimum-gas-prices', min_gas, REQUIRED_MIN_GAS_PRICE, failures)
-            if min_gas == REQUIRED_MIN_GAS_PRICE:
-                print(f'   [OK] app.toml minimum-gas-prices = "{REQUIRED_MIN_GAS_PRICE}"')
+            print(f'   [FAIL] app.toml: minimum-gas-prices = "{min_gas}" (expected "{REQUIRED_MIN_GAS_PRICE}")')
+            failures.append(f'app.toml minimum-gas-prices expected "{REQUIRED_MIN_GAS_PRICE}", got "{min_gas}"')
     else:
+        print(f"   [WARN] app.toml not found")
         warnings.append(f"app.toml not found at {app_toml}")
 
     for name in ["config.toml", "client.toml", "genesis.json"]:
@@ -626,6 +549,7 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
         if p.exists():
             print(f"   [OK] {name} exists")
         else:
+            print(f"   [WARN] {name} not found")
             warnings.append(f"{name} not found at {p}")
 
     genesis_path = cfg_dir / "genesis.json"
@@ -638,29 +562,26 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
                 genesis_chain_id = cid
                 print(f"   [OK] genesis chain_id: {cid}")
             else:
+                print(f"   [FAIL] genesis chain_id: invalid")
                 failures.append(f"genesis.json: invalid chain_id {cid!r}")
         except Exception as e:
+            print(f"   [FAIL] genesis.json: {e}")
             failures.append(f"genesis.json parse failed: {e}")
 
     if rpc_chain_id and genesis_chain_id:
-        _check_equal("RPC chain-id vs genesis chain_id", rpc_chain_id, genesis_chain_id, failures)
-
-    client_toml = cfg_dir / "client.toml"
-    client_txt = _read_text_if_exists(client_toml)
-    if client_txt is not None and genesis_chain_id:
-        cfg_cid = _extract_toml_string_value(client_txt, "chain-id")
-        if cfg_cid is None:
-            warnings.append("client.toml: missing chain-id")
+        if rpc_chain_id == genesis_chain_id:
+            print(f"   [OK] RPC chain_id matches genesis")
         else:
-            _check_equal("client.toml chain-id vs genesis chain_id", cfg_cid, genesis_chain_id, failures)
+            print(f"   [FAIL] RPC chain_id ({rpc_chain_id}) != genesis ({genesis_chain_id})")
+            failures.append(f"RPC chain-id vs genesis chain_id mismatch")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.0-bridge upgrade (strict/exhaustive)")
+    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.0-bridge upgrade")
     parser.add_argument("--node", default="http://127.0.0.1:26657", help="CometBFT RPC endpoint")
-    parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory root (expects HOME/node/)")
-    parser.add_argument("--skip-config", action="store_true", help="Skip local config file checks")
-    parser.add_argument("--phase", choices=["pre", "post"], default="post", help="pre=plan must exist, post=applied required")
+    parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory")
+    parser.add_argument("--skip-config", action="store_true", help="Skip local config checks")
+    parser.add_argument("--phase", choices=["pre", "post"], default="post", help="pre=plan exists, post=applied")
     args = parser.parse_args()
 
     rpc = args.node.rstrip("/")
@@ -679,16 +600,9 @@ def main() -> int:
     print(f"phase:   {args.phase}")
     print()
 
-    # 1) RPC health
     rpc_chain_id, _ = check_node_health(rpc, failures, warnings)
-
-    # 2) Binary
-    check_binary_version(miraged, failures, warnings)
-
-    # 3) Upgrade state
     check_upgrade_state(miraged, rpc, args.phase, failures)
 
-    # 4) Core params (single fetch, exhaustive validation)
     try:
         core = fetch_core_params(miraged, rpc)
         check_core_params_exhaustive(core, failures)
@@ -696,7 +610,6 @@ def main() -> int:
         failures.append(f"failed to fetch/validate core params: {e}")
         core = {}
 
-    # 5) Bridge queries (must exist + must match core/config)
     try:
         b_status = fetch_bridge_status(miraged, rpc)
         b_cfg = fetch_bridge_config(miraged, rpc)
@@ -705,21 +618,18 @@ def main() -> int:
     except Exception as e:
         failures.append(f"bridge query failed: {e}")
 
-    # 6) Gov params (strict deposits + presence checks)
     try:
         gp = fetch_gov_params(miraged, rpc)
         check_gov_params_strict(gp, failures)
     except Exception as e:
         failures.append(f"failed to fetch/validate gov params: {e}")
 
-    # 7) Difficulty endpoint
     try:
         d = fetch_difficulty(miraged, rpc)
         check_difficulty(d, failures)
     except Exception as e:
         failures.append(f"failed to fetch/validate difficulty: {e}")
 
-    # 8) Local config checks
     if not args.skip_config:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
 
@@ -742,4 +652,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

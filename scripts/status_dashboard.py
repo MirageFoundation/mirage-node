@@ -171,6 +171,9 @@ def get_tmux_visibility_state() -> tuple[bool, bool]:
     if not os.environ.get("TMUX"):
         return False, True  # Not in tmux, assume visible
     
+    # Get our pane ID for explicit targeting
+    pane_id = os.environ.get("TMUX_PANE", "")
+    
     try:
         # Check if session has any attached clients
         result = subprocess.run(
@@ -185,21 +188,42 @@ def get_tmux_visibility_state() -> tuple[bool, bool]:
             return True, False
         
         # Session has clients - check if current window is active
-        # #{window_active} is 1 if this is the active window in the attached client
+        # Get our window index and compare to the session's active window
+        cmd = ["tmux", "display-message", "-p", "#{window_index} #{session_attached} #{client_session}"]
+        if pane_id:
+            cmd = ["tmux", "display-message", "-t", pane_id, "-p", "#{window_index} #{session_attached} #{client_session}"]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
+        our_window_index = result.stdout.strip().split()[0] if result.stdout.strip() else ""
+        
+        # List windows to find which one is active (has * flag)
         result = subprocess.run(
-            ["tmux", "display-message", "-p", "#{window_active}"],
+            ["tmux", "list-windows", "-F", "#{window_index} #{window_flags}"],
             capture_output=True,
             text=True,
             timeout=2,
         )
-        window_active = result.stdout.strip() == "1"
+        
+        active_window_index = None
+        for line in result.stdout.strip().split("\n"):
+            parts = line.split(None, 1)
+            if len(parts) >= 2:
+                idx, flags = parts[0], parts[1]
+                if "*" in flags:
+                    active_window_index = idx
+                    break
+            elif len(parts) == 1:
+                # No flags means this might be the only window
+                pass
+        
+        window_active = our_window_index == active_window_index
+        
+        debug_log(f"tmux: pane={pane_id} our_window={our_window_index} active_window={active_window_index} visible={window_active}")
         
         if not window_active:
-            debug_log("tmux: window not active")
             return True, False
         
         # Window is active - user is looking at this
-        debug_log("tmux: visible and active")
         return True, True
         
     except Exception as e:
@@ -880,17 +904,14 @@ def check_caddy() -> ServiceStatus:
     https_status = None
     response_ms = None
 
-    # Test HTTP on localhost
-    try:
-        start = time.time()
-        resp = requests.get("http://127.0.0.1:80/api/get_parameters", timeout=5)
-        response_ms = int((time.time() - start) * 1000)
-        http_status = resp.status_code
-        http_ok = resp.status_code < 500  # 2xx, 3xx, 4xx are "working"
-    except requests.exceptions.ConnectionError:
+    # Test HTTP on localhost - TCP connect only (backend check already tests the endpoint)
+    ms = tcp_connect_ms("127.0.0.1", 80, timeout_secs=2)
+    if ms is not None:
+        response_ms = ms
+        http_status = ms  # Show latency as the status
+        http_ok = True
+    else:
         http_status = "refused"
-    except Exception as e:
-        http_status = str(e)[:15]
 
     # If DOMAIN is set, test HTTPS
     if clean_domain:
@@ -1547,14 +1568,14 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Caddy":
         if details.get("domain"):
             lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
-        # Show HTTP status
+        # Show HTTP status (now shows TCP connect latency, not HTTP status code)
         http_val = details.get("http")
         https_ok = isinstance(details.get("https"), int) and details.get("https") < 400
         if http_val is not None:
-            if isinstance(http_val, int) and http_val < 400:
-                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}{http_val}{Colors.RESET}")
-            elif isinstance(http_val, int):
-                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_YELLOW}{http_val}{Colors.RESET}")
+            if isinstance(http_val, int):
+                # It's TCP connect latency in ms
+                ms_color = Colors.BRIGHT_GREEN if http_val < 50 else Colors.BRIGHT_YELLOW if http_val < 200 else Colors.BRIGHT_RED
+                lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {ms_color}{http_val}ms{Colors.RESET}")
             elif http_val == "refused" and https_ok:
                 # HTTP refused is expected when HTTPS is working
                 lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {Colors.BRIGHT_GREEN}redirected{Colors.RESET}")
