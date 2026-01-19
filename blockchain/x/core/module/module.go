@@ -2051,7 +2051,20 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 	return &types.MsgUnfollowTopicResponse{}, nil
 }
 
-// Delete validates and logs deletion of a post/comment (not persisted).
+// Delete validates and logs deletion of a post/comment (not persisted on-chain).
+//
+// SECURITY MODEL (enforced by indexer, NOT here):
+// The blockchain accepts Delete messages from anyone - they just pay gas. This is
+// intentional: on-chain validation would require storing post ownership data in the
+// KV store, which is expensive and unnecessary.
+//
+// Authorization is enforced by the INDEXER (see indexer/message_processor.py):
+//   - Governance: can delete any post
+//   - Admin (level >= 100): can delete any post
+//   - Regular user: can only delete posts they own
+//
+// If someone submits a Delete for a post they don't own, they waste gas but the
+// indexer rejects it - the post remains visible. This is the intended design.
 func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.MsgDeleteResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
@@ -2060,7 +2073,7 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 	var owner string
 	var userLevel int
 	if authority == govAuthority {
-		// GOVERNANCE PATH: can delete any post
+		// GOVERNANCE PATH: governance module is the "owner" for logging
 		owner = authority
 	} else {
 		// NODE PATH: authority is the validator, owner is derived from envelope_pubkey
@@ -2070,20 +2083,15 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		// Check if user has level >= 100 (admin) - they can delete any post
+		// Get user level for gas fee calculation
 		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
 			var core types.ProfileCore
 			_ = json.Unmarshal(bz, &core)
 			userLevel = int(core.Level)
 		}
 
-		// User with level >= 100 can delete any post (like governance)
-		// Non-admin can only delete their own posts
-		if userLevel < 100 {
-			// TODO: validate that owner created the post being deleted
-			// This would require storing post metadata or querying the indexer
-			// For now, we allow it and rely on indexer to filter
-		}
+		// NOTE: We do NOT validate ownership here. The indexer enforces authorization.
+		// This is intentional - see SECURITY MODEL comment above.
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
