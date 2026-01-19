@@ -421,6 +421,48 @@ def canon_base_set_auto_renewal(
     return bytes(out)
 
 
+def canon_base_ibc_transfer(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    receiver: str,
+    amount: int,
+    source_channel: str,
+    timeout_seconds: int,
+) -> bytes:
+    out = bytearray(_prefix("MsgIBCTransfer"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, receiver)
+    out += _enc_u64(101, amount)
+    out += _enc_str(102, source_channel)
+    out += _enc_u64(103, timeout_seconds)
+    return bytes(out)
+
+
+def canon_base_bridge_burn(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    destination_chain: str,
+    destination_address: str,
+    amount: int,
+) -> bytes:
+    out = bytearray(_prefix("MsgBridgeBurn"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, destination_chain)
+    out += _enc_str(101, destination_address)
+    out += _enc_u64(102, amount)
+    return bytes(out)
+
+
 def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
     """
     Insert pow (tag 5) between difficulty (tag 4) and timestamp (tag 6)

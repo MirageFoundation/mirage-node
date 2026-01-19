@@ -10,6 +10,7 @@ import Button from '../components/Button';
 import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
+import { ibcTransfer, bridgeBurn } from '../utils/tx';
 
 // Convert a bech32 address from one prefix to another (e.g., mirage1... -> osmo1...)
 const convertBech32Prefix = (address, newPrefix) => {
@@ -36,6 +37,8 @@ const NETWORKS = {
         minAmount: 1,
         enabled: true,
         canDerive: true, // Same key derives address on this chain
+        isIbc: true,
+        ibcChannel: 'channel-0', // IBC channel to Osmosis
     },
     solana: {
         id: 'solana',
@@ -50,6 +53,7 @@ const NETWORKS = {
         minAmount: 10,
         enabled: true,
         canDerive: false, // Different cryptography, no derived address
+        isIbc: false,
     },
 };
 
@@ -452,13 +456,17 @@ const StatusBanner = styled.div`
     gap: 0.4rem;
     padding: 0.75rem;
     margin-top: 0.75rem;
-    background: ${({ $success }) => 
-        $success ? 'rgba(72, 187, 120, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
-    border: 1px solid ${({ $success }) => 
-        $success ? 'rgba(72, 187, 120, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
+    background: ${({ $success, $error }) => 
+        $success ? 'rgba(72, 187, 120, 0.1)' : 
+        $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
+    border: 1px solid ${({ $success, $error }) => 
+        $success ? 'rgba(72, 187, 120, 0.3)' : 
+        $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
     border-radius: 8px;
     font-size: 0.8rem;
-    color: ${({ $success }) => $success ? '#48bb78' : '#667eea'};
+    color: ${({ $success, $error }) => 
+        $success ? '#48bb78' : 
+        $error ? '#ef4444' : '#667eea'};
     font-weight: 500;
     animation: ${fadeIn} 0.3s ease-out;
 `;
@@ -623,8 +631,17 @@ export default function BridgeView({ state }) {
             if (!trimmed.startsWith('osmo1')) {
                 return 'Osmosis address must start with osmo1';
             }
-            if (trimmed.length !== 43) {
-                return `Invalid address length (expected 43 characters)`;
+            try {
+                const decoded = bech32.decode(trimmed);
+                if (decoded.prefix !== 'osmo') {
+                    return 'Invalid Osmosis bech32 prefix';
+                }
+                const bytes = bech32.fromWords(decoded.words);
+                if (!bytes || bytes.length !== 20) {
+                    return 'Invalid Osmosis address payload';
+                }
+            } catch (_) {
+                return 'Invalid Osmosis address (bech32 checksum failed)';
             }
         }
         
@@ -719,22 +736,43 @@ export default function BridgeView({ state }) {
             return;
         }
         
-        // UI-only: simulate submission
         setIsSubmitting(true);
         setSubmitStatus(null);
         
-        // Simulate API call delay
-        setTimeout(() => {
-            setIsSubmitting(false);
-            // This is just UI - no actual submission
-            // In production, this would call the bridge API
-            setSubmitStatus('success');
+        try {
+            // Convert MIRAGE to umirage (1 MIRAGE = 1,000,000 umirage)
+            const amountUmirage = Math.floor(parseFloat(rawAmount) * 1_000_000);
             
-            // Reset after showing success
-            setTimeout(() => {
-                setSubmitStatus(null);
-            }, 5000);
-        }, 2000);
+            let result;
+            if (selectedNetwork.isIbc) {
+                // IBC transfer to Cosmos chains
+                const sourceChannel = selectedNetwork.ibcChannel || 'channel-0';
+                result = await ibcTransfer(effectiveDestination, amountUmirage, sourceChannel, 600);
+            } else {
+                // Attested burn for non-IBC chains (e.g., Solana)
+                result = await bridgeBurn(selectedNetwork.id, effectiveDestination, amountUmirage);
+            }
+            
+            if (result.success) {
+                setSubmitStatus('success');
+                // Reset form after success
+                setTimeout(() => {
+                    setAmount('');
+                    setDestinationAddress('');
+                    setUseDifferentAddress(false);
+                    setSubmitStatus(null);
+                }, 5000);
+            } else {
+                setSubmitStatus('error');
+                setErrors({ submit: result.error || 'Bridge transaction failed' });
+            }
+        } catch (e) {
+            console.error('Bridge submission error:', e);
+            setSubmitStatus('error');
+            setErrors({ submit: e?.message || 'An unexpected error occurred' });
+        } finally {
+            setIsSubmitting(false);
+        }
     };
     
     // Calculate preview values
@@ -1003,6 +1041,11 @@ export default function BridgeView({ state }) {
                                             {submitStatus === 'success' && (
                                                 <StatusBanner $success>
                                                     ✓ Bridge transaction submitted successfully!
+                                                </StatusBanner>
+                                            )}
+                                            {submitStatus === 'error' && errors.submit && (
+                                                <StatusBanner $error>
+                                                    ✗ {errors.submit}
                                                 </StatusBanner>
                                             )}
                                         </SubmitSection>

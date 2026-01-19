@@ -9,9 +9,19 @@ The Mirage bridge supports two bridging mechanisms:
 
 The non-IBC bridge is chain-agnostic - the same message types and orchestrator support any external chain via configuration.
 
+### Implementation Status
+
+| Component | Status |
+|-----------|--------|
+| Part 1: IBC Bridge (Go + Backend + Frontend) | ✅ Complete |
+| Part 2: Non-IBC Bridge Messages (Go + Backend + Frontend) | ✅ Complete |
+| Part 3: Orchestrator | ⏳ Not Started |
+| Part 4: Solana Integration | ⏳ Not Started |
+| Part 5: Additional Chains | ⏳ Not Started |
+
 ---
 
-## Part 1: IBC Bridge (Osmosis)
+## Part 1: IBC Bridge (Osmosis) ✅ COMPLETE
 
 ### How It Works
 
@@ -19,8 +29,9 @@ The non-IBC bridge is chain-agnostic - the same message types and orchestrator s
 2. Backend builds `MsgIBCTransfer` with envelope fields
 3. Transaction broadcast to Mirage chain
 4. Ante handler (`ante_metasig.go`) verifies envelope signature
-5. Handler calls `TransferKeeper.Transfer()` to initiate IBC transfer
-6. IBC relayer (Hermes) delivers packet to Osmosis
+5. Ante handler (`ante_pow.go`) validates PoW for non-subscribers
+6. Handler calls `TransferKeeper.Transfer()` to initiate IBC transfer
+7. IBC relayer (Hermes) delivers packet to Osmosis
 
 ### Message Type
 
@@ -28,6 +39,8 @@ The non-IBC bridge is chain-agnostic - the same message types and orchestrator s
 
 ```protobuf
 message MsgIBCTransfer {
+  option (cosmos.msg.v1.signer) = "authority";
+  
   string authority = 1;
   
   // Envelope fields (standard)
@@ -36,13 +49,14 @@ message MsgIBCTransfer {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  bytes envelope_signature = 7;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
   
-  // IBC transfer fields
-  string receiver = 100;           // Destination address (e.g., osmo1...)
-  uint64 amount = 101;             // Amount in umirage
-  string source_channel = 102;     // IBC channel ID
-  uint64 timeout_timestamp = 103;  // Timeout in nanoseconds (0 = default)
+  // Payload
+  string receiver = 100;           // destination address on target chain (e.g., osmo1...)
+  uint64 amount = 101;             // amount in umirage to transfer
+  string source_channel = 102;     // IBC channel ID (e.g., "channel-1")
+  uint64 timeout_seconds = 103;    // timeout in seconds from now (default: 600 = 10 min)
 }
 
 message MsgIBCTransferResponse {
@@ -50,18 +64,20 @@ message MsgIBCTransferResponse {
 }
 ```
 
-### Implementation Files
+### Implementation Files ✅
 
-| File | Changes |
-|------|---------|
-| `blockchain/proto/mirage/core/v1/tx.proto` | Add `MsgIBCTransfer` and response |
-| `blockchain/app/ante_metasig.go` | Add case for `*coretypes.MsgIBCTransfer` |
-| `blockchain/x/core/keeper/msg_server.go` | Add `IBCTransfer()` handler |
-| `shared/datatypes.py` | Add `MsgIBCTransfer` class |
-| `shared/canon.py` | Add `canon_base_ibc_transfer()` |
-| `web/backend/routes/core.py` | Add `/api/core/ibc_transfer` endpoint |
-| `web/frontend/src/utils/TransactionHandler.js` | Add `ibcTransfer()` method |
-| `web/frontend/src/views/BridgeView.js` | Wire up Osmosis outbound tab |
+| File | Status | Changes |
+|------|--------|---------|
+| `blockchain/proto/mirage/core/v1/tx.proto` | ✅ | Added `MsgIBCTransfer` and `MsgIBCTransferResponse` |
+| `blockchain/app/ante_metasig.go` | ✅ | Added signature verification case for `*coretypes.MsgIBCTransfer` |
+| `blockchain/app/ante_pow.go` | ✅ | Added PoW validation case and `buildCanonForIBCTransfer()` |
+| `blockchain/x/core/module/module.go` | ✅ | Added `IBCTransfer()` handler calling `TransferKeeper.Transfer()` |
+| `blockchain/x/core/module/cli_bridge.go` | ✅ | Added `bridge ibc-transfer` CLI command |
+| `shared/datatypes.py` | ✅ | Added `MsgIBCTransfer` class with correct field numbers |
+| `shared/canon.py` | ✅ | Added `canon_base_ibc_transfer()` matching Go canonical bytes |
+| `web/backend/routes/bridge.py` | ✅ | Added `POST /api/bridge/ibc_transfer` endpoint |
+| `web/frontend/src/utils/TransactionHandler.js` | ✅ | Added `ibcTransfer()` method with canonical signing |
+| `web/frontend/src/views/BridgeView.js` | ✅ | Wired up Osmosis outbound with proper network config |
 
 ### Key Constants
 
@@ -72,7 +88,16 @@ message MsgIBCTransferResponse {
 | Outbound channel (Mirage → Osmosis) | `channel-1` |
 | Inbound channel (Osmosis → Mirage) | `channel-108698` |
 | IBC denom on Osmosis | `ibc/3B6D9E089BECA458072D7624E67F0B84B8087E68B58CF0B9A65E0BA8E7818B54` |
-| Default timeout | 10 minutes from block time |
+| Default timeout | 600 seconds (10 minutes) |
+| Timeout bounds | 60s minimum, 86400s (24h) maximum |
+
+### Backend Validation ✅
+
+- **Receiver address**: Validated as proper bech32 with `osmo` HRP and 20-byte payload
+- **Source channel**: Must be enabled in `params.bridge_chains` configuration
+- **Amount**: Must be positive integer
+- **Timeout**: Clamped to [60, 86400] seconds
+- **PoW**: Required for non-subscribers, forbidden for subscribers
 
 ### Inbound (Osmosis → Mirage)
 
@@ -87,7 +112,7 @@ Frontend shows:
 
 ---
 
-## Part 2: Non-IBC Bridge (Validator-Attested)
+## Part 2: Non-IBC Bridge (Validator-Attested) ✅ COMPLETE
 
 ### Security Model
 
@@ -104,16 +129,25 @@ Frontend shows:
 - No escrow or locking - pure burn/mint on both sides
 - Total supply across all chains remains constant
 
+### Bridge Fee
+
+- **Flat 1 MIRAGE fee** for all bridge transfers (IBC and attested)
+- Fee is **burned** (not paid to validators)
+- Configurable via governance parameter `bridge_fee`
+- Applies regardless of subscriber status
+
 ### Message Types
 
 **File:** `blockchain/proto/mirage/core/v1/tx.proto`
 
-#### MsgBridgeBurn (User Outbound)
+#### MsgBridgeBurn (User Outbound) ✅
 
 User burns MIRAGE on Mirage to bridge out to an external chain.
 
 ```protobuf
 message MsgBridgeBurn {
+  option (cosmos.msg.v1.signer) = "authority";
+  
   string authority = 1;
   
   // Envelope fields (standard)
@@ -122,25 +156,29 @@ message MsgBridgeBurn {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  bytes envelope_signature = 7;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
   
-  // Bridge fields
-  string destination_chain = 100;   // "solana", "ethereum", "arbitrum", etc.
-  string destination_address = 101; // Address on destination chain
-  uint64 amount = 102;              // Amount in umirage
+  // Payload
+  string destination_chain = 100;    // target chain identifier (e.g., "solana", "ethereum")
+  string destination_address = 101;  // recipient address on target chain
+  uint64 amount = 102;               // amount in umirage to burn and bridge
 }
 
 message MsgBridgeBurnResponse {
-  string burn_id = 1;  // Unique identifier for this burn (tx hash)
+  string burn_id = 1;  // unique burn identifier (tx hash)
 }
 ```
 
-#### MsgBridgeAttest (Validator Inbound)
+#### MsgBridgeAttest (Validator Inbound) ✅
 
 Validator attests to a burn event on an external chain. When threshold is met, MIRAGE is minted to recipient.
 
 ```protobuf
 message MsgBridgeAttest {
+  option (cosmos.msg.v1.signer) = "validator";
+  option (amino.name) = "mirage/x/core/MsgBridgeAttest";
+
   string validator = 1;         // Validator operator address (signer)
   string source_chain = 2;      // "solana", "ethereum", etc.
   string burn_id = 3;           // Unique ID (tx hash from source chain where burn occurred)
@@ -150,74 +188,100 @@ message MsgBridgeAttest {
 
 message MsgBridgeAttestResponse {
   bool minted = 1;              // True if this attestation triggered minting
-  uint64 attested_power = 2;    // Total attested voting power so far
-  uint64 required_power = 3;    // Power needed to mint
+  int64 attested_power = 2;     // Total attested voting power so far
+  int64 required_power = 3;     // Power needed to mint
 }
 ```
 
-### Chain Parameters
+**Note:** `MsgBridgeAttest` does NOT use envelope fields - it's signed directly by the validator's consensus key.
+
+### Chain Parameters ✅
+
+Added to `blockchain/proto/mirage/core/v1/params.proto`:
 
 ```protobuf
 message BridgeChainConfig {
-  string chain_id = 1;          // "solana", "ethereum", etc.
-  string contract_address = 2;  // Bridge contract address on that chain
-  bool enabled = 3;             // Can be disabled via governance
+  string chain_id = 1;      // "solana", "osmosis", etc.
+  bool enabled = 2;         // Can be disabled via governance
+  bool is_ibc = 3;          // True for IBC chains (Osmosis), false for attested (Solana)
+  string ibc_channel = 4;   // IBC channel ID (only for IBC chains)
 }
 
-message BridgeParams {
-  repeated BridgeChainConfig chains = 1;
-  uint64 attestation_threshold = 2;  // 6667 = 66.67%
-}
+// In Params message:
+repeated BridgeChainConfig bridge_chains = 19;
+uint64 bridge_attestation_threshold = 20;  // 6667 = 66.67%
+uint64 bridge_fee = 21;                    // Fee in umirage (default: 1000000 = 1 MIRAGE)
 ```
 
 New chains can be added via governance proposal without code changes.
 
-### Bridge Keeper State
+### Attestation Storage ✅
 
-**Attestation tracking (per chain + burn_id) for inbound minting:**
+**File:** `blockchain/x/core/types/bridge.go`
 
 ```go
-type BridgeMintAttestation struct {
-    SourceChain     string
-    BurnID          string           // Unique within chain (tx hash of burn on external chain)
-    MirageRecipient string
-    Amount          uint64
-    Attestations    map[string]bool  // validator addr -> attested
-    TotalPower      int64            // sum of attesting validator power
-    Minted          bool
-    CreatedAt       time.Time
-    MintedAt        *time.Time
+type BridgeAttestation struct {
+    SourceChain     string          `json:"source_chain"`
+    BurnID          string          `json:"burn_id"`
+    MirageRecipient string          `json:"mirage_recipient"`
+    Amount          uint64          `json:"amount"`
+    Attestors       map[string]bool `json:"attestors"`  // validator addr -> attested
+    AttestedPower   int64           `json:"attested_power"`
+    Minted          bool            `json:"minted"`
+    CreatedAt       int64           `json:"created_at"` // block height
 }
 ```
 
-Storage key: `bridge/mint_attestation/{source_chain}/{burn_id}`
+Storage key: `bridge_attestations/{source_chain}/{burn_id}`
 
-**Burn tracking (for outbound) - optional, for UI/history:**
+**Key behavior:**
+- Attestations persist across blocks until threshold is met
+- Same `(source_chain, burn_id)` key = same attestation record
+- Multiple validators can attest over multiple blocks
+- Once minted, further attestations are rejected
+- Duplicate attestations from same validator are rejected
 
-```go
-type BridgeBurn struct {
-    BurnID             string
-    Sender             string
-    DestinationChain   string
-    DestinationAddress string
-    Amount             uint64
-    CreatedAt          time.Time
-}
-```
+**Important:** `burn_id` should be canonicalized (e.g., lowercase hex) by orchestrators to prevent duplicate attestation records from case differences.
 
-Storage key: `bridge/burn/{burn_id}`
+### Implementation Files ✅
+
+| File | Status | Changes |
+|------|--------|---------|
+| `blockchain/proto/mirage/core/v1/tx.proto` | ✅ | Added `MsgBridgeBurn`, `MsgBridgeAttest`, responses |
+| `blockchain/proto/mirage/core/v1/params.proto` | ✅ | Added `BridgeChainConfig`, bridge params |
+| `blockchain/proto/mirage/core/v1/query.proto` | ✅ | Added `BridgeStatus`, `BridgeAttestation`, `BridgeConfig` queries |
+| `blockchain/x/core/types/bridge.go` | ✅ | `BridgeAttestation` type with threshold logic |
+| `blockchain/x/core/keeper/keeper.go` | ✅ | `GetOrCreateBridgeAttestation`, `SetBridgeAttestation`, `MintToAccount` |
+| `blockchain/app/ante_metasig.go` | ✅ | Signature verification for `MsgBridgeBurn` (not `MsgBridgeAttest`) |
+| `blockchain/app/ante_pow.go` | ✅ | PoW validation and `buildCanonForBridgeBurn()` |
+| `blockchain/x/core/module/module.go` | ✅ | `BridgeBurn()`, `BridgeAttest()` handlers + query handlers |
+| `blockchain/x/core/module/cli_bridge.go` | ✅ | `bridge burn`, `bridge attest`, `bridge status` CLI commands |
+| `shared/datatypes.py` | ✅ | Added `MsgBridgeBurn` class |
+| `shared/canon.py` | ✅ | Added `canon_base_bridge_burn()` |
+| `web/backend/routes/bridge.py` | ✅ | `POST /api/bridge/burn`, `GET /api/bridge/config` endpoints |
+| `web/frontend/src/utils/TransactionHandler.js` | ✅ | Added `bridgeBurn()` method |
+| `web/frontend/src/views/BridgeView.js` | ✅ | Wired up Solana outbound |
+
+### Backend Validation ✅
+
+For `POST /api/bridge/burn`:
+- **Destination chain**: Must be enabled in params AND must be non-IBC
+- **Destination address**: Validated per chain (Solana: valid base58, 32 bytes decoded)
+- **Amount**: Must be positive integer
+- **PoW**: Required for non-subscribers, forbidden for subscribers
 
 ### Outbound Flow (Mirage → External Chain)
 
 1. User submits `MsgBridgeBurn` with `destination_chain` and `destination_address`
 2. Handler validates:
-   - Chain is enabled in params
-   - Amount > 0
+   - Chain is enabled in params and is non-IBC
+   - Amount > bridge_fee
    - User has sufficient balance
-3. Handler **burns** MIRAGE from user's account (reduces total supply)
-4. Handler emits event: `bridge_burn{chain, address, amount, burn_id}`
-5. Orchestrators watch for `bridge_burn` events
-6. Orchestrators call external chain's bridge contract to **mint** MIRAGE
+3. Handler **burns** (amount + bridge_fee) from user's account
+4. Handler **burns** bridge_fee (reduces total supply)
+5. Handler emits event: `bridge_burn{chain, address, amount, burn_id}`
+6. Orchestrators watch for `bridge_burn` events
+7. Orchestrators call external chain's bridge contract to **mint** MIRAGE
 
 ### Inbound Flow (External Chain → Mirage)
 
@@ -230,34 +294,20 @@ Storage key: `bridge/burn/{burn_id}`
    - `mirage_recipient` = destination on Mirage
    - `amount` = burned amount
 5. Handler validates:
-   - Signer is active validator
-   - Chain is enabled
+   - Signer is active bonded validator
+   - Chain is enabled and non-IBC
    - Attestation not already submitted by this validator
-   - If already minted, reject
+   - If already minted, return early (no error)
+   - Recipient and amount match existing attestation (if any)
 6. Handler records attestation and calculates total attested power
 7. If attested power ≥ 66.67% of total voting power:
    - **Mint** MIRAGE to recipient (increases total supply)
    - Mark attestation as minted
    - Emit `bridge_mint{chain, burn_id, recipient, amount}`
 
-### Implementation Files
-
-| File | Changes |
-|------|---------|
-| `blockchain/proto/mirage/core/v1/tx.proto` | Add `MsgBridgeBurn`, `MsgBridgeAttest`, params |
-| `blockchain/proto/mirage/core/v1/params.proto` | Add `BridgeParams`, `BridgeChainConfig` |
-| `blockchain/app/ante_metasig.go` | Add case for `*coretypes.MsgBridgeBurn` |
-| `blockchain/x/core/keeper/bridge.go` | New file: bridge keeper logic (burn/mint) |
-| `blockchain/x/core/keeper/msg_server.go` | Add `BridgeBurn()`, `BridgeAttest()` handlers |
-| `shared/datatypes.py` | Add `MsgBridgeBurn`, `MsgBridgeAttest` classes |
-| `shared/canon.py` | Add `canon_base_bridge_burn()` |
-| `web/backend/routes/core.py` | Add `/api/bridge/burn` endpoint |
-| `web/frontend/src/utils/TransactionHandler.js` | Add `bridgeBurn()` method |
-| `web/frontend/src/views/BridgeView.js` | Wire up non-IBC chain tabs |
-
 ---
 
-## Part 3: Orchestrator
+## Part 3: Orchestrator ⏳ NOT STARTED
 
 The orchestrator is a Go binary that validators run alongside their node.
 
@@ -363,50 +413,52 @@ type ChainWatcher interface {
 
 ---
 
-## Part 4: Frontend UI
+## Part 4: Frontend UI ✅ COMPLETE
 
 ### Chain Configuration
 
 ```javascript
 // web/frontend/src/views/BridgeView.js
 
-const BRIDGE_NETWORKS = {
-  osmosis: {
-    type: 'ibc',
-    name: 'Osmosis',
-    symbol: 'OSMO',
-    channel: 'channel-1',
-    inboundChannel: 'channel-108698',
-    addressPrefix: 'osmo',
-    canDerive: true,  // Can derive from Mirage key
-    deepLinkBase: 'https://wallet.keplr.app/chains/osmosis',
-    ibcDenom: 'ibc/3B6D9E089BECA458072D7624E67F0B84B8087E68B58CF0B9A65E0BA8E7818B54'
-  },
-  solana: {
-    type: 'attested',
-    name: 'Solana',
-    symbol: 'SOL',
-    addressRegex: /^[1-9A-HJ-NP-Za-km-z]{32,44}$/,
-    canDerive: false,
-    explorerUrl: 'https://solscan.io/tx/',
-    instructions: 'Burn MIRAGE on Solana. Validators will automatically mint to your Mirage address within ~2 minutes.'
-  }
+const NETWORKS = {
+    osmosis: {
+        id: 'osmosis',
+        name: 'Osmosis',
+        icon: '/bridges/osmosis.svg',
+        addressPrefix: 'osmo',
+        addressPlaceholder: 'osmo1...',
+        canDerive: true,
+        minAmount: 1,
+        estimatedTime: '~30 seconds',
+        isIbc: true,
+        ibcChannel: 'channel-0',
+    },
+    solana: {
+        id: 'solana',
+        name: 'Solana',
+        icon: '/bridges/solana.svg',
+        addressPlaceholder: 'Solana address',
+        canDerive: false,
+        minAmount: 10,
+        estimatedTime: '~2 minutes',
+        isIbc: false,
+    },
 };
 ```
 
 ### UI Structure
 
-1. **Network Selector**: Dropdown to choose destination/source chain
-2. **Direction Tabs**: OUTBOUND / INBOUND
-3. **Dynamic Form**: Changes based on network type
+1. **Network Selector**: Cards to choose destination chain
+2. **Dynamic Form**: Changes based on network type
 
 **OUTBOUND (Mirage → External):**
-- Amount input with max button
+- Amount input with max button and thousands separators
 - Destination address:
   - IBC chains: Auto-derived from Mirage key, option for different address
-  - Non-IBC chains: Manual entry with validation
-- Fee display (free for subscribers, 1 MIRAGE for non-subscribers)
-- Submit button
+  - Non-IBC chains: Manual entry with chain-specific validation
+- Fee display (always 1 MIRAGE, burned)
+- "Receive on {Chain}" display
+- Submit button with loading state and success/error feedback
 
 **INBOUND (External → Mirage):**
 - Network selector
@@ -414,61 +466,63 @@ const BRIDGE_NETWORKS = {
 - For IBC chains: "Open in Keplr" button with deep link
 - For non-IBC chains: Instructions to burn on that chain
 
+### Address Validation ✅
+
+- **Osmosis**: Valid bech32 with `osmo` HRP and 20-byte payload (checksum verified)
+- **Solana**: Valid base58, decodes to exactly 32 bytes
+
 ---
 
 ## Part 5: Implementation Order
 
-### Phase 1: IBC Bridge (Osmosis)
+### Phase 1: IBC Bridge (Osmosis) ✅ COMPLETE
 
-Ship first - well-understood, uses existing infrastructure.
+- [x] Add `MsgIBCTransfer` to protobuf, regenerate
+- [x] Add ante handler cases (signature + PoW)
+- [x] Implement handler calling `TransferKeeper.Transfer()`
+- [x] Add bridge fee deduction and burning
+- [x] Add Python datatypes and canon function
+- [x] Add backend endpoint with validation
+- [x] Add frontend transaction handler
+- [x] Wire up BridgeView with Osmosis
 
-1. Add `MsgIBCTransfer` to protobuf, regenerate
-2. Add ante handler case
-3. Implement handler calling `TransferKeeper.Transfer()`
-4. Add Python datatypes and canon function
-5. Add backend endpoint
-6. Add frontend transaction handler
-7. Wire up BridgeView with Osmosis tabs
+### Phase 2: Non-IBC Message Types ✅ COMPLETE
 
-### Phase 2: Non-IBC Message Types
+- [x] Add `MsgBridgeBurn`, `MsgBridgeAttest` to protobuf
+- [x] Add `BridgeChainConfig` params with chain configs
+- [x] Implement bridge keeper (burn/mint, attestation tracking)
+- [x] Add attestation persistence across blocks
+- [x] Add ante handler for `MsgBridgeBurn` (signature + PoW)
+- [x] Implement handlers for both message types
+- [x] Add CLI commands (`bridge burn`, `bridge attest`, `bridge status`)
+- [x] Add query handlers (`BridgeStatus`, `BridgeAttestation`, `BridgeConfig`)
+- [x] Add Python datatypes and backend endpoints
+- [x] Add destination address validation (bech32, base58)
+- [x] Add chain/channel whitelist validation
+- [x] Update frontend for non-IBC chains
 
-Prepare the chain for attested bridges.
+### Phase 3: Orchestrator Core ⏳ NOT STARTED
 
-1. Add `MsgBridgeBurn`, `MsgBridgeAttest` to protobuf
-2. Add `BridgeParams` with chain configs
-3. Implement bridge keeper (burn/mint, attestation tracking)
-4. Add ante handler for `MsgBridgeBurn`
-5. Implement handlers for both message types
-6. Add Python datatypes and backend endpoints
-7. Update frontend for non-IBC chains
+- [ ] Set up Go project structure
+- [ ] Implement config loading
+- [ ] Implement Mirage client (watch events, submit attestations)
+- [ ] Implement ChainWatcher interface
+- [ ] Build attestor logic with batching and retries
+- [ ] Add burn_id canonicalization (lowercase hex)
 
-### Phase 3: Orchestrator Core
+### Phase 4: Solana Integration ⏳ NOT STARTED
 
-Build the validator sidecar.
+- [ ] Deploy Solana bridge program (see `SOLANA_BRIDGE_SPEC.md`)
+- [ ] Implement Solana watcher in orchestrator
+- [ ] Test full round-trip (Mirage → Solana → Mirage)
+- [ ] Enable Solana in chain params via governance
 
-1. Set up Go project structure
-2. Implement config loading
-3. Implement Mirage client (watch events, submit attestations)
-4. Implement ChainWatcher interface
-5. Build attestor logic with batching and retries
+### Phase 5: Additional Chains ⏳ NOT STARTED
 
-### Phase 4: Solana Integration
-
-First external chain.
-
-1. Deploy Solana bridge program (see `SOLANA_BRIDGE_SPEC.md`)
-2. Implement Solana watcher in orchestrator
-3. Test full round-trip (Mirage → Solana → Mirage)
-4. Enable Solana in chain params via governance
-
-### Phase 5: Additional Chains
-
-Add more chains as needed.
-
-1. Deploy bridge contract on new chain
-2. Add watcher module to orchestrator
-3. Enable chain in params via governance
-4. Update frontend `BRIDGE_NETWORKS` config
+- [ ] Deploy bridge contract on new chain
+- [ ] Add watcher module to orchestrator
+- [ ] Enable chain in params via governance
+- [ ] Update frontend `NETWORKS` config
 
 Each new chain requires:
 - Bridge contract deployment (external)
@@ -478,8 +532,46 @@ Each new chain requires:
 
 ---
 
+## CLI Commands ✅
+
+```bash
+# Query bridge status
+miraged q core bridge-status
+
+# Query attestation for a specific burn
+miraged q core bridge-attestation solana <burn_id>
+
+# Query bridge configuration
+miraged q core bridge-config
+
+# Submit a bridge burn (outbound to external chain)
+miraged tx core bridge burn <destination_chain> <destination_address> <amount> --from <key>
+
+# Submit attestation (validators only)
+miraged tx core bridge attest <source_chain> <burn_id> <mirage_recipient> <amount> --from <validator_key>
+
+# IBC transfer (outbound to IBC chain)
+miraged tx core bridge ibc-transfer <receiver> <amount> <source_channel> [timeout_seconds] --from <key>
+```
+
+---
+
+## Security Considerations ✅
+
+1. **Canonical bytes**: Go, Python, and JavaScript implementations produce identical canonical bytes for signature verification
+2. **Attestation uniqueness**: `burn_id` should be canonicalized (lowercase) by orchestrators to prevent duplicate records
+3. **Threshold safety**: Uses `cosmossdk.io/math` for safe integer arithmetic, no overflow
+4. **Duplicate prevention**: Same validator cannot attest twice; already-minted attestations are rejected
+5. **Chain validation**: Destination/source chain must be enabled in params
+6. **Address validation**: Chain-specific validation (bech32 for Cosmos, base58 for Solana)
+7. **PoW/Reserve**: Non-subscribers must provide valid PoW; subscribers use reserve
+
+---
+
 ## Related Documents
 
 - `SOLANA_BRIDGE_SPEC.md` - Technical spec for Solana program developer
 - `blockchain/proto/mirage/core/v1/tx.proto` - Protobuf definitions
+- `blockchain/x/core/types/bridge.go` - Attestation types and logic
 - `web/frontend/src/views/BridgeView.js` - Frontend implementation
+- `web/backend/routes/bridge.py` - Backend API endpoints
