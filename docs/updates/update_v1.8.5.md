@@ -2,11 +2,13 @@
 
 ### Overview
 
-This release focuses on feed quality and user experience polish. The magic feed algorithm now decays posts faster—reaching half-score at 12 hours instead of 24—which keeps the feed fresher and rewards timely engagement. Combined with the preference score cap, feeds are now more balanced between new content and established posts.
+This release focuses on feed quality, user experience polish, and cross-chain bridge documentation. The magic feed algorithm now decays posts faster—reaching half-score at 12 hours instead of 24—which keeps the feed fresher and rewards timely engagement. Combined with the preference score cap, feeds are now more balanced between new content and established posts.
 
 Subscriber identity gets more visible with tier tooltips. Hover over any colored username to see their subscription level (Trusted, Established, or Distinguished). The tooltip system was overhauled to appear consistently above text across the entire platform, eliminating the visual inconsistency of tooltips appearing in different positions.
 
 For token listings and market data aggregators, we've added CoinGecko-compliant supply endpoints that return plain-text values for easy integration. The circulating supply calculation excludes team-controlled wallets (Founders, Marketing, and Development funds) to provide accurate market data.
+
+Comprehensive bridge documentation has been added for cross-chain token transfers, supporting IBC (Osmosis) and validator-attested (Solana) bridges with a burn/mint model.
 
 ---
 
@@ -71,3 +73,17 @@ For token listings and market data aggregators, we've added CoinGecko-compliant 
 
 **Admin endpoints:**
 - `GET /api/stats/signups` — recent signups with referrer info (admin only)
+
+---
+
+### Bridge Documentation
+
+New technical documentation in `docs/bridge/`:
+
+- **BRIDGE_IMPLEMENTATION_PLAN.md** — Complete implementation roadmap for IBC and non-IBC bridges, message type specs, orchestrator architecture, and phased implementation order
+- **SOLANA_BRIDGE_SPEC.md** — Technical specification for Solana bridge program developers
+
+**Bridge architecture:**
+- IBC chains (Osmosis): Native IBC using `MsgIBCTransfer`
+- Non-IBC chains (Solana): Validator-attested burn/mint with 66.67% stake threshold
+- Chain-agnostic message types supporting multiple external chains
