@@ -462,12 +462,16 @@ def main():
     setup_logging()
     log(f"Starting submit_proposal.py")
 
-    # Parse args with optional --dry-run
+    # Parse args with optional flags
     args = sys.argv[1:]
     dry_run = False
+    no_confirm = False
     if "--dry-run" in args:
         args.remove("--dry-run")
         dry_run = True
+    if "--no-confirm" in args:
+        args.remove("--no-confirm")
+        no_confirm = True
 
     if len(args) < 2:
         print("Usage: python3 submit_proposal.py <local|remote> <proposal_file_or_name> [--dry-run]")
@@ -785,7 +789,9 @@ def main():
 
     # Confirmation
     try:
-        if _is_local_mode:
+        if no_confirm:
+            print(f"\n[--no-confirm: skipping confirmation]")
+        elif _is_local_mode:
             print(f"\n[LOCAL TESTNET]")
             input(f"Press Enter to submit (Ctrl+C to abort)... ")
         else:
@@ -1174,12 +1180,9 @@ def main():
             log(f"Vote failed for {account_name}: {output}")
             info(f"⚠️ {account_name} vote failed (exit {exit_status})")
             if output:
-                # Show first meaningful error line
-                for line in output.strip().split('\n'):
-                    line = line.strip()
-                    if line and ('error' in line.lower() or 'failed' in line.lower() or 'invalid' in line.lower()):
-                        info(f"  {line}")
-                        break
+                info(f"Full output:\n{output}")
+            info(f"Command was: {' '.join(vote_cmd)}")
+            sys.exit(1)
         else:
             info(f"✅ {account_name} voted YES")
 
