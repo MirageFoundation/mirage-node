@@ -75,7 +75,7 @@ If you have a domain pointing to your server, enable TLS:
 
 ```bash
 ssh root@your-server
-docker exec mirage bash /opt/mirage/deploy/letsencrypt_register.sh --domain your-domain.com
+docker exec mirage python3 /opt/mirage/deploy/setup_letsencrypt.py --domain=your-domain.com
 ```
 
 If you're just using an IP address, skip this step — your node will be accessible at `http://your-server-ip` directly.

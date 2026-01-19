@@ -58,7 +58,7 @@ curl -I "https://${NODE_DOMAIN}/" || true
 - Re-run your TLS provisioning workflow. If you are using the Mirage Caddy setup, the helper script is:
 
 ```bash
-docker exec "${CONTAINER}" bash /opt/mirage/deploy/letsencrypt_register.sh --domain "${NODE_DOMAIN}"
+docker exec "${CONTAINER}" python3 /opt/mirage/deploy/setup_letsencrypt.py --domain="${NODE_DOMAIN}"
 ```
 
 ### Issue 3: Wrong machine or wrong container

@@ -136,11 +136,12 @@ COPY --from=builder /opt/mirage/deploy/render_template.py /opt/mirage/deploy/ren
 COPY --from=builder /opt/mirage/deploy/derive_consensus_key.py /opt/mirage/deploy/derive_consensus_key.py
 
 # Domain/TLS helper scripts
-COPY --from=builder /opt/mirage/deploy/letsencrypt_register.sh /opt/mirage/deploy/letsencrypt_register.sh
+COPY --from=builder /opt/mirage/deploy/setup_letsencrypt.py /opt/mirage/deploy/setup_letsencrypt.py
 COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/deploy/enable_validator_mode.sh
 
-# IBC relayer setup
-COPY --from=builder /opt/mirage/deploy/setup_hermes.sh /opt/mirage/deploy/setup_hermes.sh
+# Setup scripts
+COPY --from=builder /opt/mirage/deploy/setup_hermes.py /opt/mirage/deploy/setup_hermes.py
+COPY --from=builder /opt/mirage/deploy/setup_orchestrator.py /opt/mirage/deploy/setup_orchestrator.py
 
 # Set working directory
 WORKDIR /opt/mirage

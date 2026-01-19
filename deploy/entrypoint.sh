@@ -275,7 +275,7 @@ if [ -n "${DOMAIN:-}" ]; then
     echo "==> Domain configured: $DOMAIN"
     echo "==> Configuring HTTPS automatically..."
     sleep 2  # Give Caddy a moment to start
-    bash "$ROOT_DIR/deploy/letsencrypt_register.sh" --domain="$DOMAIN"
+    python3 "$ROOT_DIR/deploy/setup_letsencrypt.py" --domain="$DOMAIN"
   fi
 fi
 
@@ -320,7 +320,7 @@ tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 P
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
 
 # IBC Relayer (sixth) - only if Hermes is configured
-# NOTE: This hermes startup code is duplicated in deploy/setup_hermes.sh
+# NOTE: This hermes startup code is duplicated in deploy/setup_hermes.py
 #       If you change this, update the other file too!
 HERMES_HOME="$DATA_DIR/hermes"
 if [ -f "$HERMES_HOME/config.toml" ]; then
