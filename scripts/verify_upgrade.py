@@ -37,7 +37,7 @@ def _http_get_json(url: str, timeout: int = 5) -> dict:
 
 def _find_miraged() -> str:
     candidates = [
-        "/opt/mirage/blockchain/miraged",  # inside container
+        "/opt/mirage/blockchain/bin/miraged",  # inside container
         str(Path(__file__).resolve().parents[1] / "blockchain" / "miraged"),  # repo checkout
         "miraged",
     ]

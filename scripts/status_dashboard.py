@@ -606,7 +606,7 @@ def check_validator() -> ServiceStatus:
         power_pct = None
         try:
             result = subprocess.run(
-                ["/opt/mirage/blockchain/miraged", "query", "staking", "validators", "--home", node_home, "-o", "json"],
+                ["/opt/mirage/blockchain/bin/miraged", "query", "staking", "validators", "--home", node_home, "-o", "json"],
                 capture_output=True,
                 text=True,
                 timeout=5,

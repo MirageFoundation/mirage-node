@@ -5,7 +5,7 @@ cleanup() {
   echo "Received shutdown signal, gracefully stopping services..."
   
   # Stop orchestrator
-  pkill -TERM -f "mirage-orchestrator" 2>/dev/null || true
+  pkill -TERM -f "blockchain/bin/orchestrator" 2>/dev/null || true
   sleep 1
   
   # Stop node
@@ -83,7 +83,7 @@ fi
 DATA_DIR="${HOME}/.mirage"
 NODE_HOME="$DATA_DIR/node"
 LOGS_DIR="$DATA_DIR/logs"
-BIN="$ROOT_DIR/blockchain/miraged"
+BIN="$ROOT_DIR/blockchain/bin/miraged"
 CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
@@ -340,7 +340,7 @@ if [ -f "$HERMES_HOME/config.toml" ]; then
 fi
 
 # Bridge Orchestrator - always starts, handles enabled/disabled internally via ORCHESTRATOR_ENABLED env var
-ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/mirage-orchestrator"
+ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/bin/orchestrator"
 if [ -f "$ORCHESTRATOR_BIN" ]; then
   echo "==> Starting bridge orchestrator..."
   mkdir -p "$DATA_DIR/orchestrator"

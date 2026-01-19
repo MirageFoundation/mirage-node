@@ -12,7 +12,7 @@ EOF
 
 # Defaults
 ROOT_DIR="/opt/mirage"
-BIN_DEFAULT="$ROOT_DIR/blockchain/miraged"
+BIN_DEFAULT="$ROOT_DIR/blockchain/bin/miraged"
 BIN="${BIN:-}"
 if [ -z "${BIN:-}" ]; then
   if [ -x "$BIN_DEFAULT" ]; then

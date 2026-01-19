@@ -2290,7 +2290,7 @@ def get_config():
             valoper = find_local_operator_address()
             if valoper:
                 possible_paths = [
-                    "/opt/mirage/blockchain/miraged",
+                    "/opt/mirage/blockchain/bin/miraged",
                     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "miraged")),
                     "miraged",
                 ]

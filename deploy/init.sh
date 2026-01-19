@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="/opt/mirage"
 DATA_DIR="${HOME}/.mirage"
 NODE_HOME="$DATA_DIR/node"
-BIN="$ROOT_DIR/blockchain/miraged"
+BIN="$ROOT_DIR/blockchain/bin/miraged"
 CHAIN_ID="mirage-1"
 MARKER="$DATA_DIR/.initialized"
 

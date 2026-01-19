@@ -15,7 +15,7 @@ set -euo pipefail
 #  - Prints post-state (jailed flag, status)
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
-BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
+BIN="${BIN:-$ROOT_DIR/blockchain/bin/miraged}"
 NODE_HOME="${HOME:-/root}/.mirage/node"
 
 # Safety check: prevent doubling .mirage/node
