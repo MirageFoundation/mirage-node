@@ -202,7 +202,7 @@ def find_local_consensus_address() -> str:
 def resolve_validator_payer_address() -> str:
     cfg = get_config()
     home = cfg.get_node_config()["home"]
-    bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "miraged"))
+    bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "bin", "miraged"))
     cmd = [bin_path, "keys", "list", "--output", "json", "--home", home, "--keyring-backend", KEYRING_BACKEND]
     out = subprocess.check_output(cmd, timeout=5).decode("utf-8").strip()
     data = json.loads(out)
@@ -218,7 +218,7 @@ def resolve_validator_payer_address() -> str:
 def resolve_validator_pubkey_bytes() -> bytes:
     cfg = get_config()
     home = cfg.get_node_config()["home"]
-    bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "miraged"))
+    bin_path = os.path.abspath(os.path.join(project_root(), "blockchain", "bin", "miraged"))
     cmd = [
         bin_path,
         "keys",

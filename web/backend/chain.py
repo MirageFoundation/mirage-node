@@ -274,7 +274,7 @@ def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
             rt = require_runtime()
             possible_paths = [
                 "/opt/mirage/blockchain/bin/miraged",
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "miraged")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")),
                 "miraged",
             ]
             bin_path = None
