@@ -341,6 +341,9 @@ func readString(r *bytes.Reader) (string, error) {
 	if length == 0 {
 		return "", fmt.Errorf("string length cannot be zero")
 	}
+	if length > 65536 {
+		return "", fmt.Errorf("string length too large: %d > 65536", length)
+	}
 	buf := make([]byte, length)
 	if _, err := r.Read(buf); err != nil {
 		return "", err
