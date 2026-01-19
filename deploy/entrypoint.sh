@@ -343,15 +343,12 @@ fi
 ORCHESTRATOR_CONFIG="$DATA_DIR/orchestrator/config.yaml"
 ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/mirage-orchestrator"
 if [ -f "$ORCHESTRATOR_CONFIG" ] && [ -f "$NODE_HOME/config/priv_validator_key.json" ]; then
-  # Build orchestrator if binary doesn't exist
-  if [ ! -f "$ORCHESTRATOR_BIN" ]; then
-    echo "==> Building orchestrator binary..."
-    (cd "$ROOT_DIR/blockchain" && go build -o mirage-orchestrator ./cmd/orchestrator) || echo "WARNING: Failed to build orchestrator"
-  fi
   if [ -f "$ORCHESTRATOR_BIN" ]; then
     echo "==> Starting bridge orchestrator..."
     tmux new-window -t "$SESSION" -n orchestrator -c "$ROOT_DIR"
     tmux send-keys -t "$SESSION:orchestrator" "$ORCHESTRATOR_BIN --config \"$ORCHESTRATOR_CONFIG\" 2>&1 | tee >(cronolog \"$LOGS_DIR/orchestrator/orchestrator-%Y-%m-%d.log\")" C-m
+  else
+    echo "WARNING: Orchestrator config exists but binary not found at $ORCHESTRATOR_BIN"
   fi
 fi
 

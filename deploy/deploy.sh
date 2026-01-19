@@ -192,6 +192,7 @@ maybe_proto_gen_and_go_build() {
     "$REPO_ROOT/blockchain/go.sum" \
     "$REPO_ROOT/blockchain/app" \
     "$REPO_ROOT/blockchain/cmd" \
+    "$REPO_ROOT/blockchain/orchestrator" \
     "$REPO_ROOT/blockchain/x" \
   )"
 
@@ -200,8 +201,8 @@ maybe_proto_gen_and_go_build() {
     old_go_hash="$(cat "$go_hash_file" 2>/dev/null || echo "")"
   fi
   if [ -z "$old_go_hash" ] || [ "$old_go_hash" != "$new_go_hash" ]; then
-    echo "==> Go inputs changed; building miraged..."
-    ( cd "$REPO_ROOT/blockchain" && make install )
+    echo "==> Go inputs changed; building miraged and orchestrator..."
+    ( cd "$REPO_ROOT/blockchain" && make build-all )
     echo "$new_go_hash" > "$go_hash_file"
   else
     echo "==> Go inputs unchanged; skipping go build."
