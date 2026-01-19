@@ -3347,6 +3347,15 @@ class TransactionHandler {
                 const grpcMatch = fullErr.match(/details\s*=\s*"([^"]+)"/);
                 const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
                 updateNotification(cleanMsg, 10, true);
+            } else if (/pow_required/i.test(fullErr)) {
+                // Backend detected we're not a subscriber but frontend thought we were
+                // Clear cached subscription status to force re-fetch
+                console.warn('Subscription status mismatch detected - clearing cached user_level');
+                try {
+                    Storage.save('user_level', '0');
+                    window.dispatchEvent(new CustomEvent('subscriptionStatusChanged', { detail: { level: 0 } }));
+                } catch (_) { }
+                updateNotification('Your subscription may have expired. Please try again - PoW will be used.', 8, true);
             } else if (/insufficient funds/i.test(fullErr)) {
                 updateNotification('Node does not have enough gas for this transaction.', 6, true);
             } else {

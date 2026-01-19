@@ -2183,7 +2183,8 @@ def core_vote():
         # no client-provided fees
         # Minimal fields; last_block_hash/difficulty/proof only needed for PoW path
         if not (pub_b64 and sig_b64 and target):
-            return jsonify({"error": "missing required fields"}), 400
+            log_event(rid, "vote.missing_fields", has_pubkey=bool(pub_b64), has_signature=bool(sig_b64), has_target=bool(target))
+            return jsonify({"error": "missing required fields", "details": f"pubkey={bool(pub_b64)}, signature={bool(sig_b64)}, target={bool(target)}"}), 400
         if not _is_hex64(target.strip()):
             return jsonify({"error": "invalid target"}), 400
 
@@ -2201,9 +2202,12 @@ def core_vote():
         validator_addr = require_runtime().validator_payer_addr
 
         # Free users require PoW; subscribers must NOT use PoW
-        if not is_subscriber(user_addr):
+        user_is_sub = is_subscriber(user_addr)
+        log_event(rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty)
+        if not user_is_sub:
             if not (int(difficulty) > 0 and proof):
-                return jsonify({"error": "missing required fields"}), 400
+                log_event(rid, "vote.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
+                return jsonify({"error": "pow_required", "details": "Non-subscriber must provide valid PoW. Your subscription may have expired."}), 400
             if not _is_hex64(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             if not is_valid_recent_block_hash(last_block_hash):

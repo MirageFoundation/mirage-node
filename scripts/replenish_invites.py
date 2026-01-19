@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """
-Replenish invite codes for all users on the platform.
+Replenish invite codes for all users on the platform, or give codes to a specific user.
 
-Gives every user a target number of invite codes (default: 3).
-If a user already has some codes, only adds enough to reach the target.
+Modes:
+1. Replenish all users: Gives every user a target number of invite codes (default: 3).
+   If a user already has some codes, only adds enough to reach the target.
+
+2. Give to specific user: Adds a specific number of codes to one user and returns their full code list.
 
 Usage:
     python3 scripts/replenish_invites.py                    # Top up all users to 3 codes
     python3 scripts/replenish_invites.py --target 5         # Top up all users to 5 codes
     python3 scripts/replenish_invites.py --dry-run          # Show what would happen without making changes
+    python3 scripts/replenish_invites.py --user Santa --count 100   # Give Santa 100 new codes, show all their codes
 """
 
 import argparse
 import os
 import random
-import string
 import sys
 import time
 
@@ -46,6 +49,122 @@ def generate_unique_code(existing: set) -> str:
     raise RuntimeError("Failed to generate unique code after 1000 attempts")
 
 
+def give_codes_to_user(conn, username: str, count: int, dry_run: bool) -> None:
+    """Give a specific number of codes to a user and print their full code list."""
+    cur = conn.cursor()
+
+    # Find the user by username (case-insensitive)
+    cur.execute(
+        "SELECT owner, username FROM profiles WHERE LOWER(username) = LOWER(%s)",
+        (username,),
+    )
+    row = cur.fetchone()
+    if not row:
+        print(f"Error: User '{username}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    owner, actual_username = row
+    print(f"Found user: {actual_username} ({owner[:20]}...)")
+    print()
+
+    # Get existing codes for uniqueness check
+    existing_codes = get_existing_codes(cur)
+
+    # Get user's current codes
+    cur.execute(
+        """
+        SELECT code, created_at, used_by 
+        FROM invite_codes 
+        WHERE LOWER(owner) = LOWER(%s)
+        ORDER BY created_at DESC
+        """,
+        (owner,),
+    )
+    current_codes = cur.fetchall()
+    print(f"Current codes: {len(current_codes)}")
+    print(f"Codes to add: {count}")
+    print()
+
+    if dry_run:
+        print("DRY RUN - no changes will be made")
+        print()
+        print(f"Would add {count} codes to {actual_username}")
+        print()
+        print("Current codes:")
+        for code, created_at, used_by in current_codes:
+            status = f"used by {used_by[:20]}..." if used_by else "unused"
+            print(f"  {code}  ({status})")
+        return
+
+    # Confirmation
+    print("Type 'confirm' to proceed, or anything else to cancel:")
+    confirmation = input("> ").strip().lower()
+    if confirmation != "confirm":
+        print("Cancelled.")
+        sys.exit(0)
+
+    print()
+    print(f"Creating {count} codes for {actual_username}...")
+
+    now_ts = int(time.time())
+    new_codes = []
+    for _ in range(count):
+        code = generate_unique_code(existing_codes)
+        existing_codes.add(code)
+        cur.execute(
+            """
+            INSERT INTO invite_codes (code, owner, created_at)
+            VALUES (%s, %s, %s)
+            """,
+            (code, owner, now_ts),
+        )
+        new_codes.append(code)
+
+    print(f"Created {len(new_codes)} new codes")
+    print()
+
+    # Get full updated code list
+    cur.execute(
+        """
+        SELECT code, created_at, used_by 
+        FROM invite_codes 
+        WHERE LOWER(owner) = LOWER(%s)
+        ORDER BY created_at DESC
+        """,
+        (owner,),
+    )
+    all_codes = cur.fetchall()
+
+    print("=" * 60)
+    print(f"ALL CODES FOR {actual_username} ({len(all_codes)} total)")
+    print("=" * 60)
+    print()
+
+    unused_codes = []
+    used_codes = []
+    for code, created_at, used_by in all_codes:
+        if used_by:
+            used_codes.append((code, used_by))
+        else:
+            unused_codes.append(code)
+
+    print(f"UNUSED CODES ({len(unused_codes)}):")
+    print("-" * 40)
+    for code in unused_codes:
+        print(f"  {code}")
+    print()
+
+    if used_codes:
+        print(f"USED CODES ({len(used_codes)}):")
+        print("-" * 40)
+        for code, used_by in used_codes:
+            print(f"  {code}  -> {used_by[:30]}...")
+        print()
+
+    print("=" * 60)
+    print("Done!")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Replenish invite codes for all users")
     parser.add_argument(
@@ -59,7 +178,28 @@ def main():
         action="store_true",
         help="Show what would happen without making changes",
     )
+    parser.add_argument(
+        "--user",
+        type=str,
+        help="Username to give codes to (instead of replenishing all users)",
+    )
+    parser.add_argument(
+        "--count",
+        type=int,
+        help="Number of codes to give to --user (required with --user)",
+    )
     args = parser.parse_args()
+
+    # Validate args
+    if args.user and not args.count:
+        print("Error: --count is required when using --user", file=sys.stderr)
+        sys.exit(1)
+    if args.count and not args.user:
+        print("Error: --user is required when using --count", file=sys.stderr)
+        sys.exit(1)
+    if args.count and args.count < 1:
+        print("Error: --count must be at least 1", file=sys.stderr)
+        sys.exit(1)
 
     target = args.target
     dry_run = args.dry_run
@@ -73,107 +213,114 @@ def main():
         print("Error: MIRAGE_INDEXER_DB_URL environment variable not set", file=sys.stderr)
         sys.exit(1)
 
+    try:
+        conn = psycopg.connect(db_url, autocommit=True)
+    except Exception as e:
+        print(f"Error connecting to database: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Single user mode
+    if args.user:
+        give_codes_to_user(conn, args.user, args.count, dry_run)
+        conn.close()
+        return
+
+    # Replenish all users mode
     print(f"Replenishing invite codes (target: {target} per user)")
     if dry_run:
         print("DRY RUN - no changes will be made")
     print()
 
-    try:
-        conn = psycopg.connect(db_url, autocommit=True)
-        cur = conn.cursor()
+    cur = conn.cursor()
 
-        # Get all users with profiles
-        cur.execute("SELECT owner FROM profiles")
-        users = [row[0] for row in cur.fetchall()]
-        print(f"Found {len(users)} users with profiles")
+    # Get all users with profiles
+    cur.execute("SELECT owner FROM profiles")
+    users = [row[0] for row in cur.fetchall()]
+    print(f"Found {len(users)} users with profiles")
 
-        # Get existing codes for uniqueness check
-        existing_codes = get_existing_codes(cur)
-        print(f"Found {len(existing_codes)} existing invite codes")
+    # Get existing codes for uniqueness check
+    existing_codes = get_existing_codes(cur)
+    print(f"Found {len(existing_codes)} existing invite codes")
 
-        # Count codes per user
-        cur.execute(
-            """
-            SELECT LOWER(owner), COUNT(*) 
-            FROM invite_codes 
-            GROUP BY LOWER(owner)
-            """
-        )
-        codes_per_user = {row[0]: row[1] for row in cur.fetchall()}
+    # Count codes per user
+    cur.execute(
+        """
+        SELECT LOWER(owner), COUNT(*) 
+        FROM invite_codes 
+        GROUP BY LOWER(owner)
+        """
+    )
+    codes_per_user = {row[0]: row[1] for row in cur.fetchall()}
 
-        # Calculate what needs to be done
-        users_needing_codes = []
-        total_to_create = 0
-        for user in users:
-            user_lower = user.lower()
-            current_count = codes_per_user.get(user_lower, 0)
-            needed = target - current_count
-            if needed > 0:
-                users_needing_codes.append((user, current_count, needed))
-                total_to_create += needed
+    # Calculate what needs to be done
+    users_needing_codes = []
+    total_to_create = 0
+    for user in users:
+        user_lower = user.lower()
+        current_count = codes_per_user.get(user_lower, 0)
+        needed = target - current_count
+        if needed > 0:
+            users_needing_codes.append((user, current_count, needed))
+            total_to_create += needed
 
-        print()
-        print("=" * 50)
-        print(f"Users total: {len(users)}")
-        print(f"Users needing codes: {len(users_needing_codes)}")
-        print(f"Codes to create: {total_to_create}")
-        print("=" * 50)
+    print()
+    print("=" * 50)
+    print(f"Users total: {len(users)}")
+    print(f"Users needing codes: {len(users_needing_codes)}")
+    print(f"Codes to create: {total_to_create}")
+    print("=" * 50)
 
-        if total_to_create == 0:
-            print("\nNo codes need to be created. All users already have enough.")
-            conn.close()
-            return
-
-        if dry_run:
-            print("\nDRY RUN - showing what would be created:\n")
-            for user, current, needed in users_needing_codes:
-                print(f"  {user[:20]}... has {current} codes, would add {needed}")
-            print()
-            print(f"Would create {total_to_create} codes for {len(users_needing_codes)} users")
-            print("(DRY RUN - no actual changes made)")
-            conn.close()
-            return
-
-        # Confirmation required for actual changes
-        print()
-        print("This will create invite codes in the database.")
-        print("Type 'confirm' to proceed, or anything else to cancel:")
-        confirmation = input("> ").strip().lower()
-        if confirmation != "confirm":
-            print("Cancelled.")
-            conn.close()
-            sys.exit(0)
-
-        print()
-        print("Creating codes...")
-        total_created = 0
-        now_ts = int(time.time())
-
-        for user, current_count, needed in users_needing_codes:
-            print(f"  {user[:20]}... has {current_count} codes, adding {needed}")
-            for _ in range(needed):
-                code = generate_unique_code(existing_codes)
-                existing_codes.add(code)
-                cur.execute(
-                    """
-                    INSERT INTO invite_codes (code, owner, created_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (code, user, now_ts),
-                )
-                total_created += 1
-
+    if total_to_create == 0:
+        print("\nNo codes need to be created. All users already have enough.")
         conn.close()
+        return
 
+    if dry_run:
+        print("\nDRY RUN - showing what would be created:\n")
+        for user, current, needed in users_needing_codes:
+            print(f"  {user[:20]}... has {current} codes, would add {needed}")
         print()
-        print("=" * 50)
-        print(f"Users updated: {len(users_needing_codes)}")
-        print(f"Codes created: {total_created}")
-        print("Done!")
+        print(f"Would create {total_to_create} codes for {len(users_needing_codes)} users")
+        print("(DRY RUN - no actual changes made)")
+        conn.close()
+        return
 
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Confirmation required for actual changes
+    print()
+    print("This will create invite codes in the database.")
+    print("Type 'confirm' to proceed, or anything else to cancel:")
+    confirmation = input("> ").strip().lower()
+    if confirmation != "confirm":
+        print("Cancelled.")
+        conn.close()
+        sys.exit(0)
+
+    print()
+    print("Creating codes...")
+    total_created = 0
+    now_ts = int(time.time())
+
+    for user, current_count, needed in users_needing_codes:
+        print(f"  {user[:20]}... has {current_count} codes, adding {needed}")
+        for _ in range(needed):
+            code = generate_unique_code(existing_codes)
+            existing_codes.add(code)
+            cur.execute(
+                """
+                INSERT INTO invite_codes (code, owner, created_at)
+                VALUES (%s, %s, %s)
+                """,
+                (code, user, now_ts),
+            )
+            total_created += 1
+
+    conn.close()
+
+    print()
+    print("=" * 50)
+    print(f"Users updated: {len(users_needing_codes)}")
+    print(f"Codes created: {total_created}")
+    print("Done!")
 
 
 if __name__ == "__main__":
