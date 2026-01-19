@@ -76,16 +76,53 @@ def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
     return hashlib.pbkdf2_hmac("sha512", password, salt, 2048, 64)
 
 
+def derive_slip10_ed25519(seed: bytes, path: list[int]) -> bytes:
+    """
+    Derive ed25519 key using SLIP-10.
+    Path should be list of indices (already hardened, i.e., with 0x80000000 added).
+    Returns 32-byte private key seed.
+    """
+    import hmac
+    
+    # Master key derivation
+    I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
+    key = I[:32]
+    chain_code = I[32:]
+    
+    # Derive each level
+    for index in path:
+        # ed25519 only supports hardened derivation
+        data = b"\x00" + key + index.to_bytes(4, "big")
+        I = hmac.new(chain_code, data, hashlib.sha512).digest()
+        key = I[:32]
+        chain_code = I[32:]
+    
+    return key
+
+
 def create_solana_keypair(mnemonic: str, path: Path) -> str:
-    """Create Solana keypair from mnemonic. Returns base58 address."""
+    """Create Solana keypair from mnemonic using BIP44 derivation (Phantom-compatible)."""
     seed = mnemonic_to_seed(mnemonic.strip().lower())
     
-    # Use first 32 bytes as ed25519 seed
-    signing_key = SigningKey(seed[:32])
+    # BIP44 path: m/44'/501'/0'/0' (Solana coin type = 501)
+    # Hardened indices have 0x80000000 added
+    HARDENED = 0x80000000
+    derivation_path = [
+        44 | HARDENED,   # purpose
+        501 | HARDENED,  # coin type (Solana)
+        0 | HARDENED,    # account
+        0 | HARDENED,    # change
+    ]
+    
+    # Derive key using SLIP-10
+    private_key_seed = derive_slip10_ed25519(seed, derivation_path)
+    
+    # Create ed25519 keypair
+    signing_key = SigningKey(private_key_seed)
     verify_key = signing_key.verify_key
     
-    # Solana keypair format: [32-byte seed, 32-byte pubkey]
-    keypair = list(seed[:32]) + list(bytes(verify_key))
+    # Solana keypair format: [32-byte private seed, 32-byte pubkey]
+    keypair = list(private_key_seed) + list(bytes(verify_key))
     
     # Save keypair
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -197,7 +234,7 @@ def main():
     print("=" * 50)
     print()
     print("The orchestrator will use this wallet for Solana transactions.")
-    print("Make sure it has enough SOL for transaction fees (~0.1 SOL).")
+    print("Maintain enough SOL for transaction fees (~0.1 SOL).")
     print()
     
     return 0
