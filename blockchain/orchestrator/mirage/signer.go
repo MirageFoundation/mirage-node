@@ -97,6 +97,11 @@ func (c *Client) buildTxBytes(ctx context.Context, msg sdk.Msg) ([]byte, error) 
 }
 
 func (c *Client) valoperFromAcc() string {
+	return c.ValoperAddress()
+}
+
+// ValoperAddress returns the validator operator address for this client's key.
+func (c *Client) ValoperAddress() string {
 	addr := c.ClientContext().GetFromAddress()
 	valAddr := sdk.ValAddress(addr)
 	return valAddr.String()

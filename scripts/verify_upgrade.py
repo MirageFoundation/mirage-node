@@ -26,6 +26,7 @@ import urllib.request
 
 UPGRADE_NAME = "v1.9.0-bridge"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
+EXPECTED_VERSION_PREFIX = "v1.9.0"
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
@@ -157,26 +158,86 @@ def _expected_core_params_v190() -> dict[str, Any]:
 
 def _expected_tiers_v190() -> list[dict[str, Any]]:
     return [
-        {"period_fee": 0, "max_followed_mods": 5, "max_followed_users": 25, "max_followed_topics": 50,
-         "max_blocked_users": 10, "max_blocked_posts": 25, "max_quality_posts": 0, "max_title_length": 130,
-         "max_content_length": 1000, "editing_time_mins": 10, "archive_duration_days": 30, "vote_weight": 1.0,
-         "award_permissions": 0, "eligible_for_mod": False, "can_change_name": False, "can_have_biography": False,
-         "can_have_avatar": False, "can_have_banner": False},
-        {"period_fee": 100_000_000_000, "max_followed_mods": 10, "max_followed_users": 125, "max_followed_topics": 250,
-         "max_blocked_users": 125, "max_blocked_posts": 100, "max_quality_posts": 0, "max_title_length": 165,
-         "max_content_length": 2000, "editing_time_mins": 60, "archive_duration_days": 90, "vote_weight": 1.15,
-         "award_permissions": 1, "eligible_for_mod": False, "can_change_name": True, "can_have_biography": True,
-         "can_have_avatar": True, "can_have_banner": True},
-        {"period_fee": 200_000_000_000, "max_followed_mods": 25, "max_followed_users": 500, "max_followed_topics": 500,
-         "max_blocked_users": 500, "max_blocked_posts": 200, "max_quality_posts": 50, "max_title_length": 200,
-         "max_content_length": 5000, "editing_time_mins": 360, "archive_duration_days": 180, "vote_weight": 1.30,
-         "award_permissions": 2, "eligible_for_mod": True, "can_change_name": True, "can_have_biography": True,
-         "can_have_avatar": True, "can_have_banner": True},
-        {"period_fee": 300_000_000_000, "max_followed_mods": 50, "max_followed_users": 1000, "max_followed_topics": 1000,
-         "max_blocked_users": 1000, "max_blocked_posts": 500, "max_quality_posts": 100, "max_title_length": 250,
-         "max_content_length": 25000, "editing_time_mins": 720, "archive_duration_days": 365, "vote_weight": 1.45,
-         "award_permissions": 3, "eligible_for_mod": True, "can_change_name": True, "can_have_biography": True,
-         "can_have_avatar": True, "can_have_banner": True},
+        {
+            "period_fee": 0,
+            "max_followed_mods": 5,
+            "max_followed_users": 25,
+            "max_followed_topics": 50,
+            "max_blocked_users": 10,
+            "max_blocked_posts": 25,
+            "max_quality_posts": 0,
+            "max_title_length": 130,
+            "max_content_length": 1000,
+            "editing_time_mins": 10,
+            "archive_duration_days": 30,
+            "vote_weight": 1.0,
+            "award_permissions": 0,
+            "eligible_for_mod": False,
+            "can_change_name": False,
+            "can_have_biography": False,
+            "can_have_avatar": False,
+            "can_have_banner": False,
+        },
+        {
+            "period_fee": 100_000_000_000,
+            "max_followed_mods": 10,
+            "max_followed_users": 125,
+            "max_followed_topics": 250,
+            "max_blocked_users": 125,
+            "max_blocked_posts": 100,
+            "max_quality_posts": 0,
+            "max_title_length": 165,
+            "max_content_length": 2000,
+            "editing_time_mins": 60,
+            "archive_duration_days": 90,
+            "vote_weight": 1.15,
+            "award_permissions": 1,
+            "eligible_for_mod": False,
+            "can_change_name": True,
+            "can_have_biography": True,
+            "can_have_avatar": True,
+            "can_have_banner": True,
+        },
+        {
+            "period_fee": 200_000_000_000,
+            "max_followed_mods": 25,
+            "max_followed_users": 500,
+            "max_followed_topics": 500,
+            "max_blocked_users": 500,
+            "max_blocked_posts": 200,
+            "max_quality_posts": 50,
+            "max_title_length": 200,
+            "max_content_length": 5000,
+            "editing_time_mins": 360,
+            "archive_duration_days": 180,
+            "vote_weight": 1.30,
+            "award_permissions": 2,
+            "eligible_for_mod": True,
+            "can_change_name": True,
+            "can_have_biography": True,
+            "can_have_avatar": True,
+            "can_have_banner": True,
+        },
+        {
+            "period_fee": 300_000_000_000,
+            "max_followed_mods": 50,
+            "max_followed_users": 1000,
+            "max_followed_topics": 1000,
+            "max_blocked_users": 1000,
+            "max_blocked_posts": 500,
+            "max_quality_posts": 100,
+            "max_title_length": 250,
+            "max_content_length": 25000,
+            "editing_time_mins": 720,
+            "archive_duration_days": 365,
+            "vote_weight": 1.45,
+            "award_permissions": 3,
+            "eligible_for_mod": True,
+            "can_change_name": True,
+            "can_have_biography": True,
+            "can_have_avatar": True,
+            "can_have_banner": True,
+        },
     ]
 
 
@@ -196,8 +257,69 @@ def _fmt_value(v: Any) -> str:
     return str(v)
 
 
+def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
+    """Check that miraged binary version matches expected version."""
+    print("-> Checking binary version...")
+    try:
+        p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
+        version = p.stdout.strip() or p.stderr.strip()
+        if version.startswith(EXPECTED_VERSION_PREFIX):
+            print(f"   [OK] Binary version: {version}")
+            return version
+        else:
+            print(f"   [FAIL] Binary version: {version} (expected {EXPECTED_VERSION_PREFIX}*)")
+            failures.append(f"Binary version {version} does not match expected {EXPECTED_VERSION_PREFIX}")
+            return version
+    except Exception as e:
+        print(f"   [FAIL] Cannot check version: {e}")
+        failures.append(f"Cannot check binary version: {e}")
+        return None
+
+
+def check_bridge_commands(miraged: str, failures: list[str], warnings: list[str]) -> None:
+    """Check that new bridge CLI commands exist."""
+    print("\n-> Checking bridge CLI commands...")
+    
+    # Check query commands exist (should show help, not error)
+    query_cmds = [
+        ([miraged, "q", "bridge", "--help"], "q bridge"),
+        ([miraged, "q", "bridge", "status", "--help"], "q bridge status"),
+        ([miraged, "q", "bridge", "config", "--help"], "q bridge config"),
+    ]
+    
+    for cmd, name in query_cmds:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            # Help should return 0 or show usage
+            if p.returncode == 0 or "usage" in p.stdout.lower() or "usage" in p.stderr.lower():
+                print(f"   [OK] {name}")
+            else:
+                print(f"   [FAIL] {name}: command not found")
+                failures.append(f"Bridge command '{name}' not available")
+        except Exception as e:
+            print(f"   [FAIL] {name}: {e}")
+            failures.append(f"Bridge command '{name}' check failed: {e}")
+    
+    # Check tx commands exist
+    tx_cmds = [
+        ([miraged, "tx", "bridge", "--help"], "tx bridge"),
+    ]
+    
+    for cmd, name in tx_cmds:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if p.returncode == 0 or "usage" in p.stdout.lower() or "usage" in p.stderr.lower():
+                print(f"   [OK] {name}")
+            else:
+                print(f"   [FAIL] {name}: command not found")
+                failures.append(f"Bridge command '{name}' not available")
+        except Exception as e:
+            print(f"   [FAIL] {name}: {e}")
+            failures.append(f"Bridge command '{name}' check failed: {e}")
+
+
 def check_node_health(rpc: str, failures: list[str], warnings: list[str]) -> tuple[str | None, str | None]:
-    print("-> Checking node health...")
+    print("\n-> Checking node health...")
     try:
         status = _http_get_json(f"{rpc}/status")
         result = status.get("result", {})
@@ -348,7 +470,9 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
             if tier_ok:
                 print(f"   [OK] Tier {i} ({name}): fee={_fmt_value(period_fee)}, {len(exp)} fields OK")
             else:
-                print(f"   [FAIL] Tier {i} ({name}): {', '.join(tier_errors[:3])}{'...' if len(tier_errors) > 3 else ''}")
+                print(
+                    f"   [FAIL] Tier {i} ({name}): {', '.join(tier_errors[:3])}{'...' if len(tier_errors) > 3 else ''}"
+                )
                 for err in tier_errors:
                     failures.append(f"core params.tiers[{i}].{err}")
 
@@ -372,14 +496,14 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
                 enabled = ch.get("enabled", False)
                 status = "enabled" if enabled else "disabled"
                 print(f"      - {chain_id}: {status}")
-                
+
                 # Verify Solana config
                 if chain_id == "solana":
                     solana_found = True
                     if not enabled:
                         print(f"   [FAIL] Solana bridge is disabled")
                         failures.append("bridge_chains: Solana is disabled")
-        
+
         if not solana_found:
             print("   [FAIL] Solana not found in bridge_chains")
             failures.append("bridge_chains: Solana chain not configured")
@@ -537,29 +661,93 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
         failures.append(f"core difficulty invalid: {e}")
 
 
+def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
+    """Check orchestrator configuration if enabled."""
+    print("\n-> Checking orchestrator config...")
+    
+    orchestrator_env = home_dir / "env" / "orchestrator.env"
+    if not orchestrator_env.exists():
+        print("   [INFO] orchestrator.env not found (orchestrator not configured)")
+        return
+    
+    try:
+        content = orchestrator_env.read_text()
+    except Exception as e:
+        print(f"   [WARN] Cannot read orchestrator.env: {e}")
+        warnings.append(f"Cannot read orchestrator.env: {e}")
+        return
+    
+    # Parse env file
+    env_values = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env_values[key.strip()] = value.strip()
+    
+    # Check if enabled
+    enabled = env_values.get("ORCHESTRATOR_ENABLED", "").lower()
+    if enabled not in ("true", "1", "yes"):
+        print("   [INFO] Orchestrator disabled (ORCHESTRATOR_ENABLED != true)")
+        return
+    
+    print("   [OK] Orchestrator enabled")
+    
+    # Check required fields
+    required_fields = [
+        ("ORCHESTRATOR_SOLANA_PROGRAM_ID", "Solana program ID"),
+        ("ORCHESTRATOR_SOLANA_RPC", "Solana RPC endpoint"),
+        ("ORCHESTRATOR_SOLANA_KEYPAIR", "Solana keypair path"),
+    ]
+    
+    for field, desc in required_fields:
+        value = env_values.get(field, "")
+        if value:
+            # Truncate long values for display
+            display_val = value if len(value) <= 40 else value[:37] + "..."
+            print(f"   [OK] {field}: {display_val}")
+        else:
+            print(f"   [FAIL] {field}: not set ({desc})")
+            failures.append(f"Orchestrator enabled but {field} not set")
+    
+    # Check keypair file exists
+    keypair_path = env_values.get("ORCHESTRATOR_SOLANA_KEYPAIR", "")
+    if keypair_path:
+        # Expand ~ and env vars
+        keypair_path = os.path.expanduser(keypair_path)
+        keypair_path = os.path.expandvars(keypair_path)
+        if os.path.exists(keypair_path):
+            print(f"   [OK] Keypair file exists")
+        else:
+            print(f"   [WARN] Keypair file not found: {keypair_path}")
+            warnings.append(f"Orchestrator keypair file not found: {keypair_path}")
+
+
 def check_deploy_migrations(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
     """Check that required v1.9.0 deploy migrations have been applied."""
     print("\n-> Checking deploy migrations...")
-    
+
     migrations_file = home_dir / "env" / ".migrations"
     if not migrations_file.exists():
         print("   [WARN] .migrations file not found (fresh install?)")
         warnings.append(".migrations file not found - migrations may not have run yet")
         return
-    
+
     try:
         content = migrations_file.read_text()
     except Exception as e:
         print(f"   [FAIL] Cannot read .migrations: {e}")
         failures.append(f"Cannot read .migrations file: {e}")
         return
-    
+
     # Required migrations for v1.9.0
     required_migrations = [
         "v1_9_0_indexer_env_rename",
         "v1_9_0_p2p_rate_limiting",
     ]
-    
+
     for migration_key in required_migrations:
         # Check if migration key appears in the file (format: "key|timestamp|result")
         if migration_key in content:
@@ -655,6 +843,12 @@ def main() -> int:
     print(f"phase:   {args.phase}")
     print()
 
+    # Check binary version first
+    check_binary_version(miraged, failures, warnings)
+    
+    # Check bridge CLI commands exist
+    check_bridge_commands(miraged, failures, warnings)
+
     rpc_chain_id, _ = check_node_health(rpc, failures, warnings)
     check_upgrade_state(miraged, rpc, args.phase, failures)
 
@@ -688,6 +882,7 @@ def main() -> int:
     if not args.skip_config:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
         check_deploy_migrations(home_dir, failures, warnings)
+        check_orchestrator_config(home_dir, failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
