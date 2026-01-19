@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -64,6 +66,13 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 		discBurn:  eventDiscriminator("BurnInitiated"),
 		discMint:  instructionDiscriminator("mint"),
 		ready:     true,
+	}
+
+	// Load persisted state (lastSig) if available
+	if err := watcher.loadState(); err != nil {
+		logger.Printf("WARN failed to load persisted state: %v (starting fresh)", err)
+	} else if watcher.lastSig != "" {
+		logger.Printf("DEBUG loaded persisted lastSig=%s", watcher.lastSig)
 	}
 
 	logger.Printf("DEBUG solana watcher ready program_id=%s", programID.String())
@@ -194,9 +203,15 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		w.seenSig[sigStr] = true
 	}
 
-	// Update lastSig to the most recent signature
+	// Update lastSig to the most recent signature and persist
 	if len(allSigs) > 0 {
-		w.lastSig = allSigs[0].Signature.String()
+		newLastSig := allSigs[0].Signature.String()
+		if newLastSig != w.lastSig {
+			w.lastSig = newLastSig
+			if err := w.saveState(); err != nil {
+				w.logger.Printf("WARN failed to persist state: %v", err)
+			}
+		}
 	}
 
 	// Prune seenSig map to prevent unbounded growth (keep last 10000)
@@ -215,6 +230,46 @@ func (w *Watcher) pruneSeenSigs() {
 	// Simple strategy: clear the map and rely on lastSig for deduplication
 	// This is safe because lastSig ensures we don't re-process old signatures
 	w.seenSig = make(map[string]bool)
+}
+
+// stateFilePath returns the path to the state file
+func (w *Watcher) stateFilePath() string {
+	return filepath.Join(w.cfg.StateDir, "solana_watcher_state.txt")
+}
+
+// loadState loads the persisted lastSig from disk
+func (w *Watcher) loadState() error {
+	data, err := os.ReadFile(w.stateFilePath())
+	if os.IsNotExist(err) {
+		return nil // No state file yet, start fresh
+	}
+	if err != nil {
+		return err
+	}
+	w.lastSig = strings.TrimSpace(string(data))
+	return nil
+}
+
+// saveState persists the current lastSig to disk
+func (w *Watcher) saveState() error {
+	if w.cfg.StateDir == "" {
+		return nil // State persistence disabled
+	}
+
+	// Ensure state directory exists
+	if err := os.MkdirAll(w.cfg.StateDir, 0700); err != nil {
+		return fmt.Errorf("failed to create state dir: %w", err)
+	}
+
+	// Write atomically: write to temp file, then rename
+	tmpPath := w.stateFilePath() + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(w.lastSig), 0600); err != nil {
+		return fmt.Errorf("failed to write state: %w", err)
+	}
+	if err := os.Rename(tmpPath, w.stateFilePath()); err != nil {
+		return fmt.Errorf("failed to rename state file: %w", err)
+	}
+	return nil
 }
 
 func (w *Watcher) parseBurnsFromSignature(ctx context.Context, signature string) ([]chains.ExternalBurnEvent, error) {

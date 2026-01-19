@@ -155,3 +155,42 @@ func IsIBCChain(chainID string, chains []*BridgeChainConfig) bool {
 	}
 	return false
 }
+
+// ValidateBridgeDestinationAddress validates the destination address format for a given chain
+func ValidateBridgeDestinationAddress(chainID, address string) error {
+	if address == "" {
+		return fmt.Errorf("destination address cannot be empty")
+	}
+
+	switch chainID {
+	case "solana":
+		// Solana addresses are base58-encoded 32-byte public keys
+		// Valid base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+		if len(address) < 32 || len(address) > 44 {
+			return fmt.Errorf("invalid solana address length: expected 32-44 chars, got %d", len(address))
+		}
+		// Check for valid base58 characters (no 0, O, I, l)
+		for _, c := range address {
+			if !isBase58Char(c) {
+				return fmt.Errorf("invalid solana address: contains invalid character '%c'", c)
+			}
+		}
+	default:
+		// For unknown chains, just ensure non-empty (already checked above)
+		// Additional validation can be added as new chains are supported
+	}
+
+	return nil
+}
+
+// isBase58Char returns true if the character is valid in base58 encoding
+func isBase58Char(c rune) bool {
+	// Base58 alphabet: 123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+	// Excludes: 0, O, I, l
+	return (c >= '1' && c <= '9') ||
+		(c >= 'A' && c <= 'H') ||
+		(c >= 'J' && c <= 'N') ||
+		(c >= 'P' && c <= 'Z') ||
+		(c >= 'a' && c <= 'k') ||
+		(c >= 'm' && c <= 'z')
+}

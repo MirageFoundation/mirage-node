@@ -246,9 +246,12 @@ payload := []byte{}
 payload = append(payload, burn_tx_hash[:]...)           // 32 bytes
 payload = append(payload, borshString(mirage_sender)...) // 4 + len(sender)
 payload = append(payload, uint64LE(amount)...)          // 8 bytes
+payload = append(payload, recipient[:]...)              // 32 bytes (Solana pubkey)
 
 signature := ed25519.Sign(orchestrator_private_key, payload)
 ```
+
+**Security note**: The recipient is included in the signed payload to prevent redirection attacks. Without this binding, a malicious actor could intercept a valid attestation and redirect minted tokens to their own address.
 
 ### Rust Mint Params
 
@@ -297,7 +300,10 @@ When `mint` is called:
 
 1. **Verify discriminator** matches `sha256("global:mint")[0..8]`
 2. **Verify orchestrator** is in the ValidatorRegistry
-3. **Verify signature** is valid Ed25519 over the attestation payload
+3. **Verify signature** is valid Ed25519 over the attestation payload:
+   - Reconstruct payload: `burn_tx_hash || borsh_string(mirage_sender) || amount || recipient_pubkey`
+   - The `recipient_pubkey` comes from the `recipient` account (index 1)
+   - This ensures orchestrators cannot redirect mints to different addresses
 4. **Check mint_record** PDA doesn't exist (prevents double-mint)
 5. **Track attestation**: increment attested power for this `burn_tx_hash`
 6. **If threshold reached** (≥66.67% of total validator voting power):
@@ -405,7 +411,7 @@ fn instruction_discriminator(name: &str) -> [u8; 8] {
 - [ ] `BurnInitiated` event includes all required fields
 - [ ] `burn_id` is unique (auto-incrementing nonce)
 - [ ] `mirage_recipient` is validated as proper bech32 before burning
-- [ ] `mint` instruction verifies Ed25519 signature
+- [ ] `mint` instruction verifies Ed25519 signature **including recipient binding**
 - [ ] `mint` instruction checks orchestrator is in ValidatorRegistry
 - [ ] `mint_record` PDA prevents double-minting
 - [ ] Threshold logic requires ≥66.67% of validator stake
