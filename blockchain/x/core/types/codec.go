@@ -18,6 +18,11 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgDelete{}, &MsgSendTokens{}, &MsgSetLevel{},
 		&MsgPunishValidator{}, &MsgMintTo{}, &MsgUpgradeLevel{},
 		&MsgSetAutoRenewal{},
+		// IBC and Bridge messages
+		&MsgIBCTransfer{},
+		&MsgBridgeBurn{},
+		&MsgBridgeAttestBurned{},
+		&MsgBridgeAttestMinted{},
 	)
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
 }
