@@ -69,11 +69,14 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		mintRecordPayer = payer
 	}
 
+	// Calculate net amount after fee deduction
+	mintAmount := burn.Amount - burn.BridgeFee
+
 	// Anchor's init_if_needed handles ATA creation, no separate instruction needed
 	instructions := []solana.Instruction{}
 
-	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, burn.Amount, recipient)
-	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, burn.Amount, recipient)
+	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, mintAmount, recipient)
+	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, mintAmount, recipient)
 	if err != nil {
 		return err
 	}
@@ -82,7 +85,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	ed25519Instr := buildEd25519VerifyInstruction(orchestratorPub, attestationPayload, attestationSig)
 	instructions = append(instructions, ed25519Instr)
 
-	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, burn.Amount, burn.Sequence)
+	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, mintAmount, burn.Sequence)
 	if err != nil {
 		return err
 	}

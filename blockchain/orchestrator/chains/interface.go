@@ -16,7 +16,8 @@ type MirageBurnEvent struct {
 	BurnID             string
 	DestinationChain   string
 	DestinationAddress string
-	Amount             uint64
+	Amount             uint64 // Gross amount before fee
+	BridgeFee          uint64 // Fee deducted from amount
 	Owner              string
 	Sequence           uint64
 }
