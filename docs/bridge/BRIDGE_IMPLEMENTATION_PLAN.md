@@ -131,9 +131,10 @@ Frontend shows:
 
 ### Bridge Fee
 
-- **Flat 1 MIRAGE fee** for all bridge transfers (IBC and attested)
-- Fee is **burned** (not paid to validators)
-- Configurable via governance parameter `bridge_fee`
+- **Per-chain fee** configured in `bridge_chains[].fee` parameter
+- Solana: 100 MIRAGE (100,000,000 umirage)
+- Fee is **paid to the validator** who confirms the mint on the destination chain
+- Incentivizes validators to run bridge orchestrators
 - Applies regardless of subscriber status
 
 ### Message Types
@@ -203,14 +204,14 @@ Added to `blockchain/proto/mirage/core/v1/params.proto`:
 message BridgeChainConfig {
   string chain_id = 1;      // "solana", "osmosis", etc.
   bool enabled = 2;         // Can be disabled via governance
-  bool is_ibc = 3;          // True for IBC chains (Osmosis), false for attested (Solana)
-  string ibc_channel = 4;   // IBC channel ID (only for IBC chains)
+  uint64 fee = 3;           // Per-chain fee in umirage (e.g., 100000000 = 100 MIRAGE for Solana)
+  bool is_ibc = 4;          // True for IBC chains (Osmosis), false for attested (Solana)
+  string ibc_channel = 5;   // IBC channel ID (only for IBC chains)
 }
 
 // In Params message:
-repeated BridgeChainConfig bridge_chains = 19;
-uint64 bridge_attestation_threshold = 20;  // 6667 = 66.67%
-uint64 bridge_fee = 21;                    // Fee in umirage (default: 1000000 = 1 MIRAGE)
+repeated BridgeChainConfig bridge_chains = 50;
+uint64 bridge_attestation_threshold = 51;  // 6667 = 66.67%
 ```
 
 New chains can be added via governance proposal without code changes.
@@ -275,13 +276,15 @@ For `POST /api/bridge/burn`:
 1. User submits `MsgBridgeBurn` with `destination_chain` and `destination_address`
 2. Handler validates:
    - Chain is enabled in params and is non-IBC
-   - Amount > bridge_fee
+   - Amount + chain fee fits in balance
    - User has sufficient balance
-3. Handler **burns** (amount + bridge_fee) from user's account
-4. Handler **burns** bridge_fee (reduces total supply)
-5. Handler emits event: `bridge_burn{chain, address, amount, burn_id}`
+3. Handler **burns** amount from user's account (for minting on destination)
+4. Handler **escrows** bridge_fee in module account (paid to validator on confirmation)
+5. Handler emits event: `bridge_burn{chain, address, amount, burn_id, bridge_fee}`
 6. Orchestrators watch for `bridge_burn` events
 7. Orchestrators call external chain's bridge contract to **mint** MIRAGE
+8. Orchestrator submits `MsgBridgeMinted` with destination tx proof
+9. Handler **pays** escrowed bridge_fee to the validator who confirmed
 
 ### Inbound Flow (External Chain → Mirage)
 
@@ -456,7 +459,7 @@ const NETWORKS = {
 - Destination address:
   - IBC chains: Auto-derived from Mirage key, option for different address
   - Non-IBC chains: Manual entry with chain-specific validation
-- Fee display (always 1 MIRAGE, burned)
+- Fee display (per-chain fee from /api/bridge/config, paid to validator)
 - "Receive on {Chain}" display
 - Submit button with loading state and success/error feedback
 

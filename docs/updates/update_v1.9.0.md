@@ -15,7 +15,7 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
 - **Attested Bridge** for non-IBC chains (Solana, future Ethereum support)
   - Validators run orchestrators that watch external chains for burns
   - Attestations require 66.67% of voting power to mint tokens
-  - 1 MIRAGE flat fee per bridge transfer (burned)
+  - Per-chain bridge fee (100 MIRAGE for Solana) paid to validator who confirms mint
 
 - **Bridge Orchestrator** - new component for validators
   - Watches Solana for burn events
@@ -26,9 +26,8 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `bridge_chains` | `[{chain_id: "solana", enabled: true}]` | Enabled bridge chains |
+| `bridge_chains` | `[{chain_id: "solana", enabled: true, fee: 100000000}]` | Enabled bridge chains with per-chain fees |
 | `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
-| `bridge_fee` | `1,000,000` (1 MIRAGE) | Flat fee per bridge transfer |
 
 ### New CLI Commands
 
@@ -151,9 +150,8 @@ Run `python3 scripts/verify_upgrade.py --phase post` which checks:
 - [ ] Upgrade applied at correct height
 - [ ] All core params set correctly
 - [ ] All 4 tiers configured with correct values
-- [ ] Solana bridge chain enabled
+- [ ] Solana bridge chain enabled with fee = 100,000,000 (100 MIRAGE)
 - [ ] Bridge attestation threshold = 6667
-- [ ] Bridge fee = 1,000,000
 - [ ] Bridge queries working (status, config)
 - [ ] Gov params unchanged
 - [ ] Local config valid (app.toml, genesis.json)

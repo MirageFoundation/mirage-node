@@ -155,6 +155,11 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if err := w.waitForConfirmation(ctx, sig); err != nil {
 		return "", err
 	}
+
+	// Log Solana fee (base fee ~5000 lamports = 0.000005 SOL per signature)
+	w.logger.Printf("INFO  [FEES] solana_mint solana_fee=~0.000005 SOL mint_amount=%.2f MIRAGE burn_id=%s signature=%s",
+		float64(mintAmount)/1_000_000, burn.BurnID, sig.String())
+
 	return sig.String(), nil
 }
 

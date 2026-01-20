@@ -207,24 +207,23 @@ def bridge_config():
     log_event(rid, "bridge_config.begin")
     try:
         p = expect_params()
-        bridge_chains = p.get("bridge_chains", [])
-        bridge_fee = int(p.get("bridge_fee", 1_000_000))  # Default 1 MIRAGE in umirage
+        bridge_chains = p["bridge_chains"]  # Required, fail if missing
         
-        # Format chains for frontend
+        # Format chains for frontend - each chain must have fee
         chains = []
         for chain in bridge_chains:
+            chain_id = chain["chain_id"]
+            fee_umirage = int(chain["fee"])  # Required per-chain fee
             chains.append({
-                "chain_id": chain.get("chain_id", ""),
-                "enabled": chain.get("enabled", False),
+                "chain_id": chain_id,
+                "enabled": chain["enabled"],
                 "is_ibc": chain.get("is_ibc", False),
                 "ibc_channel": chain.get("ibc_channel", ""),
+                "fee_umirage": fee_umirage,
+                "fee_mirage": fee_umirage / 1_000_000,
             })
         
-        return jsonify({
-            "bridge_fee": bridge_fee,
-            "bridge_fee_mirage": bridge_fee / 1_000_000,
-            "chains": chains,
-        })
+        return jsonify({"chains": chains})
     except Exception as e:
         log_event(rid, "bridge_config.err", error=str(e))
         return jsonify({"error": str(e)}), 500

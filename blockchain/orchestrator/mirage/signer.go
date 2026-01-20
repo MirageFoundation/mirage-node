@@ -18,11 +18,13 @@ import (
 )
 
 // unorderedTxTimeout is the timeout duration for unordered transactions.
-// Must be long enough to allow tx propagation and inclusion.
-const unorderedTxTimeout = 10 * time.Minute
+// Must be under the chain's max TTL (10m). Using 5m for safety margin.
+const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the safety margin applied to simulated gas.
-const gasBufferMultiplier = 1.3
+// Using 1.5x because we simulate ordered tx but broadcast unordered tx,
+// which has additional overhead for timeout validation and hash storage.
+const gasBufferMultiplier = 1.5
 
 // simulationGasLimit is a high gas limit used only for simulation.
 const simulationGasLimit = 1_000_000
@@ -37,7 +39,7 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 		Amount:          burn.Amount,
 	}
 
-	txBytes, err := c.buildTxBytesWithSimulation(ctx, msg)
+	txBytes, feeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -56,11 +58,12 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
 	}
 
-	c.logger.Printf("DEBUG attestation submitted burn_id=%s txhash=%s", burnID, resp.TxResponse.TxHash)
+	c.logger.Printf("INFO  [FEES] attestation gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
+		float64(feeUmirage)/1_000_000, burnID, resp.TxResponse.TxHash)
 	return nil
 }
 
-func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string) error {
+func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, bridgeFeeUmirage uint64) error {
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
 	msg := &coretypes.MsgBridgeMinted{
 		Authority:        c.FromAddress(),
@@ -69,7 +72,7 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		DestinationTx:    strings.TrimSpace(destTx),
 	}
 
-	txBytes, err := c.buildTxBytesWithSimulation(ctx, msg)
+	txBytes, gasFeeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -88,35 +91,36 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
 	}
 
-	c.logger.Printf("DEBUG bridge minted submitted burn_id=%s dest_tx=%s txhash=%s", burnID, destTx, resp.TxResponse.TxHash)
+	netProfit := float64(int64(bridgeFeeUmirage)-int64(gasFeeUmirage)) / 1_000_000
+	c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE bridge_fee_received=%.2f MIRAGE net_profit=%.2f MIRAGE burn_id=%s txhash=%s",
+		float64(gasFeeUmirage)/1_000_000, float64(bridgeFeeUmirage)/1_000_000, netProfit, burnID, resp.TxResponse.TxHash)
 	return nil
 }
 
 // buildTxBytesWithSimulation builds tx bytes using simulation to determine gas.
-func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([]byte, error) {
+// Returns the tx bytes and the fee amount in umirage.
+func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([]byte, uint64, error) {
 	clientCtx := c.ClientContext()
 	fromAddr := clientCtx.GetFromAddress()
 	accNum, accSeq, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query account info: %w", err)
+		return nil, 0, fmt.Errorf("failed to query account info: %w", err)
 	}
 
-	timeout := time.Now().Add(unorderedTxTimeout)
-
-	// Build tx for simulation with high gas limit
-	simTxBytes, err := c.buildTxBytesInternal(clientCtx, msg, accNum, accSeq, timeout, simulationGasLimit, sdk.NewCoins())
+	// Build ORDERED tx for simulation (no unordered flag, no timeout)
+	simTxBytes, err := c.buildSimulationTx(clientCtx, msg, accNum, accSeq, simulationGasLimit)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build simulation tx: %w", err)
+		return nil, 0, fmt.Errorf("failed to build simulation tx: %w", err)
 	}
 
 	// Simulate to get gas used
 	txClient := txtypes.NewServiceClient(c.grpcConn)
 	simResp, err := txClient.Simulate(ctx, &txtypes.SimulateRequest{TxBytes: simTxBytes})
 	if err != nil {
-		return nil, fmt.Errorf("simulation failed: %w", err)
+		return nil, 0, fmt.Errorf("simulation failed: %w", err)
 	}
 	if simResp.GasInfo == nil {
-		return nil, fmt.Errorf("simulation returned no gas info")
+		return nil, 0, fmt.Errorf("simulation returned no gas info")
 	}
 
 	gasUsed := simResp.GasInfo.GasUsed
@@ -129,14 +133,48 @@ func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([
 	feeAmount := minGasPrice.MulRaw(int64(gasLimit))
 	feeCoins := sdk.NewCoins(sdk.NewCoin(c.cfg.Mirage.FeeDenom, feeAmount))
 
-	// Build final tx with correct gas and fee
-	return c.buildTxBytesInternal(clientCtx, msg, accNum, accSeq, timeout, gasLimit, feeCoins)
+	// Build final UNORDERED tx with correct gas and fee for broadcast
+	timeout := time.Now().Add(unorderedTxTimeout)
+	txBytes, err := c.buildUnorderedTx(clientCtx, msg, accNum, timeout, gasLimit, feeCoins)
+	if err != nil {
+		return nil, 0, err
+	}
+	return txBytes, feeAmount.Uint64(), nil
 }
 
-func (c *Client) buildTxBytesInternal(
+// buildSimulationTx builds a regular ordered tx for simulation purposes.
+func (c *Client) buildSimulationTx(
 	clientCtx client.Context,
 	msg sdk.Msg,
 	accNum, accSeq uint64,
+	gasLimit uint64,
+) ([]byte, error) {
+	txf := tx.Factory{}.
+		WithTxConfig(clientCtx.TxConfig).
+		WithChainID(c.cfg.Mirage.ChainID).
+		WithKeybase(c.keyring).
+		WithAccountNumber(accNum).
+		WithSequence(accSeq).
+		WithGas(gasLimit)
+
+	txBuilder := clientCtx.TxConfig.NewTxBuilder()
+	if err := txBuilder.SetMsgs(msg); err != nil {
+		return nil, fmt.Errorf("failed to set tx messages: %w", err)
+	}
+	txBuilder.SetGasLimit(gasLimit)
+
+	if err := tx.Sign(context.Background(), txf, c.cfg.Mirage.KeyName, txBuilder, true); err != nil {
+		return nil, err
+	}
+	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
+}
+
+// buildUnorderedTx builds an unordered tx with timeout for actual broadcast.
+// Unordered txs must NOT have a sequence number (SDK rejects sequence != 0).
+func (c *Client) buildUnorderedTx(
+	clientCtx client.Context,
+	msg sdk.Msg,
+	accNum uint64,
 	timeout time.Time,
 	gasLimit uint64,
 	feeCoins sdk.Coins,
@@ -146,7 +184,7 @@ func (c *Client) buildTxBytesInternal(
 		WithChainID(c.cfg.Mirage.ChainID).
 		WithKeybase(c.keyring).
 		WithAccountNumber(accNum).
-		WithSequence(accSeq).
+		WithSequence(0). // Unordered txs must have sequence = 0
 		WithGas(gasLimit).
 		WithUnordered(true).
 		WithTimeoutTimestamp(timeout)
