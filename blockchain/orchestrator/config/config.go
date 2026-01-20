@@ -41,8 +41,6 @@ type SolanaConfig struct {
 	PollIntervalMin time.Duration
 	PollIntervalMax time.Duration
 	StateDir        string        // Directory to persist watcher state (lastSig)
-	CleanupInterval time.Duration // How often to run rent reclamation (0 = disabled)
-	CleanupMinAge   time.Duration // Minimum age of completed records before closing (default: 24h)
 }
 
 type AttestorConfig struct {
@@ -107,8 +105,6 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
-	solanaCleanupInterval := envDurationDefault("ORCHESTRATOR_SOLANA_CLEANUP_INTERVAL", time.Hour)
-	solanaCleanupMinAge := envDurationDefault("ORCHESTRATOR_SOLANA_CLEANUP_MIN_AGE", 24*time.Hour)
 
 	// Mirage config (chain ID and fee denom are constants)
 	mirageGRPC := os.Getenv("ORCHESTRATOR_MIRAGE_GRPC")
@@ -184,8 +180,6 @@ func LoadFromEnv() (*Config, error) {
 			PollIntervalMin: solanaPollIntervalMin,
 			PollIntervalMax: solanaPollIntervalMax,
 			StateDir:        home + "/.mirage/orchestrator",
-			CleanupInterval: solanaCleanupInterval,
-			CleanupMinAge:   solanaCleanupMinAge,
 		},
 		},
 		Attestor: AttestorConfig{
@@ -257,40 +251,4 @@ func envRequiredDuration(key string) (time.Duration, error) {
 		return 0, fmt.Errorf("%s must be a valid duration (e.g., '5s', '10m'): %v", key, err)
 	}
 	return d, nil
-}
-
-func envDurationDefault(key string, defaultVal time.Duration) time.Duration {
-	val := os.Getenv(key)
-	if val == "" {
-		return defaultVal
-	}
-	d, err := parseDurationWithDays(val)
-	if err != nil {
-		return defaultVal
-	}
-	return d
-}
-
-// parseDurationWithDays extends time.ParseDuration to support "d" for days.
-// Examples: "1d", "2d12h", "1d30m", "24h", "30m", "60s"
-func parseDurationWithDays(s string) (time.Duration, error) {
-	// Check for days suffix and convert to hours
-	if idx := strings.Index(s, "d"); idx != -1 {
-		daysStr := s[:idx]
-		days, err := strconv.Atoi(daysStr)
-		if err != nil {
-			return 0, fmt.Errorf("invalid days value: %s", daysStr)
-		}
-		remainder := s[idx+1:]
-		if remainder == "" {
-			return time.Duration(days) * 24 * time.Hour, nil
-		}
-		// Parse remainder (e.g., "12h" from "1d12h")
-		rest, err := time.ParseDuration(remainder)
-		if err != nil {
-			return 0, err
-		}
-		return time.Duration(days)*24*time.Hour + rest, nil
-	}
-	return time.ParseDuration(s)
 }
