@@ -63,6 +63,12 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		return fmt.Errorf("failed to derive validator registry PDA: %w", err)
 	}
 
+	// Determine mint_record_payer: if record exists, use stored payer; otherwise orchestrator
+	mintRecordPayer := orchestratorPub
+	if payer, err := w.getMintRecordPayer(ctx, mintRecordPDA); err == nil && payer != (solana.PublicKey{}) {
+		mintRecordPayer = payer
+	}
+
 	// Anchor's init_if_needed handles ATA creation, no separate instruction needed
 	instructions := []solana.Instruction{}
 
@@ -76,7 +82,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	ed25519Instr := buildEd25519VerifyInstruction(orchestratorPub, attestationPayload, attestationSig)
 	instructions = append(instructions, ed25519Instr)
 
-	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, burn.Amount, burn.Sequence, attestationSig)
+	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, burn.Amount, burn.Sequence)
 	if err != nil {
 		return err
 	}
@@ -90,6 +96,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		accounts: []*solana.AccountMeta{
 			solana.NewAccountMeta(orchestratorPub, true, true),                    // orchestrator (writable, signer)
 			solana.NewAccountMeta(recipient, false, false),                        // recipient
+			solana.NewAccountMeta(mintRecordPayer, true, false),                   // mint_record_payer (writable) - rent refund target
 			solana.NewAccountMeta(recipientATA, true, false),                      // recipient_token_account (writable)
 			solana.NewAccountMeta(mintPDA, true, false),                           // token_mint (writable)
 			solana.NewAccountMeta(bridgeConfigPDA, true, false),                   // bridge_config (writable)
@@ -156,6 +163,32 @@ func (w *Watcher) accountExists(ctx context.Context, pubkey solana.PublicKey) (b
 	return info != nil && info.Value != nil, nil
 }
 
+// getMintRecordPayer fetches the payer pubkey from an existing MintRecord account.
+// Returns zero pubkey if account doesn't exist or can't be read.
+func (w *Watcher) getMintRecordPayer(ctx context.Context, mintRecordPDA solana.PublicKey) (solana.PublicKey, error) {
+	info, err := w.rpcClient.GetAccountInfo(ctx, mintRecordPDA)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return solana.PublicKey{}, nil // Account doesn't exist yet
+		}
+		return solana.PublicKey{}, err
+	}
+	if info == nil || info.Value == nil || info.Value.Data == nil {
+		return solana.PublicKey{}, nil // Account doesn't exist
+	}
+
+	data := info.Value.Data.GetBinary()
+	// MintRecord layout: 8 (discriminator) + 32 (payer) + ...
+	// Payer starts at offset 8
+	if len(data) < 40 {
+		return solana.PublicKey{}, fmt.Errorf("mint record data too short: %d bytes", len(data))
+	}
+
+	var payer solana.PublicKey
+	copy(payer[:], data[8:40])
+	return payer, nil
+}
+
 func (w *Watcher) waitForConfirmation(ctx context.Context, sig solana.Signature) error {
 	sub, err := w.wsClient.SignatureSubscribe(sig, w.commitment())
 	if err != nil {
@@ -207,7 +240,7 @@ func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount 
 	return buf.Bytes()
 }
 
-func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSender string, amount uint64, sequence uint64, sig [64]byte) ([]byte, error) {
+func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSender string, amount uint64, sequence uint64) ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	if _, err := buf.Write(discriminator[:]); err != nil {
 		return nil, err
@@ -220,7 +253,6 @@ func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSe
 	if err := binary.Write(buf, binary.LittleEndian, sequence); err != nil {
 		return nil, err
 	}
-	buf.Write(sig[:])
 	return buf.Bytes(), nil
 }
 
