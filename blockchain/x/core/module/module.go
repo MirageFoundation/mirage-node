@@ -2750,9 +2750,16 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		return nil, fmt.Errorf("failed to get next sequence: %w", err)
 	}
 
-	// Burn the total amount (fee + transfer amount)
-	if err := am.k.BurnFromAccount(sdkCtx, owner, totalBurn); err != nil {
+	// Burn the transfer amount (fee is escrowed, not burned)
+	if err := am.k.BurnFromAccount(sdkCtx, owner, amount); err != nil {
 		return nil, fmt.Errorf("failed to burn tokens: %w", err)
+	}
+
+	// Escrow the bridge fee in the core module account (paid to validator on BridgeMinted)
+	if bridgeFee > 0 {
+		if err := am.k.SendToModule(sdkCtx, owner, bridgeFee); err != nil {
+			return nil, fmt.Errorf("failed to escrow bridge fee: %w", err)
+		}
 	}
 
 	// Generate burn_id from tx hash
@@ -3051,6 +3058,14 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 		return nil, fmt.Errorf("bridge mint already recorded for burn_id %s", burnID)
 	}
 
+	// Pay escrowed bridge fee to the validator who submitted the mint confirmation
+	bridgeFee := burnRecord.BridgeFee
+	if bridgeFee > 0 {
+		if err := am.k.SendFromModule(sdkCtx, authority, bridgeFee); err != nil {
+			return nil, fmt.Errorf("failed to pay bridge fee to validator: %w", err)
+		}
+	}
+
 	record := &types.BridgeMintedRecord{
 		BurnID:           burnID,
 		DestinationChain: destChain,
@@ -3068,6 +3083,7 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 			sdk.NewAttribute("destination_chain", destChain),
 			sdk.NewAttribute("destination_tx", destTx),
 			sdk.NewAttribute("authority", authority),
+			sdk.NewAttribute("bridge_fee_paid", fmt.Sprintf("%d", bridgeFee)),
 		),
 	)
 
@@ -3077,6 +3093,7 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 		"destination_tx", destTx,
 		"authority", authority,
 		"validator", valoper,
+		"bridge_fee_paid", bridgeFee,
 	)
 
 	return &types.MsgBridgeMintedResponse{}, nil

@@ -132,6 +132,15 @@ class MessageProcessor:
             self._handle_set_auto_renewal(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
+        # Bridge messages - no indexer action needed (chain state only)
+        elif type_url == "/mirage.core.v1.MsgBridgeBurn":
+            pass
+        elif type_url == "/mirage.core.v1.MsgBridgeAttest":
+            pass
+        elif type_url == "/mirage.core.v1.MsgBridgeMinted":
+            pass
+        elif type_url == "/mirage.core.v1.MsgIBCTransfer":
+            pass
         else:
             raise RuntimeError(f"Unhandled message type {type_url}")
 

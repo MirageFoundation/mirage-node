@@ -57,8 +57,6 @@ const NETWORKS = {
     },
 };
 
-// Bridge fee: flat 1 MIRAGE for all transfers (burned, deflationary)
-const BRIDGE_FEE = 1; // 1 MIRAGE
 
 // Animations
 const fadeIn = keyframes`
@@ -637,9 +635,32 @@ export default function BridgeView({ state }) {
         destinationChain: '',
         error: '',
     });
+    const [chainConfigs, setChainConfigs] = useState({}); // chain_id -> { fee_mirage, enabled, ... }
 
-    // Bridge fee: flat 1 MIRAGE for all transfers (governance parameter, burned)
-    const bridgeFee = BRIDGE_FEE;
+    // Fetch bridge config (per-chain fees) from backend
+    useEffect(() => {
+        fetch('/api/bridge/config')
+            .then(res => res.json())
+            .then(data => {
+                if (data.chains) {
+                    const configs = {};
+                    for (const chain of data.chains) {
+                        configs[chain.chain_id] = chain;
+                    }
+                    setChainConfigs(configs);
+                    console.debug('[Bridge] Loaded chain configs:', configs);
+                }
+            })
+            .catch(err => console.error('[Bridge] Failed to load config:', err));
+    }, []);
+
+    // Bridge fee per chain (from backend config)
+    const bridgeFee = useMemo(() => {
+        if (!selectedNetwork) return null;
+        const config = chainConfigs[selectedNetwork.id];
+        if (!config) return null; // Chain not configured
+        return config.fee_mirage;
+    }, [selectedNetwork, chainConfigs]);
 
     // Derive the user's address on the destination chain (for Cosmos chains)
     const derivedAddress = useMemo(() => {
@@ -681,6 +702,7 @@ export default function BridgeView({ state }) {
     // Validation
     const validateAmount = useCallback((value) => {
         if (!value || value === '') return null;
+        if (bridgeFee === null) return 'Chain not configured';
         const num = parseFloat(value);
         if (isNaN(num) || num <= 0) return 'Please enter a valid amount';
         // Fee is subtracted from amount, so amount must be greater than fee
@@ -1034,12 +1056,13 @@ export default function BridgeView({ state }) {
     // Calculate preview values
     // Fee is SUBTRACTED - user pays (amount), receives (amount - fee) on destination
     const parsedAmount = parseFloat(rawAmount) || 0;
-    const receiveAmount = Math.max(0, parsedAmount - bridgeFee); // Fee is deducted from receive
+    const receiveAmount = bridgeFee !== null ? Math.max(0, parsedAmount - bridgeFee) : 0;
 
     // Determine if we can submit
     const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
     const hasValidDestination = needsManualAddress ? (destinationAddress && !errors.address) : !!derivedAddress;
     const canSubmit = selectedNetwork &&
+        bridgeFee !== null && // Chain must be configured with fee
         rawAmount &&
         parseFloat(rawAmount) > 0 &&
         hasValidDestination &&
@@ -1326,10 +1349,10 @@ export default function BridgeView({ state }) {
                                                         <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
                                                     </PreviewRow>
                                                     <PreviewRow>
-                                                        <PreviewLabel data-tooltip="Flat bridge fee (burned, deflationary)">
+                                                        <PreviewLabel data-tooltip="Bridge fee paid to validator">
                                                             − Fee
                                                         </PreviewLabel>
-                                                        <PreviewValue>−{bridgeFee} MIRAGE</PreviewValue>
+                                                        <PreviewValue>−{bridgeFee !== null ? bridgeFee : '?'} MIRAGE</PreviewValue>
                                                     </PreviewRow>
                                                     <Divider />
                                                     <PreviewRow>
