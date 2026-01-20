@@ -505,9 +505,9 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
                     if not enabled:
                         print(f"   [FAIL] Solana bridge is disabled")
                         failures.append("bridge_chains: Solana is disabled")
-                    if fee != 100_000_000:
-                        print(f"   [FAIL] Solana fee expected 100,000,000, got {fee}")
-                        failures.append(f"bridge_chains: Solana fee expected 100_000_000, got {fee}")
+                    if fee != 500_000_000:
+                        print(f"   [FAIL] Solana fee expected 500,000,000, got {fee}")
+                        failures.append(f"bridge_chains: Solana fee expected 500_000_000, got {fee}")
 
         if not solana_found:
             print("   [FAIL] Solana not found in bridge_chains")

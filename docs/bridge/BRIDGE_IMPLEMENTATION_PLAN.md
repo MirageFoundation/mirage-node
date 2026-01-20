@@ -132,7 +132,7 @@ Frontend shows:
 ### Bridge Fee
 
 - **Per-chain fee** configured in `bridge_chains[].fee` parameter
-- Solana: 100 MIRAGE (100,000,000 umirage)
+- Solana: 500 MIRAGE (500,000,000 umirage)
 - Fee is **paid to the validator** who confirms the mint on the destination chain
 - Incentivizes validators to run bridge orchestrators
 - Applies regardless of subscriber status
@@ -204,7 +204,7 @@ Added to `blockchain/proto/mirage/core/v1/params.proto`:
 message BridgeChainConfig {
   string chain_id = 1;      // "solana", "osmosis", etc.
   bool enabled = 2;         // Can be disabled via governance
-  uint64 fee = 3;           // Per-chain fee in umirage (e.g., 100000000 = 100 MIRAGE for Solana)
+  uint64 fee = 3;           // Per-chain fee in umirage (e.g., 500000000 = 500 MIRAGE for Solana)
   bool is_ibc = 4;          // True for IBC chains (Osmosis), false for attested (Solana)
   string ibc_channel = 5;   // IBC channel ID (only for IBC chains)
 }

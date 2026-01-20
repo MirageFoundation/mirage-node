@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -32,6 +33,7 @@ type SolanaConfig struct {
 	Enabled         bool
 	RPC             string
 	WS              string
+	Cluster         string // devnet | testnet | mainnet
 	ProgramID       string
 	Keypair         string
 	Confirmations   uint64
@@ -81,6 +83,12 @@ func LoadFromEnv() (*Config, error) {
 	solanaWS := os.Getenv("ORCHESTRATOR_SOLANA_WS")
 	if solanaWS == "" {
 		errs = append(errs, "ORCHESTRATOR_SOLANA_WS is required")
+	}
+	solanaCluster := strings.ToLower(strings.TrimSpace(os.Getenv("ORCHESTRATOR_SOLANA_CLUSTER")))
+	if solanaCluster == "" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_CLUSTER is required (devnet | testnet | mainnet)")
+	} else if solanaCluster != "devnet" && solanaCluster != "testnet" && solanaCluster != "mainnet" {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_CLUSTER must be devnet, testnet, or mainnet")
 	}
 	solanaProgramID := os.Getenv("ORCHESTRATOR_SOLANA_PROGRAM_ID")
 	if solanaProgramID == "" {
@@ -161,6 +169,7 @@ func LoadFromEnv() (*Config, error) {
 			Enabled:         true,
 			RPC:             solanaRPC,
 			WS:              solanaWS,
+			Cluster:         solanaCluster,
 			ProgramID:       solanaProgramID,
 			Keypair:         solanaKeypair,
 			Confirmations:   solanaConfirmations,

@@ -330,13 +330,13 @@ func (w *Watcher) commitment() rpc.CommitmentType {
 }
 
 // solscanURL returns a Solscan explorer URL for the given transaction signature.
-// It automatically detects devnet vs mainnet based on the RPC URL.
+// Cluster is explicitly configured in the orchestrator env (no implicit detection).
 func (w *Watcher) solscanURL(sig solana.Signature) string {
 	cluster := ""
-	rpcLower := strings.ToLower(w.cfg.RPC)
-	if strings.Contains(rpcLower, "devnet") {
+	switch strings.ToLower(strings.TrimSpace(w.cfg.Cluster)) {
+	case "devnet":
 		cluster = "?cluster=devnet"
-	} else if strings.Contains(rpcLower, "testnet") {
+	case "testnet":
 		cluster = "?cluster=testnet"
 	}
 	return fmt.Sprintf("https://solscan.io/tx/%s%s", sig.String(), cluster)

@@ -192,13 +192,11 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 func isPermanentError(err error) bool {
 	errStr := err.Error()
 	// Solana program errors that indicate already processed or invalid data
+	// Note: AlreadyMinted (6021) is now handled gracefully in the minter and returns success
 	permanentPatterns := []string{
-		"AlreadyMinted",            // Replay protection triggered
-		"error: 6021",              // AlreadyMinted error code
-		"Custom\": (json.Number) (len=4) \"6021\"", // JSON-RPC format
-		"TransactionTooOld",        // Sequence too old
-		"error: 6020",              // TransactionTooOld error code
-		"bridge mint already recorded", // Duplicate mint confirmation
+		"TransactionTooOld",            // Sequence too old
+		"error: 6020",                  // TransactionTooOld error code
+		"bridge mint already recorded", // Duplicate mint confirmation on Mirage
 	}
 	for _, pattern := range permanentPatterns {
 		if strings.Contains(errStr, pattern) {

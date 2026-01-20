@@ -990,18 +990,32 @@ def write_working_genesis(genesis_json: str):
             status(f"WARNING: Orchestrator startup failed (optional): {e}")
 
 
+def find_latest_snapshot() -> Path | None:
+    """Find the most recent .tgz snapshot in ~/.mirage/tmp/."""
+    if not MIRAGE_TMP.exists():
+        return None
+    snapshots = sorted(MIRAGE_TMP.glob("*.tgz"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return snapshots[0] if snapshots else None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Reset local testnet from remote clone, then run single-validator simulation."
     )
     parser.add_argument("--source", default="mirage.vote", help="Source host (default: mirage.vote)")
     parser.add_argument("--file", dest="snapshot_file", default=None, help="Use local snapshot tarball (skip remote)")
+    parser.add_argument("--latest", action="store_true", help="Use the latest downloaded snapshot (skip remote)")
     args = parser.parse_args()
 
     status("Reset local testnet: BEGIN")
 
     # Step 1: Get snapshot (fetch remote or use local file)
-    if args.snapshot_file:
+    if args.latest:
+        tarball = find_latest_snapshot()
+        if not tarball:
+            raise RuntimeError(f"No snapshots found in {MIRAGE_TMP}. Run without --latest first.")
+        status(f"Using latest snapshot: {tarball}")
+    elif args.snapshot_file:
         tarball = Path(args.snapshot_file).expanduser().resolve()
         if not tarball.exists():
             raise RuntimeError(f"Snapshot file not found: {tarball}")
