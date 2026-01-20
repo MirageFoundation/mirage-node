@@ -27,6 +27,8 @@ from shared.datatypes import (
     MsgBridgeBurn,
     QueryBridgeMintedRequest,
     QueryBridgeMintedResponse,
+    QueryBridgeAttestationRequest,
+    QueryBridgeAttestationResponse,
 )
 from shared.canon import canon_signed_with_pow
 
@@ -89,6 +91,25 @@ def _query_bridge_minted(burn_id: str, timeout: float = 3.0) -> dict:
             response_deserializer=_deserialize,
         )
         resp = method(QueryBridgeMintedRequest(burn_id=burn_id), timeout=timeout)
+    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
+
+
+def _query_bridge_attestation(source_chain: str, burn_id: str, timeout: float = 3.0) -> dict:
+    """Query inbound bridge attestation (external chain -> Mirage)."""
+
+    def _deserialize(data: bytes) -> QueryBridgeAttestationResponse:
+        msg = QueryBridgeAttestationResponse()
+        msg.ParseFromString(data)
+        return msg
+
+    target = require_runtime().grpc_target
+    with _grpc.insecure_channel(target) as channel:
+        method = channel.unary_unary(
+            "/mirage.core.v1.Query/GetBridgeAttestation",
+            request_serializer=lambda msg: msg.SerializeToString(),
+            response_deserializer=_deserialize,
+        )
+        resp = method(QueryBridgeAttestationRequest(source_chain=source_chain, burn_id=burn_id), timeout=timeout)
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
@@ -250,10 +271,15 @@ def bridge_config():
 
 @bridge_bp.route("/api/bridge/get_minted", methods=["GET"])
 def get_bridge_minted():
-    """Query outbound bridge mint confirmation by burn_id."""
+    """Query bridge mint confirmation by burn_id.
+
+    For outbound bridges (Mirage -> external): just pass burn_id
+    For inbound bridges (external -> Mirage): pass burn_id and chain (e.g., chain=solana)
+    """
     rid = next_request_id()
-    burn_id = (request.args.get("burn_id") or "").strip().lower()
-    log_event(rid, "get_bridge_minted.begin", burn_id=burn_id)
+    burn_id = (request.args.get("burn_id") or "").strip()
+    chain = (request.args.get("chain") or "").strip().lower()
+    log_event(rid, "get_bridge_minted.begin", burn_id=burn_id, chain=chain)
 
     if not burn_id:
         return jsonify({"error": "burn_id required"}), 400
@@ -264,17 +290,30 @@ def get_bridge_minted():
         return jsonify({"error": "forbidden"}), 403
 
     try:
-        result = _query_bridge_minted(burn_id)
-        log_event(
-            rid,
-            "get_bridge_minted.ok",
-            burn_id=burn_id,
-            minted=result.get("minted", False),
-            destination_chain=result.get("destination_chain"),
-        )
+        if chain:
+            # Inbound bridge: query attestation by source chain and burn_id
+            result = _query_bridge_attestation(chain, burn_id)
+            log_event(
+                rid,
+                "get_bridge_minted.ok",
+                burn_id=burn_id,
+                chain=chain,
+                found=result.get("found", False),
+                minted=result.get("minted", False),
+            )
+        else:
+            # Outbound bridge: query by burn_id (tx hash)
+            result = _query_bridge_minted(burn_id.lower())
+            log_event(
+                rid,
+                "get_bridge_minted.ok",
+                burn_id=burn_id,
+                minted=result.get("minted", False),
+                destination_chain=result.get("destination_chain"),
+            )
         return jsonify(result)
     except Exception as e:
-        log_event(rid, "get_bridge_minted.err", burn_id=burn_id, error=str(e))
+        log_event(rid, "get_bridge_minted.err", burn_id=burn_id, chain=chain, error=str(e))
         return jsonify({"error": str(e)}), 500
 
 

@@ -459,6 +459,26 @@ def _build_pool():
     add_f(msg_bridge_minted_resp, "destination_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_bridge_minted_resp, "destination_tx", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # QueryBridgeAttestationRequest (for inbound bridges)
+    msg_bridge_attest_req = file_proto.message_type.add()
+    msg_bridge_attest_req.name = "QueryBridgeAttestationRequest"
+    add_f(msg_bridge_attest_req, "source_chain", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_req, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # QueryBridgeAttestationResponse
+    msg_bridge_attest_resp = file_proto.message_type.add()
+    msg_bridge_attest_resp.name = "QueryBridgeAttestationResponse"
+    add_f(msg_bridge_attest_resp, "found", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_attest_resp, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_resp, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_resp, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_resp, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    # Note: attestors is repeated string but we'll skip for simplicity
+    add_f(msg_bridge_attest_resp, "attested_power", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_bridge_attest_resp, "required_power", 8, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_bridge_attest_resp, "minted", 9, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_attest_resp, "created_at", 10, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+
     pool.Add(file_proto)
     return pool
 
@@ -514,3 +534,5 @@ QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyReque
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
 QueryBridgeMintedRequest = _get_message_class("mirage.core.v1.QueryBridgeMintedRequest")
 QueryBridgeMintedResponse = _get_message_class("mirage.core.v1.QueryBridgeMintedResponse")
+QueryBridgeAttestationRequest = _get_message_class("mirage.core.v1.QueryBridgeAttestationRequest")
+QueryBridgeAttestationResponse = _get_message_class("mirage.core.v1.QueryBridgeAttestationResponse")
