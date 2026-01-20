@@ -345,32 +345,37 @@ def _build_pool():
     add_f(bridge_config, "fee", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(bridge_config, "ibc_channel", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgBridgeAttest (validator attestation for external chain burns)
-    msg_bridge_attest = file_proto.message_type.add()
-    msg_bridge_attest.name = "MsgBridgeAttest"
-    add_f(msg_bridge_attest, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_attest, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    # MsgBridgeAttestBurned (validator attestation for external chain burns - inbound)
+    msg_bridge_attest_burned = file_proto.message_type.add()
+    msg_bridge_attest_burned.name = "MsgBridgeAttestBurned"
+    add_f(msg_bridge_attest_burned, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_burned, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_burned, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_burned, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_burned, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
-    # MsgBridgeAttestResponse
-    msg_bridge_attest_resp = file_proto.message_type.add()
-    msg_bridge_attest_resp.name = "MsgBridgeAttestResponse"
-    add_f(msg_bridge_attest_resp, "minted", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(msg_bridge_attest_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
-    add_f(msg_bridge_attest_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    # MsgBridgeAttestBurnedResponse
+    msg_bridge_attest_burned_resp = file_proto.message_type.add()
+    msg_bridge_attest_burned_resp.name = "MsgBridgeAttestBurnedResponse"
+    add_f(msg_bridge_attest_burned_resp, "confirmed", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_attest_burned_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_bridge_attest_burned_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
 
-    # MsgBridgeMinted (validator mint confirmation for outbound burns)
-    msg_bridge_minted = file_proto.message_type.add()
-    msg_bridge_minted.name = "MsgBridgeMinted"
-    add_f(msg_bridge_minted, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_minted, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_minted, "destination_chain", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_bridge_minted, "destination_tx", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    # MsgBridgeAttestMinted (validator attestation for external chain mints - outbound)
+    msg_bridge_attest_minted = file_proto.message_type.add()
+    msg_bridge_attest_minted.name = "MsgBridgeAttestMinted"
+    add_f(msg_bridge_attest_minted, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_minted, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_minted, "destination_chain", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_minted, "destination_tx", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest_minted, "mirage_tx_hash", 5, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgBridgeMintedResponse
-    add_msg("MsgBridgeMintedResponse")
+    # MsgBridgeAttestMintedResponse
+    msg_bridge_attest_minted_resp = file_proto.message_type.add()
+    msg_bridge_attest_minted_resp.name = "MsgBridgeAttestMintedResponse"
+    add_f(msg_bridge_attest_minted_resp, "confirmed", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_attest_minted_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_bridge_attest_minted_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
 
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
     msg4 = file_proto.message_type.add()
@@ -520,10 +525,10 @@ MsgUpgradeLevel = _get_message_class("mirage.core.v1.MsgUpgradeLevel")
 MsgSetAutoRenewal = _get_message_class("mirage.core.v1.MsgSetAutoRenewal")
 MsgIBCTransfer = _get_message_class("mirage.core.v1.MsgIBCTransfer")
 MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
-MsgBridgeAttest = _get_message_class("mirage.core.v1.MsgBridgeAttest")
-MsgBridgeAttestResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestResponse")
-MsgBridgeMinted = _get_message_class("mirage.core.v1.MsgBridgeMinted")
-MsgBridgeMintedResponse = _get_message_class("mirage.core.v1.MsgBridgeMintedResponse")
+MsgBridgeAttestBurned = _get_message_class("mirage.core.v1.MsgBridgeAttestBurned")
+MsgBridgeAttestBurnedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestBurnedResponse")
+MsgBridgeAttestMinted = _get_message_class("mirage.core.v1.MsgBridgeAttestMinted")
+MsgBridgeAttestMintedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestMintedResponse")
 TierConfig = _get_message_class("mirage.core.v1.TierConfig")
 BridgeChainConfig = _get_message_class("mirage.core.v1.BridgeChainConfig")
 Params = _get_message_class("mirage.core.v1.Params")

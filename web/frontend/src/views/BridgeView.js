@@ -903,7 +903,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                     console.debug('[Solana Bridge In] Attestation found, starting mint timer');
                 }
 
-                if (data.minted) {
+                if (data.confirmed) {
                     setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
                     // Calculate final elapsed time for the 'complete' (mint) step
                     const now = Date.now();
@@ -2047,7 +2047,7 @@ export default function BridgeView({ state }) {
                     throw new Error(`mint query failed (${res.status})`);
                 }
                 const data = await res.json();
-                if (data?.minted) {
+                if (data?.confirmed) {
                     setMintStatus({
                         state: 'minted',
                         destinationTx: data.destination_tx || '',

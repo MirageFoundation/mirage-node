@@ -41,7 +41,8 @@ func (c *Client) WatchBridgeBurns(ctx context.Context, out chan<- chains.MirageB
 				continue
 			}
 			eventMap := abciEventsToMap(data.Result.Events)
-			burns, err := parseBridgeBurnEvents(eventMap)
+			txHash := fmt.Sprintf("%X", tmtypes.Tx(data.Tx).Hash())
+			burns, err := parseBridgeBurnEvents(eventMap, txHash)
 			if err != nil {
 				return err
 			}
@@ -69,7 +70,7 @@ func abciEventsToMap(events []abci.Event) map[string][]string {
 	return result
 }
 
-func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent, error) {
+func parseBridgeBurnEvents(events map[string][]string, txHash string) ([]chains.MirageBurnEvent, error) {
 	burnIDs := events["bridge_burn.burn_id"]
 	if len(burnIDs) == 0 {
 		return nil, nil
@@ -108,6 +109,7 @@ func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent
 			BridgeFee:          bridgeFee,
 			Owner:              strings.TrimSpace(owners[i]),
 			Sequence:           sequence,
+			TxHash:             txHash,
 		})
 	}
 	return burns, nil
