@@ -628,6 +628,7 @@ const ExplanationIcon = styled.span`
 export default function BridgeView({ state }) {
     const location = useLocation();
     const address = Storage.load('publicKey', '') || '';
+    const valoperAddress = Storage.load('validator_operator_address', '') || '';
 
     // State
     const [activeTab, setActiveTab] = useState('out');
@@ -653,6 +654,7 @@ export default function BridgeView({ state }) {
         destinationTx: '',
         destinationChain: '',
         error: '',
+        completedAt: null, // timestamp when mint completed (for final timer display)
     });
     const [chainConfigs, setChainConfigs] = useState({}); // chain_id -> { fee_mirage, enabled, ... }
 
@@ -801,7 +803,7 @@ export default function BridgeView({ state }) {
         setErrorStage(null);
         setStepTimestamps({});
         setStepElapsed({});
-        setMintStatus({ state: 'idle', destinationTx: '', destinationChain: '', error: '' });
+        setMintStatus({ state: 'idle', destinationTx: '', destinationChain: '', error: '', completedAt: null });
     }, []);
 
     // Track step timing: record timestamp when stage changes
@@ -869,6 +871,7 @@ export default function BridgeView({ state }) {
                         destinationTx: data.destination_tx || '',
                         destinationChain: data.destination_chain || 'solana',
                         error: '',
+                        completedAt: Date.now(),
                     });
                     return;
                 }
@@ -879,6 +882,7 @@ export default function BridgeView({ state }) {
                     destinationTx: '',
                     destinationChain: '',
                     error: message,
+                    completedAt: Date.now(),
                 });
                 return;
             }
@@ -889,6 +893,7 @@ export default function BridgeView({ state }) {
                     destinationTx: '',
                     destinationChain: '',
                     error: 'mint confirmation timed out',
+                    completedAt: Date.now(),
                 });
                 return;
             }
@@ -900,6 +905,7 @@ export default function BridgeView({ state }) {
                     destinationTx: '',
                     destinationChain: '',
                     error: 'mint confirmation timed out',
+                    completedAt: Date.now(),
                 });
                 return;
             }
@@ -1175,13 +1181,20 @@ export default function BridgeView({ state }) {
             }
         }
 
+        // For the last step (confirmed/mint), use completedAt if available (works for complete, error, timeout)
+        if (step === 'confirmed' && mintStatus.completedAt) {
+            const duration = (mintStatus.completedAt - stepStart) / 1000;
+            return ` (${duration.toFixed(1)}s)`;
+        }
+
         // For active step or last completed step, show elapsed from start
         const elapsed = stepElapsed[step];
         if (elapsed === undefined || elapsed === null) return '';
         return ` (${elapsed.toFixed(1)}s)`;
     };
 
-    const showMintTimer = isSolanaBridge && getStepState('confirmed') === 'active';
+    const confirmedStepState = getStepState('confirmed');
+    const showMintTimer = isSolanaBridge && (confirmedStepState === 'active' || confirmedStepState === 'complete' || confirmedStepState === 'error');
 
     return (
         <ContentGrid>
@@ -1430,6 +1443,13 @@ export default function BridgeView({ state }) {
                                                                 <StepDot $state={getStepState('submitting')} />
                                                                 <StepText>
                                                                     <StepTitle>Submitting bridge transaction{formatStepTime('submitting')}</StepTitle>
+                                                                    <StepMeta>
+                                                                        {getStepState('submitting') === 'complete'
+                                                                            ? `Relayed by ${valoperAddress}`
+                                                                            : (submitStage === 'error' && errorStage === 'submitting')
+                                                                                ? `Failure: ${submitError || 'submission failed'}`
+                                                                                : 'Broadcasting to network...'}
+                                                                    </StepMeta>
                                                                 </StepText>
                                                             </StepItem>
                                                             <StepItem>
@@ -1437,11 +1457,20 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>Confirming token burn on Mirage{formatStepTime('verifying')}</StepTitle>
                                                                     <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
-                                                                        {submitStage === 'confirmed'
-                                                                            ? `Success: ${submitTxHash || 'burn confirmed'}`
-                                                                            : (submitStage === 'error' && errorStage === 'verifying')
-                                                                                ? `Failure: ${submitError || 'burn failed'}`
-                                                                                : (submitTxHash || 'Waiting for confirmation.')}
+                                                                        {submitStage === 'confirmed' ? (
+                                                                            <>
+                                                                                {'Success: '}
+                                                                                <a
+                                                                                    href={`/chain/rpc/tx?hash=0x${submitTxHash}`}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                >
+                                                                                    {submitTxHash}
+                                                                                </a>
+                                                                            </>
+                                                                        ) : (submitStage === 'error' && errorStage === 'verifying')
+                                                                            ? `Failure: ${submitError || 'burn failed'}`
+                                                                            : (submitTxHash || 'Waiting for confirmation.')}
                                                                     </StepMeta>
                                                                 </StepText>
                                                             </StepItem>
