@@ -6,6 +6,7 @@ plugins:
     out: .
     opt:
       - plugins=grpc
+      - module=mirage
       - Mgoogle/protobuf/any.proto=github.com/cosmos/gogoproto/types/any
       - Mcosmos/orm/v1/orm.proto=cosmossdk.io/orm
       - Mcosmos/app/v1alpha1/module.proto=cosmossdk.io/api/cosmos/app/v1alpha1
@@ -19,3 +20,4 @@ plugins:
     opt:
       - logtostderr=true
       - allow_colon_final_segments=true
+      - module=mirage

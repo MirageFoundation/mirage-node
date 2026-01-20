@@ -73,7 +73,7 @@ func GetCmdQueryBridgeStatus() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.BridgeStatus(cmd.Context(), &types.QueryBridgeStatusRequest{})
+			res, err := queryClient.GetBridgeStatus(cmd.Context(), &types.QueryBridgeStatusRequest{})
 			if err != nil {
 				return err
 			}
@@ -99,7 +99,7 @@ func GetCmdQueryBridgeAttestation() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.BridgeAttestation(cmd.Context(), &types.QueryBridgeAttestationRequest{
+			res, err := queryClient.GetBridgeAttestation(cmd.Context(), &types.QueryBridgeAttestationRequest{
 				SourceChain: args[0],
 				BurnId:      args[1],
 			})
@@ -128,7 +128,7 @@ func GetCmdQueryBridgeConfig() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.BridgeConfig(cmd.Context(), &types.QueryBridgeConfigRequest{})
+			res, err := queryClient.GetBridgeConfig(cmd.Context(), &types.QueryBridgeConfigRequest{})
 			if err != nil {
 				return err
 			}
