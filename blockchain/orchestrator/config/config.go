@@ -84,12 +84,8 @@ func LoadFromEnv() (*Config, error) {
 	if solanaWS == "" {
 		errs = append(errs, "ORCHESTRATOR_SOLANA_WS is required")
 	}
-	solanaCluster := strings.ToLower(strings.TrimSpace(os.Getenv("ORCHESTRATOR_SOLANA_CLUSTER")))
-	if solanaCluster == "" {
-		errs = append(errs, "ORCHESTRATOR_SOLANA_CLUSTER is required (devnet | testnet | mainnet)")
-	} else if solanaCluster != "devnet" && solanaCluster != "testnet" && solanaCluster != "mainnet" {
-		errs = append(errs, "ORCHESTRATOR_SOLANA_CLUSTER must be devnet, testnet, or mainnet")
-	}
+	// Derive cluster from RPC URL: contains "devnet" -> devnet, "testnet" -> testnet, else mainnet
+	solanaCluster := deriveClusterFromRPC(solanaRPC)
 	solanaProgramID := os.Getenv("ORCHESTRATOR_SOLANA_PROGRAM_ID")
 	if solanaProgramID == "" {
 		errs = append(errs, "ORCHESTRATOR_SOLANA_PROGRAM_ID is required")
@@ -199,6 +195,19 @@ func joinErrors(errs []string) string {
 		result += "\n  - " + errs[i]
 	}
 	return result
+}
+
+// deriveClusterFromRPC infers the Solana cluster from the RPC URL.
+// If URL contains "devnet" -> devnet, "testnet" -> testnet, else mainnet.
+func deriveClusterFromRPC(rpcURL string) string {
+	lower := strings.ToLower(rpcURL)
+	if strings.Contains(lower, "devnet") {
+		return "devnet"
+	}
+	if strings.Contains(lower, "testnet") {
+		return "testnet"
+	}
+	return "mainnet"
 }
 
 func envBool(key string, defaultVal bool) bool {

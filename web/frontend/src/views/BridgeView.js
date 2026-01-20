@@ -67,6 +67,15 @@ const BRIDGE_POLL_SCHEDULE = {
     ],
 };
 
+const MINT_POLL_SCHEDULE = {
+    initialDelayMs: 1000,
+    intervalsMs: [
+        ...Array.from({ length: 9 }, () => 1000),
+        ...Array.from({ length: 5 }, () => 2000),
+        ...Array.from({ length: 18 }, () => 5000),
+    ],
+};
+
 
 // Animations
 const fadeIn = keyframes`
@@ -628,7 +637,7 @@ export default function BridgeView({ state }) {
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [submitStage, setSubmitStage] = useState('idle'); // idle | preparing | submitting | verifying | confirmed | error
+    const [submitStage, setSubmitStage] = useState('idle'); // idle | submitting | verifying | confirmed | error
     const [submitError, setSubmitError] = useState('');
     const [submitTxHash, setSubmitTxHash] = useState('');
     const [verificationProgress, setVerificationProgress] = useState({ attempt: 0, maxAttempts: 0 });
@@ -830,8 +839,8 @@ export default function BridgeView({ state }) {
         if (!submitTxHash) return;
 
         let cancelled = false;
-        const maxAttempts = BRIDGE_POLL_SCHEDULE.intervalsMs.length + 1;
-        const initialDelayMs = BRIDGE_POLL_SCHEDULE.initialDelayMs;
+        const maxAttempts = MINT_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = MINT_POLL_SCHEDULE.initialDelayMs;
 
         setMintStatus({
             state: 'pending',
@@ -842,7 +851,7 @@ export default function BridgeView({ state }) {
 
         console.debug('[Bridge] Mint poll schedule (ms):', {
             initialDelayMs,
-            intervalsMs: BRIDGE_POLL_SCHEDULE.intervalsMs,
+            intervalsMs: MINT_POLL_SCHEDULE.intervalsMs,
         });
 
         const poll = async (attempt = 1) => {
@@ -884,7 +893,7 @@ export default function BridgeView({ state }) {
                 return;
             }
 
-            const nextDelay = BRIDGE_POLL_SCHEDULE.intervalsMs[attempt - 1];
+            const nextDelay = MINT_POLL_SCHEDULE.intervalsMs[attempt - 1];
             if (!nextDelay) {
                 setMintStatus({
                     state: 'timeout',
@@ -978,7 +987,7 @@ export default function BridgeView({ state }) {
     };
 
     const handleSubmit = async () => {
-        let stageAtError = 'preparing';
+        let stageAtError = 'submitting';
         console.debug('[Bridge] Submit attempt', {
             network: selectedNetwork?.id,
             amount: rawAmount,
@@ -1018,8 +1027,8 @@ export default function BridgeView({ state }) {
         setSubmitTxHash('');
         setVerificationProgress({ attempt: 0, maxAttempts: 0 });
         setErrorStage(null);
-        setSubmitStage('preparing');
-        stageAtError = 'preparing';
+        setSubmitStage('submitting');
+        stageAtError = 'submitting';
 
         try {
             // Convert MIRAGE to umirage (1 MIRAGE = 1,000,000 umirage)
@@ -1045,12 +1054,7 @@ export default function BridgeView({ state }) {
             }
 
             setSubmitTxHash(txHash);
-            setSubmitStage('submitting');
-            stageAtError = 'submitting';
             console.debug('[Bridge] Transaction submitted:', txHash);
-
-            // Allow UI to render the submitting state
-            await new Promise(r => setTimeout(r, 250));
 
             setSubmitStage('verifying');
             stageAtError = 'verifying';
@@ -1108,6 +1112,12 @@ export default function BridgeView({ state }) {
 
     const inputsDisabled = isSubmitting || submitStage === 'confirmed';
     const isSolanaBridge = selectedNetwork?.id === 'solana';
+    const solanaCluster = useMemo(() => {
+        const cluster = (chainConfigs?.solana?.solana_cluster || '').toLowerCase().trim();
+        if (!cluster || cluster === 'mainnet') return '';
+        return cluster;
+    }, [chainConfigs]);
+    const solscanClusterParam = solanaCluster ? `?cluster=${solanaCluster}` : '';
 
     // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
@@ -1115,9 +1125,9 @@ export default function BridgeView({ state }) {
         return mirage.toLocaleString();
     };
 
-    const stepOrder = ['preparing', 'submitting', 'verifying', 'confirmed'];
+    const stepOrder = ['submitting', 'verifying', 'confirmed'];
     const currentStepIndex = submitStage === 'error'
-        ? stepOrder.indexOf(errorStage || 'preparing')
+        ? stepOrder.indexOf(errorStage || 'submitting')
         : stepOrder.indexOf(submitStage);
 
     const getStepState = (step) => {
@@ -1417,17 +1427,9 @@ export default function BridgeView({ state }) {
                                                     <StepsCard ref={stepsRef}>
                                                         <StepsList>
                                                             <StepItem>
-                                                                <StepDot $state={getStepState('preparing')} />
-                                                                <StepText>
-                                                                    <StepTitle>Preparing transaction{formatStepTime('preparing')}</StepTitle>
-                                                                    <StepMeta>Checking parameters and building the transfer.</StepMeta>
-                                                                </StepText>
-                                                            </StepItem>
-                                                            <StepItem>
                                                                 <StepDot $state={getStepState('submitting')} />
                                                                 <StepText>
-                                                                    <StepTitle>Submitting to the node{formatStepTime('submitting')}</StepTitle>
-                                                                    <StepMeta>Broadcasting your bridge transaction.</StepMeta>
+                                                                    <StepTitle>Submitting bridge transaction{formatStepTime('submitting')}</StepTitle>
                                                                 </StepText>
                                                             </StepItem>
                                                             <StepItem>
@@ -1456,7 +1458,7 @@ export default function BridgeView({ state }) {
                                                                                 <>
                                                                                     {'Success: '}
                                                                                     <a
-                                                                                        href={`https://solscan.io/tx/${mintStatus.destinationTx}`}
+                                                                                        href={`https://solscan.io/tx/${mintStatus.destinationTx}${solscanClusterParam}`}
                                                                                         target="_blank"
                                                                                         rel="noopener noreferrer"
                                                                                     >

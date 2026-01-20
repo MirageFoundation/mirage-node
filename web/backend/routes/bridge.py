@@ -11,6 +11,7 @@ Endpoints:
 """
 
 import base64
+import os
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
@@ -208,21 +209,33 @@ def bridge_config():
     try:
         p = expect_params()
         bridge_chains = p["bridge_chains"]  # Required, fail if missing
-        
+
+        # Derive Solana cluster from RPC URL: contains "devnet" -> devnet, "testnet" -> testnet, else mainnet
+        solana_rpc = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "").lower()
+        if "devnet" in solana_rpc:
+            solana_cluster = "devnet"
+        elif "testnet" in solana_rpc:
+            solana_cluster = "testnet"
+        else:
+            solana_cluster = "mainnet"
+
         # Format chains for frontend - each chain must have fee
         chains = []
         for chain in bridge_chains:
             chain_id = chain["chain_id"]
             fee_umirage = int(chain["fee"])  # Required per-chain fee
-            chains.append({
+            entry = {
                 "chain_id": chain_id,
                 "enabled": chain["enabled"],
                 "is_ibc": chain.get("is_ibc", False),
                 "ibc_channel": chain.get("ibc_channel", ""),
                 "fee_umirage": fee_umirage,
                 "fee_mirage": fee_umirage / 1_000_000,
-            })
-        
+            }
+            if chain_id == "solana":
+                entry["solana_cluster"] = solana_cluster
+            chains.append(entry)
+
         return jsonify({"chains": chains})
     except Exception as e:
         log_event(rid, "bridge_config.err", error=str(e))
@@ -262,7 +275,7 @@ def get_bridge_minted():
 @bridge_bp.route("/api/bridge/ibc_transfer", methods=["POST"])
 def bridge_ibc_transfer():
     """Relay IBC transfer to a Cosmos chain (e.g., Osmosis).
-    
+
     Required fields:
     - pubkey: Base64 encoded compressed public key
     - signature: Base64 encoded signature
@@ -272,7 +285,7 @@ def bridge_ibc_transfer():
     - amount: Amount in umirage to transfer
     - source_channel: IBC channel ID (e.g., "channel-1")
     - timeout_seconds: Timeout in seconds (default: 600)
-    
+
     Optional (for non-subscribers):
     - pow_difficulty: PoW difficulty
     - pow: PoW proof value
@@ -282,10 +295,10 @@ def bridge_ibc_transfer():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        
+
         data = request.get_json(force=True) or {}
         log_event(rid, "ibc_transfer.data", receiver=data.get("receiver"), amount=data.get("amount"))
-        
+
         # Parse required fields
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
@@ -294,27 +307,27 @@ def bridge_ibc_transfer():
             return jsonify({"error": "last_block_hash too long"}), 400
         if len(last_block_hash) > _MAX_BLOCKHASH_HEX_LEN:
             return jsonify({"error": "last_block_hash too long"}), 400
-        
+
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
-        
+
         receiver = str(data.get("receiver", "")).strip()
         if not receiver:
             return jsonify({"error": "receiver required"}), 400
         if len(receiver) > _MAX_ADDR_LEN:
             return jsonify({"error": "receiver too long"}), 400
-        
+
         try:
             amount = int(data.get("amount", 0))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid amount"}), 400
         if amount <= 0:
             return jsonify({"error": "amount must be positive"}), 400
-        
+
         source_channel = str(data.get("source_channel", "")).strip()
         if not source_channel:
             return jsonify({"error": "source_channel required"}), 400
@@ -330,7 +343,7 @@ def bridge_ibc_transfer():
         expected_hrp = _expected_receiver_hrp(chain_cfg)
         if expected_hrp is not None and not _validate_bech32_20(receiver, expected_hrp):
             return jsonify({"error": f"invalid receiver address (expected {expected_hrp} bech32)"}), 400
-        
+
         try:
             timeout_seconds = int(data.get("timeout_seconds", 600))
         except (TypeError, ValueError):
@@ -339,29 +352,29 @@ def bridge_ibc_transfer():
             timeout_seconds = 60
         if timeout_seconds > 86400:  # Max 24 hours
             timeout_seconds = 86400
-        
+
         try:
             difficulty = int(data.get("pow_difficulty", 0) or 0)
             proof = int(data.get("pow", 0) or 0)
         except (TypeError, ValueError):
             return jsonify({"error": "invalid pow fields"}), 400
-        
+
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
-        
+
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
             return jsonify({"error": "invalid relay fields"}), 400
-        
+
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
-        
+
         validator_addr = require_runtime().validator_payer_addr
-        
+
         # Check subscriber status for PoW requirement
         user_is_sub = is_subscriber(user_addr)
         if not user_is_sub:
@@ -377,7 +390,7 @@ def bridge_ibc_transfer():
             # Subscriber: PoW not allowed
             if difficulty > 0 or proof > 0:
                 return jsonify({"error": "pow not allowed for subscribers"}), 400
-        
+
         # Verify signature
         try:
             base = canon_base_ibc_transfer(
@@ -397,7 +410,7 @@ def bridge_ibc_transfer():
         except Exception as e:
             log_event(rid, "ibc_transfer.sig_exception", error=str(e))
             return jsonify({"error": "invalid signature"}), 400
-        
+
         # Build and broadcast transaction
         msg = MsgIBCTransfer()
         msg.authority = validator_addr
@@ -411,7 +424,7 @@ def bridge_ibc_transfer():
         msg.amount = amount
         msg.source_channel = source_channel
         msg.timeout_seconds = timeout_seconds
-        
+
         any_msg = AnyPB()
         any_msg.type_url = "/mirage.core.v1.MsgIBCTransfer"
         any_msg.value = msg.SerializeToString()
@@ -424,7 +437,7 @@ def bridge_ibc_transfer():
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_bytes = build_tx_bytes(body_bytes, gas_limit)
         tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
-        
+
         if code != 0:
             extra = {
                 "height": height,
@@ -434,7 +447,7 @@ def bridge_ibc_transfer():
                 "source_channel": source_channel,
             }
             return _tx_error(rid, "bridge/ibc_transfer", "MsgIBCTransfer", code, tx_hash, raw_log, extra)
-        
+
         log_event(rid, "ibc_transfer.success", tx_hash=tx_hash, receiver=receiver, amount=amount)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
@@ -445,7 +458,7 @@ def bridge_ibc_transfer():
 @bridge_bp.route("/api/bridge/burn", methods=["POST"])
 def bridge_burn():
     """Relay burn for attested bridge to non-IBC chains (e.g., Solana).
-    
+
     Required fields:
     - pubkey: Base64 encoded compressed public key
     - signature: Base64 encoded signature
@@ -454,7 +467,7 @@ def bridge_burn():
     - destination_chain: Target chain ID (e.g., "solana")
     - destination_address: Recipient address on target chain
     - amount: Amount in umirage to burn and bridge
-    
+
     Optional (for non-subscribers):
     - pow_difficulty: PoW difficulty
     - pow: PoW proof value
@@ -464,22 +477,22 @@ def bridge_burn():
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
-        
+
         data = request.get_json(force=True) or {}
         log_event(rid, "bridge_burn.data", dest_chain=data.get("destination_chain"), amount=data.get("amount"))
-        
+
         # Parse required fields
         pub_b64 = str(data.get("pubkey", "")).strip()
         sig_b64 = str(data.get("signature", "")).strip()
         last_block_hash = str(data.get("last_block_hash", "")).strip()
-        
+
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
-        
+
         destination_chain = str(data.get("destination_chain", "")).strip()
         if not destination_chain:
             return jsonify({"error": "destination_chain required"}), 400
@@ -490,7 +503,7 @@ def bridge_burn():
         # Ensure destination chain is enabled (params-driven)
         if not _resolve_enabled_attested_chain(destination_chain):
             return jsonify({"error": "destination_chain not enabled"}), 400
-        
+
         destination_address = str(data.get("destination_address", "")).strip()
         if not destination_address:
             return jsonify({"error": "destination_address required"}), 400
@@ -505,36 +518,36 @@ def bridge_burn():
                 return jsonify({"error": "invalid solana address"}), 400
             if len(decoded) != 32:
                 return jsonify({"error": "invalid solana address length"}), 400
-        
+
         try:
             amount = int(data.get("amount", 0))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid amount"}), 400
         if amount <= 0:
             return jsonify({"error": "amount must be positive"}), 400
-        
+
         try:
             difficulty = int(data.get("pow_difficulty", 0) or 0)
             proof = int(data.get("pow", 0) or 0)
         except (TypeError, ValueError):
             return jsonify({"error": "invalid pow fields"}), 400
-        
+
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
-        
+
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
         if len(sig_dec) == 65:
             sig_dec = sig_dec[:64]
         if len(pub_dec) != 33 or len(sig_dec) != 64:
             return jsonify({"error": "invalid relay fields"}), 400
-        
+
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
-        
+
         validator_addr = require_runtime().validator_payer_addr
-        
+
         # Check subscriber status for PoW requirement
         user_is_sub = is_subscriber(user_addr)
         if not user_is_sub:
@@ -550,7 +563,7 @@ def bridge_burn():
             # Subscriber: PoW not allowed
             if difficulty > 0 or proof > 0:
                 return jsonify({"error": "pow not allowed for subscribers"}), 400
-        
+
         # Verify signature
         try:
             base = canon_base_bridge_burn(
@@ -569,7 +582,7 @@ def bridge_burn():
         except Exception as e:
             log_event(rid, "bridge_burn.sig_exception", error=str(e))
             return jsonify({"error": "invalid signature"}), 400
-        
+
         # Build and broadcast transaction
         msg = MsgBridgeBurn()
         msg.authority = validator_addr
@@ -582,7 +595,7 @@ def bridge_burn():
         msg.destination_chain = destination_chain
         msg.destination_address = destination_address
         msg.amount = amount
-        
+
         any_msg = AnyPB()
         any_msg.type_url = "/mirage.core.v1.MsgBridgeBurn"
         any_msg.value = msg.SerializeToString()
@@ -595,7 +608,7 @@ def bridge_burn():
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_bytes = build_tx_bytes(body_bytes, gas_limit)
         tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
-        
+
         if code != 0:
             extra = {
                 "height": height,
@@ -605,15 +618,17 @@ def bridge_burn():
                 "amount": amount,
             }
             return _tx_error(rid, "bridge/burn", "MsgBridgeBurn", code, tx_hash, raw_log, extra)
-        
+
         log_event(rid, "bridge_burn.success", tx_hash=tx_hash, destination_chain=destination_chain, amount=amount)
-        return jsonify({
-            "tx_hash": tx_hash, 
-            "code": code, 
-            "height": height, 
-            "raw_log": raw_log,
-            "burn_id": tx_hash,  # burn_id is the tx hash
-        })
+        return jsonify(
+            {
+                "tx_hash": tx_hash,
+                "code": code,
+                "height": height,
+                "raw_log": raw_log,
+                "burn_id": tx_hash,  # burn_id is the tx hash
+            }
+        )
     except Exception as e:
         log_event(rid, "bridge_burn.err", error=str(e))
         return jsonify({"error": str(e)}), 500
