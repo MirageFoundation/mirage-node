@@ -758,13 +758,13 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 // Implement minimal Query/Msg servers on the module itself.
 
 // Params Query
-func (am AppModule) Params(ctx context.Context, _ *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
+func (am AppModule) GetParams(ctx context.Context, _ *types.QueryParamsRequest) (*types.QueryParamsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	return &types.QueryParamsResponse{Params: am.k.GetParams(sdkCtx)}, nil
 }
 
 // Difficulty Query
-func (am AppModule) Difficulty(ctx context.Context, _ *types.QueryDifficultyRequest) (*types.QueryDifficultyResponse, error) {
+func (am AppModule) GetDifficulty(ctx context.Context, _ *types.QueryDifficultyRequest) (*types.QueryDifficultyResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
@@ -790,7 +790,7 @@ func (am AppModule) Difficulty(ctx context.Context, _ *types.QueryDifficultyRequ
 }
 
 // Profile Query
-func (am AppModule) Profile(ctx context.Context, req *types.QueryProfileRequest) (*types.QueryProfileResponse, error) {
+func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileRequest) (*types.QueryProfileResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	address := strings.ToLower(strings.TrimSpace(req.Address))
@@ -829,7 +829,7 @@ func (am AppModule) Profile(ctx context.Context, req *types.QueryProfileRequest)
 }
 
 // Profiles Query (lists profiles with pagination)
-func (am AppModule) Profiles(ctx context.Context, req *types.QueryProfilesRequest) (*types.QueryProfilesResponse, error) {
+func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesRequest) (*types.QueryProfilesResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	// Extract pagination params
@@ -3071,7 +3071,7 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 // ============================================
 
 // BridgeStatus queries the current bridge status
-func (am AppModule) BridgeStatus(ctx context.Context, _ *types.QueryBridgeStatusRequest) (*types.QueryBridgeStatusResponse, error) {
+func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeStatusRequest) (*types.QueryBridgeStatusResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	enabledChains := am.k.GetEnabledBridgeChains(sdkCtx)
@@ -3087,7 +3087,7 @@ func (am AppModule) BridgeStatus(ctx context.Context, _ *types.QueryBridgeStatus
 }
 
 // BridgeAttestation queries a specific attestation
-func (am AppModule) BridgeAttestation(ctx context.Context, req *types.QueryBridgeAttestationRequest) (*types.QueryBridgeAttestationResponse, error) {
+func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBridgeAttestationRequest) (*types.QueryBridgeAttestationResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
@@ -3149,7 +3149,7 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 }
 
 // BridgeConfig queries the bridge configuration
-func (am AppModule) BridgeConfig(ctx context.Context, _ *types.QueryBridgeConfigRequest) (*types.QueryBridgeConfigResponse, error) {
+func (am AppModule) GetBridgeConfig(ctx context.Context, _ *types.QueryBridgeConfigRequest) (*types.QueryBridgeConfigResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 

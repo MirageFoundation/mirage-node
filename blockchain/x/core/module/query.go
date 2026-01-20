@@ -41,7 +41,7 @@ func GetCmdQueryParams() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.Params(cmd.Context(), &types.QueryParamsRequest{})
+			res, err := queryClient.GetParams(cmd.Context(), &types.QueryParamsRequest{})
 			if err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ func GetCmdQueryDifficulty() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.Difficulty(cmd.Context(), &types.QueryDifficultyRequest{})
+			res, err := queryClient.GetDifficulty(cmd.Context(), &types.QueryDifficultyRequest{})
 			if err != nil {
 				return err
 			}
@@ -93,7 +93,7 @@ func GetCmdQueryProfile() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.Profile(cmd.Context(), &types.QueryProfileRequest{
+			res, err := queryClient.GetProfile(cmd.Context(), &types.QueryProfileRequest{
 				Address: args[0],
 			})
 			if err != nil {
@@ -121,7 +121,7 @@ func GetCmdQueryProfiles() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.Profiles(cmd.Context(), &types.QueryProfilesRequest{})
+			res, err := queryClient.GetProfiles(cmd.Context(), &types.QueryProfilesRequest{})
 			if err != nil {
 				return err
 			}

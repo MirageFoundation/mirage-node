@@ -40,7 +40,7 @@ def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
     target = require_runtime().grpc_target
     with _grpc.insecure_channel(target) as channel:
         method = channel.unary_unary(
-            "/mirage.core.v1.Query/Difficulty",
+            "/mirage.core.v1.Query/GetDifficulty",
             request_serializer=lambda msg: msg.SerializeToString(),
             response_deserializer=_deserialize,
         )

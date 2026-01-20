@@ -32,7 +32,7 @@ def _query_core_params(grpc_target: str, timeout: float = 5.0) -> dict:
 
     with grpc.insecure_channel(grpc_target) as channel:
         method = channel.unary_unary(
-            "/mirage.core.v1.Query/Params",
+            "/mirage.core.v1.Query/GetParams",
             request_serializer=lambda msg: msg.SerializeToString(),
             response_deserializer=_deserialize,
         )

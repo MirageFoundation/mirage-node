@@ -408,7 +408,7 @@ class ChainClient:
 
             with grpc.insecure_channel(self.grpc_target) as channel:
                 method = channel.unary_unary(
-                    "/mirage.core.v1.Query/Difficulty",
+                    "/mirage.core.v1.Query/GetDifficulty",
                     request_serializer=QueryDifficultyRequest.SerializeToString,
                     response_deserializer=QueryDifficultyResponse.FromString,
                 )
