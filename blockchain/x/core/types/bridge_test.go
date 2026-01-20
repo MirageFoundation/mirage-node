@@ -1,0 +1,492 @@
+package types
+
+import (
+	"testing"
+)
+
+func TestBridgeBurnRecordMarshalUnmarshal(t *testing.T) {
+	original := &BridgeBurnRecord{
+		BurnID:             "abc123def456",
+		Owner:              "mirage1abc123",
+		DestinationChain:   "solana",
+		DestinationAddress: "SoLANaAddress123",
+		Amount:             1000000,
+		BridgeFee:          10000,
+		Sequence:           42,
+		CreatedAt:          12345,
+	}
+
+	data, err := original.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	restored, err := UnmarshalBridgeBurnRecord(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if restored.BurnID != original.BurnID {
+		t.Errorf("BurnID mismatch: got %s, want %s", restored.BurnID, original.BurnID)
+	}
+	if restored.Owner != original.Owner {
+		t.Errorf("Owner mismatch: got %s, want %s", restored.Owner, original.Owner)
+	}
+	if restored.DestinationChain != original.DestinationChain {
+		t.Errorf("DestinationChain mismatch: got %s, want %s", restored.DestinationChain, original.DestinationChain)
+	}
+	if restored.DestinationAddress != original.DestinationAddress {
+		t.Errorf("DestinationAddress mismatch: got %s, want %s", restored.DestinationAddress, original.DestinationAddress)
+	}
+	if restored.Amount != original.Amount {
+		t.Errorf("Amount mismatch: got %d, want %d", restored.Amount, original.Amount)
+	}
+	if restored.BridgeFee != original.BridgeFee {
+		t.Errorf("BridgeFee mismatch: got %d, want %d", restored.BridgeFee, original.BridgeFee)
+	}
+	if restored.Sequence != original.Sequence {
+		t.Errorf("Sequence mismatch: got %d, want %d", restored.Sequence, original.Sequence)
+	}
+	if restored.CreatedAt != original.CreatedAt {
+		t.Errorf("CreatedAt mismatch: got %d, want %d", restored.CreatedAt, original.CreatedAt)
+	}
+}
+
+func TestBridgeMintedRecordMarshalUnmarshal(t *testing.T) {
+	original := &BridgeMintedRecord{
+		BurnID:           "abc123def456",
+		DestinationChain: "solana",
+		DestinationTx:    "SolanaSignature123ABC",
+		CreatedAt:        12345,
+	}
+
+	data, err := original.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	restored, err := UnmarshalBridgeMintedRecord(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if restored.BurnID != original.BurnID {
+		t.Errorf("BurnID mismatch: got %s, want %s", restored.BurnID, original.BurnID)
+	}
+	if restored.DestinationChain != original.DestinationChain {
+		t.Errorf("DestinationChain mismatch: got %s, want %s", restored.DestinationChain, original.DestinationChain)
+	}
+	if restored.DestinationTx != original.DestinationTx {
+		t.Errorf("DestinationTx mismatch: got %s, want %s", restored.DestinationTx, original.DestinationTx)
+	}
+	if restored.CreatedAt != original.CreatedAt {
+		t.Errorf("CreatedAt mismatch: got %d, want %d", restored.CreatedAt, original.CreatedAt)
+	}
+}
+
+func TestBridgeMintedRecordUnmarshalInvalid(t *testing.T) {
+	_, err := UnmarshalBridgeMintedRecord([]byte("not valid json"))
+	if err == nil {
+		t.Error("Expected error for invalid JSON, got nil")
+	}
+}
+
+func TestBridgeBurnRecordUnmarshalInvalid(t *testing.T) {
+	_, err := UnmarshalBridgeBurnRecord([]byte("not valid json"))
+	if err == nil {
+		t.Error("Expected error for invalid JSON, got nil")
+	}
+}
+
+func TestBridgeBurnKey(t *testing.T) {
+	tests := []struct {
+		burnID   string
+		expected string
+	}{
+		{"abc123", "bridge_burns/abc123"},
+		{"", "bridge_burns/"},
+		{"ABCDEF123456", "bridge_burns/ABCDEF123456"},
+	}
+
+	for _, tc := range tests {
+		key := BridgeBurnKey(tc.burnID)
+		if string(key) != tc.expected {
+			t.Errorf("BridgeBurnKey(%q) = %q, want %q", tc.burnID, string(key), tc.expected)
+		}
+	}
+}
+
+func TestBridgeMintedKey(t *testing.T) {
+	tests := []struct {
+		burnID   string
+		expected string
+	}{
+		{"abc123", "bridge_mints/abc123"},
+		{"", "bridge_mints/"},
+		{"ABCDEF123456", "bridge_mints/ABCDEF123456"},
+	}
+
+	for _, tc := range tests {
+		key := BridgeMintedKey(tc.burnID)
+		if string(key) != tc.expected {
+			t.Errorf("BridgeMintedKey(%q) = %q, want %q", tc.burnID, string(key), tc.expected)
+		}
+	}
+}
+
+func TestBridgeAttestationKey(t *testing.T) {
+	tests := []struct {
+		sourceChain string
+		burnID      string
+		expected    string
+	}{
+		{"solana", "abc123", "bridge_attestations/solana/abc123"},
+		{"ethereum", "def456", "bridge_attestations/ethereum/def456"},
+		{"", "", "bridge_attestations//"},
+	}
+
+	for _, tc := range tests {
+		key := BridgeAttestationKey(tc.sourceChain, tc.burnID)
+		if string(key) != tc.expected {
+			t.Errorf("BridgeAttestationKey(%q, %q) = %q, want %q", tc.sourceChain, tc.burnID, string(key), tc.expected)
+		}
+	}
+}
+
+func TestValidateBridgeDestinationAddress(t *testing.T) {
+	tests := []struct {
+		name      string
+		chainID   string
+		address   string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "valid solana address",
+			chainID: "solana",
+			address: "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs",
+			wantErr: false,
+		},
+		{
+			name:      "empty address",
+			chainID:   "solana",
+			address:   "",
+			wantErr:   true,
+			errSubstr: "cannot be empty",
+		},
+		{
+			name:      "solana address too short",
+			chainID:   "solana",
+			address:   "abc",
+			wantErr:   true,
+			errSubstr: "invalid solana address length",
+		},
+		{
+			name:      "solana address with invalid char 0",
+			chainID:   "solana",
+			address:   "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV30youov87awMs",
+			wantErr:   true,
+			errSubstr: "invalid character",
+		},
+		{
+			name:      "solana address with invalid char O",
+			chainID:   "solana",
+			address:   "7EYnhQoR9YM3N7UoaKROA44Uy8JeaZV3qyouov87awMs",
+			wantErr:   true,
+			errSubstr: "invalid character",
+		},
+		{
+			name:      "solana address with invalid char I",
+			chainID:   "solana",
+			address:   "7EYnhQoR9YM3N7UoaKRoA44Uy8IeaZV3qyouov87awMs",
+			wantErr:   true,
+			errSubstr: "invalid character",
+		},
+		{
+			name:      "solana address with invalid char l",
+			chainID:   "solana",
+			address:   "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZVlqyouov87awMs",
+			wantErr:   true,
+			errSubstr: "invalid character",
+		},
+		{
+			name:    "unknown chain with valid address",
+			chainID: "unknown",
+			address: "someaddress",
+			wantErr: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateBridgeDestinationAddress(tc.chainID, tc.address)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tc.errSubstr)
+				} else if tc.errSubstr != "" && !contains(err.Error(), tc.errSubstr) {
+					t.Errorf("expected error containing %q, got %q", tc.errSubstr, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestIsBase58Char(t *testing.T) {
+	// Valid base58 chars
+	validChars := "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+	for _, c := range validChars {
+		if !isBase58Char(c) {
+			t.Errorf("isBase58Char(%q) = false, want true", c)
+		}
+	}
+
+	// Invalid base58 chars (0, O, I, l)
+	invalidChars := "0OIl"
+	for _, c := range invalidChars {
+		if isBase58Char(c) {
+			t.Errorf("isBase58Char(%q) = true, want false", c)
+		}
+	}
+}
+
+func TestBridgeAttestationMeetsThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		attestedPower int64
+		totalPower    int64
+		threshold     uint64 // basis points
+		expected      bool
+	}{
+		{
+			name:          "exactly at threshold",
+			attestedPower: 6667,
+			totalPower:    10000,
+			threshold:     6667,
+			expected:      true,
+		},
+		{
+			name:          "above threshold",
+			attestedPower: 7000,
+			totalPower:    10000,
+			threshold:     6667,
+			expected:      true,
+		},
+		{
+			name:          "below threshold",
+			attestedPower: 6000,
+			totalPower:    10000,
+			threshold:     6667,
+			expected:      false,
+		},
+		{
+			name:          "zero total power",
+			attestedPower: 100,
+			totalPower:    0,
+			threshold:     6667,
+			expected:      false,
+		},
+		{
+			name:          "negative total power",
+			attestedPower: 100,
+			totalPower:    -100,
+			threshold:     6667,
+			expected:      false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := &BridgeAttestation{AttestedPower: tc.attestedPower}
+			result := a.MeetsThreshold(tc.totalPower, tc.threshold)
+			if result != tc.expected {
+				t.Errorf("MeetsThreshold(%d, %d) = %v, want %v",
+					tc.totalPower, tc.threshold, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestRequiredPower(t *testing.T) {
+	tests := []struct {
+		name       string
+		totalPower int64
+		threshold  uint64
+		expected   int64
+	}{
+		{
+			name:       "standard case",
+			totalPower: 10000,
+			threshold:  6667,
+			expected:   6667,
+		},
+		{
+			name:       "50% threshold",
+			totalPower: 10000,
+			threshold:  5000,
+			expected:   5000,
+		},
+		{
+			name:       "zero total power",
+			totalPower: 0,
+			threshold:  6667,
+			expected:   0,
+		},
+		{
+			name:       "negative total power",
+			totalPower: -100,
+			threshold:  6667,
+			expected:   0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := RequiredPower(tc.totalPower, tc.threshold)
+			if result != tc.expected {
+				t.Errorf("RequiredPower(%d, %d) = %d, want %d",
+					tc.totalPower, tc.threshold, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestBridgeAttestationAddAttestation(t *testing.T) {
+	a := NewBridgeAttestation("solana", "burn123", "mirage1recipient", 1000000, 100)
+
+	// First attestation should succeed
+	if !a.AddAttestation("validator1", 100) {
+		t.Error("First attestation should return true")
+	}
+	if a.AttestedPower != 100 {
+		t.Errorf("AttestedPower = %d, want 100", a.AttestedPower)
+	}
+
+	// Duplicate attestation should fail
+	if a.AddAttestation("validator1", 100) {
+		t.Error("Duplicate attestation should return false")
+	}
+	if a.AttestedPower != 100 {
+		t.Errorf("AttestedPower should not change on duplicate, got %d", a.AttestedPower)
+	}
+
+	// Second different validator should succeed
+	if !a.AddAttestation("validator2", 50) {
+		t.Error("Second validator attestation should return true")
+	}
+	if a.AttestedPower != 150 {
+		t.Errorf("AttestedPower = %d, want 150", a.AttestedPower)
+	}
+}
+
+func TestBridgeAttestationHasAttested(t *testing.T) {
+	a := NewBridgeAttestation("solana", "burn123", "mirage1recipient", 1000000, 100)
+
+	if a.HasAttested("validator1") {
+		t.Error("HasAttested should return false before attestation")
+	}
+
+	a.AddAttestation("validator1", 100)
+
+	if !a.HasAttested("validator1") {
+		t.Error("HasAttested should return true after attestation")
+	}
+
+	if a.HasAttested("validator2") {
+		t.Error("HasAttested should return false for different validator")
+	}
+}
+
+func TestBridgeAttestationAttestorList(t *testing.T) {
+	a := NewBridgeAttestation("solana", "burn123", "mirage1recipient", 1000000, 100)
+
+	a.AddAttestation("validator1", 100)
+	a.AddAttestation("validator2", 50)
+	a.AddAttestation("validator3", 75)
+
+	list := a.AttestorList()
+	if len(list) != 3 {
+		t.Errorf("AttestorList length = %d, want 3", len(list))
+	}
+
+	// Check all validators are in the list
+	validators := map[string]bool{"validator1": false, "validator2": false, "validator3": false}
+	for _, v := range list {
+		validators[v] = true
+	}
+	for v, found := range validators {
+		if !found {
+			t.Errorf("Validator %s not found in AttestorList", v)
+		}
+	}
+}
+
+func TestValidateBridgeChain(t *testing.T) {
+	chains := []*BridgeChainConfig{
+		{ChainId: "solana", Enabled: true, Fee: 100000},
+		{ChainId: "ethereum", Enabled: false, Fee: 200000},
+	}
+
+	tests := []struct {
+		name      string
+		chainID   string
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "valid enabled chain",
+			chainID: "solana",
+			wantErr: false,
+		},
+		{
+			name:      "disabled chain",
+			chainID:   "ethereum",
+			wantErr:   true,
+			errSubstr: "disabled",
+		},
+		{
+			name:      "unknown chain",
+			chainID:   "unknown",
+			wantErr:   true,
+			errSubstr: "unknown bridge chain",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			config, err := ValidateBridgeChain(tc.chainID, chains)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error containing %q, got nil", tc.errSubstr)
+				} else if !contains(err.Error(), tc.errSubstr) {
+					t.Errorf("expected error containing %q, got %q", tc.errSubstr, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if config == nil {
+					t.Error("expected non-nil config")
+				}
+			}
+		})
+	}
+}
+
+// contains checks if substr is in s
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
