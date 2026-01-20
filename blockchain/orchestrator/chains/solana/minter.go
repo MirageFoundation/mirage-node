@@ -19,48 +19,48 @@ import (
 	"mirage/orchestrator/chains"
 )
 
-func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) error {
+func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) (string, error) {
 	if !w.ready {
-		return fmt.Errorf("solana watcher not ready")
+		return "", fmt.Errorf("solana watcher not ready")
 	}
 	burnHash, err := decodeBurnHash(burn.BurnID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	recipient, err := solana.PublicKeyFromBase58(strings.TrimSpace(burn.DestinationAddress))
 	if err != nil {
-		return fmt.Errorf("invalid solana destination address: %w", err)
+		return "", fmt.Errorf("invalid solana destination address: %w", err)
 	}
 
 	orchestratorKey, err := solana.PrivateKeyFromSolanaKeygenFile(w.cfg.Keypair)
 	if err != nil {
-		return fmt.Errorf("failed to read solana keypair: %w", err)
+		return "", fmt.Errorf("failed to read solana keypair: %w", err)
 	}
 	orchestratorPub := orchestratorKey.PublicKey()
 
 	mintPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(mintSeed)}, w.programID)
 	if err != nil {
-		return fmt.Errorf("failed to derive mint PDA: %w", err)
+		return "", fmt.Errorf("failed to derive mint PDA: %w", err)
 	}
 	bridgeConfigPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(bridgeConfigSeed)}, w.programID)
 	if err != nil {
-		return fmt.Errorf("failed to derive bridge config PDA: %w", err)
+		return "", fmt.Errorf("failed to derive bridge config PDA: %w", err)
 	}
 	bridgeStatePDA, _, err := solana.FindProgramAddress([][]byte{[]byte(bridgeStateSeed)}, w.programID)
 	if err != nil {
-		return fmt.Errorf("failed to derive bridge state PDA: %w", err)
+		return "", fmt.Errorf("failed to derive bridge state PDA: %w", err)
 	}
 	mintRecordPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(mintRecordSeed), burnHash[:]}, w.programID)
 	if err != nil {
-		return fmt.Errorf("failed to derive mint record PDA: %w", err)
+		return "", fmt.Errorf("failed to derive mint record PDA: %w", err)
 	}
 	recipientATA, _, err := solana.FindAssociatedTokenAddress(recipient, mintPDA)
 	if err != nil {
-		return fmt.Errorf("failed to derive recipient ATA: %w", err)
+		return "", fmt.Errorf("failed to derive recipient ATA: %w", err)
 	}
 	validatorRegistryPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(validatorRegistrySeed)}, w.programID)
 	if err != nil {
-		return fmt.Errorf("failed to derive validator registry PDA: %w", err)
+		return "", fmt.Errorf("failed to derive validator registry PDA: %w", err)
 	}
 
 	// Determine mint_record_payer: if record exists, use stored payer; otherwise orchestrator
@@ -72,7 +72,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	// Calculate net amount after fee deduction
 	if burn.BridgeFee >= burn.Amount {
 		w.logger.Printf("WARN skipping burn %s: fee (%d) >= amount (%d)", burn.BurnID, burn.BridgeFee, burn.Amount)
-		return nil
+		return "", nil
 	}
 	mintAmount := burn.Amount - burn.BridgeFee
 
@@ -82,7 +82,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, mintAmount, recipient)
 	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, mintAmount, recipient)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Add Ed25519 verify instruction (must precede mint instruction for on-chain verification)
@@ -91,7 +91,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 
 	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, mintAmount, burn.Sequence)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Instructions sysvar for Ed25519 signature verification
@@ -121,7 +121,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 
 	latest, err := w.rpcClient.GetLatestBlockhash(ctx, w.commitment())
 	if err != nil {
-		return fmt.Errorf("failed to get latest blockhash: %w", err)
+		return "", fmt.Errorf("failed to get latest blockhash: %w", err)
 	}
 	tx, err := solana.NewTransaction(
 		instructions,
@@ -129,7 +129,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		solana.TransactionPayer(orchestratorPub),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to build transaction: %w", err)
+		return "", fmt.Errorf("failed to build transaction: %w", err)
 	}
 	_, err = tx.Sign(func(pub solana.PublicKey) *solana.PrivateKey {
 		if pub.Equals(orchestratorPub) {
@@ -138,7 +138,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to sign transaction: %w", err)
+		return "", fmt.Errorf("failed to sign transaction: %w", err)
 	}
 
 	sig, err := w.rpcClient.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{
@@ -146,16 +146,16 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		PreflightCommitment: w.commitment(),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to send transaction: %w", err)
+		return "", fmt.Errorf("failed to send transaction: %w", err)
 	}
 	explorerURL := w.solscanURL(sig)
 	w.logger.Printf("DEBUG solana mint submitted burn_id=%s signature=%s", burn.BurnID, sig.String())
 	w.logger.Printf("INFO  solscan: %s", explorerURL)
 
 	if err := w.waitForConfirmation(ctx, sig); err != nil {
-		return err
+		return "", err
 	}
-	return nil
+	return sig.String(), nil
 }
 
 func (w *Watcher) accountExists(ctx context.Context, pubkey solana.PublicKey) (bool, error) {

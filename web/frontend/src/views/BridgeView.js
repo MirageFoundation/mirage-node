@@ -627,10 +627,16 @@ export default function BridgeView({ state }) {
     const [errorStage, setErrorStage] = useState(null);
     const [errors, setErrors] = useState({});
     const stepsRef = useRef(null);
-    
+
     // Step timing: track when each step started and current elapsed times
     const [stepTimestamps, setStepTimestamps] = useState({});
     const [stepElapsed, setStepElapsed] = useState({});
+    const [mintStatus, setMintStatus] = useState({
+        state: 'idle', // idle | pending | minted | timeout | error
+        destinationTx: '',
+        destinationChain: '',
+        error: '',
+    });
 
     // Bridge fee: flat 1 MIRAGE for all transfers (governance parameter, burned)
     const bridgeFee = BRIDGE_FEE;
@@ -751,23 +757,24 @@ export default function BridgeView({ state }) {
         setErrorStage(null);
         setStepTimestamps({});
         setStepElapsed({});
+        setMintStatus({ state: 'idle', destinationTx: '', destinationChain: '', error: '' });
     }, []);
-    
+
     // Track step timing: record timestamp when stage changes
     useEffect(() => {
         if (submitStage === 'idle') return;
-        
+
         // Record timestamp for this step if not already set
         setStepTimestamps(prev => {
             if (prev[submitStage]) return prev;
             return { ...prev, [submitStage]: Date.now() };
         });
     }, [submitStage]);
-    
+
     // Update elapsed times every 100ms while not idle
     useEffect(() => {
         if (submitStage === 'idle') return;
-        
+
         const interval = setInterval(() => {
             const now = Date.now();
             setStepElapsed(prev => {
@@ -778,9 +785,73 @@ export default function BridgeView({ state }) {
                 return newElapsed;
             });
         }, 100);
-        
+
         return () => clearInterval(interval);
     }, [submitStage, stepTimestamps]);
+
+    useEffect(() => {
+        if (submitStage !== 'confirmed') return;
+        if (selectedNetwork?.id !== 'solana') return;
+        if (!submitTxHash) return;
+
+        let cancelled = false;
+        const maxAttempts = 120;
+        const intervalMs = 5000;
+
+        setMintStatus({
+            state: 'pending',
+            destinationTx: '',
+            destinationChain: '',
+            error: '',
+        });
+
+        const poll = async (attempt = 1) => {
+            if (cancelled) return;
+            try {
+                console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
+                const res = await fetch(`/api/get_bridge_minted?burn_id=${submitTxHash}`);
+                if (!res.ok) {
+                    throw new Error(`mint query failed (${res.status})`);
+                }
+                const data = await res.json();
+                if (data?.minted) {
+                    setMintStatus({
+                        state: 'minted',
+                        destinationTx: data.destination_tx || '',
+                        destinationChain: data.destination_chain || 'solana',
+                        error: '',
+                    });
+                    return;
+                }
+            } catch (e) {
+                const message = e?.message || 'mint query failed';
+                setMintStatus({
+                    state: 'error',
+                    destinationTx: '',
+                    destinationChain: '',
+                    error: message,
+                });
+                return;
+            }
+
+            if (attempt >= maxAttempts) {
+                setMintStatus({
+                    state: 'timeout',
+                    destinationTx: '',
+                    destinationChain: '',
+                    error: 'mint confirmation timed out',
+                });
+                return;
+            }
+
+            setTimeout(() => poll(attempt + 1), intervalMs);
+        };
+
+        poll(1);
+        return () => {
+            cancelled = true;
+        };
+    }, [submitStage, selectedNetwork?.id, submitTxHash]);
 
     const handleNewBridge = () => {
         setAmount('');
@@ -977,6 +1048,7 @@ export default function BridgeView({ state }) {
         submitStage !== 'confirmed';
 
     const inputsDisabled = isSubmitting || submitStage === 'confirmed';
+    const isSolanaBridge = selectedNetwork?.id === 'solana';
 
     // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
@@ -999,23 +1071,29 @@ export default function BridgeView({ state }) {
         }
         // When burn is confirmed, the Solana mint step is still pending
         if (submitStage === 'confirmed') {
-            return step === 'confirmed' ? 'active' : 'complete';
+            if (step === 'confirmed') {
+                if (!isSolanaBridge) {
+                    return 'complete';
+                }
+                return mintStatus.state === 'minted' ? 'complete' : 'active';
+            }
+            return 'complete';
         }
         if (idx < currentStepIndex) return 'complete';
         if (idx === currentStepIndex) return 'active';
         return 'pending';
     };
-    
+
     // Format elapsed time for a step (e.g., "1.2s")
     // For completed steps, show how long they took (until next step started)
     // For active/current step, show time since it started
     const formatStepTime = (step) => {
         const stepStart = stepTimestamps[step];
         if (!stepStart) return '';
-        
+
         const stepIdx = stepOrder.indexOf(step);
         const state = getStepState(step);
-        
+
         // For completed steps, show duration (time until next step)
         if (state === 'complete' && stepIdx < stepOrder.length - 1) {
             const nextStep = stepOrder[stepIdx + 1];
@@ -1025,7 +1103,7 @@ export default function BridgeView({ state }) {
                 return ` (${duration.toFixed(1)}s)`;
             }
         }
-        
+
         // For active step or last completed step, show elapsed from start
         const elapsed = stepElapsed[step];
         if (elapsed === undefined || elapsed === null) return '';
@@ -1305,8 +1383,33 @@ export default function BridgeView({ state }) {
                                                             <StepItem>
                                                                 <StepDot $state={getStepState('confirmed')} />
                                                                 <StepText>
-                                                                    <StepTitle>Confirming token mint on Solana</StepTitle>
-                                                                    <StepMeta>Pending (orchestrator confirmation not yet available).</StepMeta>
+                                                                    <StepTitle>
+                                                                        {isSolanaBridge ? 'Confirming token mint on Solana' : 'Bridge complete'}
+                                                                    </StepTitle>
+                                                                    <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
+                                                                        {isSolanaBridge ? (
+                                                                            mintStatus.state === 'minted' && mintStatus.destinationTx ? (
+                                                                                <>
+                                                                                    {'Success: '}
+                                                                                    <a
+                                                                                        href={`https://solscan.io/tx/${mintStatus.destinationTx}`}
+                                                                                        target="_blank"
+                                                                                        rel="noopener noreferrer"
+                                                                                    >
+                                                                                        {mintStatus.destinationTx}
+                                                                                    </a>
+                                                                                </>
+                                                                            ) : mintStatus.state === 'error' ? (
+                                                                                `Error: ${mintStatus.error || 'mint confirmation failed'}`
+                                                                            ) : mintStatus.state === 'timeout' ? (
+                                                                                'Pending: confirmation taking longer than expected.'
+                                                                            ) : (
+                                                                                'Pending: waiting for orchestrator confirmation.'
+                                                                            )
+                                                                        ) : (
+                                                                            'Transfer confirmed on-chain.'
+                                                                        )}
+                                                                    </StepMeta>
                                                                 </StepText>
                                                             </StepItem>
                                                         </StepsList>

@@ -94,6 +94,10 @@ service Msg {
   // Does NOT use envelope - signed directly by validator's consensus key.
   rpc BridgeAttest(MsgBridgeAttest) returns (MsgBridgeAttestResponse);
 
+  // BridgeMinted allows validators to report successful mint on a destination chain.
+  // Signed by validator's operator key.
+  rpc BridgeMinted(MsgBridgeMinted) returns (MsgBridgeMintedResponse);
+
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
@@ -681,3 +685,23 @@ message MsgBridgeAttestResponse {
   int64 attested_power = 2;  // total voting power that has attested
   int64 required_power = 3;  // voting power required to mint (66.67% threshold)
 }
+
+// MsgBridgeMinted allows validators to report a successful mint on a destination chain.
+message MsgBridgeMinted {
+  option (cosmos.msg.v1.signer) = "authority";
+  option (amino.name) = "mirage/x/core/MsgBridgeMinted";
+
+  // authority is the validator operator address submitting the mint confirmation
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // burn_id is the Mirage tx hash of the original burn
+  string burn_id = 2;
+
+  // destination_chain is the external chain identifier (e.g., "solana")
+  string destination_chain = 3;
+
+  // destination_tx is the tx signature/hash on the destination chain
+  string destination_tx = 4;
+}
+
+message MsgBridgeMintedResponse {}

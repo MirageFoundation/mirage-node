@@ -25,10 +25,39 @@ func GetBridgeQueryCmd() *cobra.Command {
 	bridgeQueryCmd.AddCommand(
 		GetCmdQueryBridgeStatus(),
 		GetCmdQueryBridgeAttestation(),
+		GetCmdQueryBridgeMinted(),
 		GetCmdQueryBridgeConfig(),
 	)
 
 	return bridgeQueryCmd
+}
+
+// GetCmdQueryBridgeMinted implements the query bridge minted command.
+func GetCmdQueryBridgeMinted() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "minted [burn_id]",
+		Short: "Query mint confirmation by burn ID",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientQueryContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			queryClient := types.NewQueryClient(clientCtx)
+			res, err := queryClient.GetBridgeMinted(cmd.Context(), &types.QueryBridgeMintedRequest{
+				BurnId: args[0],
+			})
+			if err != nil {
+				return err
+			}
+
+			return clientCtx.PrintProto(res)
+		},
+	}
+
+	flags.AddQueryFlagsToCmd(cmd)
+	return cmd
 }
 
 // GetCmdQueryBridgeStatus implements the query bridge status command.
@@ -125,9 +154,43 @@ func GetBridgeTxCmd() *cobra.Command {
 	bridgeTxCmd.AddCommand(
 		GetCmdBridgeBurn(),
 		GetCmdBridgeAttest(),
+		GetCmdBridgeMinted(),
 	)
 
 	return bridgeTxCmd
+}
+
+// GetCmdBridgeMinted implements the bridge minted command for validators.
+func GetCmdBridgeMinted() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "minted [burn_id] [destination_chain] [destination_tx]",
+		Short: "Report successful mint on destination chain (validators only)",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientCtx, err := client.GetClientTxContext(cmd)
+			if err != nil {
+				return err
+			}
+
+			fromAddr := clientCtx.GetFromAddress()
+			valoper, err := convertAccToValoper(fromAddr.String())
+			if err != nil {
+				return fmt.Errorf("failed to convert to validator address: %w", err)
+			}
+
+			msg := &types.MsgBridgeMinted{
+				Authority:        valoper,
+				BurnId:           args[0],
+				DestinationChain: args[1],
+				DestinationTx:    args[2],
+			}
+
+			return tx.GenerateOrBroadcastTxCLI(clientCtx, cmd.Flags(), msg)
+		},
+	}
+
+	flags.AddTxFlagsToCmd(cmd)
+	return cmd
 }
 
 // GetCmdBridgeBurn implements the bridge burn command for non-IBC chains.

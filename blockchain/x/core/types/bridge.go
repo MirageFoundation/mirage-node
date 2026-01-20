@@ -12,6 +12,14 @@ const (
 	// Key format: bridge_attestations/{source_chain}/{burn_id}
 	BridgeAttestationsPrefix = "bridge_attestations/"
 
+	// BridgeBurnsPrefix is the KVStore prefix for outbound bridge burn records
+	// Key format: bridge_burns/{burn_id}
+	BridgeBurnsPrefix = "bridge_burns/"
+
+	// BridgeMintsPrefix is the KVStore prefix for outbound bridge mint confirmations
+	// Key format: bridge_mints/{burn_id}
+	BridgeMintsPrefix = "bridge_mints/"
+
 	// BridgePendingCountKey stores the count of pending (unminted) attestations
 	BridgePendingCountKey = "bridge_pending_count"
 
@@ -48,6 +56,48 @@ type BridgeAttestation struct {
 	CreatedAt int64 `json:"created_at"`
 }
 
+// BridgeBurnRecord tracks an outbound bridge burn on Mirage.
+type BridgeBurnRecord struct {
+	// BurnID is the Mirage burn tx hash (lowercase hex)
+	BurnID string `json:"burn_id"`
+
+	// Owner is the Mirage address that initiated the burn
+	Owner string `json:"owner"`
+
+	// DestinationChain is the external chain identifier (e.g., "solana")
+	DestinationChain string `json:"destination_chain"`
+
+	// DestinationAddress is the recipient address on the destination chain
+	DestinationAddress string `json:"destination_address"`
+
+	// Amount is the gross amount burned (in umirage)
+	Amount uint64 `json:"amount"`
+
+	// BridgeFee is the fee deducted from the amount (in umirage)
+	BridgeFee uint64 `json:"bridge_fee"`
+
+	// Sequence is the outbound bridge sequence for the destination chain
+	Sequence uint64 `json:"sequence"`
+
+	// CreatedAt is the block height when the burn occurred
+	CreatedAt int64 `json:"created_at"`
+}
+
+// BridgeMintedRecord tracks an outbound bridge mint confirmation.
+type BridgeMintedRecord struct {
+	// BurnID is the Mirage burn tx hash (lowercase hex)
+	BurnID string `json:"burn_id"`
+
+	// DestinationChain is the external chain identifier (e.g., "solana")
+	DestinationChain string `json:"destination_chain"`
+
+	// DestinationTx is the tx hash/signature on the destination chain
+	DestinationTx string `json:"destination_tx"`
+
+	// CreatedAt is the block height when the mint was confirmed
+	CreatedAt int64 `json:"created_at"`
+}
+
 // NewBridgeAttestation creates a new BridgeAttestation with initialized maps
 func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount uint64, createdAt int64) *BridgeAttestation {
 	return &BridgeAttestation{
@@ -65,6 +115,16 @@ func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount ui
 // BridgeAttestationKey returns the store key for a bridge attestation
 func BridgeAttestationKey(sourceChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeAttestationsPrefix, sourceChain, burnID))
+}
+
+// BridgeBurnKey returns the store key for a bridge burn record
+func BridgeBurnKey(burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s", BridgeBurnsPrefix, burnID))
+}
+
+// BridgeMintedKey returns the store key for a bridge mint confirmation
+func BridgeMintedKey(burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s", BridgeMintsPrefix, burnID))
 }
 
 // HasAttested returns true if the validator has already attested to this burn
@@ -126,6 +186,34 @@ func UnmarshalBridgeAttestation(data []byte) (*BridgeAttestation, error) {
 		a.Attestors = make(map[string]bool)
 	}
 	return &a, nil
+}
+
+// Marshal serializes a bridge burn record to JSON
+func (b *BridgeBurnRecord) Marshal() ([]byte, error) {
+	return json.Marshal(b)
+}
+
+// UnmarshalBridgeBurnRecord deserializes JSON to a BridgeBurnRecord
+func UnmarshalBridgeBurnRecord(data []byte) (*BridgeBurnRecord, error) {
+	var b BridgeBurnRecord
+	if err := json.Unmarshal(data, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// Marshal serializes a bridge mint record to JSON
+func (m *BridgeMintedRecord) Marshal() ([]byte, error) {
+	return json.Marshal(m)
+}
+
+// UnmarshalBridgeMintedRecord deserializes JSON to a BridgeMintedRecord
+func UnmarshalBridgeMintedRecord(data []byte) (*BridgeMintedRecord, error) {
+	var m BridgeMintedRecord
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // AttestorList returns a slice of validator addresses that have attested

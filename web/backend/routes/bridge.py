@@ -7,6 +7,7 @@ Endpoints:
 - POST /api/bridge/burn: Relay burn for attested bridge to non-IBC chains (e.g., Solana)
 - GET /api/bridge/config: Get bridge configuration (enabled chains, fees)
 - GET /api/bridge/status: Get bridge status (pending transfers)
+- GET /api/get_bridge_minted: Query outbound mint confirmation by burn_id
 """
 
 import base64
@@ -14,11 +15,18 @@ from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 from google.protobuf.any_pb2 import Any as AnyPB
+from google.protobuf.json_format import MessageToDict
+import grpc as _grpc
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 
 from bech32 import bech32_decode, convertbits  # type: ignore
 
-from shared.datatypes import MsgIBCTransfer, MsgBridgeBurn
+from shared.datatypes import (
+    MsgIBCTransfer,
+    MsgBridgeBurn,
+    QueryBridgeMintedRequest,
+    QueryBridgeMintedResponse,
+)
 from shared.canon import canon_signed_with_pow
 
 from logging_utils import log_event, next_request_id
@@ -38,6 +46,49 @@ _MAX_ADDR_LEN = 128
 _MAX_CHAIN_LEN = 64
 _MAX_CHANNEL_LEN = 64
 _MAX_BLOCKHASH_HEX_LEN = 128
+
+
+def _client_ip() -> str:
+    ip_raw = request.headers.get("X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr or ""))
+    return (ip_raw.split(",")[0].strip() if ip_raw else "").strip()
+
+
+def _is_private_ip(ip: str) -> bool:
+    if not ip:
+        return False
+    if ip in ("127.0.0.1", "::1", "localhost"):
+        return True
+    # Basic RFC1918 checks for IPv4
+    try:
+        parts = [int(p) for p in ip.split(".")]
+        if len(parts) != 4:
+            return False
+    except ValueError:
+        return False
+    if parts[0] == 10:
+        return True
+    if parts[0] == 192 and parts[1] == 168:
+        return True
+    if parts[0] == 172 and 16 <= parts[1] <= 31:
+        return True
+    return False
+
+
+def _query_bridge_minted(burn_id: str, timeout: float = 3.0) -> dict:
+    def _deserialize(data: bytes) -> QueryBridgeMintedResponse:
+        msg = QueryBridgeMintedResponse()
+        msg.ParseFromString(data)
+        return msg
+
+    target = require_runtime().grpc_target
+    with _grpc.insecure_channel(target) as channel:
+        method = channel.unary_unary(
+            "/mirage.core.v1.Query/GetBridgeMinted",
+            request_serializer=lambda msg: msg.SerializeToString(),
+            response_deserializer=_deserialize,
+        )
+        resp = method(QueryBridgeMintedRequest(burn_id=burn_id), timeout=timeout)
+    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
 def _base58_decode(s: str) -> bytes:
@@ -176,6 +227,36 @@ def bridge_config():
         })
     except Exception as e:
         log_event(rid, "bridge_config.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@bridge_bp.route("/api/get_bridge_minted", methods=["GET"])
+def get_bridge_minted():
+    """Query outbound bridge mint confirmation by burn_id."""
+    rid = next_request_id()
+    burn_id = (request.args.get("burn_id") or "").strip().lower()
+    log_event(rid, "get_bridge_minted.begin", burn_id=burn_id)
+
+    if not burn_id:
+        return jsonify({"error": "burn_id required"}), 400
+
+    client_ip = _client_ip()
+    if not _is_private_ip(client_ip):
+        log_event(rid, "get_bridge_minted.forbidden", ip=client_ip, burn_id=burn_id)
+        return jsonify({"error": "forbidden"}), 403
+
+    try:
+        result = _query_bridge_minted(burn_id)
+        log_event(
+            rid,
+            "get_bridge_minted.ok",
+            burn_id=burn_id,
+            minted=result.get("minted", False),
+            destination_chain=result.get("destination_chain"),
+        )
+        return jsonify(result)
+    except Exception as e:
+        log_event(rid, "get_bridge_minted.err", burn_id=burn_id, error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
