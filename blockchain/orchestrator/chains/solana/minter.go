@@ -70,6 +70,10 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	}
 
 	// Calculate net amount after fee deduction
+	if burn.BridgeFee >= burn.Amount {
+		w.logger.Printf("WARN skipping burn %s: fee (%d) >= amount (%d)", burn.BurnID, burn.BridgeFee, burn.Amount)
+		return nil
+	}
 	mintAmount := burn.Amount - burn.BridgeFee
 
 	// Anchor's init_if_needed handles ATA creation, no separate instruction needed
