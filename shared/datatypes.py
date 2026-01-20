@@ -359,6 +359,17 @@ def _build_pool():
     add_f(msg_bridge_attest_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
     add_f(msg_bridge_attest_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
 
+    # MsgBridgeMinted (validator mint confirmation for outbound burns)
+    msg_bridge_minted = file_proto.message_type.add()
+    msg_bridge_minted.name = "MsgBridgeMinted"
+    add_f(msg_bridge_minted, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_minted, "burn_id", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_minted, "destination_chain", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_minted, "destination_tx", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgBridgeMintedResponse
+    add_msg("MsgBridgeMintedResponse")
+
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
     msg4 = file_proto.message_type.add()
     msg4.name = "Params"
@@ -434,6 +445,18 @@ def _build_pool():
     add_f(msg_diff, "latest_block_hash", 6, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_diff, "current_height", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
 
+    # QueryBridgeMintedRequest
+    msg_bridge_minted_req = file_proto.message_type.add()
+    msg_bridge_minted_req.name = "QueryBridgeMintedRequest"
+    add_f(msg_bridge_minted_req, "burn_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # QueryBridgeMintedResponse
+    msg_bridge_minted_resp = file_proto.message_type.add()
+    msg_bridge_minted_resp.name = "QueryBridgeMintedResponse"
+    add_f(msg_bridge_minted_resp, "minted", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_minted_resp, "destination_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_minted_resp, "destination_tx", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     pool.Add(file_proto)
     return pool
 
@@ -477,6 +500,8 @@ MsgIBCTransfer = _get_message_class("mirage.core.v1.MsgIBCTransfer")
 MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
 MsgBridgeAttest = _get_message_class("mirage.core.v1.MsgBridgeAttest")
 MsgBridgeAttestResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestResponse")
+MsgBridgeMinted = _get_message_class("mirage.core.v1.MsgBridgeMinted")
+MsgBridgeMintedResponse = _get_message_class("mirage.core.v1.MsgBridgeMintedResponse")
 TierConfig = _get_message_class("mirage.core.v1.TierConfig")
 BridgeChainConfig = _get_message_class("mirage.core.v1.BridgeChainConfig")
 Params = _get_message_class("mirage.core.v1.Params")
@@ -485,3 +510,5 @@ QueryParamsRequest = _get_message_class("mirage.core.v1.QueryParamsRequest")
 QueryParamsResponse = _get_message_class("mirage.core.v1.QueryParamsResponse")
 QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyRequest")
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
+QueryBridgeMintedRequest = _get_message_class("mirage.core.v1.QueryBridgeMintedRequest")
+QueryBridgeMintedResponse = _get_message_class("mirage.core.v1.QueryBridgeMintedResponse")

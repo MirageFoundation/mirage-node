@@ -131,10 +131,21 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 		if err != nil {
 			return err
 		}
+		var sig string
 		if err := a.retry(ctx, func() error {
-			return watcher.ExecuteMint(ctx, burn)
+			var execErr error
+			sig, execErr = watcher.ExecuteMint(ctx, burn)
+			return execErr
 		}); err != nil {
 			return err
+		}
+
+		if sig != "" {
+			if err := a.retry(ctx, func() error {
+				return a.mirage.SubmitBridgeMinted(ctx, burn.BurnID, burn.DestinationChain, sig)
+			}); err != nil {
+				a.logger.Printf("WARN failed to submit bridge minted burn_id=%s: %v", burn.BurnID, err)
+			}
 		}
 	}
 	return nil
@@ -187,6 +198,7 @@ func isPermanentError(err error) bool {
 		"Custom\": (json.Number) (len=4) \"6021\"", // JSON-RPC format
 		"TransactionTooOld",        // Sequence too old
 		"error: 6020",              // TransactionTooOld error code
+		"bridge mint already recorded", // Duplicate mint confirmation
 	}
 	for _, pattern := range permanentPatterns {
 		if strings.Contains(errStr, pattern) {

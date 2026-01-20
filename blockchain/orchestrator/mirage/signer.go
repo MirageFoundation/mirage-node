@@ -52,6 +52,38 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 	return nil
 }
 
+func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string) error {
+	burnID = strings.ToLower(strings.TrimSpace(burnID))
+	msg := &coretypes.MsgBridgeMinted{
+		Authority:        c.valoperFromAcc(),
+		BurnId:           burnID,
+		DestinationChain: strings.TrimSpace(destChain),
+		DestinationTx:    strings.TrimSpace(destTx),
+	}
+
+	txBytes, err := c.buildTxBytes(ctx, msg)
+	if err != nil {
+		return err
+	}
+	txClient := txtypes.NewServiceClient(c.grpcConn)
+	resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
+		TxBytes: txBytes,
+		Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
+	})
+	if err != nil {
+		return fmt.Errorf("broadcast tx failed: %w", err)
+	}
+	if resp.TxResponse == nil {
+		return fmt.Errorf("broadcast tx response missing")
+	}
+	if resp.TxResponse.Code != 0 {
+		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+	}
+
+	c.logger.Printf("DEBUG bridge minted submitted burn_id=%s dest_tx=%s txhash=%s", burnID, destTx, resp.TxResponse.TxHash)
+	return nil
+}
+
 func (c *Client) buildTxBytes(ctx context.Context, msg sdk.Msg) ([]byte, error) {
 	clientCtx := c.ClientContext()
 	fromAddr := clientCtx.GetFromAddress()

@@ -25,6 +25,6 @@ type MirageBurnEvent struct {
 // ChainWatcher watches for burns on an external chain.
 type ChainWatcher interface {
 	WatchBurns(ctx context.Context, events chan<- ExternalBurnEvent) error
-	ExecuteMint(ctx context.Context, burn MirageBurnEvent) error
+	ExecuteMint(ctx context.Context, burn MirageBurnEvent) (string, error)
 	ChainID() string
 }

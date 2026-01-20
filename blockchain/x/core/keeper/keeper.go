@@ -1261,6 +1261,72 @@ func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnI
 	return attestation, nil
 }
 
+// ============================================
+// Bridge Burn State Management
+// ============================================
+
+// GetBridgeBurnRecord retrieves a bridge burn record from state
+func (k Keeper) GetBridgeBurnRecord(ctx sdk.Context, burnID string) (*types.BridgeBurnRecord, bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeBurnKey(burnID)
+	bz, err := store.Get(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bz) == 0 {
+		return nil, false, nil
+	}
+	record, err := types.UnmarshalBridgeBurnRecord(bz)
+	if err != nil {
+		return nil, false, err
+	}
+	return record, true, nil
+}
+
+// SetBridgeBurnRecord stores a bridge burn record in state
+func (k Keeper) SetBridgeBurnRecord(ctx sdk.Context, record *types.BridgeBurnRecord) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeBurnKey(record.BurnID)
+	bz, err := record.Marshal()
+	if err != nil {
+		return err
+	}
+	return store.Set(key, bz)
+}
+
+// ============================================
+// Bridge Mint Confirmation State Management
+// ============================================
+
+// GetBridgeMintedRecord retrieves a bridge mint record from state
+func (k Keeper) GetBridgeMintedRecord(ctx sdk.Context, burnID string) (*types.BridgeMintedRecord, bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintedKey(burnID)
+	bz, err := store.Get(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bz) == 0 {
+		return nil, false, nil
+	}
+	record, err := types.UnmarshalBridgeMintedRecord(bz)
+	if err != nil {
+		return nil, false, err
+	}
+	return record, true, nil
+}
+
+// SetBridgeMintedRecord stores a bridge mint record in state
+func (k Keeper) SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintedKey(record.BurnID)
+	bz, err := record.Marshal()
+	if err != nil {
+		return err
+	}
+	return store.Set(key, bz)
+}
+
 // GetNextBridgeSequence increments and returns the next sequence number for a destination chain
 func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
 	store := k.storeService.OpenKVStore(ctx)

@@ -2758,6 +2758,21 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 	// Generate burn_id from tx hash
 	burnID := hex.EncodeToString(tmhash.Sum(sdkCtx.TxBytes()))
 
+	// Persist burn record for on-chain validation of outbound mint confirmations
+	burnRecord := &types.BridgeBurnRecord{
+		BurnID:             strings.ToLower(burnID),
+		Owner:              owner,
+		DestinationChain:   destChain,
+		DestinationAddress: destAddr,
+		Amount:             amount,
+		BridgeFee:          bridgeFee,
+		Sequence:           sequence,
+		CreatedAt:          sdkCtx.BlockHeight(),
+	}
+	if err := am.k.SetBridgeBurnRecord(sdkCtx, burnRecord); err != nil {
+		return nil, fmt.Errorf("failed to store bridge burn record: %w", err)
+	}
+
 	// Deduct relay gas fee
 	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
 		return nil, err
@@ -2961,6 +2976,96 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	}, nil
 }
 
+// BridgeMinted allows validators to report a successful mint on a destination chain
+func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted) (*types.MsgBridgeMintedResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	authority := strings.TrimSpace(req.GetAuthority())
+	if authority == "" {
+		return nil, fmt.Errorf("authority cannot be empty")
+	}
+
+	bonded, err := am.k.IsValidatorBonded(sdkCtx, authority)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check validator status: %w", err)
+	}
+	if !bonded {
+		return nil, fmt.Errorf("validator %s is not bonded", authority)
+	}
+
+	burnID := strings.ToLower(strings.TrimSpace(req.GetBurnId()))
+	if err := validateTxHash(burnID); err != nil {
+		return nil, fmt.Errorf("invalid burn_id: %w", err)
+	}
+
+	destChain := strings.TrimSpace(req.GetDestinationChain())
+	if destChain == "" {
+		return nil, fmt.Errorf("destination_chain cannot be empty")
+	}
+	if len(destChain) > 64 {
+		return nil, fmt.Errorf("destination_chain too long")
+	}
+
+	destTx := strings.TrimSpace(req.GetDestinationTx())
+	if destTx == "" {
+		return nil, fmt.Errorf("destination_tx cannot be empty")
+	}
+	if len(destTx) > 128 {
+		return nil, fmt.Errorf("destination_tx too long")
+	}
+	for _, c := range destTx {
+		if c <= ' ' || c == '/' {
+			return nil, fmt.Errorf("destination_tx contains invalid character")
+		}
+	}
+
+	burnRecord, found, err := am.k.GetBridgeBurnRecord(sdkCtx, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load burn record: %w", err)
+	}
+	if !found {
+		return nil, fmt.Errorf("unknown burn_id: %s", burnID)
+	}
+	if burnRecord.DestinationChain != destChain {
+		return nil, fmt.Errorf("destination_chain mismatch: expected %s, got %s", burnRecord.DestinationChain, destChain)
+	}
+
+	if _, exists, err := am.k.GetBridgeMintedRecord(sdkCtx, burnID); err != nil {
+		return nil, fmt.Errorf("failed to check existing mint record: %w", err)
+	} else if exists {
+		return nil, fmt.Errorf("bridge mint already recorded for burn_id %s", burnID)
+	}
+
+	record := &types.BridgeMintedRecord{
+		BurnID:           burnID,
+		DestinationChain: destChain,
+		DestinationTx:    destTx,
+		CreatedAt:        sdkCtx.BlockHeight(),
+	}
+	if err := am.k.SetBridgeMintedRecord(sdkCtx, record); err != nil {
+		return nil, fmt.Errorf("failed to store mint record: %w", err)
+	}
+
+	sdkCtx.EventManager().EmitEvent(
+		sdk.NewEvent(
+			"bridge_minted",
+			sdk.NewAttribute("burn_id", burnID),
+			sdk.NewAttribute("destination_chain", destChain),
+			sdk.NewAttribute("destination_tx", destTx),
+			sdk.NewAttribute("authority", authority),
+		),
+	)
+
+	sdkCtx.Logger().Info("BridgeMinted",
+		"burn_id", burnID,
+		"destination_chain", destChain,
+		"destination_tx", destTx,
+		"authority", authority,
+	)
+
+	return &types.MsgBridgeMintedResponse{}, nil
+}
+
 // ============================================
 // Bridge Query Handlers
 // ============================================
@@ -3016,6 +3121,30 @@ func (am AppModule) BridgeAttestation(ctx context.Context, req *types.QueryBridg
 		RequiredPower:   requiredPower,
 		Minted:          attestation.Minted,
 		CreatedAt:       attestation.CreatedAt,
+	}, nil
+}
+
+// GetBridgeMinted queries a mint confirmation by burn_id
+func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	burnID := strings.ToLower(strings.TrimSpace(req.GetBurnId()))
+	if err := validateTxHash(burnID); err != nil {
+		return nil, fmt.Errorf("invalid burn_id: %w", err)
+	}
+
+	record, found, err := am.k.GetBridgeMintedRecord(sdkCtx, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load mint record: %w", err)
+	}
+	if !found {
+		return &types.QueryBridgeMintedResponse{Minted: false}, nil
+	}
+
+	return &types.QueryBridgeMintedResponse{
+		Minted:           true,
+		DestinationChain: record.DestinationChain,
+		DestinationTx:    record.DestinationTx,
 	}, nil
 }
 
