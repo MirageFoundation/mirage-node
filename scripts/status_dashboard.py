@@ -1009,13 +1009,20 @@ def check_endpoints() -> ServiceStatus:
     """Check public chain endpoints (RPC/REST paths through Caddy)."""
     # Get domain from env or Caddyfile
     domain = os.environ.get("DOMAIN", "")
+    is_local = False
     if not domain:
         try:
             with open("/etc/caddy/Caddyfile") as f:
                 content = f.read()
                 for line in content.splitlines():
                     line = line.strip()
-                    if line.startswith(":") or line.startswith("www.") or line.startswith("#") or not line:
+                    if line.startswith("#") or not line:
+                        continue
+                    # Local mode: Caddyfile starts with :80 (no domain)
+                    if line.startswith(":80") or line.startswith(":443"):
+                        is_local = True
+                        break
+                    if line.startswith("www."):
                         continue
                     match = re.match(r"^([a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", line)
                     if match:
@@ -1031,16 +1038,19 @@ def check_endpoints() -> ServiceStatus:
         elif domain.startswith("http://"):
             domain = domain[7:]
 
-    # If no domain, fall back to external IP
-    use_https = bool(domain)
+    # If local mode (no domain, just :80), use localhost
+    use_https = bool(domain) and not is_local
     host = domain
     if not host:
-        try:
-            resp = requests.get("https://ifconfig.me", timeout=3)
-            if resp.status_code == 200:
-                host = resp.text.strip()
-        except Exception:
-            pass
+        if is_local:
+            host = "127.0.0.1"
+        else:
+            try:
+                resp = requests.get("https://ifconfig.me", timeout=3)
+                if resp.status_code == 200:
+                    host = resp.text.strip()
+            except Exception:
+                pass
 
     if not host:
         return ServiceStatus(
