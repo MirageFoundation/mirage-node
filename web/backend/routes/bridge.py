@@ -131,9 +131,10 @@ def _resolve_enabled_ibc_chain(source_channel: str) -> Dict[str, Any] | None:
         try:
             if not c.get("enabled", False):
                 continue
-            if not c.get("is_ibc", False):
+            channel = str(c.get("ibc_channel", "")).strip()
+            if not channel:
                 continue
-            if str(c.get("ibc_channel", "")).strip() == source_channel:
+            if channel == source_channel:
                 return c
         except Exception:
             continue
@@ -150,7 +151,7 @@ def _resolve_enabled_attested_chain(chain_id: str) -> Dict[str, Any] | None:
         try:
             if not c.get("enabled", False):
                 continue
-            if c.get("is_ibc", False):
+            if str(c.get("ibc_channel", "")).strip():
                 continue
             if str(c.get("chain_id", "")).strip().lower() == want:
                 return c
@@ -219,6 +220,10 @@ def bridge_config():
         else:
             solana_cluster = "mainnet"
 
+        # Solana program ID and token address from orchestrator config
+        solana_program_id = os.environ.get("ORCHESTRATOR_SOLANA_PROGRAM_ID", "")
+        solana_token_address = os.environ.get("ORCHESTRATOR_SOLANA_TOKEN_ADDRESS", "")
+
         # Format chains for frontend - each chain must have fee
         chains = []
         for chain in bridge_chains:
@@ -227,13 +232,14 @@ def bridge_config():
             entry = {
                 "chain_id": chain_id,
                 "enabled": chain["enabled"],
-                "is_ibc": chain.get("is_ibc", False),
                 "ibc_channel": chain.get("ibc_channel", ""),
                 "fee_umirage": fee_umirage,
                 "fee_mirage": fee_umirage / 1_000_000,
             }
             if chain_id == "solana":
                 entry["solana_cluster"] = solana_cluster
+                entry["solana_program_id"] = solana_program_id
+                entry["solana_token_address"] = solana_token_address
             chains.append(entry)
 
         return jsonify({"chains": chains})

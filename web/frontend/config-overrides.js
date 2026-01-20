@@ -45,6 +45,8 @@ module.exports = function override(config) {
         ...(config.resolve.fallback || {}),
         crypto: require.resolve('crypto-browserify'),
         stream: require.resolve('stream-browserify'),
+        buffer: require.resolve('buffer/'),
+        process: require.resolve('process/browser'),
     };
     config.module = config.module || {};
     config.module.rules = (config.module.rules || []).concat([
@@ -66,7 +68,11 @@ module.exports = function override(config) {
             resourceRegExp: /^uvu$/,
             contextRegExp: /node_modules/,
         }),
-        // No automatic polyfills provided
+        // Provide Buffer and process globally for Solana web3.js
+        new webpack.ProvidePlugin({
+            Buffer: ['buffer', 'Buffer'],
+            process: 'process/browser',
+        }),
     ]);
     return config;
 };

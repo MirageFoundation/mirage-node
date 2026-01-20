@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
-import styled, { keyframes, css } from 'styled-components';
-import { useLocation } from 'react-router-dom';
+import styled, { keyframes, css, useTheme } from 'styled-components';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from '../utils/Storage';
 import Sidebar from '../components/Sidebar';
@@ -11,6 +11,9 @@ import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
 import { ibcTransfer, bridgeBurn, pollTxStatus } from '../utils/tx';
+
+// Lazy import for Solana bridge - only loads when needed
+const loadSolanaBridge = () => import('../utils/solanaBridge');
 
 // Convert a bech32 address from one prefix to another (e.g., mirage1... -> osmo1...)
 const convertBech32Prefix = (address, newPrefix) => {
@@ -228,7 +231,6 @@ const InputLabel = styled.label`
     font-weight: 600;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     margin-bottom: 0.5rem;
-    ${tooltipStyles('top')}
 `;
 
 const InputWrapper = styled.div`
@@ -402,7 +404,6 @@ const PreviewLabel = styled.span`
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     white-space: nowrap;
     flex-shrink: 0;
-    ${tooltipStyles('top')}
 `;
 
 const PreviewValue = styled.span`
@@ -515,11 +516,11 @@ const StepDot = styled.span`
     height: 0.65rem;
     border-radius: 50%;
     flex-shrink: 0;
-    background: ${({ $state }) => {
+    background: ${({ $state, theme }) => {
         if ($state === 'complete') return '#48bb78';
         if ($state === 'active') return '#667eea';
         if ($state === 'error') return '#ef4444';
-        return '#555';
+        return theme?.colors?.border || '#555';
     }};
     box-shadow: ${({ $state }) => $state === 'active' ? '0 0 0 3px rgba(102, 126, 234, 0.2)' : 'none'};
 `;
@@ -538,16 +539,11 @@ const StepTitle = styled.span`
 const StepMeta = styled.span`
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-size: 0.7rem;
+    
+    a {
+        color: ${({ theme }) => theme?.colors?.link || '#667eea'};
+    }
 `;
-
-const TxHashRow = styled.div`
-    margin-top: 0.6rem;
-    font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    word-break: break-all;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-`;
-
 
 // Derived address display
 const DerivedAddressBox = styled.div`
@@ -625,13 +621,1061 @@ const ExplanationIcon = styled.span`
     flex-shrink: 0;
 `;
 
+// Source network configurations for Bridge In (where tokens come FROM)
+const SOURCE_NETWORKS = {
+    osmosis: {
+        id: 'osmosis',
+        name: 'Osmosis',
+        symbol: 'OSMO',
+        icon: '/bridges/osmosis.svg',
+        color: '#5E12A0',
+        colorLight: 'rgba(94, 18, 160, 0.15)',
+        addressPrefix: 'osmo',
+        estimatedTime: '~30 seconds',
+        enabled: true,
+        isIbc: true,
+        ibcChannel: 'channel-???', // Channel from Osmosis to Mirage (user needs to look this up)
+    },
+    solana: {
+        id: 'solana',
+        name: 'Solana',
+        symbol: 'SOL',
+        icon: '/bridges/solana.svg',
+        color: '#14F195',
+        colorLight: 'rgba(20, 241, 149, 0.15)',
+        estimatedTime: '~2-5 minutes',
+        enabled: true,
+        isIbc: false,
+    },
+};
+
+// Copy button component for addresses
+const CopyButton = styled.button`
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 4px;
+    padding: 0.35rem 0.5rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex-shrink: 0;
+    
+    &:hover {
+        background: ${({ theme }) => theme?.colors?.border || '#444'};
+        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    }
+`;
+
+const ConfirmButtonRow = styled.div`
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+`;
+
+const ConfirmButton = styled.button`
+    flex: 1;
+    padding: 0.6rem 1rem;
+    border: 2px solid ${({ $variant }) => $variant === 'yes' ? '#48bb78' : '#f59e0b'};
+    border-radius: 8px;
+    background: ${({ $variant, $selected }) =>
+        $selected
+            ? ($variant === 'yes' ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 158, 11, 0.2)')
+            : 'transparent'};
+    color: ${({ $variant }) => $variant === 'yes' ? '#48bb78' : '#f59e0b'};
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    &:hover {
+        background: ${({ $variant }) => $variant === 'yes' ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 158, 11, 0.15)'};
+    }
+`;
+
+// Solana wallet button
+const SolanaWalletButton = styled.button`
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 2px solid #14F195;
+    border-radius: 8px;
+    background: rgba(20, 241, 149, 0.1);
+    color: #14F195;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    &:hover:not(:disabled) {
+        background: rgba(20, 241, 149, 0.2);
+        transform: translateY(-1px);
+    }
+    
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    
+    img {
+        width: 1.25rem;
+        height: 1.25rem;
+    }
+`;
+
+const ConnectedWalletBox = styled.div`
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid #14F195;
+    border-radius: 8px;
+    padding: 0.75rem;
+`;
+
+const WalletRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+`;
+
+const WalletAddress = styled.span`
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+`;
+
+const WalletBalance = styled.div`
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #14F195;
+    margin-top: 0.5rem;
+`;
+
+const DisconnectButton = styled.button`
+    background: transparent;
+    border: none;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    
+    &:hover {
+        color: #f56565;
+    }
+`;
+
+// Solana RPC endpoints
+const SOLANA_RPC_DEVNET = 'https://api.devnet.solana.com';
+const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
+
+// Mint polling schedule for Bridge In (Solana -> Mirage)
+const BRIDGE_IN_POLL_SCHEDULE = {
+    initialDelayMs: 10000, // Wait 10s before first poll (orchestrator needs time)
+    intervalsMs: [5000, 5000, 5000, 10000, 10000, 10000, 15000, 15000, 30000, 30000, 30000, 60000], // Then poll at these intervals
+};
+
+// Solana Bridge In Flow Component
+function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
+    const [solanaWallet, setSolanaWallet] = useState(null); // { address, mirageBalance, solBalance }
+    const [isConnecting, setIsConnecting] = useState(false);
+    const [amount, setAmount] = useState('');
+    const [isBridging, setIsBridging] = useState(false);
+    const [bridgeStatus, setBridgeStatus] = useState('idle'); // idle | confirming | pending | complete | error
+    const [bridgeError, setBridgeError] = useState('');
+    const [bridgeTxHash, setBridgeTxHash] = useState('');
+    const [burnNonce, setBurnNonce] = useState(null);
+
+    // Step tracking for progress UI
+    const [stepTimestamps, setStepTimestamps] = useState({});
+    const [stepElapsed, setStepElapsed] = useState({});
+    const [mintStatus, setMintStatus] = useState({ state: 'idle', txHash: '', error: '' });
+
+    // Get Solana config from chainConfigs
+    const solanaConfig = chainConfigs?.solana || {};
+    const solanaCluster = solanaConfig.solana_cluster || 'devnet';
+    const solanaTokenAddress = solanaConfig.solana_token_address || '';
+    const solanaRpcUrl = solanaCluster === 'mainnet' ? SOLANA_RPC_MAINNET : SOLANA_RPC_DEVNET;
+    const solscanClusterParam = solanaCluster === 'devnet' ? '?cluster=devnet' : '';
+
+    // Update elapsed times every 100ms while actively processing
+    useEffect(() => {
+        if (bridgeStatus === 'idle' || bridgeStatus === 'error' || bridgeStatus === 'complete') return;
+
+        const interval = setInterval(() => {
+            const now = Date.now();
+            setStepElapsed(prev => {
+                const newElapsed = { ...prev };
+                for (const [step, startTime] of Object.entries(stepTimestamps)) {
+                    newElapsed[step] = (now - startTime) / 1000;
+                }
+                return newElapsed;
+            });
+        }, 100);
+
+        return () => clearInterval(interval);
+    }, [bridgeStatus, stepTimestamps]);
+
+    // Poll for mint confirmation on Mirage after Solana burn is confirmed
+    useEffect(() => {
+        if (bridgeStatus !== 'pending' || burnNonce === null) return;
+
+        let cancelled = false;
+        const maxAttempts = BRIDGE_IN_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_IN_POLL_SCHEDULE.initialDelayMs;
+
+        setMintStatus({ state: 'pending', txHash: '', error: '' });
+
+        const poll = async (attempt) => {
+            if (cancelled) return;
+            try {
+                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts);
+                // Query the backend for mint status using the burn nonce
+                const res = await fetch(`/api/bridge/get_minted?burn_id=${burnNonce}&chain=solana`);
+                if (!res.ok) {
+                    throw new Error(`mint query failed (${res.status})`);
+                }
+                const data = await res.json();
+                if (data.minted) {
+                    setMintStatus({ state: 'minted', txHash: data.tx_hash || '', error: '' });
+                    setBridgeStatus('complete');
+                    // Update step timestamp for completion
+                    setStepTimestamps(prev => ({ ...prev, minting: prev.minting, complete: Date.now() }));
+                    return;
+                }
+            } catch (e) {
+                console.debug('[Solana Bridge In] Mint poll error:', e.message);
+            }
+
+            if (attempt >= maxAttempts) {
+                setMintStatus({ state: 'timeout', txHash: '', error: 'Confirmation taking longer than expected' });
+                return;
+            }
+
+            const nextDelay = BRIDGE_IN_POLL_SCHEDULE.intervalsMs[attempt - 1] || 60000;
+            console.debug('[Solana Bridge In] Mint poll next delay (ms):', nextDelay);
+            setTimeout(() => poll(attempt + 1), nextDelay);
+        };
+
+        if (initialDelayMs > 0) {
+            setTimeout(() => poll(1), initialDelayMs);
+        } else {
+            poll(1);
+        }
+
+        return () => { cancelled = true; };
+    }, [bridgeStatus, burnNonce]);
+
+    // Format step time for display
+    const formatStepTime = (step) => {
+        const elapsed = stepElapsed[step];
+        if (elapsed === undefined) return '';
+        return ` (${elapsed.toFixed(1)}s)`;
+    };
+
+    // Get step state for styling
+    const getStepState = (step) => {
+        if (bridgeStatus === 'idle') return 'pending';
+
+        const stepOrder = ['confirming', 'pending', 'complete'];
+        const currentIdx = stepOrder.indexOf(bridgeStatus);
+        const stepIdx = stepOrder.indexOf(step);
+
+        if (bridgeStatus === 'error') {
+            // Find which step had the error
+            if (stepIdx < currentIdx) return 'complete';
+            if (stepIdx === currentIdx) return 'error';
+            return 'pending';
+        }
+
+        if (stepIdx < currentIdx) return 'complete';
+        if (stepIdx === currentIdx) return 'active';
+        return 'pending';
+    };
+
+    // Format number with thousands separators for display
+    const formatAmountDisplay = (value) => {
+        if (!value || value === '') return '';
+        const raw = String(value).replace(/,/g, '');
+        const parts = raw.split('.');
+        parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return parts.join('.');
+    };
+
+    // Fetch MIRAGE token balance from Solana
+    const fetchSolanaBalance = useCallback(async (walletAddress) => {
+        try {
+            // Fetch SOL balance and MIRAGE token balance in parallel
+            const [solResponse, tokenResponse] = await Promise.all([
+                // SOL balance
+                fetch(solanaRpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        method: 'getBalance',
+                        params: [walletAddress]
+                    })
+                }),
+                // MIRAGE token balance
+                solanaTokenAddress ? fetch(solanaRpcUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: '2.0',
+                        id: 2,
+                        method: 'getTokenAccountsByOwner',
+                        params: [
+                            walletAddress,
+                            { mint: solanaTokenAddress },
+                            { encoding: 'jsonParsed' }
+                        ]
+                    })
+                }) : Promise.resolve(null)
+            ]);
+
+            // Parse SOL balance
+            const solData = await solResponse.json();
+            const solBalance = (solData.result?.value || 0) / 1_000_000_000; // lamports to SOL
+            console.debug('[Solana Bridge] SOL balance:', solBalance);
+
+            // Parse MIRAGE balance
+            let mirageBalance = 0;
+            if (tokenResponse) {
+                const tokenData = await tokenResponse.json();
+                console.debug('[Solana Bridge] MIRAGE token accounts:', tokenData);
+
+                if (tokenData.result?.value?.length > 0) {
+                    for (const account of tokenData.result.value) {
+                        const info = account.account?.data?.parsed?.info;
+                        if (info) {
+                            const amount = info.tokenAmount?.uiAmount || 0;
+                            console.debug('[Solana Bridge] Found MIRAGE:', info.mint, 'amount:', amount);
+                            mirageBalance += amount;
+                        }
+                    }
+                }
+            } else {
+                console.warn('[Solana Bridge] No token address configured');
+            }
+
+            setSolanaWallet(prev => prev ? { ...prev, mirageBalance, solBalance } : null);
+        } catch (e) {
+            console.error('[Solana Bridge] Balance fetch error:', e);
+            setSolanaWallet(prev => prev ? { ...prev, mirageBalance: 0, solBalance: 0 } : null);
+        }
+    }, [solanaRpcUrl, solanaTokenAddress]);
+
+    // Connect to Phantom wallet
+    const connectPhantom = async () => {
+        setIsConnecting(true);
+        setBridgeError('');
+        try {
+            // Check if Phantom is installed
+            const { solana } = window;
+            if (!solana?.isPhantom) {
+                window.open('https://phantom.app/', '_blank');
+                throw new Error('Phantom wallet not found. Please install it.');
+            }
+
+            // Connect
+            const response = await solana.connect();
+            const publicKey = response.publicKey.toString();
+
+            setSolanaWallet({
+                address: publicKey,
+                mirageBalance: null, // Will be fetched
+                solBalance: null, // Will be fetched
+            });
+
+            console.debug('[Solana Bridge] Connected:', publicKey);
+
+            // Fetch balance
+            await fetchSolanaBalance(publicKey);
+        } catch (e) {
+            console.error('[Solana Bridge] Connection error:', e);
+            setBridgeError(e.message || 'Failed to connect wallet');
+        } finally {
+            setIsConnecting(false);
+        }
+    };
+
+    // Disconnect wallet
+    const disconnectWallet = async () => {
+        try {
+            const { solana } = window;
+            if (solana) {
+                await solana.disconnect();
+            }
+        } catch (e) {
+            console.error('[Solana Bridge] Disconnect error:', e);
+        }
+        setSolanaWallet(null);
+        setAmount('');
+        setBridgeStatus('idle');
+        setBridgeError('');
+        setBridgeTxHash('');
+        setBurnNonce(null);
+        setStepTimestamps({});
+        setStepElapsed({});
+        setMintStatus({ state: 'idle', txHash: '', error: '' });
+    };
+
+    // Handle bridge (burn on Solana)
+    const handleBridge = async () => {
+        if (!solanaWallet || !amount || parseFloat(amount) <= 0) return;
+
+        const programId = solanaConfig.solana_program_id;
+        if (!programId) {
+            setBridgeError('Bridge program not configured');
+            return;
+        }
+
+        // Reset state
+        setIsBridging(true);
+        setBridgeStatus('confirming');
+        setBridgeError('');
+        setBridgeTxHash('');
+        setBurnNonce(null);
+        setMintStatus({ state: 'idle', txHash: '', error: '' });
+        setStepTimestamps({ confirming: Date.now() });
+        setStepElapsed({});
+
+        try {
+            // Convert amount to base units (6 decimals)
+            const rawAmount = amount.replace(/,/g, '');
+            const amountBaseUnits = Math.floor(parseFloat(rawAmount) * 1_000_000);
+
+            if (amountBaseUnits <= 0) {
+                throw new Error('Invalid amount');
+            }
+
+            console.debug('[Solana Bridge] Starting burn', {
+                amount: rawAmount,
+                amountBaseUnits,
+                recipient: mirageAddress,
+                programId,
+            });
+
+            // Lazy-load Solana bridge module (only loaded when user actually bridges)
+            const { executeBurn } = await loadSolanaBridge();
+
+            // Execute the burn transaction
+            const result = await executeBurn({
+                rpcUrl: solanaRpcUrl,
+                programIdStr: programId,
+                mirageRecipient: mirageAddress,
+                amount: amountBaseUnits,
+                onStatus: (status) => {
+                    console.debug('[Solana Bridge] Status:', status);
+                },
+            });
+
+            console.debug('[Solana Bridge] Burn successful', result);
+
+            setBridgeTxHash(result.signature);
+            setBurnNonce(result.burnNonce !== undefined ? Number(result.burnNonce) : null);
+            setBridgeStatus('pending');
+            setStepTimestamps(prev => ({ ...prev, pending: Date.now() }));
+
+            // Refresh balance after successful burn
+            if (solanaWallet?.address) {
+                fetchSolanaBalance(solanaWallet.address);
+            }
+
+        } catch (e) {
+            console.error('[Solana Bridge] Bridge error:', e);
+            setBridgeStatus('error');
+            // Clean up error message
+            let errorMsg = e.message || 'Bridge transaction failed';
+            if (errorMsg.includes('User rejected')) {
+                errorMsg = 'Transaction cancelled by user';
+            } else if (errorMsg.includes('Insufficient')) {
+                errorMsg = 'Insufficient MIRAGE balance';
+            } else if (errorMsg.includes('paused')) {
+                errorMsg = 'Bridge is currently paused';
+            }
+            setBridgeError(errorMsg);
+        } finally {
+            setIsBridging(false);
+        }
+    };
+
+    // Amount validation
+    const amountError = useMemo(() => {
+        if (!amount) return null;
+        const num = parseFloat(amount);
+        if (isNaN(num) || num <= 0) return 'Enter a valid amount';
+        if (solanaWallet?.balance !== null && num > solanaWallet.mirageBalance) {
+            return 'Insufficient balance';
+        }
+        return null;
+    }, [amount, solanaWallet?.balance]);
+
+    const canBridge = solanaWallet && amount && parseFloat(amount) > 0 && !amountError && !isBridging && bridgeStatus === 'idle';
+
+    // Reset for new bridge
+    const handleNewBridge = () => {
+        setAmount('');
+        setBridgeStatus('idle');
+        setBridgeError('');
+        setBridgeTxHash('');
+        setBurnNonce(null);
+        setStepTimestamps({});
+        setStepElapsed({});
+        setMintStatus({ state: 'idle', txHash: '', error: '' });
+    };
+
+    return (
+        <>
+            {/* Step 2: Connect Solana Wallet */}
+            <SectionTitle>
+                <StepNumber>2</StepNumber>
+                Connect Solana Wallet
+            </SectionTitle>
+            <InputSection>
+                {/* Network indicator */}
+                {solanaCluster !== 'mainnet' && (
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        marginBottom: '0.75rem',
+                        background: 'rgba(20, 241, 149, 0.1)',
+                        borderRadius: '0.5rem',
+                        border: '1px solid rgba(20, 241, 149, 0.3)',
+                        fontSize: '0.8rem',
+                    }}>
+                        <span style={{ color: '#14F195', fontWeight: 600 }}>
+                            {solanaCluster.toUpperCase()}
+                        </span>
+                        <span style={{ color: theme?.colors?.subtleText || '#888' }}>
+                            — Set Phantom to {solanaCluster} in Settings → Developer Settings
+                        </span>
+                    </div>
+                )}
+                {!solanaWallet ? (
+                    <>
+                        <SolanaWalletButton
+                            type="button"
+                            onClick={connectPhantom}
+                            disabled={isConnecting}
+                        >
+                            <img src="/bridges/solana.svg" alt="Solana" />
+                            {isConnecting ? 'Connecting...' : 'Connect Phantom'}
+                        </SolanaWalletButton>
+                        {bridgeError && bridgeStatus === 'idle' && (
+                            <ErrorText style={{ marginTop: '0.5rem' }}>⚠ {bridgeError}</ErrorText>
+                        )}
+                    </>
+                ) : (
+                    <ConnectedWalletBox>
+                        <WalletRow>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
+                                <img src="/bridges/solana.svg" alt="Solana" style={{ width: '1.25rem', height: '1.25rem', flexShrink: 0 }} />
+                                <WalletAddress style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{solanaWallet.address}</WalletAddress>
+                            </div>
+                            <DisconnectButton type="button" onClick={disconnectWallet} style={{ flexShrink: 0 }}>
+                                Disconnect
+                            </DisconnectButton>
+                        </WalletRow>
+                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                            <WalletBalance style={{ color: '#14F195' }}>
+                                {solanaWallet.mirageBalance !== null
+                                    ? `${solanaWallet.mirageBalance.toLocaleString()} MIRAGE`
+                                    : 'Loading...'}
+                            </WalletBalance>
+                            <WalletBalance style={{ color: '#9945FF' }}>
+                                {solanaWallet.solBalance !== null
+                                    ? `${solanaWallet.solBalance.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`
+                                    : 'Loading...'}
+                            </WalletBalance>
+                        </div>
+                        {solanaWallet.mirageBalance === 0 && solanaCluster !== 'mainnet' && (
+                            <div style={{
+                                marginTop: '0.5rem',
+                                padding: '0.5rem',
+                                background: 'rgba(245, 158, 11, 0.1)',
+                                borderRadius: '0.25rem',
+                                fontSize: '0.75rem',
+                                color: '#f59e0b',
+                            }}>
+                                No MIRAGE tokens found. Make sure Phantom is set to {solanaCluster}.
+                            </div>
+                        )}
+                    </ConnectedWalletBox>
+                )}
+            </InputSection>
+
+            {/* Step 3: Enter Amount (only show when connected) */}
+            {solanaWallet && (
+                <>
+                    <SectionTitle>
+                        <StepNumber>3</StepNumber>
+                        Enter Amount
+                    </SectionTitle>
+                    <InputSection>
+                        <InputWrapper>
+                            <AmountInput
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="0.00"
+                                value={amount}
+                                onChange={(e) => {
+                                    const val = e.target.value.replace(/,/g, '');
+                                    if (/^\d*\.?\d*$/.test(val)) {
+                                        setAmount(formatAmountDisplay(val));
+                                    }
+                                }}
+                                $error={!!amountError}
+                                disabled={isBridging}
+                            />
+                            {solanaWallet.mirageBalance !== null && (
+                                <MaxButton
+                                    type="button"
+                                    onClick={() => setAmount(formatAmountDisplay(String(solanaWallet.mirageBalance)))}
+                                    disabled={isBridging}
+                                >
+                                    Max
+                                </MaxButton>
+                            )}
+                            <AmountSuffix>MIRAGE</AmountSuffix>
+                        </InputWrapper>
+                        {amountError && (
+                            <ErrorText>⚠ {amountError}</ErrorText>
+                        )}
+                    </InputSection>
+
+                    {/* Step 4: Destination */}
+                    <SectionTitle>
+                        <StepNumber>4</StepNumber>
+                        Destination
+                    </SectionTitle>
+                    <InputSection>
+                        <div style={{ fontSize: '0.75rem', color: theme?.colors?.subtleText || '#888', marginBottom: '0.35rem' }}>
+                            Tokens will arrive at your Mirage address:
+                        </div>
+                        <div style={{
+                            fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
+                            fontSize: '0.8rem',
+                            padding: '0.5rem 0.75rem',
+                            background: theme?.colors?.panelAlt || '#1f2328',
+                            border: `1px solid ${theme?.colors?.border || '#444'}`,
+                            borderRadius: '6px',
+                            wordBreak: 'break-all',
+                            color: theme?.colors?.text || '#fff',
+                        }}>
+                            {mirageAddress}
+                        </div>
+                    </InputSection>
+
+                    {/* Transaction Summary */}
+                    {amount && parseFloat(amount.replace(/,/g, '')) > 0 && (
+                        <InputSection style={{ marginTop: '0.5rem' }}>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                                color: theme?.colors?.subtleText || '#888',
+                                padding: '0.5rem 0',
+                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
+                            }}>
+                                <span>Solana Network Fee</span>
+                                <span style={{ color: theme?.colors?.text || '#fff' }}>~0.0001 SOL</span>
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                                color: theme?.colors?.subtleText || '#888',
+                                padding: '0.5rem 0',
+                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
+                            }}>
+                                <span>You will receive</span>
+                                <span style={{ color: '#14F195', fontWeight: 600 }}>{amount} MIRAGE</span>
+                            </div>
+                        </InputSection>
+                    )}
+
+                    {/* Bridge Button */}
+                    <Button
+                        variant="primary"
+                        fullWidth
+                        disabled={bridgeStatus === 'complete' ? false : !canBridge}
+                        loading={isBridging}
+                        onClick={bridgeStatus === 'complete' ? handleNewBridge : handleBridge}
+                        style={{
+                            background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)',
+                            marginTop: '0.5rem',
+                        }}
+                    >
+                        {bridgeStatus === 'complete'
+                            ? 'New Bridge'
+                            : isBridging
+                                ? 'Confirm in Wallet...'
+                                : bridgeStatus === 'pending'
+                                    ? 'Bridging...'
+                                    : !amount || parseFloat(amount) <= 0
+                                        ? 'Enter Amount'
+                                        : `Bridge ${amount} MIRAGE`}
+                    </Button>
+
+                    {/* Progress Steps */}
+                    {bridgeStatus !== 'idle' && (
+                        <StepsCard style={{ marginTop: '1rem' }}>
+                            <StepsList>
+                                {/* Step 1: Confirm burn on Solana */}
+                                <StepItem>
+                                    <StepDot $state={getStepState('confirming')} />
+                                    <StepText>
+                                        <StepTitle>
+                                            Confirm burn on Solana{formatStepTime('confirming')}
+                                        </StepTitle>
+                                        <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
+                                            {bridgeStatus === 'confirming' ? (
+                                                'Waiting for wallet confirmation'
+                                            ) : bridgeStatus === 'error' && !bridgeTxHash ? (
+                                                `Failure: ${bridgeError || 'transaction failed'}`
+                                            ) : bridgeTxHash ? (
+                                                <>
+                                                    {'Success: '}
+                                                    <a
+                                                        href={`https://solscan.io/tx/${bridgeTxHash}${solscanClusterParam}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                    >
+                                                        {bridgeTxHash.slice(0, 16)}...
+                                                    </a>
+                                                </>
+                                            ) : (
+                                                'Waiting for wallet confirmation'
+                                            )}
+                                        </StepMeta>
+                                    </StepText>
+                                </StepItem>
+
+                                {/* Step 2: Orchestrator detection */}
+                                <StepItem>
+                                    <StepDot $state={getStepState('pending')} />
+                                    <StepText>
+                                        <StepTitle>
+                                            Orchestrator detection{formatStepTime('pending')}
+                                        </StepTitle>
+                                        <StepMeta>
+                                            {bridgeStatus === 'confirming' ? (
+                                                'Waiting for burn confirmation'
+                                            ) : bridgeStatus === 'pending' && mintStatus.state !== 'minted' ? (
+                                                'Scanning Solana for burn event'
+                                            ) : mintStatus.state === 'minted' || bridgeStatus === 'complete' ? (
+                                                'Burn detected by orchestrator'
+                                            ) : (
+                                                'Waiting'
+                                            )}
+                                        </StepMeta>
+                                    </StepText>
+                                </StepItem>
+
+                                {/* Step 3: Mint on Mirage */}
+                                <StepItem>
+                                    <StepDot $state={getStepState('complete')} />
+                                    <StepText>
+                                        <StepTitle>
+                                            Mint on Mirage{bridgeStatus === 'complete' ? formatStepTime('complete') : ''}
+                                        </StepTitle>
+                                        <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
+                                            {bridgeStatus === 'complete' && mintStatus.txHash ? (
+                                                <>
+                                                    {'Success: '}
+                                                    <a
+                                                        href={`/chain/rpc/tx?hash=0x${mintStatus.txHash}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                    >
+                                                        {mintStatus.txHash}
+                                                    </a>
+                                                </>
+                                            ) : bridgeStatus === 'complete' ? (
+                                                'MIRAGE minted to your address'
+                                            ) : mintStatus.state === 'timeout' ? (
+                                                'Taking longer than expected - check your balance'
+                                            ) : mintStatus.state === 'error' ? (
+                                                `Error: ${mintStatus.error || 'mint failed'}`
+                                            ) : (
+                                                'Waiting for attestation'
+                                            )}
+                                        </StepMeta>
+                                    </StepText>
+                                </StepItem>
+                            </StepsList>
+
+                            {bridgeStatus === 'error' && bridgeError && (
+                                <StatusBanner $error style={{ marginTop: '0.75rem' }}>
+                                    ✗ {bridgeError}
+                                </StatusBanner>
+                            )}
+
+                            {bridgeStatus === 'complete' && (
+                                <StatusBanner $success style={{ marginTop: '0.75rem' }}>
+                                    ✓ Bridge complete! MIRAGE has been minted to your address.
+                                </StatusBanner>
+                            )}
+                        </StepsCard>
+                    )}
+                </>
+            )}
+        </>
+    );
+}
+
+// Bridge In Panel Component
+function BridgeInPanel({ address, chainConfigs }) {
+    const theme = useTheme();
+    const [selectedSource, setSelectedSource] = useState(null);
+    const [addressConfirmed, setAddressConfirmed] = useState(null); // null = not answered, true = yes, false = no
+    const [copiedAddress, setCopiedAddress] = useState(null); // Track which address was copied
+
+    // Derive Osmosis address from Mirage address (same key)
+    const derivedOsmoAddress = useMemo(() => {
+        if (!address) return null;
+        return convertBech32Prefix(address, 'osmo');
+    }, [address]);
+
+    const handleSourceSelect = (networkId) => {
+        setSelectedSource(SOURCE_NETWORKS[networkId]);
+        setAddressConfirmed(null); // Reset when changing source
+        console.debug('[Bridge In] Selected source:', networkId);
+    };
+
+    const handleCopy = async (addr) => {
+        if (!addr) return;
+        try {
+            await navigator.clipboard.writeText(addr);
+            setCopiedAddress(addr);
+            setTimeout(() => {
+                setCopiedAddress(null);
+            }, 2000);
+        } catch (e) {
+            console.error('Failed to copy:', e);
+        }
+    };
+
+    if (!address) {
+        return (
+            <BridgeContainer>
+                <BridgeLayout>
+                    <InfoBanner>
+                        <InfoIcon>ℹ️</InfoIcon>
+                        <span>Sign in to bridge MIRAGE tokens from other networks.</span>
+                    </InfoBanner>
+                </BridgeLayout>
+            </BridgeContainer>
+        );
+    }
+
+    return (
+        <BridgeContainer>
+            <BridgeLayout>
+                {/* Step 1: Source Network Selection */}
+                <SectionTitle>
+                    <StepNumber>1</StepNumber>
+                    Select Source Chain
+                </SectionTitle>
+                <NetworkGrid>
+                    {Object.values(SOURCE_NETWORKS).map((network) => (
+                        <NetworkCard
+                            key={network.id}
+                            type="button"
+                            $selected={selectedSource?.id === network.id}
+                            $color={network.color}
+                            onClick={() => handleSourceSelect(network.id)}
+                            disabled={!network.enabled}
+                        >
+                            <NetworkCardContent>
+                                <NetworkName>{network.name}</NetworkName>
+                                <NetworkMeta>
+                                    <NetworkBadge $color={network.color}>
+                                        {network.estimatedTime}
+                                    </NetworkBadge>
+                                </NetworkMeta>
+                            </NetworkCardContent>
+                            <NetworkIcon src={network.icon} alt={network.name} />
+                            {selectedSource?.id === network.id && (
+                                <SelectedIndicator $color={network.color}>
+                                    ✓
+                                </SelectedIndicator>
+                            )}
+                        </NetworkCard>
+                    ))}
+                </NetworkGrid>
+
+                {/* Osmosis Bridge In Flow */}
+                {selectedSource?.id === 'osmosis' && (
+                    <>
+                        {/* Step 2: Connect Wallet */}
+                        <SectionTitle>
+                            <StepNumber>2</StepNumber>
+                            Connect Wallet
+                        </SectionTitle>
+                        <InputSection>
+                            <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888' }}>
+                                Open <a href="https://app.osmosis.zone/assets/ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2" target="_blank" rel="noopener noreferrer" style={{ color: theme?.colors?.link || '#667eea' }}>MIRAGE on Osmosis</a> and
+                                connect your wallet (we recommend <a href="https://www.keplr.app/" target="_blank" rel="noopener noreferrer" style={{ color: theme?.colors?.link || '#667eea' }}>Keplr</a>)
+                            </div>
+                        </InputSection>
+
+                        {/* Step 3: Verify Address */}
+                        <SectionTitle>
+                            <StepNumber>3</StepNumber>
+                            Verify Your Address
+                        </SectionTitle>
+                        <InputSection>
+                            <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888', marginBottom: '0.5rem' }}>
+                                Does the Osmosis website show this address after connecting?
+                            </div>
+                            <div style={{
+                                fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
+                                fontSize: '0.85rem',
+                                padding: '0.6rem 0.85rem',
+                                background: theme?.colors?.panelAlt || '#1f2328',
+                                border: `1px solid ${theme?.colors?.border || '#444'}`,
+                                borderRadius: '8px',
+                                wordBreak: 'break-all',
+                                color: theme?.colors?.text || '#fff',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '0.5rem'
+                            }}>
+                                <span style={{ flex: 1, minWidth: 0 }}>{derivedOsmoAddress || '...'}</span>
+                                <CopyButton type="button" onClick={() => handleCopy(derivedOsmoAddress)}>
+                                    {copiedAddress === derivedOsmoAddress ? 'Copied' : 'Copy'}
+                                </CopyButton>
+                            </div>
+                            <ConfirmButtonRow>
+                                <ConfirmButton
+                                    type="button"
+                                    $variant="yes"
+                                    $selected={addressConfirmed === true}
+                                    onClick={() => setAddressConfirmed(true)}
+                                >
+                                    ✓ Yes, it matches
+                                </ConfirmButton>
+                                <ConfirmButton
+                                    type="button"
+                                    $variant="no"
+                                    $selected={addressConfirmed === false}
+                                    onClick={() => setAddressConfirmed(false)}
+                                >
+                                    ✗ No, different address
+                                </ConfirmButton>
+                            </ConfirmButtonRow>
+
+                            {addressConfirmed === false && (
+                                <WarningBanner style={{ marginTop: '1rem', marginBottom: 0, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <WarningIcon>⚠️</WarningIcon>
+                                        <span><strong>Your MIRAGE is in a different wallet</strong></span>
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', lineHeight: 1.8, marginTop: '0.5rem' }}>
+                                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                                            <span style={{ fontWeight: 700 }}>1.</span>
+                                            <span>From your current Osmosis wallet, send your MIRAGE to:</span>
+                                        </div>
+                                        <div style={{
+                                            fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
+                                            fontSize: '0.75rem',
+                                            padding: '0.4rem 0.6rem',
+                                            background: 'rgba(245, 158, 11, 0.15)',
+                                            borderRadius: '4px',
+                                            wordBreak: 'break-all',
+                                            marginBottom: '0.5rem',
+                                            marginLeft: '1rem',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'space-between',
+                                            gap: '0.5rem'
+                                        }}>
+                                            <span style={{ flex: 1, minWidth: 0 }}>{derivedOsmoAddress}</span>
+                                            <CopyButton type="button" onClick={() => handleCopy(derivedOsmoAddress)} style={{ fontSize: '0.6rem', padding: '0.25rem 0.4rem' }}>
+                                                {copiedAddress === derivedOsmoAddress ? 'Copied' : 'Copy'}
+                                            </CopyButton>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                                            <span style={{ fontWeight: 700 }}>2.</span>
+                                            <span>Import your Mirage seed phrase (12 words) into <a href="https://www.keplr.app/" target="_blank" rel="noopener noreferrer" style={{ color: '#f59e0b' }}>Keplr</a></span>
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                            <span style={{ fontWeight: 700 }}>3.</span>
+                                            <span>Withdraw from Osmosis (now your wallet will show the correct address)</span>
+                                        </div>
+                                    </div>
+                                </WarningBanner>
+                            )}
+                        </InputSection>
+
+                        {/* Step 4: Withdraw (only shown when address is confirmed) */}
+                        {addressConfirmed === true && (
+                            <>
+                                <SectionTitle>
+                                    <StepNumber>4</StepNumber>
+                                    Withdraw
+                                </SectionTitle>
+                                <InputSection>
+                                    <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888', lineHeight: 1.6 }}>
+                                        Click <strong>Withdraw</strong>, enter the amount, and confirm the transaction.
+                                        Tokens typically arrive within 30 seconds.
+                                    </div>
+                                    <StatusBanner $success style={{ marginTop: '0.75rem' }}>
+                                        ✓ Your tokens will arrive at your Mirage address
+                                    </StatusBanner>
+                                </InputSection>
+                            </>
+                        )}
+                    </>
+                )}
+
+                {/* Solana Bridge In Flow */}
+                {selectedSource?.id === 'solana' && (
+                    <SolanaBridgeInFlow
+                        mirageAddress={address}
+                        theme={theme}
+                        chainConfigs={chainConfigs}
+                    />
+                )}
+
+                {/* Info when no source selected */}
+                {!selectedSource && (
+                    <InfoBanner>
+                        <InfoIcon>ℹ️</InfoIcon>
+                        <span>
+                            Select a source chain above to see instructions for bridging MIRAGE tokens to your Mirage wallet.
+                        </span>
+                    </InfoBanner>
+                )}
+            </BridgeLayout>
+        </BridgeContainer>
+    );
+}
+
 export default function BridgeView({ state }) {
     const location = useLocation();
+    const [searchParams, setSearchParams] = useSearchParams();
     const address = Storage.load('publicKey', '') || '';
     const valoperAddress = Storage.load('validator_operator_address', '') || '';
 
+    // Get initial tab from URL, default to 'out'
+    const tabFromUrl = searchParams.get('tab');
+    const initialTab = (tabFromUrl === 'in' || tabFromUrl === 'out') ? tabFromUrl : 'out';
+
     // State
-    const [activeTab, setActiveTab] = useState('out');
+    const [activeTab, setActiveTab] = useState(initialTab);
     const [selectedNetwork, setSelectedNetwork] = useState(null);
     const [amount, setAmount] = useState('');
     const [destinationAddress, setDestinationAddress] = useState('');
@@ -641,7 +1685,7 @@ export default function BridgeView({ state }) {
     const [submitStage, setSubmitStage] = useState('idle'); // idle | submitting | verifying | confirmed | error
     const [submitError, setSubmitError] = useState('');
     const [submitTxHash, setSubmitTxHash] = useState('');
-    const [verificationProgress, setVerificationProgress] = useState({ attempt: 0, maxAttempts: 0 });
+    const [, setVerificationProgress] = useState({ attempt: 0, maxAttempts: 0 });
     const [errorStage, setErrorStage] = useState(null);
     const [errors, setErrors] = useState({});
     const stepsRef = useRef(null);
@@ -657,6 +1701,16 @@ export default function BridgeView({ state }) {
         completedAt: null, // timestamp when mint completed (for final timer display)
     });
     const [chainConfigs, setChainConfigs] = useState({}); // chain_id -> { fee_mirage, enabled, ... }
+
+    // Sync tab state with URL changes (browser back/forward)
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab === 'in' || tab === 'out') {
+            if (tab !== activeTab) {
+                setActiveTab(tab);
+            }
+        }
+    }, [searchParams, activeTab]);
 
     // Fetch bridge config (per-chain fees) from backend
     useEffect(() => {
@@ -817,9 +1871,9 @@ export default function BridgeView({ state }) {
         });
     }, [submitStage]);
 
-    // Update elapsed times every 100ms while not idle
+    // Update elapsed times every 100ms while actively processing (not idle or error)
     useEffect(() => {
-        if (submitStage === 'idle') return;
+        if (submitStage === 'idle' || submitStage === 'error') return;
 
         const interval = setInterval(() => {
             const now = Date.now();
@@ -934,6 +1988,7 @@ export default function BridgeView({ state }) {
 
     const handleTabChange = (tab) => {
         setActiveTab(tab);
+        setSearchParams({ tab }); // Update URL
         resetSubmitState();
         setErrors(prev => ({ ...prev, submit: null }));
         console.debug('[Bridge] Tab changed:', tab);
@@ -1406,12 +2461,13 @@ export default function BridgeView({ state }) {
                                                         </PreviewNetwork>
                                                     </PreviewHeader>
                                                     <PreviewRow>
-                                                        <PreviewLabel>Send</PreviewLabel>
+                                                        <PreviewLabel>Send Amount</PreviewLabel>
                                                         <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
                                                     </PreviewRow>
                                                     <PreviewRow>
-                                                        <PreviewLabel data-tooltip="Bridge fee paid to validator">
-                                                            − Fee
+                                                        <PreviewLabel>
+                                                            Fee
+                                                            <HelpIconWrapper data-tooltip="Bridge fee paid to validator">?</HelpIconWrapper>
                                                         </PreviewLabel>
                                                         <PreviewValue>−{bridgeFee !== null ? bridgeFee : '?'} MIRAGE</PreviewValue>
                                                     </PreviewRow>
@@ -1455,7 +2511,12 @@ export default function BridgeView({ state }) {
                                                             <StepItem>
                                                                 <StepDot $state={getStepState('verifying')} />
                                                                 <StepText>
-                                                                    <StepTitle>Confirming token burn on Mirage{formatStepTime('verifying')}</StepTitle>
+                                                                    <StepTitle>
+                                                                        {isSolanaBridge
+                                                                            ? 'Confirming token burn on Mirage'
+                                                                            : 'Confirming transaction on Mirage'}
+                                                                        {formatStepTime('verifying')}
+                                                                    </StepTitle>
                                                                     <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                                                         {submitStage === 'confirmed' ? (
                                                                             <>
@@ -1469,8 +2530,8 @@ export default function BridgeView({ state }) {
                                                                                 </a>
                                                                             </>
                                                                         ) : (submitStage === 'error' && errorStage === 'verifying')
-                                                                            ? `Failure: ${submitError || 'burn failed'}`
-                                                                            : (submitTxHash || 'Waiting for confirmation.')}
+                                                                            ? `Failure: ${submitError || 'transaction failed'}`
+                                                                            : (submitTxHash || 'Waiting for confirmation')}
                                                                     </StepMeta>
                                                                 </StepText>
                                                             </StepItem>
@@ -1478,7 +2539,9 @@ export default function BridgeView({ state }) {
                                                                 <StepDot $state={getStepState('confirmed')} />
                                                                 <StepText>
                                                                     <StepTitle>
-                                                                        {isSolanaBridge ? 'Confirming token mint on Solana' : 'Bridge complete'}
+                                                                        {isSolanaBridge
+                                                                            ? 'Confirming token mint on Solana'
+                                                                            : `IBC transfer to ${selectedNetwork?.name || 'destination'}`}
                                                                         {showMintTimer ? formatStepTime('confirmed') : ''}
                                                                     </StepTitle>
                                                                     <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
@@ -1502,7 +2565,9 @@ export default function BridgeView({ state }) {
                                                                                 'Pending: waiting for orchestrator confirmation.'
                                                                             )
                                                                         ) : (
-                                                                            'Transfer confirmed on-chain.'
+                                                                            submitStage === 'confirmed'
+                                                                                ? 'IBC packet sent. Tokens will arrive in ~30 seconds.'
+                                                                                : 'Waiting for transaction confirmation'
                                                                         )}
                                                                     </StepMeta>
                                                                 </StepText>
@@ -1544,17 +2609,10 @@ export default function BridgeView({ state }) {
                                 )
                             )}
                             {activeTab === 'in' && (
-                                <BridgeContainer>
-                                    <BridgeLayout>
-                                        <InfoBanner>
-                                            <InfoIcon>ℹ️</InfoIcon>
-                                            <span>
-                                                Bridge In will let you redeem MIRAGE from other chains.
-                                                This flow is not available yet.
-                                            </span>
-                                        </InfoBanner>
-                                    </BridgeLayout>
-                                </BridgeContainer>
+                                <BridgeInPanel
+                                    address={address}
+                                    chainConfigs={chainConfigs}
+                                />
                             )}
                         </ContainerBody>
                     </TabbedContainer>

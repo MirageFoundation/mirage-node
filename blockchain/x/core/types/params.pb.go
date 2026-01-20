@@ -464,13 +464,15 @@ func (m *Params) GetBridgeAttestationThreshold() uint64 {
 // BridgeChainConfig defines the configuration for a bridgeable chain (attested bridge only).
 // IBC transfers are handled separately by the IBC module and don't need allowlisting.
 type BridgeChainConfig struct {
-	// chain_id is the unique identifier for this chain (e.g., "solana", "ethereum")
+	// chain_id is the unique identifier for this chain (e.g., "solana", "osmosis")
 	ChainId string `protobuf:"bytes,1,opt,name=chain_id,json=chainId,proto3" json:"chain_id,omitempty"`
 	// enabled indicates whether bridging to/from this chain is currently allowed
 	Enabled bool `protobuf:"varint,2,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	// fee is the flat fee in umirage charged and burned for bridge transfers to this chain
 	// Default: 1000000 = 1 MIRAGE
 	Fee uint64 `protobuf:"varint,3,opt,name=fee,proto3" json:"fee,omitempty"`
+	// ibc_channel is the IBC channel ID for IBC chains (e.g., "channel-0")
+	IbcChannel string `protobuf:"bytes,4,opt,name=ibc_channel,json=ibcChannel,proto3" json:"ibc_channel,omitempty"`
 }
 
 func (m *BridgeChainConfig) Reset()         { *m = BridgeChainConfig{} }
@@ -525,6 +527,13 @@ func (m *BridgeChainConfig) GetFee() uint64 {
 		return m.Fee
 	}
 	return 0
+}
+
+func (m *BridgeChainConfig) GetIbcChannel() string {
+	if m != nil {
+		return m.IbcChannel
+	}
+	return ""
 }
 
 func init() {
@@ -1167,6 +1176,13 @@ func (m *BridgeChainConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.IbcChannel) > 0 {
+		i -= len(m.IbcChannel)
+		copy(dAtA[i:], m.IbcChannel)
+		i = encodeVarintParams(dAtA, i, uint64(len(m.IbcChannel)))
+		i--
+		dAtA[i] = 0x22
+	}
 	if m.Fee != 0 {
 		i = encodeVarintParams(dAtA, i, uint64(m.Fee))
 		i--
@@ -1365,6 +1381,10 @@ func (m *BridgeChainConfig) Size() (n int) {
 	}
 	if m.Fee != 0 {
 		n += 1 + sovParams(uint64(m.Fee))
+	}
+	l = len(m.IbcChannel)
+	if l > 0 {
+		n += 1 + l + sovParams(uint64(l))
 	}
 	return n
 }
@@ -2373,6 +2393,38 @@ func (m *BridgeChainConfig) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+	case 4:
+		if wireType != 2 {
+			return fmt.Errorf("proto: wrong wireType = %d for field IbcChannel", wireType)
+		}
+		var stringLen uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowParams
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			stringLen |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		intStringLen := int(stringLen)
+		if intStringLen < 0 {
+			return ErrInvalidLengthParams
+		}
+		postIndex := iNdEx + intStringLen
+		if postIndex < 0 {
+			return ErrInvalidLengthParams
+		}
+		if postIndex > l {
+			return io.ErrUnexpectedEOF
+		}
+		m.IbcChannel = string(dAtA[iNdEx:postIndex])
+		iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipParams(dAtA[iNdEx:])

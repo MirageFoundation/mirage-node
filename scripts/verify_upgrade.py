@@ -491,23 +491,53 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
         print(f"   [OK] bridge_chains: {len(bridge_chains)} chain(s)")
         solana_found = False
         for idx, ch in enumerate(bridge_chains):
-            if isinstance(ch, dict):
-                chain_id = ch.get("chain_id", "?")
-                enabled = ch.get("enabled", False)
-                fee = ch.get("fee", 0)
-                status = "enabled" if enabled else "disabled"
-                fee_str = f"{fee:,} ({fee // 1_000_000} MIRAGE)" if fee >= 1_000_000 else f"{fee:,}"
-                print(f"      - {chain_id}: {status}, fee: {fee_str}")
+            print(f"   [DEBUG] bridge_chains[{idx}] raw={ch!r}")
+            if not isinstance(ch, dict):
+                print(f"   [FAIL] bridge_chains[{idx}] expected object, got {type(ch)}")
+                failures.append(f"core params.bridge_chains[{idx}] expected object, got {type(ch)}")
+                continue
 
-                # Verify Solana config
-                if chain_id == "solana":
-                    solana_found = True
-                    if not enabled:
-                        print(f"   [FAIL] Solana bridge is disabled")
-                        failures.append("bridge_chains: Solana is disabled")
-                    if fee != 500_000_000:
-                        print(f"   [FAIL] Solana fee expected 500,000,000, got {fee}")
-                        failures.append(f"bridge_chains: Solana fee expected 500_000_000, got {fee}")
+            chain_id = ch.get("chain_id", "?")
+            enabled = None
+            fee = None
+
+            if "enabled" not in ch:
+                print(f"   [FAIL] {chain_id}: missing enabled")
+                failures.append(f"bridge_chains[{idx}] missing enabled")
+            else:
+                try:
+                    enabled = _as_bool(ch.get("enabled"))
+                except Exception as e:
+                    print(f"   [FAIL] {chain_id}: invalid enabled {ch.get('enabled')!r}")
+                    failures.append(f"bridge_chains[{idx}].enabled invalid: {e}")
+
+            if "fee" not in ch:
+                print(f"   [FAIL] {chain_id}: missing fee")
+                failures.append(f"bridge_chains[{idx}] missing fee")
+            else:
+                try:
+                    fee = _as_int(ch.get("fee"))
+                except Exception as e:
+                    print(f"   [FAIL] {chain_id}: invalid fee {ch.get('fee')!r}")
+                    failures.append(f"bridge_chains[{idx}].fee invalid: {e}")
+
+            if enabled is None or fee is None:
+                print(f"   [FAIL] {chain_id}: invalid bridge config")
+                continue
+
+            status = "enabled" if enabled else "disabled"
+            fee_str = f"{fee:,} ({fee // 1_000_000} MIRAGE)" if fee >= 1_000_000 else f"{fee:,}"
+            print(f"      - {chain_id}: {status}, fee: {fee_str}")
+
+            # Verify Solana config
+            if chain_id == "solana":
+                solana_found = True
+                if not enabled:
+                    print(f"   [FAIL] Solana bridge is disabled")
+                    failures.append("bridge_chains: Solana is disabled")
+                if fee != 500_000_000:
+                    print(f"   [FAIL] Solana fee expected 500,000,000, got {fee}")
+                    failures.append(f"bridge_chains: Solana fee expected 500_000_000, got {fee}")
 
         if not solana_found:
             print("   [FAIL] Solana not found in bridge_chains")

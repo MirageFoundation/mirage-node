@@ -632,6 +632,37 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
 			}
 
+			// Enable Osmosis IBC bridge with 500 MIRAGE fee
+			osmosisEnabled := false
+			for _, chain := range params.BridgeChains {
+				if chain.ChainId == "osmosis" {
+					osmosisEnabled = true
+					if chain.Fee != 500_000_000 {
+						oldFee := chain.Fee
+						chain.Fee = 500_000_000
+						changed = true
+						sdkCtx.Logger().Info("v1.9.0-bridge: updated Osmosis bridge fee to 500 MIRAGE",
+							"old_fee", oldFee, "new_fee", 500_000_000)
+					}
+					if chain.IbcChannel != "channel-0" {
+						chain.IbcChannel = "channel-0"
+						changed = true
+						sdkCtx.Logger().Info("v1.9.0-bridge: set Osmosis IBC channel to channel-0")
+					}
+					break
+				}
+			}
+			if !osmosisEnabled {
+				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
+					ChainId:    "osmosis",
+					Enabled:    true,
+					Fee:        500_000_000, // 500 MIRAGE
+					IbcChannel: "channel-0",
+				})
+				changed = true
+				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Osmosis IBC bridge with 500 MIRAGE fee on channel-0")
+			}
+
 			// Set attestation threshold: 66.67% (6667 basis points)
 			if params.BridgeAttestationThreshold == 0 {
 				params.BridgeAttestationThreshold = 6667

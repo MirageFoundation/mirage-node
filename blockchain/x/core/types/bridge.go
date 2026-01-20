@@ -238,6 +238,16 @@ func ValidateBridgeChain(chainID string, chains []*BridgeChainConfig) (*BridgeCh
 	return nil, fmt.Errorf("unknown bridge chain: %s", chainID)
 }
 
+// FindIBCChainConfig finds an enabled IBC chain config by its channel ID
+func FindIBCChainConfig(ibcChannel string, chains []*BridgeChainConfig) *BridgeChainConfig {
+	for _, chain := range chains {
+		if chain.Enabled && chain.IbcChannel == ibcChannel {
+			return chain
+		}
+	}
+	return nil
+}
+
 // ValidateBridgeDestinationAddress validates the destination address format for a given chain
 func ValidateBridgeDestinationAddress(chainID, address string) error {
 	if address == "" {
