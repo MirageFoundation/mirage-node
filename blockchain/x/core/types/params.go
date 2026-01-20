@@ -147,9 +147,8 @@ func DefaultParams() Params {
 		MaxEnvelopeAge: 60,
 
 		// Bridge parameters
-		BridgeChains:              []*BridgeChainConfig{}, // No chains enabled by default
+		BridgeChains:              []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
 		BridgeAttestationThreshold: 6667,                  // 66.67% of voting power required
-		BridgeFee:                 1_000_000,              // 1 MIRAGE flat fee (burned)
 	}
 }
 
