@@ -337,6 +337,28 @@ def _build_pool():
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
 
+    # BridgeChainConfig (used in Params.bridge_chains)
+    bridge_config = file_proto.message_type.add()
+    bridge_config.name = "BridgeChainConfig"
+    add_f(bridge_config, "chain_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(bridge_config, "enabled", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+
+    # MsgBridgeAttest (validator attestation for external chain burns)
+    msg_bridge_attest = file_proto.message_type.add()
+    msg_bridge_attest.name = "MsgBridgeAttest"
+    add_f(msg_bridge_attest, "validator", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest, "source_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest, "burn_id", 3, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest, "mirage_recipient", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_attest, "amount", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+
+    # MsgBridgeAttestResponse
+    msg_bridge_attest_resp = file_proto.message_type.add()
+    msg_bridge_attest_resp.name = "MsgBridgeAttestResponse"
+    add_f(msg_bridge_attest_resp, "minted", 1, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_bridge_attest_resp, "attested_power", 2, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_bridge_attest_resp, "required_power", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
     msg4 = file_proto.message_type.add()
     msg4.name = "Params"
@@ -366,6 +388,16 @@ def _build_pool():
     add_f(msg4, "subscription_reserve_percent", 42, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "max_envelope_age", 45, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    # bridge_chains is a repeated BridgeChainConfig (field 50)
+    f_bridge = msg4.field.add()
+    f_bridge.name = "bridge_chains"
+    f_bridge.number = 50
+    f_bridge.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+    f_bridge.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f_bridge.type_name = ".mirage.core.v1.BridgeChainConfig"
+    add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "bridge_fee", 52, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # MsgUpdateParams (authority + Params)
     msg5 = file_proto.message_type.add()
@@ -443,7 +475,10 @@ MsgUpgradeLevel = _get_message_class("mirage.core.v1.MsgUpgradeLevel")
 MsgSetAutoRenewal = _get_message_class("mirage.core.v1.MsgSetAutoRenewal")
 MsgIBCTransfer = _get_message_class("mirage.core.v1.MsgIBCTransfer")
 MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
+MsgBridgeAttest = _get_message_class("mirage.core.v1.MsgBridgeAttest")
+MsgBridgeAttestResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestResponse")
 TierConfig = _get_message_class("mirage.core.v1.TierConfig")
+BridgeChainConfig = _get_message_class("mirage.core.v1.BridgeChainConfig")
 Params = _get_message_class("mirage.core.v1.Params")
 MsgUpdateParams = _get_message_class("mirage.core.v1.MsgUpdateParams")
 QueryParamsRequest = _get_message_class("mirage.core.v1.QueryParamsRequest")

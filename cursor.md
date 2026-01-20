@@ -165,6 +165,27 @@ This includes:
 - NO FALLBACKS. Pick the single canonical source per category and HARD FAIL if it is unavailable or returns unexpected data.
 - Backend must fail hard when required data is missing. Do not silently recover or guess.
 
+### API Paths - Caddy Routes
+
+**CRITICAL**: The web server (Caddy) exposes chain endpoints at these paths:
+
+- `/chain/rpc/*` → CometBFT RPC (port 26657) - WebSocket at `/chain/rpc/websocket`
+- `/chain/rest/*` → Cosmos SDK REST (port 1317)
+- `/api/*` → Python backend (port 5000)
+
+**Examples**:
+```bash
+# Query params via REST
+curl http://127.0.0.1/chain/rest/mirage/core/v1/params
+
+# Query status via RPC  
+curl http://127.0.0.1/chain/rpc/status
+
+# NOT /api/params - that doesn't exist!
+```
+
+Legacy paths `/rpc/*` and `/lcd/*` are deprecated (remove after 2026-02-20).
+
 ### Chain Parameters - EVERYTHING MUST BE QUERYABLE
 
 All paths below are relative to `public/mirage-node/`.

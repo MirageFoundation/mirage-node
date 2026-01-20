@@ -661,6 +661,170 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
         failures.append(f"core difficulty invalid: {e}")
 
 
+def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
+    """Check that Python protobuf definitions are complete and importable."""
+    print("\n-> Checking Python protobuf definitions...")
+    
+    try:
+        from shared import datatypes
+        print("   [OK] shared.datatypes imported")
+    except ImportError as e:
+        print(f"   [WARN] Cannot import shared.datatypes: {e}")
+        warnings.append(f"Cannot import shared.datatypes: {e}")
+        return
+    
+    # Check all required message classes exist
+    required_classes = [
+        # Transaction messages
+        "MsgPost",
+        "MsgEdit",
+        "MsgVote",
+        "MsgSetUsername",
+        "MsgFollowModerator",
+        "MsgUnfollowModerator",
+        "MsgFollowUser",
+        "MsgUnfollowUser",
+        "MsgFollowTopic",
+        "MsgUnfollowTopic",
+        "MsgBlockPost",
+        "MsgUnblockPost",
+        "MsgBlockUser",
+        "MsgUnblockUser",
+        "MsgDelete",
+        "MsgSendTokens",
+        "MsgSetLevel",
+        "MsgUpgradeLevel",
+        "MsgSetAutoRenewal",
+        "MsgIBCTransfer",
+        "MsgBridgeBurn",
+        "MsgBridgeAttest",
+        "MsgBridgeAttestResponse",
+        # Config/params messages
+        "TierConfig",
+        "BridgeChainConfig",
+        "Params",
+        "MsgUpdateParams",
+        # Query messages
+        "QueryParamsRequest",
+        "QueryParamsResponse",
+        "QueryDifficultyRequest",
+        "QueryDifficultyResponse",
+    ]
+    
+    missing = []
+    for cls_name in required_classes:
+        if hasattr(datatypes, cls_name):
+            cls = getattr(datatypes, cls_name)
+            if cls is not None:
+                continue
+        missing.append(cls_name)
+    
+    if missing:
+        print(f"   [FAIL] Missing classes: {', '.join(missing)}")
+        failures.append(f"datatypes.py missing classes: {', '.join(missing)}")
+    else:
+        print(f"   [OK] All {len(required_classes)} message classes present")
+    
+    # Check Params has all required fields
+    try:
+        params_cls = datatypes.Params
+        # Create empty instance to check fields
+        p = params_cls()
+        required_param_fields = [
+            "min_difficulty",
+            "pow_message_window",
+            "pow_message_limit",
+            "mint_interval",
+            "mint_quantity",
+            "subscription_period",
+            "max_envelope_age",
+            "bridge_attestation_threshold",
+            "bridge_fee",
+        ]
+        
+        # Check if field descriptors exist
+        descriptor = params_cls.DESCRIPTOR
+        field_names = [f.name for f in descriptor.fields]
+        
+        missing_fields = [f for f in required_param_fields if f not in field_names]
+        if missing_fields:
+            print(f"   [FAIL] Params missing fields: {', '.join(missing_fields)}")
+            failures.append(f"Params proto missing fields: {', '.join(missing_fields)}")
+        else:
+            print(f"   [OK] Params has all required fields")
+        
+        # Check bridge_chains is a repeated field
+        bridge_chains_field = None
+        for f in descriptor.fields:
+            if f.name == "bridge_chains":
+                bridge_chains_field = f
+                break
+        
+        if bridge_chains_field is None:
+            print("   [FAIL] Params.bridge_chains field missing")
+            failures.append("Params proto missing bridge_chains field")
+        elif bridge_chains_field.label != 3:  # LABEL_REPEATED = 3
+            print("   [FAIL] Params.bridge_chains should be repeated")
+            failures.append("Params.bridge_chains should be repeated field")
+        else:
+            print("   [OK] Params.bridge_chains is repeated")
+            
+    except Exception as e:
+        print(f"   [FAIL] Cannot verify Params fields: {e}")
+        failures.append(f"Cannot verify Params proto fields: {e}")
+    
+    # Check BridgeChainConfig has required fields
+    try:
+        bcc_cls = datatypes.BridgeChainConfig
+        descriptor = bcc_cls.DESCRIPTOR
+        field_names = [f.name for f in descriptor.fields]
+        
+        required_bcc_fields = ["chain_id", "enabled"]
+        missing_bcc = [f for f in required_bcc_fields if f not in field_names]
+        if missing_bcc:
+            print(f"   [FAIL] BridgeChainConfig missing: {', '.join(missing_bcc)}")
+            failures.append(f"BridgeChainConfig missing fields: {', '.join(missing_bcc)}")
+        else:
+            print(f"   [OK] BridgeChainConfig has required fields")
+    except Exception as e:
+        print(f"   [FAIL] Cannot verify BridgeChainConfig: {e}")
+        failures.append(f"Cannot verify BridgeChainConfig proto: {e}")
+    
+    # Check MsgBridgeAttest has required fields (used by orchestrator)
+    try:
+        attest_cls = datatypes.MsgBridgeAttest
+        descriptor = attest_cls.DESCRIPTOR
+        field_names = [f.name for f in descriptor.fields]
+        
+        required_attest_fields = ["validator", "source_chain", "burn_id", "mirage_recipient", "amount"]
+        missing_attest = [f for f in required_attest_fields if f not in field_names]
+        if missing_attest:
+            print(f"   [FAIL] MsgBridgeAttest missing: {', '.join(missing_attest)}")
+            failures.append(f"MsgBridgeAttest missing fields: {', '.join(missing_attest)}")
+        else:
+            print(f"   [OK] MsgBridgeAttest has required fields")
+    except Exception as e:
+        print(f"   [FAIL] Cannot verify MsgBridgeAttest: {e}")
+        failures.append(f"Cannot verify MsgBridgeAttest proto: {e}")
+    
+    # Check MsgBridgeBurn has required fields (user bridge transactions)
+    try:
+        burn_cls = datatypes.MsgBridgeBurn
+        descriptor = burn_cls.DESCRIPTOR
+        field_names = [f.name for f in descriptor.fields]
+        
+        required_burn_fields = ["destination_chain", "destination_address", "amount"]
+        missing_burn = [f for f in required_burn_fields if f not in field_names]
+        if missing_burn:
+            print(f"   [FAIL] MsgBridgeBurn missing: {', '.join(missing_burn)}")
+            failures.append(f"MsgBridgeBurn missing fields: {', '.join(missing_burn)}")
+        else:
+            print(f"   [OK] MsgBridgeBurn has required fields")
+    except Exception as e:
+        print(f"   [FAIL] Cannot verify MsgBridgeBurn: {e}")
+        failures.append(f"Cannot verify MsgBridgeBurn proto: {e}")
+
+
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
     """Check orchestrator configuration if enabled."""
     print("\n-> Checking orchestrator config...")
@@ -883,6 +1047,9 @@ def main() -> int:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
         check_deploy_migrations(home_dir, failures, warnings)
         check_orchestrator_config(home_dir, failures, warnings)
+    
+    # Check Python protobuf definitions (always run)
+    check_python_protobuf_definitions(failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")

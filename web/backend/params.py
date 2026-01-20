@@ -88,6 +88,9 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
         raise RuntimeError("missing or empty tiers in chain params")
     result["tiers"] = tiers
 
+    # Bridge chains - optional, defaults to empty list
+    result["bridge_chains"] = p.get("bridge_chains") or []
+
     return result
 
 

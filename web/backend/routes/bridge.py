@@ -29,7 +29,7 @@ from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast
 from chain import classify_reject, get_current_pow_difficulty, is_node_catching_up, is_valid_recent_block_hash
 
 # Import shared helpers from core module
-from routes.core import is_subscriber, _verify_signature, get_user_level, _hex_to_bytes
+from routes.core import is_subscriber, _verify_signature, get_user_level, _hex_to_bytes, GAS_BUFFER_MULTIPLIER
 
 
 bridge_bp = Blueprint("bridge", __name__)
@@ -341,7 +341,7 @@ def bridge_ibc_transfer():
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, gas_used + 1024)
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_bytes = build_tx_bytes(body_bytes, gas_limit)
         tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
         
@@ -512,7 +512,7 @@ def bridge_burn():
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
-        gas_limit = max(gas_est, gas_used + 1024)
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
         tx_bytes = build_tx_bytes(body_bytes, gas_limit)
         tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
         
