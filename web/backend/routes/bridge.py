@@ -7,7 +7,7 @@ Endpoints:
 - POST /api/bridge/burn: Relay burn for attested bridge to non-IBC chains (e.g., Solana)
 - GET /api/bridge/config: Get bridge configuration (enabled chains, fees)
 - GET /api/bridge/status: Get bridge status (pending transfers)
-- GET /api/get_bridge_minted: Query outbound mint confirmation by burn_id
+- GET /api/bridge/get_minted: Query outbound mint confirmation by burn_id
 """
 
 import base64
@@ -229,7 +229,7 @@ def bridge_config():
         return jsonify({"error": str(e)}), 500
 
 
-@bridge_bp.route("/api/get_bridge_minted", methods=["GET"])
+@bridge_bp.route("/api/bridge/get_minted", methods=["GET"])
 def get_bridge_minted():
     """Query outbound bridge mint confirmation by burn_id."""
     rid = next_request_id()

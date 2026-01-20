@@ -1378,6 +1378,15 @@ func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64
 	return seq, nil
 }
 
+// SetBridgeSequence sets the sequence number for a destination chain (HACK for state recovery)
+func (k Keeper) SetBridgeSequence(ctx sdk.Context, destChain string, seq uint64) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := []byte(types.BridgeSequencePrefix + destChain)
+	bz := make([]byte, 8)
+	binary.BigEndian.PutUint64(bz, seq)
+	return store.Set(key, bz)
+}
+
 // GetBridgePendingCount returns the count of pending (unminted) attestations
 func (k Keeper) GetBridgePendingCount(ctx sdk.Context) (uint64, error) {
 	store := k.storeService.OpenKVStore(ctx)

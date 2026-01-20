@@ -57,6 +57,16 @@ const NETWORKS = {
     },
 };
 
+const BRIDGE_POLL_SCHEDULE = {
+    initialDelayMs: 1000,
+    intervalsMs: [
+        ...Array.from({ length: 9 }, () => 1000),
+        ...Array.from({ length: 5 }, () => 2000),
+        5000,
+        5000,
+    ],
+};
+
 
 // Animations
 const fadeIn = keyframes`
@@ -702,7 +712,10 @@ export default function BridgeView({ state }) {
     // Validation
     const validateAmount = useCallback((value) => {
         if (!value || value === '') return null;
-        if (bridgeFee === null) return 'Chain not configured';
+        // Only show "Chain not configured" if config has loaded but chain isn't there
+        const configLoaded = Object.keys(chainConfigs).length > 0;
+        if (bridgeFee === null && configLoaded) return 'Chain not configured';
+        if (bridgeFee === null) return null; // Still loading config
         const num = parseFloat(value);
         if (isNaN(num) || num <= 0) return 'Please enter a valid amount';
         // Fee is subtracted from amount, so amount must be greater than fee
@@ -717,7 +730,7 @@ export default function BridgeView({ state }) {
             return 'Insufficient balance';
         }
         return null;
-    }, [selectedNetwork, balance, bridgeFee]);
+    }, [selectedNetwork, balance, bridgeFee, chainConfigs]);
 
     const validateAddress = useCallback((value, isManualEntry = true) => {
         // If using derived address for Cosmos chains, no validation needed
@@ -817,8 +830,8 @@ export default function BridgeView({ state }) {
         if (!submitTxHash) return;
 
         let cancelled = false;
-        const maxAttempts = 15;  // 30 second timeout (15 * 2s)
-        const intervalMs = 2000;
+        const maxAttempts = BRIDGE_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_POLL_SCHEDULE.initialDelayMs;
 
         setMintStatus({
             state: 'pending',
@@ -827,11 +840,16 @@ export default function BridgeView({ state }) {
             error: '',
         });
 
+        console.debug('[Bridge] Mint poll schedule (ms):', {
+            initialDelayMs,
+            intervalsMs: BRIDGE_POLL_SCHEDULE.intervalsMs,
+        });
+
         const poll = async (attempt = 1) => {
             if (cancelled) return;
             try {
                 console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
-                const res = await fetch(`/api/get_bridge_minted?burn_id=${submitTxHash}`);
+                const res = await fetch(`/api/bridge/get_minted?burn_id=${submitTxHash}`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
                 }
@@ -866,10 +884,25 @@ export default function BridgeView({ state }) {
                 return;
             }
 
-            setTimeout(() => poll(attempt + 1), intervalMs);
+            const nextDelay = BRIDGE_POLL_SCHEDULE.intervalsMs[attempt - 1];
+            if (!nextDelay) {
+                setMintStatus({
+                    state: 'timeout',
+                    destinationTx: '',
+                    destinationChain: '',
+                    error: 'mint confirmation timed out',
+                });
+                return;
+            }
+            console.debug('[Bridge] Mint poll next delay (ms):', nextDelay);
+            setTimeout(() => poll(attempt + 1), nextDelay);
         };
 
-        poll(1);
+        if (initialDelayMs > 0) {
+            setTimeout(() => poll(1), initialDelayMs);
+        } else {
+            poll(1);
+        }
         return () => {
             cancelled = true;
         };
@@ -1021,10 +1054,13 @@ export default function BridgeView({ state }) {
 
             setSubmitStage('verifying');
             stageAtError = 'verifying';
+            console.debug('[Bridge] Verification poll schedule (ms):', {
+                initialDelayMs: BRIDGE_POLL_SCHEDULE.initialDelayMs,
+                intervalsMs: BRIDGE_POLL_SCHEDULE.intervalsMs,
+            });
             const pollResult = await pollTxStatus(txHash, {
-                initialDelay: 4000,  // 30 second total timeout
-                interval: 2000,
-                maxAttempts: 13,
+                initialDelay: BRIDGE_POLL_SCHEDULE.initialDelayMs,
+                intervals: BRIDGE_POLL_SCHEDULE.intervalsMs,
                 requireIndexed: false,
                 onProgress: ({ attempt, maxAttempts }) => {
                     setVerificationProgress({ attempt, maxAttempts });
@@ -1134,6 +1170,8 @@ export default function BridgeView({ state }) {
         if (elapsed === undefined || elapsed === null) return '';
         return ` (${elapsed.toFixed(1)}s)`;
     };
+
+    const showMintTimer = isSolanaBridge && getStepState('confirmed') === 'active';
 
     return (
         <ContentGrid>
@@ -1409,7 +1447,8 @@ export default function BridgeView({ state }) {
                                                                 <StepDot $state={getStepState('confirmed')} />
                                                                 <StepText>
                                                                     <StepTitle>
-                                                                        {isSolanaBridge ? `Confirming token mint on Solana${mintStatus.state === 'pending' ? formatStepTime('confirmed') : ''}` : 'Bridge complete'}
+                                                                        {isSolanaBridge ? 'Confirming token mint on Solana' : 'Bridge complete'}
+                                                                        {showMintTimer ? formatStepTime('confirmed') : ''}
                                                                     </StepTitle>
                                                                     <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                                                         {isSolanaBridge ? (

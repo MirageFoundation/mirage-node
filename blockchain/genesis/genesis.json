@@ -125,7 +125,7 @@
                     {
                         "chain_id": "solana",
                         "enabled": true,
-                        "fee": "100000000"
+                        "fee": "500000000"
                     }
                 ],
                 "bridge_attestation_threshold": "6667",

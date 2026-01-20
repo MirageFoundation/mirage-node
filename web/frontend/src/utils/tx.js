@@ -201,7 +201,18 @@ export async function pollTxStatus(txHash, options = {}) {
         maxAttempts = 5,
         timeoutMs = 5000,
         requireIndexed = true,
+        intervals,
     } = options;
+
+    const hasCustomSchedule = Array.isArray(intervals) && intervals.length > 0;
+    const attemptLimit = hasCustomSchedule ? intervals.length + 1 : maxAttempts;
+    const delayBeforeFirst = hasCustomSchedule
+        ? (options.initialDelay ?? 0)
+        : initialDelay;
+
+    if (hasCustomSchedule) {
+        console.debug('[pollTxStatus] Using custom interval schedule:', intervals);
+    }
 
     const Api = (await import('../lib/api')).default;
     const Storage = (await import('./Storage')).default;
@@ -211,11 +222,13 @@ export async function pollTxStatus(txHash, options = {}) {
     const address = Storage.load('publicKey', '');
 
     // Initial delay before first poll
-    await sleep(initialDelay);
+    if (delayBeforeFirst > 0) {
+        await sleep(delayBeforeFirst);
+    }
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    for (let attempt = 0; attempt < attemptLimit; attempt++) {
         try {
-            if (onProgress) onProgress({ attempt: attempt + 1, maxAttempts });
+            if (onProgress) onProgress({ attempt: attempt + 1, maxAttempts: attemptLimit });
 
             const params = { hash: txHash };
             if (address) params.address = address;
@@ -249,8 +262,11 @@ export async function pollTxStatus(txHash, options = {}) {
             console.warn('[pollTxStatus] Attempt', attempt + 1, 'failed:', err?.message || err);
         }
 
-        if (attempt < maxAttempts - 1) {
-            await sleep(interval);
+        if (attempt < attemptLimit - 1) {
+            const nextDelay = hasCustomSchedule ? intervals[attempt] : interval;
+            if (nextDelay > 0) {
+                await sleep(nextDelay);
+            }
         }
     }
 

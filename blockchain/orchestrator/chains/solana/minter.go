@@ -146,6 +146,13 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		PreflightCommitment: w.commitment(),
 	})
 	if err != nil {
+		// Check if this is an "AlreadyMinted" error - means Solana mint succeeded previously
+		errStr := err.Error()
+		if strings.Contains(errStr, "AlreadyMinted") || strings.Contains(errStr, "6021") {
+			w.logger.Printf("INFO  [ALREADY_MINTED] burn_id=%s was already minted on Solana (replay protection)", burn.BurnID)
+			// Return special marker so attestor can still submit MsgBridgeMinted
+			return "already_minted:" + burn.BurnID, nil
+		}
 		return "", fmt.Errorf("failed to send transaction: %w", err)
 	}
 	explorerURL := w.solscanURL(sig)

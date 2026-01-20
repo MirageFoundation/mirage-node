@@ -6,13 +6,14 @@ A unified health check dashboard combining all service statuses in a
 visually appealing card/tile layout.
 
 Services monitored:
-  - Node (CometBFT/blockchain)
+  - CometBFT (blockchain node)
   - Validator (if configured)
   - PostgreSQL database
   - Backend API
   - Indexer
   - Caddy (web server)
   - Hermes IBC relayer (if configured)
+  - Bridge Orchestrator (if configured)
 """
 
 import json
@@ -576,11 +577,11 @@ def check_node() -> ServiceStatus:
             f"status={status.value} message={message}"
         )
 
-        return ServiceStatus(name="Node", status=status, message=message, details=details)
+        return ServiceStatus(name="CometBFT", status=status, message=message, details=details)
     except requests.exceptions.ConnectionError:
-        return ServiceStatus(name="Node", status=Status.ERROR, message="Not reachable", details={})
+        return ServiceStatus(name="CometBFT", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
-        return ServiceStatus(name="Node", status=Status.ERROR, message=str(e)[:30], details={})
+        return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details={})
 
 
 def check_validator() -> ServiceStatus:
@@ -1437,6 +1438,80 @@ def check_hermes() -> ServiceStatus:
         return ServiceStatus(name="Hermes IBC", status=Status.WARN, message=str(e)[:20], details=base_details)
 
 
+def check_orchestrator() -> ServiceStatus:
+    """Check Bridge Orchestrator status."""
+    env_path = os.path.expanduser("~/.mirage/env/orchestrator.env")
+    keypair_path = os.path.expanduser("~/.mirage/orchestrator/solana-keypair.json")
+
+    # Check if env file exists
+    if not os.path.exists(env_path):
+        return ServiceStatus(
+            name="Orchestrator", status=Status.UNKNOWN, message="Not configured", details={"configured": False}
+        )
+
+    # Parse env file to check if enabled
+    enabled = False
+    solana_rpc = None
+    try:
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("ORCHESTRATOR_ENABLED="):
+                    val = line.split("=", 1)[1].strip().lower().strip('"').strip("'")
+                    enabled = val in ("true", "1", "yes")
+                elif line.startswith("ORCHESTRATOR_SOLANA_RPC="):
+                    solana_rpc = line.split("=", 1)[1].strip().strip('"').strip("'")
+    except Exception:
+        pass
+
+    base_details = {
+        "configured": True,
+        "enabled": enabled,
+    }
+
+    # If not enabled, show as unknown (not configured to run)
+    if not enabled:
+        return ServiceStatus(
+            name="Orchestrator", status=Status.UNKNOWN, message="Disabled", details=base_details
+        )
+
+    # Check if process is running
+    try:
+        result = subprocess.run(["pgrep", "-f", "bin/orchestrator"], capture_output=True, text=True)
+        process_running = result.returncode == 0
+    except Exception:
+        process_running = False
+
+    base_details["running"] = process_running
+
+    # Check if Solana keypair exists
+    keypair_exists = os.path.exists(keypair_path)
+    base_details["keypair"] = keypair_exists
+
+    # Determine Solana network from RPC URL
+    if solana_rpc:
+        if "devnet" in solana_rpc:
+            base_details["network"] = "devnet"
+        elif "mainnet" in solana_rpc:
+            base_details["network"] = "mainnet"
+        else:
+            base_details["network"] = "custom"
+
+    if not process_running:
+        return ServiceStatus(
+            name="Orchestrator", status=Status.ERROR, message="Not running", details=base_details
+        )
+
+    if not keypair_exists:
+        return ServiceStatus(
+            name="Orchestrator", status=Status.WARN, message="No keypair", details=base_details
+        )
+
+    return ServiceStatus(
+        name="Orchestrator", status=Status.OK, message="Running", details=base_details
+    )
+
+
 # ============================================================================
 # Dashboard Rendering
 # ============================================================================
@@ -1495,9 +1570,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     bullet = f"{Colors.DIM}-{Colors.RESET} "
 
     # Service-specific details (4 bullets each)
-    if status.name == "Node":
-        if details.get("chain_id"):
-            lines.append(f"{bullet}{Colors.DIM}Chain:{Colors.RESET} {details['chain_id']}")
+    if status.name == "CometBFT":
         if details.get("height"):
             try:
                 h = int(details["height"])
@@ -1661,6 +1734,16 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("chains"):
             lines.append(f"{bullet}{Colors.DIM}Chains:{Colors.RESET} {details['chains']}")
 
+    elif status.name == "Orchestrator":
+        if details.get("network"):
+            network = details["network"]
+            net_color = Colors.BRIGHT_YELLOW if network == "devnet" else Colors.BRIGHT_GREEN
+            lines.append(f"{bullet}{Colors.DIM}Network:{Colors.RESET} {net_color}{network}{Colors.RESET}")
+        if details.get("keypair"):
+            lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET}")
+        elif details.get("enabled"):
+            lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_RED}Missing{Colors.RESET}")
+
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
         lines.append("")
@@ -1683,6 +1766,7 @@ def render_dashboard(refresh_secs: int):
         check_caddy(),
         check_endpoints(),
         check_hermes(),
+        check_orchestrator(),
     ]
 
     # Filter out unconfigured services for cleaner display
@@ -1691,7 +1775,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("Node", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints")
+        or s.name in ("CometBFT", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints")
     ]
 
     # Render header

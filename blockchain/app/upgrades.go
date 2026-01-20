@@ -607,11 +607,18 @@ func (app *App) RegisterUpgradeHandlers() {
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			changed := false
 
-			// Enable Solana bridge with 100 MIRAGE fee
+			// Enable Solana bridge with 500 MIRAGE fee
 			solanaEnabled := false
 			for _, chain := range params.BridgeChains {
 				if chain.ChainId == "solana" {
 					solanaEnabled = true
+					if chain.Fee != 500_000_000 {
+						oldFee := chain.Fee
+						chain.Fee = 500_000_000
+						changed = true
+						sdkCtx.Logger().Info("v1.9.0-bridge: updated Solana bridge fee to 500 MIRAGE",
+							"old_fee", oldFee, "new_fee", 500_000_000)
+					}
 					break
 				}
 			}
@@ -619,10 +626,10 @@ func (app *App) RegisterUpgradeHandlers() {
 				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
 					ChainId: "solana",
 					Enabled: true,
-					Fee:     100_000_000, // 100 MIRAGE
+					Fee:     500_000_000, // 500 MIRAGE
 				})
 				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 100 MIRAGE fee")
+				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
 			}
 
 			// Set attestation threshold: 66.67% (6667 basis points)
@@ -640,7 +647,40 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.9.0-bridge: params updated successfully")
 			}
 
+			// HACK: Advance Solana bridge sequence past any old Solana devnet state
+			// This prevents "AlreadyMinted" errors when Mirage chain is reset but Solana state persists
+			if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", 100); err != nil {
+				sdkCtx.Logger().Error("v1.9.0-bridge: failed to set bridge sequence", "err", err)
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.9.0-bridge: set Solana bridge sequence to 100 (skip old devnet state)")
+
 			sdkCtx.Logger().Info("Upgrade to v1.9.0-bridge complete - cross-chain bridge enabled")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.1-seq-fix: HACK to advance Solana sequence past stale devnet state
+	// Use this if v1.9.0-bridge already ran before the sequence fix was added
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.1-seq-fix",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.1-seq-fix...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Advance Solana bridge sequence past any old Solana devnet state
+			if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", 100); err != nil {
+				sdkCtx.Logger().Error("v1.9.1-seq-fix: failed to set bridge sequence", "err", err)
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.9.1-seq-fix: set Solana bridge sequence to 100")
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.1-seq-fix complete")
 			return toVM, nil
 		},
 	)
