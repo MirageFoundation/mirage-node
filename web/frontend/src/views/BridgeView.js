@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import styled, { keyframes, css } from 'styled-components';
 import { useLocation } from 'react-router-dom';
@@ -10,7 +10,7 @@ import Button from '../components/Button';
 import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
-import { ibcTransfer, bridgeBurn } from '../utils/tx';
+import { ibcTransfer, bridgeBurn, pollTxStatus } from '../utils/tx';
 
 // Convert a bech32 address from one prefix to another (e.g., mirage1... -> osmo1...)
 const convertBech32Prefix = (address, newPrefix) => {
@@ -113,11 +113,11 @@ const NetworkGrid = styled.div`
 `;
 
 const NetworkCard = styled.button`
-    background: ${({ theme, $selected, $color }) => 
-        $selected 
+    background: ${({ theme, $selected, $color }) =>
+        $selected
             ? `linear-gradient(135deg, ${$color}22 0%, ${$color}11 100%)`
             : (theme?.colors?.panel || '#23272C')};
-    border: 2px solid ${({ $selected, $color, theme }) => 
+    border: 2px solid ${({ $selected, $color, theme }) =>
         $selected ? $color : (theme?.colors?.border || '#444')};
     border-radius: 10px;
     padding: 0.85rem;
@@ -223,7 +223,7 @@ const InputWrapper = styled.div`
 const AmountInput = styled.input`
     width: 100%;
     padding: 0.65rem 5rem 0.65rem 0.85rem;
-    border: 1px solid ${({ theme, $error }) => 
+    border: 1px solid ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.border || '#444')};
     border-radius: 8px;
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
@@ -240,10 +240,10 @@ const AmountInput = styled.input`
     }
     
     &:focus {
-        border-color: ${({ theme, $error }) => 
-            $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
-        box-shadow: 0 0 0 3px ${({ $error }) => 
-            $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
+        border-color: ${({ theme, $error }) =>
+        $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
+        box-shadow: 0 0 0 3px ${({ $error }) =>
+        $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
     }
     
     /* Hide number spinners */
@@ -288,7 +288,7 @@ const MaxButton = styled.button`
 const AddressInput = styled.input`
     width: 100%;
     padding: 0.65rem 0.85rem;
-    border: 1px solid ${({ theme, $error }) => 
+    border: 1px solid ${({ theme, $error }) =>
         $error ? '#f56565' : (theme?.colors?.border || '#444')};
     border-radius: 8px;
     background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
@@ -304,10 +304,10 @@ const AddressInput = styled.input`
     }
     
     &:focus {
-        border-color: ${({ theme, $error }) => 
-            $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
-        box-shadow: 0 0 0 3px ${({ $error }) => 
-            $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
+        border-color: ${({ theme, $error }) =>
+        $error ? '#f56565' : (theme?.colors?.link || '#667eea')};
+        box-shadow: 0 0 0 3px ${({ $error }) =>
+        $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
     }
 `;
 
@@ -456,19 +456,79 @@ const StatusBanner = styled.div`
     gap: 0.4rem;
     padding: 0.75rem;
     margin-top: 0.75rem;
-    background: ${({ $success, $error }) => 
-        $success ? 'rgba(72, 187, 120, 0.1)' : 
-        $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
-    border: 1px solid ${({ $success, $error }) => 
-        $success ? 'rgba(72, 187, 120, 0.3)' : 
-        $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
+    background: ${({ $success, $error }) =>
+        $success ? 'rgba(72, 187, 120, 0.1)' :
+            $error ? 'rgba(239, 68, 68, 0.1)' : 'rgba(102, 126, 234, 0.1)'};
+    border: 1px solid ${({ $success, $error }) =>
+        $success ? 'rgba(72, 187, 120, 0.3)' :
+            $error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(102, 126, 234, 0.3)'};
     border-radius: 8px;
     font-size: 0.8rem;
-    color: ${({ $success, $error }) => 
-        $success ? '#48bb78' : 
-        $error ? '#ef4444' : '#667eea'};
+    color: ${({ $success, $error }) =>
+        $success ? '#48bb78' :
+            $error ? '#ef4444' : '#667eea'};
     font-weight: 500;
     animation: ${fadeIn} 0.3s ease-out;
+`;
+
+const StepsCard = styled.div`
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 10px;
+    padding: 0.85rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+`;
+
+const StepsList = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+`;
+
+const StepItem = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.8rem;
+`;
+
+const StepDot = styled.span`
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: ${({ $state }) => {
+        if ($state === 'complete') return '#48bb78';
+        if ($state === 'active') return '#667eea';
+        if ($state === 'error') return '#ef4444';
+        return '#555';
+    }};
+    box-shadow: ${({ $state }) => $state === 'active' ? '0 0 0 3px rgba(102, 126, 234, 0.2)' : 'none'};
+`;
+
+const StepText = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+`;
+
+const StepTitle = styled.span`
+    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    font-weight: 600;
+`;
+
+const StepMeta = styled.span`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.7rem;
+`;
+
+const TxHashRow = styled.div`
+    margin-top: 0.6rem;
+    font-size: 0.7rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    word-break: break-all;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
 
@@ -551,20 +611,30 @@ const ExplanationIcon = styled.span`
 export default function BridgeView({ state }) {
     const location = useLocation();
     const address = Storage.load('publicKey', '') || '';
-    
+
     // State
+    const [activeTab, setActiveTab] = useState('out');
     const [selectedNetwork, setSelectedNetwork] = useState(null);
     const [amount, setAmount] = useState('');
     const [destinationAddress, setDestinationAddress] = useState('');
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(0);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [submitStatus, setSubmitStatus] = useState(null); // 'success' | 'error' | null
+    const [submitStage, setSubmitStage] = useState('idle'); // idle | preparing | submitting | verifying | confirmed | error
+    const [submitError, setSubmitError] = useState('');
+    const [submitTxHash, setSubmitTxHash] = useState('');
+    const [verificationProgress, setVerificationProgress] = useState({ attempt: 0, maxAttempts: 0 });
+    const [errorStage, setErrorStage] = useState(null);
     const [errors, setErrors] = useState({});
+    const stepsRef = useRef(null);
     
+    // Step timing: track when each step started and current elapsed times
+    const [stepTimestamps, setStepTimestamps] = useState({});
+    const [stepElapsed, setStepElapsed] = useState({});
+
     // Bridge fee: flat 1 MIRAGE for all transfers (governance parameter, burned)
     const bridgeFee = BRIDGE_FEE;
-    
+
     // Derive the user's address on the destination chain (for Cosmos chains)
     const derivedAddress = useMemo(() => {
         if (!address || !selectedNetwork?.canDerive || !selectedNetwork?.addressPrefix) {
@@ -572,7 +642,7 @@ export default function BridgeView({ state }) {
         }
         return convertBech32Prefix(address, selectedNetwork.addressPrefix);
     }, [address, selectedNetwork]);
-    
+
     // The effective destination address (derived or manual)
     const effectiveDestination = useMemo(() => {
         if (selectedNetwork?.canDerive && !useDifferentAddress) {
@@ -580,7 +650,7 @@ export default function BridgeView({ state }) {
         }
         return destinationAddress;
     }, [selectedNetwork, useDifferentAddress, derivedAddress, destinationAddress]);
-    
+
     // Load user balance from cached config
     useEffect(() => {
         try {
@@ -588,8 +658,8 @@ export default function BridgeView({ state }) {
             if (cachedBalance) {
                 setBalance(Number(cachedBalance) || 0);
             }
-        } catch (_) {}
-        
+        } catch (_) { }
+
         // Also check configData for balance
         try {
             const configData = localStorage.getItem('configData');
@@ -599,9 +669,9 @@ export default function BridgeView({ state }) {
                     setBalance(Number(cached.balance) || 0);
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
     }, []);
-    
+
     // Validation
     const validateAmount = useCallback((value) => {
         if (!value || value === '') return null;
@@ -620,18 +690,18 @@ export default function BridgeView({ state }) {
         }
         return null;
     }, [selectedNetwork, balance, bridgeFee]);
-    
+
     const validateAddress = useCallback((value, isManualEntry = true) => {
         // If using derived address for Cosmos chains, no validation needed
         if (selectedNetwork?.canDerive && !isManualEntry) {
             return null;
         }
-        
+
         if (!value || value === '') return null;
         if (!selectedNetwork) return null;
-        
+
         const trimmed = value.trim();
-        
+
         if (selectedNetwork.id === 'osmosis') {
             if (!trimmed.startsWith('osmo1')) {
                 return 'Osmosis address must start with osmo1';
@@ -649,7 +719,7 @@ export default function BridgeView({ state }) {
                 return 'Invalid Osmosis address (bech32 checksum failed)';
             }
         }
-        
+
         if (selectedNetwork.id === 'solana') {
             // Basic Solana address validation (base58, 32-44 chars)
             if (trimmed.length < 32 || trimmed.length > 44) {
@@ -660,18 +730,83 @@ export default function BridgeView({ state }) {
                 return 'Invalid Solana address format';
             }
         }
-        
+
         return null;
     }, [selectedNetwork]);
-    
+
+    useEffect(() => {
+        if (submitStage === 'idle') return;
+        if (!stepsRef.current) return;
+        try {
+            stepsRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (_) { }
+    }, [submitStage]);
+
     // Handlers
+    const resetSubmitState = useCallback(() => {
+        setSubmitStage('idle');
+        setSubmitError('');
+        setSubmitTxHash('');
+        setVerificationProgress({ attempt: 0, maxAttempts: 0 });
+        setErrorStage(null);
+        setStepTimestamps({});
+        setStepElapsed({});
+    }, []);
+    
+    // Track step timing: record timestamp when stage changes
+    useEffect(() => {
+        if (submitStage === 'idle') return;
+        
+        // Record timestamp for this step if not already set
+        setStepTimestamps(prev => {
+            if (prev[submitStage]) return prev;
+            return { ...prev, [submitStage]: Date.now() };
+        });
+    }, [submitStage]);
+    
+    // Update elapsed times every 100ms while not idle
+    useEffect(() => {
+        if (submitStage === 'idle') return;
+        
+        const interval = setInterval(() => {
+            const now = Date.now();
+            setStepElapsed(prev => {
+                const newElapsed = { ...prev };
+                for (const [step, startTime] of Object.entries(stepTimestamps)) {
+                    newElapsed[step] = (now - startTime) / 1000;
+                }
+                return newElapsed;
+            });
+        }, 100);
+        
+        return () => clearInterval(interval);
+    }, [submitStage, stepTimestamps]);
+
+    const handleNewBridge = () => {
+        setAmount('');
+        setDestinationAddress('');
+        setUseDifferentAddress(false);
+        resetSubmitState();
+        setErrors(prev => ({ ...prev, submit: null }));
+        console.debug('[Bridge] Reset for new transaction');
+    };
+
+    const handleTabChange = (tab) => {
+        setActiveTab(tab);
+        resetSubmitState();
+        setErrors(prev => ({ ...prev, submit: null }));
+        console.debug('[Bridge] Tab changed:', tab);
+    };
+
     const handleNetworkSelect = (networkId) => {
         setSelectedNetwork(NETWORKS[networkId]);
         setDestinationAddress('');
         setUseDifferentAddress(false);
         setErrors({});
+        resetSubmitState();
+        console.debug('[Bridge] Selected network:', networkId);
     };
-    
+
     // Format number with thousands separators for display
     const formatAmountDisplay = useCallback((value) => {
         if (!value || value === '') return '';
@@ -683,10 +818,10 @@ export default function BridgeView({ state }) {
         parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
         return parts.join('.');
     }, []);
-    
+
     // Get raw amount (without commas) for calculations
     const rawAmount = amount.replace(/,/g, '');
-    
+
     const handleAmountChange = (e) => {
         // Strip commas from input to get raw value
         const rawValue = e.target.value.replace(/,/g, '');
@@ -696,9 +831,10 @@ export default function BridgeView({ state }) {
             setAmount(formatAmountDisplay(rawValue));
             const error = validateAmount(rawValue);
             setErrors(prev => ({ ...prev, amount: error }));
+            if (submitStage !== 'idle') resetSubmitState();
         }
     };
-    
+
     const handleMaxAmount = () => {
         if (!selectedNetwork) return;
         // Fee is subtracted from amount, so MAX is full balance
@@ -706,49 +842,63 @@ export default function BridgeView({ state }) {
         setAmount(formatAmountDisplay(maxAmount.toFixed(6)));
         setErrors(prev => ({ ...prev, amount: null }));
     };
-    
+
     const handleAddressChange = (e) => {
         const value = e.target.value;
         setDestinationAddress(value);
         const error = validateAddress(value);
         setErrors(prev => ({ ...prev, address: error }));
+        if (submitStage !== 'idle') resetSubmitState();
     };
-    
+
     const handleSubmit = async () => {
+        let stageAtError = 'preparing';
+        console.debug('[Bridge] Submit attempt', {
+            network: selectedNetwork?.id,
+            amount: rawAmount,
+            destination: effectiveDestination,
+        });
+
         // Validate all fields (use raw amount without commas)
         const amountError = validateAmount(rawAmount);
         // Only validate manual address entry
         const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
         const addressError = needsManualAddress ? validateAddress(destinationAddress, true) : null;
-        
+
         if (!selectedNetwork) {
             setErrors({ network: 'Please select a destination network' });
             return;
         }
-        
+
         if (amountError || addressError) {
             setErrors({ amount: amountError, address: addressError });
             return;
         }
-        
+
         if (!rawAmount) {
             setErrors({ amount: 'Amount is required' });
             return;
         }
-        
+
         // Check we have an effective destination
         if (!effectiveDestination) {
             setErrors({ address: 'Destination address is required' });
             return;
         }
-        
+
         setIsSubmitting(true);
-        setSubmitStatus(null);
-        
+        setErrors(prev => ({ ...prev, submit: null }));
+        setSubmitError('');
+        setSubmitTxHash('');
+        setVerificationProgress({ attempt: 0, maxAttempts: 0 });
+        setErrorStage(null);
+        setSubmitStage('preparing');
+        stageAtError = 'preparing';
+
         try {
             // Convert MIRAGE to umirage (1 MIRAGE = 1,000,000 umirage)
             const amountUmirage = Math.floor(parseFloat(rawAmount) * 1_000_000);
-            
+
             let result;
             if (selectedNetwork.isIbc) {
                 // IBC transfer to Cosmos chains
@@ -758,52 +908,130 @@ export default function BridgeView({ state }) {
                 // Attested burn for non-IBC chains (e.g., Solana)
                 result = await bridgeBurn(selectedNetwork.id, effectiveDestination, amountUmirage);
             }
-            
-            if (result.success) {
-                setSubmitStatus('success');
-                // Reset form after success
-                setTimeout(() => {
-                    setAmount('');
-                    setDestinationAddress('');
-                    setUseDifferentAddress(false);
-                    setSubmitStatus(null);
-                }, 5000);
-            } else {
-                setSubmitStatus('error');
-                setErrors({ submit: result.error || 'Bridge transaction failed' });
+
+            if (!result || !result.success) {
+                throw new Error(result?.error || 'Bridge transaction failed');
             }
+
+            const txHash = String(result.tx_hash || '').toLowerCase();
+            if (!txHash) {
+                throw new Error('Missing transaction hash');
+            }
+
+            setSubmitTxHash(txHash);
+            setSubmitStage('submitting');
+            stageAtError = 'submitting';
+            console.debug('[Bridge] Transaction submitted:', txHash);
+
+            // Allow UI to render the submitting state
+            await new Promise(r => setTimeout(r, 250));
+
+            setSubmitStage('verifying');
+            stageAtError = 'verifying';
+            const pollResult = await pollTxStatus(txHash, {
+                initialDelay: 6000,
+                interval: 3000,
+                maxAttempts: 10,
+                requireIndexed: false,
+                onProgress: ({ attempt, maxAttempts }) => {
+                    setVerificationProgress({ attempt, maxAttempts });
+                    console.debug('[Bridge] Verification attempt', attempt, 'of', maxAttempts);
+                },
+            });
+            if (!pollResult) throw new Error('Confirmation timeout');
+            if (!pollResult.success) {
+                throw new Error(pollResult.error_details?.message || 'Transaction rejected');
+            }
+
+            setSubmitStage('confirmed');
+            setErrors(prev => ({ ...prev, submit: null }));
+            console.debug('[Bridge] Transaction confirmed:', txHash);
+
+            // Keep final state visible until user starts a new bridge
         } catch (e) {
+            const msg = e?.message || 'An unexpected error occurred';
             console.error('Bridge submission error:', e);
-            setSubmitStatus('error');
-            setErrors({ submit: e?.message || 'An unexpected error occurred' });
+            setSubmitStage('error');
+            setSubmitError(msg);
+            setErrors({ submit: msg });
+            setErrorStage(stageAtError);
         } finally {
             setIsSubmitting(false);
         }
     };
-    
+
     // Calculate preview values
     // Fee is SUBTRACTED - user pays (amount), receives (amount - fee) on destination
     const parsedAmount = parseFloat(rawAmount) || 0;
     const receiveAmount = Math.max(0, parsedAmount - bridgeFee); // Fee is deducted from receive
-    
+
     // Determine if we can submit
     const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
     const hasValidDestination = needsManualAddress ? (destinationAddress && !errors.address) : !!derivedAddress;
-    const canSubmit = selectedNetwork && 
-        rawAmount && 
-        parseFloat(rawAmount) > 0 && 
-        hasValidDestination && 
-        !errors.amount && 
-        !isSubmitting;
-    
-    // Format balance for display
+    const canSubmit = selectedNetwork &&
+        rawAmount &&
+        parseFloat(rawAmount) > 0 &&
+        hasValidDestination &&
+        !errors.amount &&
+        !isSubmitting &&
+        submitStage !== 'confirmed';
+
+    const inputsDisabled = isSubmitting || submitStage === 'confirmed';
+
+    // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
-        const mirage = umirage / 1_000_000;
-        if (mirage >= 1000000) return (mirage / 1000000).toFixed(2) + 'M';
-        if (mirage >= 1000) return (mirage / 1000).toFixed(2) + 'K';
-        return mirage.toFixed(2);
+        const mirage = Math.round(umirage / 1_000_000);
+        return mirage.toLocaleString();
+    };
+
+    const stepOrder = ['preparing', 'submitting', 'verifying', 'confirmed'];
+    const currentStepIndex = submitStage === 'error'
+        ? stepOrder.indexOf(errorStage || 'preparing')
+        : stepOrder.indexOf(submitStage);
+
+    const getStepState = (step) => {
+        if (submitStage === 'idle') return 'pending';
+        const idx = stepOrder.indexOf(step);
+        if (submitStage === 'error') {
+            if (idx < currentStepIndex) return 'complete';
+            if (idx === currentStepIndex) return 'error';
+            return 'pending';
+        }
+        // When burn is confirmed, the Solana mint step is still pending
+        if (submitStage === 'confirmed') {
+            return step === 'confirmed' ? 'active' : 'complete';
+        }
+        if (idx < currentStepIndex) return 'complete';
+        if (idx === currentStepIndex) return 'active';
+        return 'pending';
     };
     
+    // Format elapsed time for a step (e.g., "1.2s")
+    // For completed steps, show how long they took (until next step started)
+    // For active/current step, show time since it started
+    const formatStepTime = (step) => {
+        const stepStart = stepTimestamps[step];
+        if (!stepStart) return '';
+        
+        const stepIdx = stepOrder.indexOf(step);
+        const state = getStepState(step);
+        
+        // For completed steps, show duration (time until next step)
+        if (state === 'complete' && stepIdx < stepOrder.length - 1) {
+            const nextStep = stepOrder[stepIdx + 1];
+            const nextStart = stepTimestamps[nextStep];
+            if (nextStart) {
+                const duration = (nextStart - stepStart) / 1000;
+                return ` (${duration.toFixed(1)}s)`;
+            }
+        }
+        
+        // For active step or last completed step, show elapsed from start
+        const elapsed = stepElapsed[step];
+        if (elapsed === undefined || elapsed === null) return '';
+        return ` (${elapsed.toFixed(1)}s)`;
+    };
+
     return (
         <ContentGrid>
             <Helmet>
@@ -816,246 +1044,317 @@ export default function BridgeView({ state }) {
                     <MobileHeader />
                     <TabbedContainer>
                         <TabsRow>
-                            <ClickableTab $active={true}>Bridge</ClickableTab>
+                            <ClickableTab
+                                type="button"
+                                role="tab"
+                                aria-selected={activeTab === 'out'}
+                                $active={activeTab === 'out'}
+                                onClick={() => handleTabChange('out')}
+                            >
+                                Bridge Out
+                            </ClickableTab>
+                            <ClickableTab
+                                type="button"
+                                role="tab"
+                                aria-selected={activeTab === 'in'}
+                                $active={activeTab === 'in'}
+                                onClick={() => handleTabChange('in')}
+                            >
+                                Bridge In
+                            </ClickableTab>
                         </TabsRow>
                         <ContainerBody>
-                            {!address ? (
-                                <InfoBanner>
-                                    <InfoIcon>ℹ️</InfoIcon>
-                                    <span>Sign in to bridge MIRAGE tokens to other networks.</span>
-                                </InfoBanner>
-                            ) : (
+                            {activeTab === 'out' && (
+                                !address ? (
+                                    <InfoBanner>
+                                        <InfoIcon>ℹ️</InfoIcon>
+                                        <span>Sign in to bridge MIRAGE tokens to other networks.</span>
+                                    </InfoBanner>
+                                ) : (
+                                    <BridgeContainer>
+                                        <BridgeLayout>
+                                            {/* Step 1: Network Selection */}
+                                            <SectionTitle>
+                                                <StepNumber>1</StepNumber>
+                                                Select Destination
+                                            </SectionTitle>
+                                            <NetworkGrid>
+                                                {Object.values(NETWORKS).map((network) => (
+                                                    <NetworkCard
+                                                        key={network.id}
+                                                        type="button"
+                                                        $selected={selectedNetwork?.id === network.id}
+                                                        $color={network.color}
+                                                        onClick={() => handleNetworkSelect(network.id)}
+                                                        disabled={!network.enabled || inputsDisabled}
+                                                    >
+                                                        <NetworkCardContent>
+                                                            <NetworkName>{network.name}</NetworkName>
+                                                            <NetworkMeta>
+                                                                <NetworkBadge $color={network.color}>
+                                                                    {network.estimatedTime}
+                                                                </NetworkBadge>
+                                                            </NetworkMeta>
+                                                        </NetworkCardContent>
+                                                        <NetworkIcon src={network.icon} alt={network.name} />
+                                                        {selectedNetwork?.id === network.id && (
+                                                            <SelectedIndicator $color={network.color}>
+                                                                ✓
+                                                            </SelectedIndicator>
+                                                        )}
+                                                    </NetworkCard>
+                                                ))}
+                                            </NetworkGrid>
+
+                                            {/* Step 2: Amount */}
+                                            <SectionTitle>
+                                                <StepNumber>2</StepNumber>
+                                                Enter Amount
+                                            </SectionTitle>
+                                            <InputSection>
+                                                <InputWrapper>
+                                                    <AmountInput
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        placeholder="0.00"
+                                                        value={amount}
+                                                        onChange={handleAmountChange}
+                                                        $error={!!errors.amount}
+                                                        disabled={!selectedNetwork || inputsDisabled}
+                                                    />
+                                                    <MaxButton
+                                                        type="button"
+                                                        onClick={handleMaxAmount}
+                                                        disabled={!selectedNetwork || inputsDisabled}
+                                                    >
+                                                        Max
+                                                    </MaxButton>
+                                                    <AmountSuffix>MIRAGE</AmountSuffix>
+                                                </InputWrapper>
+                                                <BalanceDisplay>
+                                                    <BalanceLabel>Available:</BalanceLabel>
+                                                    <BalanceValue>{formatBalance(balance)} MIRAGE</BalanceValue>
+                                                </BalanceDisplay>
+                                                {errors.amount && (
+                                                    <ErrorText>⚠ {errors.amount}</ErrorText>
+                                                )}
+                                            </InputSection>
+
+                                            {/* Step 3: Destination Address */}
+                                            <SectionTitle>
+                                                <StepNumber>3</StepNumber>
+                                                Destination Address
+                                                {selectedNetwork?.canDerive && (
+                                                    <HelpIconWrapper
+                                                        data-tooltip="Your Mirage key works on Cosmos chains. We auto-derive your address."
+                                                    >
+                                                        ?
+                                                    </HelpIconWrapper>
+                                                )}
+                                            </SectionTitle>
+                                            <InputSection>
+                                                {/* Cosmos chains: show derived address with option to change */}
+                                                {selectedNetwork?.canDerive ? (
+                                                    <>
+                                                        {!useDifferentAddress ? (
+                                                            <>
+                                                                <AddressExplanation>
+                                                                    <ExplanationIcon>💡</ExplanationIcon>
+                                                                    <span>
+                                                                        Your Mirage wallet key works on {selectedNetwork.name}.
+                                                                        Tokens will arrive at your {selectedNetwork.name} address below.
+                                                                    </span>
+                                                                </AddressExplanation>
+                                                                <InputLabel>Your {selectedNetwork.name} Address</InputLabel>
+                                                                <DerivedAddressBox>
+                                                                    <AddressText>{derivedAddress || '...'}</AddressText>
+                                                                </DerivedAddressBox>
+                                                                <DifferentAddressToggle
+                                                                    type="button"
+                                                                    onClick={() => setUseDifferentAddress(true)}
+                                                                    disabled={inputsDisabled}
+                                                                >
+                                                                    Send to a different address →
+                                                                </DifferentAddressToggle>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <InputLabel>
+                                                                    {selectedNetwork.name} Address
+                                                                </InputLabel>
+                                                                <AddressInput
+                                                                    type="text"
+                                                                    placeholder={`${selectedNetwork.addressPrefix}1...`}
+                                                                    value={destinationAddress}
+                                                                    onChange={handleAddressChange}
+                                                                    $error={!!errors.address}
+                                                                    disabled={inputsDisabled}
+                                                                />
+                                                                {errors.address && (
+                                                                    <ErrorText>⚠ {errors.address}</ErrorText>
+                                                                )}
+                                                                <DifferentAddressToggle
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setUseDifferentAddress(false);
+                                                                        setDestinationAddress('');
+                                                                        setErrors(prev => ({ ...prev, address: null }));
+                                                                    }}
+                                                                    disabled={inputsDisabled}
+                                                                >
+                                                                    ← Use my {selectedNetwork.name} address
+                                                                </DifferentAddressToggle>
+                                                            </>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    /* Non-Cosmos chains: require manual entry */
+                                                    <>
+                                                        <InputLabel>
+                                                            {selectedNetwork
+                                                                ? `${selectedNetwork.name} Address`
+                                                                : 'Recipient Address'}
+                                                        </InputLabel>
+                                                        <AddressInput
+                                                            type="text"
+                                                            placeholder={selectedNetwork?.id === 'solana'
+                                                                ? 'Enter your Solana wallet address'
+                                                                : 'Select a network first'}
+                                                            value={destinationAddress}
+                                                            onChange={handleAddressChange}
+                                                            $error={!!errors.address}
+                                                            disabled={!selectedNetwork || inputsDisabled}
+                                                        />
+                                                        {errors.address && (
+                                                            <ErrorText>⚠ {errors.address}</ErrorText>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </InputSection>
+
+                                            {/* Preview */}
+                                            {selectedNetwork && parsedAmount > 0 && (
+                                                <PreviewCard>
+                                                    <PreviewHeader>
+                                                        <PreviewTitle>Summary</PreviewTitle>
+                                                        <PreviewNetwork $color={selectedNetwork.color}>
+                                                            <img src={selectedNetwork.icon} alt="" style={{ width: '1.25rem', height: '1.25rem' }} /> {selectedNetwork.name}
+                                                        </PreviewNetwork>
+                                                    </PreviewHeader>
+                                                    <PreviewRow>
+                                                        <PreviewLabel>Send</PreviewLabel>
+                                                        <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
+                                                    </PreviewRow>
+                                                    <PreviewRow>
+                                                        <PreviewLabel data-tooltip="Flat bridge fee (burned, deflationary)">
+                                                            − Fee
+                                                        </PreviewLabel>
+                                                        <PreviewValue>−{bridgeFee} MIRAGE</PreviewValue>
+                                                    </PreviewRow>
+                                                    <Divider />
+                                                    <PreviewRow>
+                                                        <PreviewLabel>Receive on {selectedNetwork.name}</PreviewLabel>
+                                                        <PreviewValue $highlight>
+                                                            {formatBalance(receiveAmount * 1_000_000)} MIRAGE
+                                                        </PreviewValue>
+                                                    </PreviewRow>
+                                                </PreviewCard>
+                                            )}
+
+                                            {/* Warning */}
+                                            <WarningBanner>
+                                                <WarningIcon>⚠️</WarningIcon>
+                                                <span>
+                                                    Cross-chain transfers are irreversible. Double-check the destination
+                                                    address before proceeding.
+                                                </span>
+                                            </WarningBanner>
+
+                                            {/* Submit */}
+                                            <SubmitSection>
+                                                {submitStage !== 'idle' && (
+                                                    <StepsCard ref={stepsRef}>
+                                                        <StepsList>
+                                                            <StepItem>
+                                                                <StepDot $state={getStepState('preparing')} />
+                                                                <StepText>
+                                                                    <StepTitle>Preparing transaction{formatStepTime('preparing')}</StepTitle>
+                                                                    <StepMeta>Checking parameters and building the transfer.</StepMeta>
+                                                                </StepText>
+                                                            </StepItem>
+                                                            <StepItem>
+                                                                <StepDot $state={getStepState('submitting')} />
+                                                                <StepText>
+                                                                    <StepTitle>Submitting to the node{formatStepTime('submitting')}</StepTitle>
+                                                                    <StepMeta>Broadcasting your bridge transaction.</StepMeta>
+                                                                </StepText>
+                                                            </StepItem>
+                                                            <StepItem>
+                                                                <StepDot $state={getStepState('verifying')} />
+                                                                <StepText>
+                                                                    <StepTitle>Confirming token burn on Mirage{formatStepTime('verifying')}</StepTitle>
+                                                                    <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
+                                                                        {submitStage === 'confirmed'
+                                                                            ? `Success: ${submitTxHash || 'burn confirmed'}`
+                                                                            : (submitStage === 'error' && errorStage === 'verifying')
+                                                                                ? `Failure: ${submitError || 'burn failed'}`
+                                                                                : (submitTxHash || 'Waiting for confirmation.')}
+                                                                    </StepMeta>
+                                                                </StepText>
+                                                            </StepItem>
+                                                            <StepItem>
+                                                                <StepDot $state={getStepState('confirmed')} />
+                                                                <StepText>
+                                                                    <StepTitle>Confirming token mint on Solana</StepTitle>
+                                                                    <StepMeta>Pending (orchestrator confirmation not yet available).</StepMeta>
+                                                                </StepText>
+                                                            </StepItem>
+                                                        </StepsList>
+                                                        {submitStage === 'error' && submitError && (
+                                                            <StatusBanner $error style={{ marginTop: '0.75rem' }}>
+                                                                ✗ {submitError}
+                                                            </StatusBanner>
+                                                        )}
+                                                    </StepsCard>
+                                                )}
+                                                <Button
+                                                    variant="primary"
+                                                    fullWidth
+                                                    disabled={submitStage === 'confirmed' ? false : !canSubmit}
+                                                    loading={isSubmitting}
+                                                    onClick={submitStage === 'confirmed' ? handleNewBridge : handleSubmit}
+                                                    style={selectedNetwork ? {
+                                                        background: `linear-gradient(135deg, ${selectedNetwork.color} 0%, ${selectedNetwork.color}CC 100%)`,
+                                                    } : {}}
+                                                >
+                                                    {submitStage === 'confirmed'
+                                                        ? 'Clear'
+                                                        : isSubmitting
+                                                            ? 'Processing...'
+                                                            : !selectedNetwork
+                                                                ? 'Select Network'
+                                                                : !amount || parseFloat(amount) <= 0
+                                                                    ? 'Enter Amount'
+                                                                    : !hasValidDestination
+                                                                        ? 'Enter Address'
+                                                                        : `Bridge to ${selectedNetwork.name}`
+                                                    }
+                                                </Button>
+                                            </SubmitSection>
+                                        </BridgeLayout>
+                                    </BridgeContainer>
+                                )
+                            )}
+                            {activeTab === 'in' && (
                                 <BridgeContainer>
                                     <BridgeLayout>
-                                        {/* Step 1: Network Selection */}
-                                        <SectionTitle>
-                                            <StepNumber>1</StepNumber>
-                                            Select Destination
-                                        </SectionTitle>
-                                        <NetworkGrid>
-                                            {Object.values(NETWORKS).map((network) => (
-                                                <NetworkCard
-                                                    key={network.id}
-                                                    type="button"
-                                                    $selected={selectedNetwork?.id === network.id}
-                                                    $color={network.color}
-                                                    onClick={() => handleNetworkSelect(network.id)}
-                                                    disabled={!network.enabled}
-                                                >
-                                                    <NetworkCardContent>
-                                                        <NetworkName>{network.name}</NetworkName>
-                                                        <NetworkMeta>
-                                                            <NetworkBadge $color={network.color}>
-                                                                {network.estimatedTime}
-                                                            </NetworkBadge>
-                                                        </NetworkMeta>
-                                                    </NetworkCardContent>
-                                                    <NetworkIcon src={network.icon} alt={network.name} />
-                                                    {selectedNetwork?.id === network.id && (
-                                                        <SelectedIndicator $color={network.color}>
-                                                            ✓
-                                                        </SelectedIndicator>
-                                                    )}
-                                                </NetworkCard>
-                                            ))}
-                                        </NetworkGrid>
-                                        
-                                        {/* Step 2: Amount */}
-                                        <SectionTitle>
-                                            <StepNumber>2</StepNumber>
-                                            Enter Amount
-                                        </SectionTitle>
-                                        <InputSection>
-                                            <InputWrapper>
-                                                <AmountInput
-                                                    type="text"
-                                                    inputMode="decimal"
-                                                    placeholder="0.00"
-                                                    value={amount}
-                                                    onChange={handleAmountChange}
-                                                    $error={!!errors.amount}
-                                                    disabled={!selectedNetwork}
-                                                />
-                                                <MaxButton 
-                                                    type="button"
-                                                    onClick={handleMaxAmount}
-                                                    disabled={!selectedNetwork}
-                                                >
-                                                    Max
-                                                </MaxButton>
-                                                <AmountSuffix>MIRAGE</AmountSuffix>
-                                            </InputWrapper>
-                                            <BalanceDisplay>
-                                                <BalanceLabel>Available:</BalanceLabel>
-                                                <BalanceValue>{formatBalance(balance)} MIRAGE</BalanceValue>
-                                            </BalanceDisplay>
-                                            {errors.amount && (
-                                                <ErrorText>⚠ {errors.amount}</ErrorText>
-                                            )}
-                                        </InputSection>
-                                        
-                                        {/* Step 3: Destination Address */}
-                                        <SectionTitle>
-                                            <StepNumber>3</StepNumber>
-                                            Destination Address
-                                            {selectedNetwork?.canDerive && (
-                                                <HelpIconWrapper 
-                                                    data-tooltip="Your Mirage key works on Cosmos chains. We auto-derive your address."
-                                                >
-                                                    ?
-                                                </HelpIconWrapper>
-                                            )}
-                                        </SectionTitle>
-                                        <InputSection>
-                                            {/* Cosmos chains: show derived address with option to change */}
-                                            {selectedNetwork?.canDerive ? (
-                                                <>
-                                                    {!useDifferentAddress ? (
-                                                        <>
-                                                            <AddressExplanation>
-                                                                <ExplanationIcon>💡</ExplanationIcon>
-                                                                <span>
-                                                                    Your Mirage wallet key works on {selectedNetwork.name}. 
-                                                                    Tokens will arrive at your {selectedNetwork.name} address below.
-                                                                </span>
-                                                            </AddressExplanation>
-                                                            <InputLabel>Your {selectedNetwork.name} Address</InputLabel>
-                                                            <DerivedAddressBox>
-                                                                <AddressText>{derivedAddress || '...'}</AddressText>
-                                                            </DerivedAddressBox>
-                                                            <DifferentAddressToggle 
-                                                                type="button"
-                                                                onClick={() => setUseDifferentAddress(true)}
-                                                            >
-                                                                Send to a different address →
-                                                            </DifferentAddressToggle>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <InputLabel>
-                                                                {selectedNetwork.name} Address
-                                                            </InputLabel>
-                                                            <AddressInput
-                                                                type="text"
-                                                                placeholder={`${selectedNetwork.addressPrefix}1...`}
-                                                                value={destinationAddress}
-                                                                onChange={handleAddressChange}
-                                                                $error={!!errors.address}
-                                                            />
-                                                            {errors.address && (
-                                                                <ErrorText>⚠ {errors.address}</ErrorText>
-                                                            )}
-                                                            <DifferentAddressToggle 
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setUseDifferentAddress(false);
-                                                                    setDestinationAddress('');
-                                                                    setErrors(prev => ({ ...prev, address: null }));
-                                                                }}
-                                                            >
-                                                                ← Use my {selectedNetwork.name} address
-                                                            </DifferentAddressToggle>
-                                                        </>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                /* Non-Cosmos chains: require manual entry */
-                                                <>
-                                                    <InputLabel>
-                                                        {selectedNetwork 
-                                                            ? `${selectedNetwork.name} Address`
-                                                            : 'Recipient Address'}
-                                                    </InputLabel>
-                                                    <AddressInput
-                                                        type="text"
-                                                        placeholder={selectedNetwork?.id === 'solana'
-                                                            ? 'Enter your Solana wallet address'
-                                                            : 'Select a network first'}
-                                                        value={destinationAddress}
-                                                        onChange={handleAddressChange}
-                                                        $error={!!errors.address}
-                                                        disabled={!selectedNetwork}
-                                                    />
-                                                    {errors.address && (
-                                                        <ErrorText>⚠ {errors.address}</ErrorText>
-                                                    )}
-                                                </>
-                                            )}
-                                        </InputSection>
-                                        
-                                        {/* Preview */}
-                                        {selectedNetwork && parsedAmount > 0 && (
-                                            <PreviewCard>
-                                                <PreviewHeader>
-                                                    <PreviewTitle>Summary</PreviewTitle>
-                                                    <PreviewNetwork $color={selectedNetwork.color}>
-                                                        <img src={selectedNetwork.icon} alt="" style={{ width: '1.25rem', height: '1.25rem' }} /> {selectedNetwork.name}
-                                                    </PreviewNetwork>
-                                                </PreviewHeader>
-                                                <PreviewRow>
-                                                    <PreviewLabel>Send</PreviewLabel>
-                                                    <PreviewValue>{formatBalance(parsedAmount * 1_000_000)} MIRAGE</PreviewValue>
-                                                </PreviewRow>
-                                                <PreviewRow>
-                                                    <PreviewLabel data-tooltip="Flat bridge fee (burned, deflationary)">
-                                                        − Fee
-                                                    </PreviewLabel>
-                                                    <PreviewValue>−{bridgeFee} MIRAGE</PreviewValue>
-                                                </PreviewRow>
-                                                <Divider />
-                                                <PreviewRow>
-                                                    <PreviewLabel>Receive on {selectedNetwork.name}</PreviewLabel>
-                                                    <PreviewValue $highlight>
-                                                        {formatBalance(receiveAmount * 1_000_000)} MIRAGE
-                                                    </PreviewValue>
-                                                </PreviewRow>
-                                            </PreviewCard>
-                                        )}
-                                        
-                                        {/* Warning */}
-                                        <WarningBanner>
-                                            <WarningIcon>⚠️</WarningIcon>
+                                        <InfoBanner>
+                                            <InfoIcon>ℹ️</InfoIcon>
                                             <span>
-                                                Cross-chain transfers are irreversible. Double-check the destination 
-                                                address before proceeding.
+                                                Bridge In will let you redeem MIRAGE from other chains.
+                                                This flow is not available yet.
                                             </span>
-                                        </WarningBanner>
-                                        
-                                        {/* Submit */}
-                                        <SubmitSection>
-                                            <Button
-                                                variant="primary"
-                                                fullWidth
-                                                disabled={!canSubmit}
-                                                loading={isSubmitting}
-                                                onClick={handleSubmit}
-                                                style={selectedNetwork ? {
-                                                    background: `linear-gradient(135deg, ${selectedNetwork.color} 0%, ${selectedNetwork.color}CC 100%)`,
-                                                } : {}}
-                                            >
-                                                {isSubmitting 
-                                                    ? 'Processing...'
-                                                    : !selectedNetwork 
-                                                        ? 'Select Network'
-                                                        : !amount || parseFloat(amount) <= 0
-                                                            ? 'Enter Amount'
-                                                            : !hasValidDestination
-                                                                ? 'Enter Address'
-                                                                : `Bridge to ${selectedNetwork.name}`
-                                                }
-                                            </Button>
-                                            
-                                            {submitStatus === 'success' && (
-                                                <StatusBanner $success>
-                                                    ✓ Bridge transaction submitted successfully!
-                                                </StatusBanner>
-                                            )}
-                                            {submitStatus === 'error' && errors.submit && (
-                                                <StatusBanner $error>
-                                                    ✗ {errors.submit}
-                                                </StatusBanner>
-                                            )}
-                                        </SubmitSection>
+                                        </InfoBanner>
                                     </BridgeLayout>
                                 </BridgeContainer>
                             )}

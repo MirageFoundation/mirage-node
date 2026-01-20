@@ -200,6 +200,7 @@ export async function pollTxStatus(txHash, options = {}) {
         interval = 2000,
         maxAttempts = 5,
         timeoutMs = 5000,
+        requireIndexed = true,
     } = options;
 
     const Api = (await import('../lib/api')).default;
@@ -235,10 +236,10 @@ export async function pollTxStatus(txHash, options = {}) {
                         error_details: res.error_details,
                     };
                 }
-                if (res.indexed) {
+                if (res.indexed || !requireIndexed) {
                     return {
                         success: true,
-                        indexed: true,
+                        indexed: !!res.indexed,
                         tx_type: res.tx_type,
                         details: res.details,
                     };
