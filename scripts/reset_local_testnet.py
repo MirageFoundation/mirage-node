@@ -780,6 +780,17 @@ def transform_to_single_validator(
     bank["supply"] = supply_list
     app_state["bank"] = bank
 
+    # Add validator account to auth (required for signing transactions)
+    auth_accounts.append(
+        {
+            "@type": "/cosmos.auth.v1beta1.BaseAccount",
+            "address": val_addr,
+            "pub_key": None,
+            "account_number": str(len(auth_accounts)),
+            "sequence": "0",
+        }
+    )
+    # Add faucet account to auth
     auth_accounts.append(
         {
             "@type": "/cosmos.auth.v1beta1.BaseAccount",
