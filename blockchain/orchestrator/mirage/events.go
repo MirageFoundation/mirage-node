@@ -48,7 +48,7 @@ func (c *Client) WatchBridgeBurns(ctx context.Context, out chan<- chains.MirageB
 			for _, burn := range burns {
 				select {
 				case out <- burn:
-					c.logger.Printf("DEBUG bridge burn received burn_id=%s dest_chain=%s amount=%d", burn.BurnID, burn.DestinationChain, burn.Amount)
+					c.logger.Printf("DEBUG bridge burn received burn_id=%s dest_chain=%s amount=%d fee=%d net=%d", burn.BurnID, burn.DestinationChain, burn.Amount, burn.BridgeFee, burn.Amount-burn.BridgeFee)
 				case <-ctx.Done():
 					return ctx.Err()
 				}
@@ -77,17 +77,22 @@ func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent
 	destChains := events["bridge_burn.destination_chain"]
 	destAddrs := events["bridge_burn.destination_address"]
 	amounts := events["bridge_burn.amount"]
+	bridgeFees := events["bridge_burn.bridge_fee"]
 	owners := events["bridge_burn.owner"]
 	sequences := events["bridge_burn.sequence"]
 
-	if len(destChains) != len(burnIDs) || len(destAddrs) != len(burnIDs) || len(amounts) != len(burnIDs) || len(owners) != len(burnIDs) || len(sequences) != len(burnIDs) {
-		return nil, fmt.Errorf("bridge burn event attribute mismatch: burn_ids=%d chains=%d addresses=%d amounts=%d owners=%d sequences=%d",
-			len(burnIDs), len(destChains), len(destAddrs), len(amounts), len(owners), len(sequences))
+	if len(destChains) != len(burnIDs) || len(destAddrs) != len(burnIDs) || len(amounts) != len(burnIDs) || len(owners) != len(burnIDs) || len(sequences) != len(burnIDs) || len(bridgeFees) != len(burnIDs) {
+		return nil, fmt.Errorf("bridge burn event attribute mismatch: burn_ids=%d chains=%d addresses=%d amounts=%d fees=%d owners=%d sequences=%d",
+			len(burnIDs), len(destChains), len(destAddrs), len(amounts), len(bridgeFees), len(owners), len(sequences))
 	}
 
 	burns := make([]chains.MirageBurnEvent, 0, len(burnIDs))
 	for i, burnID := range burnIDs {
 		amount, err := parseUint64(amounts[i], "bridge_burn.amount")
+		if err != nil {
+			return nil, err
+		}
+		bridgeFee, err := parseUint64(bridgeFees[i], "bridge_burn.bridge_fee")
 		if err != nil {
 			return nil, err
 		}
@@ -100,6 +105,7 @@ func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent
 			DestinationChain:   strings.TrimSpace(destChains[i]),
 			DestinationAddress: strings.TrimSpace(destAddrs[i]),
 			Amount:             amount,
+			BridgeFee:          bridgeFee,
 			Owner:              strings.TrimSpace(owners[i]),
 			Sequence:           sequence,
 		})
