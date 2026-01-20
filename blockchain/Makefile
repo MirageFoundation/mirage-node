@@ -44,7 +44,12 @@ bench:
 
 test: govet govulncheck test-unit
 
-.PHONY: test test-unit test-race test-cover bench
+# Fast test for CI/deploy - no race detector, shorter timeout
+test-fast:
+	@echo "--> Running tests..."
+	@go test -mod=readonly -timeout 5m ./...
+
+.PHONY: test test-unit test-race test-cover test-fast bench
 
 #################
 ###  Install  ###
@@ -66,7 +71,7 @@ build-orchestrator:
 	@mkdir -p ./bin
 	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/orchestrator ./cmd/orchestrator
 
-build-all: build build-orchestrator
+build-all: test-fast build build-orchestrator
 
 # Build a specific version for upgrades
 build-version:

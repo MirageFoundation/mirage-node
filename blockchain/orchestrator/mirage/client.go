@@ -13,9 +13,10 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	"github.com/cosmos/cosmos-sdk/crypto/keyring"
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/auth/tx"
 	authtxconfig "github.com/cosmos/cosmos-sdk/x/auth/tx/config"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
-	"github.com/cosmos/cosmos-sdk/x/auth/tx"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -101,6 +102,13 @@ func (c *Client) ClientContext() client.Context {
 
 func (c *Client) FromAddress() string {
 	return c.fromAddress
+}
+
+// ValoperAddress returns the validator operator address derived from the account address.
+// Used for logging/display purposes only - the module handles acc→valoper conversion.
+func (c *Client) ValoperAddress() string {
+	addr := c.ClientContext().GetFromAddress()
+	return sdk.ValAddress(addr).String()
 }
 
 func buildClientContext() (client.Context, codec.Codec, error) {

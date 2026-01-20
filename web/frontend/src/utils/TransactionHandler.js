@@ -238,9 +238,14 @@ class TransactionHandler {
                                 const exactKey = String(target).trim();
                                 if (this.getPost(exactKey)) postKey = exactKey;
                             }
-                            // Update points and direction from server
+                            // Update points, direction, and user_weight from server
                             const serverDir = vote > 0 ? 1 : (vote < 0 ? -1 : 0);
-                            this.updatePost(postKey, { points: serverPoints, direction: serverDir });
+                            const updateData = { points: serverPoints, direction: serverDir };
+                            // Include user_weight so VoteSection formula calculates correctly
+                            if (typeof weight === 'number') {
+                                updateData.user_weight = weight;
+                            }
+                            this.updatePost(postKey, updateData);
                         }
                         this._notifyVoteListeners();
                     }

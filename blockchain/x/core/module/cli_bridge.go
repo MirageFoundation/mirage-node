@@ -172,14 +172,8 @@ func GetCmdBridgeMinted() *cobra.Command {
 				return err
 			}
 
-			fromAddr := clientCtx.GetFromAddress()
-			valoper, err := convertAccToValoper(fromAddr.String())
-			if err != nil {
-				return fmt.Errorf("failed to convert to validator address: %w", err)
-			}
-
 			msg := &types.MsgBridgeMinted{
-				Authority:        valoper,
+				Authority:        clientCtx.GetFromAddress().String(),
 				BurnId:           args[0],
 				DestinationChain: args[1],
 				DestinationTx:    args[2],
@@ -258,15 +252,8 @@ Example:
 				return fmt.Errorf("invalid amount: %w", err)
 			}
 
-			// The signer should be a validator operator address
-			fromAddr := clientCtx.GetFromAddress()
-			valoper, err := convertAccToValoper(fromAddr.String())
-			if err != nil {
-				return fmt.Errorf("failed to convert to validator address: %w", err)
-			}
-
 			msg := &types.MsgBridgeAttest{
-				Validator:       valoper,
+				Validator:       clientCtx.GetFromAddress().String(),
 				SourceChain:     sourceChain,
 				BurnId:          burnID,
 				MirageRecipient: mirageRecipient,
@@ -281,16 +268,3 @@ Example:
 	return cmd
 }
 
-// convertAccToValoper converts a bech32 account address to a validator operator address.
-// This is needed because validators sign with their operator key.
-func convertAccToValoper(accAddr string) (string, error) {
-	// For Mirage, the prefix conversion is: mirage -> miragevaloper
-	// The SDK handles this conversion automatically when we use the same bytes
-	// but with different prefix
-	if len(accAddr) < 7 {
-		return "", fmt.Errorf("invalid address")
-	}
-	// Simple prefix replacement for mirage chain
-	// In production, this should use SDK's address conversion
-	return "miragevaloper" + accAddr[6:], nil
-}

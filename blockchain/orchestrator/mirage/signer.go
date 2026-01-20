@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	sdkmath "cosmossdk.io/math"
+	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/tx"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	txtypes "github.com/cosmos/cosmos-sdk/types/tx"
@@ -19,17 +21,23 @@ import (
 // Must be long enough to allow tx propagation and inclusion.
 const unorderedTxTimeout = 10 * time.Minute
 
+// gasBufferMultiplier is the safety margin applied to simulated gas.
+const gasBufferMultiplier = 1.3
+
+// simulationGasLimit is a high gas limit used only for simulation.
+const simulationGasLimit = 1_000_000
+
 func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBurnEvent) error {
 	burnID := strings.ToLower(strings.TrimSpace(burn.BurnID))
 	msg := &coretypes.MsgBridgeAttest{
-		Validator:       c.valoperFromAcc(),
+		Validator:       c.FromAddress(),
 		SourceChain:     burn.SourceChain,
 		BurnId:          burnID,
 		MirageRecipient: burn.MirageRecipient,
 		Amount:          burn.Amount,
 	}
 
-	txBytes, err := c.buildTxBytes(ctx, msg)
+	txBytes, err := c.buildTxBytesWithSimulation(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -55,13 +63,13 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string) error {
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
 	msg := &coretypes.MsgBridgeMinted{
-		Authority:        c.valoperFromAcc(),
+		Authority:        c.FromAddress(),
 		BurnId:           burnID,
 		DestinationChain: strings.TrimSpace(destChain),
 		DestinationTx:    strings.TrimSpace(destTx),
 	}
 
-	txBytes, err := c.buildTxBytes(ctx, msg)
+	txBytes, err := c.buildTxBytesWithSimulation(ctx, msg)
 	if err != nil {
 		return err
 	}
@@ -84,7 +92,8 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 	return nil
 }
 
-func (c *Client) buildTxBytes(ctx context.Context, msg sdk.Msg) ([]byte, error) {
+// buildTxBytesWithSimulation builds tx bytes using simulation to determine gas.
+func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([]byte, error) {
 	clientCtx := c.ClientContext()
 	fromAddr := clientCtx.GetFromAddress()
 	accNum, accSeq, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
@@ -92,24 +101,53 @@ func (c *Client) buildTxBytes(ctx context.Context, msg sdk.Msg) ([]byte, error) 
 		return nil, fmt.Errorf("failed to query account info: %w", err)
 	}
 
-	// Use unordered transaction with timeout timestamp per cursor.md rules
 	timeout := time.Now().Add(unorderedTxTimeout)
 
-	// Build fee string like "1000umirage"
-	feeStr := fmt.Sprintf("%d%s", c.cfg.Mirage.FeeAmount, c.cfg.Mirage.FeeDenom)
-	feeCoins, err := sdk.ParseCoinsNormalized(feeStr)
+	// Build tx for simulation with high gas limit
+	simTxBytes, err := c.buildTxBytesInternal(clientCtx, msg, accNum, accSeq, timeout, simulationGasLimit, sdk.NewCoins())
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse fee coins: %w", err)
+		return nil, fmt.Errorf("failed to build simulation tx: %w", err)
 	}
 
+	// Simulate to get gas used
+	txClient := txtypes.NewServiceClient(c.grpcConn)
+	simResp, err := txClient.Simulate(ctx, &txtypes.SimulateRequest{TxBytes: simTxBytes})
+	if err != nil {
+		return nil, fmt.Errorf("simulation failed: %w", err)
+	}
+	if simResp.GasInfo == nil {
+		return nil, fmt.Errorf("simulation returned no gas info")
+	}
+
+	gasUsed := simResp.GasInfo.GasUsed
+	gasLimit := uint64(float64(gasUsed) * gasBufferMultiplier)
+	c.logger.Printf("DEBUG simulation gas_used=%d gas_limit=%d", gasUsed, gasLimit)
+
+	// Calculate fee: gas_limit * min_gas_price
+	// min_gas_price is 5000umirage per cursor.md
+	minGasPrice := sdkmath.NewInt(5000)
+	feeAmount := minGasPrice.MulRaw(int64(gasLimit))
+	feeCoins := sdk.NewCoins(sdk.NewCoin(c.cfg.Mirage.FeeDenom, feeAmount))
+
+	// Build final tx with correct gas and fee
+	return c.buildTxBytesInternal(clientCtx, msg, accNum, accSeq, timeout, gasLimit, feeCoins)
+}
+
+func (c *Client) buildTxBytesInternal(
+	clientCtx client.Context,
+	msg sdk.Msg,
+	accNum, accSeq uint64,
+	timeout time.Time,
+	gasLimit uint64,
+	feeCoins sdk.Coins,
+) ([]byte, error) {
 	txf := tx.Factory{}.
 		WithTxConfig(clientCtx.TxConfig).
 		WithChainID(c.cfg.Mirage.ChainID).
 		WithKeybase(c.keyring).
 		WithAccountNumber(accNum).
 		WithSequence(accSeq).
-		WithGas(c.cfg.Mirage.GasLimit).
-		WithFees(feeStr).
+		WithGas(gasLimit).
 		WithUnordered(true).
 		WithTimeoutTimestamp(timeout)
 
@@ -117,26 +155,15 @@ func (c *Client) buildTxBytes(ctx context.Context, msg sdk.Msg) ([]byte, error) 
 	if err := txBuilder.SetMsgs(msg); err != nil {
 		return nil, fmt.Errorf("failed to set tx messages: %w", err)
 	}
-	txBuilder.SetGasLimit(c.cfg.Mirage.GasLimit)
+	txBuilder.SetGasLimit(gasLimit)
 	txBuilder.SetFeeAmount(feeCoins)
 	txBuilder.SetUnordered(true)
 	txBuilder.SetTimeoutTimestamp(timeout)
 
-	if err := tx.Sign(ctx, txf, c.cfg.Mirage.KeyName, txBuilder, true); err != nil {
+	if err := tx.Sign(context.Background(), txf, c.cfg.Mirage.KeyName, txBuilder, true); err != nil {
 		return nil, err
 	}
 	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
-}
-
-func (c *Client) valoperFromAcc() string {
-	return c.ValoperAddress()
-}
-
-// ValoperAddress returns the validator operator address for this client's key.
-func (c *Client) ValoperAddress() string {
-	addr := c.ClientContext().GetFromAddress()
-	valAddr := sdk.ValAddress(addr)
-	return valAddr.String()
 }
 
 func parseUint64(raw string, field string) (uint64, error) {
@@ -150,4 +177,3 @@ func parseUint64(raw string, field string) (uint64, error) {
 	}
 	return value, nil
 }
-

@@ -2811,21 +2811,28 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	params := am.k.GetParams(sdkCtx)
 
 	// Validate signer is a bonded validator
-	validator := strings.TrimSpace(req.GetValidator())
-	if validator == "" {
+	signer := strings.TrimSpace(req.GetValidator())
+	if signer == "" {
 		return nil, fmt.Errorf("validator cannot be empty")
 	}
 
-	bonded, err := am.k.IsValidatorBonded(sdkCtx, validator)
+	signerAcc, err := sdk.AccAddressFromBech32(signer)
+	if err != nil {
+		return nil, fmt.Errorf("invalid validator address: %w", err)
+	}
+	valoper := sdk.ValAddress(signerAcc).String()
+	sdkCtx.Logger().Debug("BridgeAttest signer resolved", "signer", signer, "valoper", valoper)
+
+	bonded, err := am.k.IsValidatorBonded(sdkCtx, valoper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check validator status: %w", err)
 	}
 	if !bonded {
-		return nil, fmt.Errorf("validator %s is not bonded", validator)
+		return nil, fmt.Errorf("validator %s is not bonded", valoper)
 	}
 
 	// Get validator's voting power
-	valPower, err := am.k.GetValidatorPower(sdkCtx, validator)
+	valPower, err := am.k.GetValidatorPower(sdkCtx, valoper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get validator power: %w", err)
 	}
@@ -2885,7 +2892,7 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	}
 
 	// Check if validator already attested
-	if attestation.HasAttested(validator) {
+	if attestation.HasAttested(valoper) {
 		totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
 		return &types.MsgBridgeAttestResponse{
 			Minted:        attestation.Minted,
@@ -2895,7 +2902,7 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	}
 
 	// Add attestation
-	attestation.AddAttestation(validator, valPower)
+	attestation.AddAttestation(valoper, valPower)
 
 	// Check if threshold is met
 	totalPower, err := am.k.GetTotalBondedValidatorPower(sdkCtx)
@@ -2949,7 +2956,7 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	sdkCtx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			"bridge_attest",
-			sdk.NewAttribute("validator", validator),
+			sdk.NewAttribute("validator", valoper),
 			sdk.NewAttribute("source_chain", sourceChain),
 			sdk.NewAttribute("burn_id", burnID),
 			sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
@@ -2960,7 +2967,8 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 	)
 
 	sdkCtx.Logger().Info("BridgeAttest",
-		"validator", validator,
+		"validator", valoper,
+		"signer", signer,
 		"source_chain", sourceChain,
 		"burn_id", burnID,
 		"power", valPower,
@@ -2985,12 +2993,19 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 		return nil, fmt.Errorf("authority cannot be empty")
 	}
 
-	bonded, err := am.k.IsValidatorBonded(sdkCtx, authority)
+	authorityAcc, err := sdk.AccAddressFromBech32(authority)
+	if err != nil {
+		return nil, fmt.Errorf("invalid authority address: %w", err)
+	}
+	valoper := sdk.ValAddress(authorityAcc).String()
+	sdkCtx.Logger().Debug("BridgeMinted signer resolved", "signer", authority, "valoper", valoper)
+
+	bonded, err := am.k.IsValidatorBonded(sdkCtx, valoper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check validator status: %w", err)
 	}
 	if !bonded {
-		return nil, fmt.Errorf("validator %s is not bonded", authority)
+		return nil, fmt.Errorf("validator %s is not bonded", valoper)
 	}
 
 	burnID := strings.ToLower(strings.TrimSpace(req.GetBurnId()))
@@ -3061,6 +3076,7 @@ func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeMinted
 		"destination_chain", destChain,
 		"destination_tx", destTx,
 		"authority", authority,
+		"validator", valoper,
 	)
 
 	return &types.MsgBridgeMintedResponse{}, nil
