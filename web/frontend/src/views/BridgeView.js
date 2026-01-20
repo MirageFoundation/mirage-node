@@ -795,8 +795,8 @@ export default function BridgeView({ state }) {
         if (!submitTxHash) return;
 
         let cancelled = false;
-        const maxAttempts = 120;
-        const intervalMs = 5000;
+        const maxAttempts = 15;  // 30 second timeout (15 * 2s)
+        const intervalMs = 2000;
 
         setMintStatus({
             state: 'pending',
@@ -1000,9 +1000,9 @@ export default function BridgeView({ state }) {
             setSubmitStage('verifying');
             stageAtError = 'verifying';
             const pollResult = await pollTxStatus(txHash, {
-                initialDelay: 6000,
-                interval: 3000,
-                maxAttempts: 10,
+                initialDelay: 4000,  // 30 second total timeout
+                interval: 2000,
+                maxAttempts: 13,
                 requireIndexed: false,
                 onProgress: ({ attempt, maxAttempts }) => {
                     setVerificationProgress({ attempt, maxAttempts });
@@ -1075,7 +1075,9 @@ export default function BridgeView({ state }) {
                 if (!isSolanaBridge) {
                     return 'complete';
                 }
-                return mintStatus.state === 'minted' ? 'complete' : 'active';
+                if (mintStatus.state === 'minted') return 'complete';
+                if (mintStatus.state === 'error' || mintStatus.state === 'timeout') return 'error';
+                return 'active';
             }
             return 'complete';
         }
@@ -1384,7 +1386,7 @@ export default function BridgeView({ state }) {
                                                                 <StepDot $state={getStepState('confirmed')} />
                                                                 <StepText>
                                                                     <StepTitle>
-                                                                        {isSolanaBridge ? 'Confirming token mint on Solana' : 'Bridge complete'}
+                                                                        {isSolanaBridge ? `Confirming token mint on Solana${mintStatus.state === 'pending' ? formatStepTime('confirmed') : ''}` : 'Bridge complete'}
                                                                     </StepTitle>
                                                                     <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                                                         {isSolanaBridge ? (

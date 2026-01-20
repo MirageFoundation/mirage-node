@@ -92,7 +92,7 @@ Docker tarballs are branch-specific:
   - When changing SDK defaults, update `deploy/templates/app.toml` and `deploy/templates/config.toml` to match, then re-deploy with `--update-init`.
 - **Current expected template defaults** (keep these in sync with `config.go`):
   - `app.toml`:
-    - `minimum-gas-prices = "0.025umirage"`
+    - `minimum-gas-prices = "5000umirage"`
     - `pruning = "custom"`, `pruning-keep-recent = "1000"`, `pruning-interval = "100"`
     - `min-retain-blocks = 28800`
     - `[state-sync] snapshot-interval = 1000`, `snapshot-keep-recent = 2`

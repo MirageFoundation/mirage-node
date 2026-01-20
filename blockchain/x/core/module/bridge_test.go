@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -87,12 +88,24 @@ func newMockKeeper() *mockKeeper {
 	return &mockKeeper{
 		Keeper:          k,
 		storeService:    storeService,
-		bondedValidator: "miragevaloper1bondedvalidator",
+		bondedValidator: testValoperAddressString(),
 	}
 }
 
 func (mk *mockKeeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error) {
 	return valoper == mk.bondedValidator, nil
+}
+
+func testAccAddress() sdk.AccAddress {
+	return sdk.AccAddress(bytes.Repeat([]byte{0x01}, 20))
+}
+
+func testAccAddressString() string {
+	return testAccAddress().String()
+}
+
+func testValoperAddressString() string {
+	return sdk.ValAddress(testAccAddress()).String()
 }
 
 // Helper to create a mock SDK context
@@ -285,7 +298,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 	}{
 		{
 			name:      "valid request",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
@@ -311,7 +324,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "invalid burn_id - too short",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
@@ -320,7 +333,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "invalid burn_id - invalid chars",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "xyz123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
@@ -329,7 +342,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "empty destination_chain",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "",
 			destTx:    "SolanaSignature123",
@@ -338,7 +351,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_chain too long",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: strings.Repeat("a", 65),
 			destTx:    "SolanaSignature123",
@@ -347,7 +360,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "empty destination_tx",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "",
@@ -356,7 +369,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx too long",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    strings.Repeat("a", 129),
@@ -365,7 +378,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx with invalid char (space)",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "Solana Signature123",
@@ -374,7 +387,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx with invalid char (slash)",
-			authority: "miragevaloper1abc",
+			authority: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "Solana/Signature123",
@@ -406,6 +419,9 @@ func validateBridgeMintedRequest(authority, burnID, destChain, destTx string) er
 	authority = strings.TrimSpace(authority)
 	if authority == "" {
 		return &validationError{"authority cannot be empty"}
+	}
+	if _, err := sdk.AccAddressFromBech32(authority); err != nil {
+		return &validationError{"invalid authority address"}
 	}
 
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
@@ -512,15 +528,16 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 
 // TestMsgBridgeMintedFields tests the message structure
 func TestMsgBridgeMintedFields(t *testing.T) {
+	authority := testAccAddressString()
 	msg := &types.MsgBridgeMinted{
-		Authority:        "miragevaloper1abc",
+		Authority:        authority,
 		BurnId:           "abc123def456789012345678901234567890123456789012345678901234",
 		DestinationChain: "solana",
 		DestinationTx:    "SolanaSignature123",
 	}
 
-	if msg.Authority != "miragevaloper1abc" {
-		t.Errorf("Authority = %s, want miragevaloper1abc", msg.Authority)
+	if msg.Authority != authority {
+		t.Errorf("Authority = %s, want %s", msg.Authority, authority)
 	}
 	if msg.BurnId != "abc123def456789012345678901234567890123456789012345678901234" {
 		t.Errorf("BurnId mismatch")

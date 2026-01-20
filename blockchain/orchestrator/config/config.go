@@ -21,9 +21,7 @@ type MirageConfig struct {
 	KeyringDir     string
 	KeyringBackend string
 	KeyName        string
-	GasLimit       uint64
-	FeeAmount      uint64
-	FeeDenom       string
+	FeeDenom       string // Gas limit and fee are determined via simulation
 }
 
 type ChainsConfig struct {
@@ -114,14 +112,6 @@ func LoadFromEnv() (*Config, error) {
 	if mirageRPC == "" {
 		errs = append(errs, "ORCHESTRATOR_MIRAGE_RPC is required")
 	}
-	mirageGasLimit, err := envRequiredUint64("ORCHESTRATOR_MIRAGE_GAS_LIMIT")
-	if err != nil {
-		errs = append(errs, err.Error())
-	}
-	mirageFeeAmount, err := envRequiredUint64("ORCHESTRATOR_MIRAGE_FEE_AMOUNT")
-	if err != nil {
-		errs = append(errs, err.Error())
-	}
 	keyringBackend := os.Getenv("ORCHESTRATOR_KEYRING_BACKEND")
 	if keyringBackend == "" {
 		errs = append(errs, "ORCHESTRATOR_KEYRING_BACKEND is required")
@@ -164,8 +154,6 @@ func LoadFromEnv() (*Config, error) {
 			KeyringDir:     home + "/.mirage/node",
 			KeyringBackend: keyringBackend,
 			KeyName:        keyName,
-			GasLimit:       mirageGasLimit,
-			FeeAmount:      mirageFeeAmount,
 			FeeDenom:       "umirage",
 		},
 		Chains: ChainsConfig{
