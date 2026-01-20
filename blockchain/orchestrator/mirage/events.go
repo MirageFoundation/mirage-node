@@ -48,7 +48,7 @@ func (c *Client) WatchBridgeBurns(ctx context.Context, out chan<- chains.MirageB
 			for _, burn := range burns {
 				select {
 				case out <- burn:
-					c.logger.Printf("DEBUG bridge burn received burn_id=%s dest_chain=%s amount=%d fee=%d net=%d", burn.BurnID, burn.DestinationChain, burn.Amount, burn.BridgeFee, burn.Amount-burn.BridgeFee)
+					c.logger.Printf("DEBUG bridge burn received burn_id=%s dest_chain=%s amount=%d fee=%d net=%d seq=%d", burn.BurnID, burn.DestinationChain, burn.Amount, burn.BridgeFee, burn.Amount-burn.BridgeFee, burn.Sequence)
 				case <-ctx.Done():
 					return ctx.Err()
 				}
