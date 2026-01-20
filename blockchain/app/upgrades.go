@@ -607,7 +607,7 @@ func (app *App) RegisterUpgradeHandlers() {
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			changed := false
 
-			// Enable Solana bridge (attested, non-IBC)
+			// Enable Solana bridge with 1 MIRAGE fee
 			solanaEnabled := false
 			for _, chain := range params.BridgeChains {
 				if chain.ChainId == "solana" {
@@ -619,9 +619,10 @@ func (app *App) RegisterUpgradeHandlers() {
 				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
 					ChainId: "solana",
 					Enabled: true,
+					Fee:     1_000_000, // 1 MIRAGE
 				})
 				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge")
+				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 1 MIRAGE fee")
 			}
 
 			// Set attestation threshold: 66.67% (6667 basis points)
@@ -630,7 +631,6 @@ func (app *App) RegisterUpgradeHandlers() {
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_attestation_threshold", "value", params.BridgeAttestationThreshold)
 			}
-			// Note: Bridge fees are now per-chain in BridgeChainConfig.Fee
 
 			if changed {
 				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {

@@ -152,7 +152,7 @@ def _expected_core_params_v190() -> dict[str, Any]:
         "relay_max_gas_fee": 500_000_000,
         "max_envelope_age": 60,
         "bridge_attestation_threshold": 6667,
-        "bridge_fee": 1_000_000,
+        # bridge_fee is now per-chain in BridgeChainConfig.fee
     }
 
 
@@ -494,8 +494,10 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
             if isinstance(ch, dict):
                 chain_id = ch.get("chain_id", "?")
                 enabled = ch.get("enabled", False)
+                fee = ch.get("fee", 0)
                 status = "enabled" if enabled else "disabled"
-                print(f"      - {chain_id}: {status}")
+                fee_str = f"{fee:,} ({fee // 1_000_000} MIRAGE)" if fee >= 1_000_000 else f"{fee:,}"
+                print(f"      - {chain_id}: {status}, fee: {fee_str}")
 
                 # Verify Solana config
                 if chain_id == "solana":
@@ -503,6 +505,9 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
                     if not enabled:
                         print(f"   [FAIL] Solana bridge is disabled")
                         failures.append("bridge_chains: Solana is disabled")
+                    if fee != 1_000_000:
+                        print(f"   [FAIL] Solana fee expected 1,000,000, got {fee}")
+                        failures.append(f"bridge_chains: Solana fee expected 1_000_000, got {fee}")
 
         if not solana_found:
             print("   [FAIL] Solana not found in bridge_chains")
@@ -557,16 +562,7 @@ def check_bridge_queries_strict(core: dict, status: dict, cfg: dict, failures: l
         print(f"   [FAIL] attestation_threshold: invalid")
         failures.append(f"bridge config.attestation_threshold invalid: {e}")
 
-    try:
-        fee = _as_int(cfg.get("bridge_fee", 0))
-        if fee == 1_000_000:
-            print(f"   [OK] bridge_fee: {fee:,} (1 MIRAGE)")
-        else:
-            print(f"   [FAIL] bridge_fee: expected 1,000,000, got {fee:,}")
-            failures.append(f"bridge config.bridge_fee expected 1_000_000, got {fee}")
-    except Exception as e:
-        print(f"   [FAIL] bridge_fee: invalid")
-        failures.append(f"bridge config.bridge_fee invalid: {e}")
+    # Note: bridge_fee is now per-chain in BridgeChainConfig.fee, not global
 
     print("\n   Cross-check vs core params:")
     try:
@@ -580,18 +576,6 @@ def check_bridge_queries_strict(core: dict, status: dict, cfg: dict, failures: l
     except Exception as e:
         print(f"   [FAIL] cross-check threshold: {e}")
         failures.append(f"cross-check bridge_attestation_threshold failed: {e}")
-
-    try:
-        core_fee = _as_int(core.get("bridge_fee", 0))
-        cfg_fee = _as_int(cfg.get("bridge_fee", 0))
-        if core_fee == cfg_fee:
-            print(f"   [OK] bridge_fee: {core_fee:,} (matches)")
-        else:
-            print(f"   [FAIL] fee mismatch: core={core_fee}, config={cfg_fee}")
-            failures.append(f"bridge_fee mismatch")
-    except Exception as e:
-        print(f"   [FAIL] cross-check fee: {e}")
-        failures.append(f"cross-check bridge_fee failed: {e}")
 
 
 def fetch_gov_params(miraged: str, rpc: str) -> dict:
@@ -739,7 +723,7 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             "subscription_period",
             "max_envelope_age",
             "bridge_attestation_threshold",
-            "bridge_fee",
+            # bridge_fee removed - now per-chain in BridgeChainConfig.fee
         ]
         
         # Check if field descriptors exist
@@ -779,13 +763,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         descriptor = bcc_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
         
-        required_bcc_fields = ["chain_id", "enabled"]
+        required_bcc_fields = ["chain_id", "enabled", "fee"]
         missing_bcc = [f for f in required_bcc_fields if f not in field_names]
         if missing_bcc:
             print(f"   [FAIL] BridgeChainConfig missing: {', '.join(missing_bcc)}")
             failures.append(f"BridgeChainConfig missing fields: {', '.join(missing_bcc)}")
         else:
-            print(f"   [OK] BridgeChainConfig has required fields")
+            print(f"   [OK] BridgeChainConfig has required fields (chain_id, enabled, fee)")
     except Exception as e:
         print(f"   [FAIL] Cannot verify BridgeChainConfig: {e}")
         failures.append(f"Cannot verify BridgeChainConfig proto: {e}")
