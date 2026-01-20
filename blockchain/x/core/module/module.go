@@ -978,15 +978,12 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.MaxEnvelopeAge != 0 {
 		cur.MaxEnvelopeAge = p.MaxEnvelopeAge
 	}
-	// Bridge parameters - replace entirely if provided
+	// Bridge parameters - replace entirely if provided (fees are per-chain in BridgeChains)
 	if len(p.BridgeChains) > 0 {
 		cur.BridgeChains = p.BridgeChains
 	}
 	if p.BridgeAttestationThreshold != 0 {
 		cur.BridgeAttestationThreshold = p.BridgeAttestationThreshold
-	}
-	if p.BridgeFee != 0 {
-		cur.BridgeFee = p.BridgeFee
 	}
 
 	if err := cur.Validate(); err != nil {
@@ -2564,7 +2561,6 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 // IBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis)
 func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) (*types.MsgIBCTransferResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
 
 	// Derive owner from envelope_pubkey
 	if len(req.GetEnvelopePubkey()) != 33 {
@@ -2589,18 +2585,16 @@ func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) 
 		return nil, fmt.Errorf("amount must be > 0")
 	}
 
-	// Get bridge fee from params
-	bridgeFee := params.BridgeFee
-	if amount > (math.MaxUint64 - bridgeFee) {
-		return nil, fmt.Errorf("amount too large")
-	}
+	// IBC transfers have no bridge fee (trustless protocol)
+	// Fee is only charged for attested bridges (Solana, etc.)
+	bridgeFee := uint64(0)
 	totalNeeded := amount + bridgeFee
 
 	// Check balance
 	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
 	if balance.LT(sdkmath.NewIntFromUint64(totalNeeded)) {
-		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
-			totalNeeded, amount, bridgeFee, balance.String())
+		return nil, fmt.Errorf("insufficient balance: need %d, have %s",
+			totalNeeded, balance.String())
 	}
 
 	// Validate owner address
@@ -2723,8 +2717,15 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		return nil, fmt.Errorf("amount must be > 0")
 	}
 
-	// Get bridge fee from params
-	bridgeFee := params.BridgeFee
+	// Validate destination chain (must be in bridge_chains and enabled)
+	destChain := strings.TrimSpace(req.GetDestinationChain())
+	chainConfig, err := types.ValidateBridgeChain(destChain, params.BridgeChains)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get bridge fee from chain config (per-chain fee)
+	bridgeFee := chainConfig.Fee
 	if amount > (math.MaxUint64 - bridgeFee) {
 		return nil, fmt.Errorf("amount too large")
 	}
@@ -2735,12 +2736,6 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 	if balance.LT(sdkmath.NewIntFromUint64(totalBurn)) {
 		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
 			totalBurn, amount, bridgeFee, balance.String())
-	}
-
-	// Validate destination chain (must be in bridge_chains and enabled)
-	destChain := strings.TrimSpace(req.GetDestinationChain())
-	if _, err := types.ValidateBridgeChain(destChain, params.BridgeChains); err != nil {
-		return nil, err
 	}
 
 	// Validate destination address format for the target chain
@@ -3032,6 +3027,5 @@ func (am AppModule) BridgeConfig(ctx context.Context, _ *types.QueryBridgeConfig
 	return &types.QueryBridgeConfigResponse{
 		Chains:               params.BridgeChains,
 		AttestationThreshold: params.BridgeAttestationThreshold,
-		BridgeFee:            params.BridgeFee,
 	}, nil
 }

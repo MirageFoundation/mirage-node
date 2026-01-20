@@ -120,9 +120,6 @@ message Params {
   // Default: 6667 = 66.67% of total voting power required
   uint64 bridge_attestation_threshold = 51;
 
-  // bridge_fee is the flat fee in umirage charged and burned for all bridge transfers
-  // Default: 1000000 = 1 MIRAGE
-  uint64 bridge_fee = 52;
 }
 
 // BridgeChainConfig defines the configuration for a bridgeable chain (attested bridge only).
@@ -135,4 +132,8 @@ message BridgeChainConfig {
 
   // enabled indicates whether bridging to/from this chain is currently allowed
   bool enabled = 2;
+
+  // fee is the flat fee in umirage charged and burned for bridge transfers to this chain
+  // Default: 1000000 = 1 MIRAGE
+  uint64 fee = 3;
 }

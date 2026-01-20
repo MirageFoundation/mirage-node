@@ -163,10 +163,8 @@ message QueryBridgeConfigRequest {}
 
 // QueryBridgeConfigResponse is the response type for the Query/BridgeConfig RPC method.
 message QueryBridgeConfigResponse {
-  // chains lists all configured bridge chains
+  // chains lists all configured bridge chains (each has its own fee)
   repeated BridgeChainConfig chains = 1;
   // attestation_threshold is the voting power threshold (basis points, e.g., 6667 = 66.67%)
   uint64 attestation_threshold = 2;
-  // bridge_fee is the flat fee in umirage for bridge transfers
-  uint64 bridge_fee = 3;
 }

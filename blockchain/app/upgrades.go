@@ -630,13 +630,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_attestation_threshold", "value", params.BridgeAttestationThreshold)
 			}
-
-			// Set bridge fee: 1 MIRAGE (1,000,000 umirage)
-			if params.BridgeFee == 0 {
-				params.BridgeFee = 1_000_000
-				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_fee", "value", params.BridgeFee)
-			}
+			// Note: Bridge fees are now per-chain in BridgeChainConfig.Fee
 
 			if changed {
 				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
