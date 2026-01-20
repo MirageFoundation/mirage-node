@@ -790,11 +790,42 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
     const [bridgeError, setBridgeError] = useState('');
     const [bridgeTxHash, setBridgeTxHash] = useState('');
     const [burnNonce, setBurnNonce] = useState(null);
+    const [mirageBalance, setMirageBalance] = useState(0); // Mirage network balance
 
     // Step tracking for progress UI
     const [stepTimestamps, setStepTimestamps] = useState({});
     const [stepElapsed, setStepElapsed] = useState({});
     const [mintStatus, setMintStatus] = useState({ state: 'idle', txHash: '', error: '' });
+    const buttonRef = useRef(null);
+
+    // Load Mirage balance from cache
+    useEffect(() => {
+        try {
+            const cachedBalance = Storage.load('user_balance', 0);
+            if (cachedBalance) {
+                setMirageBalance(Number(cachedBalance) || 0);
+            }
+        } catch (_) { }
+
+        try {
+            const configData = localStorage.getItem('configData');
+            if (configData) {
+                const cached = JSON.parse(configData);
+                if (cached.balance !== undefined) {
+                    setMirageBalance(Number(cached.balance) || 0);
+                }
+            }
+        } catch (_) { }
+    }, []);
+
+    // Scroll to button when bridge status changes from idle
+    useEffect(() => {
+        if (bridgeStatus === 'idle') return;
+        if (!buttonRef.current) return;
+        try {
+            buttonRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        } catch (_) { }
+    }, [bridgeStatus]);
 
     // Get Solana config from chainConfigs
     const solanaConfig = chainConfigs?.solana || {};
@@ -807,12 +838,26 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
     useEffect(() => {
         if (bridgeStatus === 'idle' || bridgeStatus === 'error' || bridgeStatus === 'complete') return;
 
+        const stepOrder = ['confirming', 'pending', 'complete'];
+        const currentStepIdx = stepOrder.indexOf(bridgeStatus);
+
         const interval = setInterval(() => {
             const now = Date.now();
             setStepElapsed(prev => {
                 const newElapsed = { ...prev };
                 for (const [step, startTime] of Object.entries(stepTimestamps)) {
-                    newElapsed[step] = (now - startTime) / 1000;
+                    const stepIdx = stepOrder.indexOf(step);
+                    // Only update elapsed time for current or future steps
+                    // For completed steps, freeze at when next step started
+                    if (stepIdx < currentStepIdx) {
+                        const nextStep = stepOrder[stepIdx + 1];
+                        const nextStepStart = stepTimestamps[nextStep];
+                        if (nextStepStart) {
+                            newElapsed[step] = (nextStepStart - startTime) / 1000;
+                        }
+                    } else {
+                        newElapsed[step] = (now - startTime) / 1000;
+                    }
                 }
                 return newElapsed;
             });
@@ -828,24 +873,47 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
         let cancelled = false;
         const maxAttempts = BRIDGE_IN_POLL_SCHEDULE.intervalsMs.length + 1;
         const initialDelayMs = BRIDGE_IN_POLL_SCHEDULE.initialDelayMs;
+        let attestationFoundTime = null; // Track when we first see found=true
 
         setMintStatus({ state: 'pending', txHash: '', error: '' });
 
         const poll = async (attempt) => {
             if (cancelled) return;
             try {
-                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts);
+                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_id:', burnNonce);
                 // Query the backend for mint status using the burn nonce
                 const res = await fetch(`/api/bridge/get_minted?burn_id=${burnNonce}&chain=solana`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
                 }
                 const data = await res.json();
+                console.debug('[Solana Bridge In] Mint poll response:', data);
+
+                // Track when attestation is first found (orchestrator detected the burn)
+                if (data.found && !attestationFoundTime) {
+                    attestationFoundTime = Date.now();
+                    // Freeze the "Orchestrator detection" step timer
+                    setStepElapsed(prev => {
+                        const pendingStart = stepTimestamps.pending;
+                        if (pendingStart) {
+                            return { ...prev, pending: (attestationFoundTime - pendingStart) / 1000 };
+                        }
+                        return prev;
+                    });
+                    console.debug('[Solana Bridge In] Attestation found, starting mint timer');
+                }
+
                 if (data.minted) {
-                    setMintStatus({ state: 'minted', txHash: data.tx_hash || '', error: '' });
+                    setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
+                    // Calculate final elapsed time for the 'complete' (mint) step
+                    const now = Date.now();
+                    const mintStartTime = attestationFoundTime || stepTimestamps.pending || now;
+                    setStepTimestamps(prev => ({ ...prev, complete: now }));
+                    setStepElapsed(prev => ({
+                        ...prev,
+                        complete: (now - mintStartTime) / 1000,
+                    }));
                     setBridgeStatus('complete');
-                    // Update step timestamp for completion
-                    setStepTimestamps(prev => ({ ...prev, minting: prev.minting, complete: Date.now() }));
                     return;
                 }
             } catch (e) {
@@ -869,7 +937,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
         }
 
         return () => { cancelled = true; };
-    }, [bridgeStatus, burnNonce]);
+    }, [bridgeStatus, burnNonce, stepTimestamps.pending]);
 
     // Format step time for display
     const formatStepTime = (step) => {
@@ -892,6 +960,9 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
             if (stepIdx === currentIdx) return 'error';
             return 'pending';
         }
+
+        // When bridgeStatus is 'complete', all steps are complete
+        if (bridgeStatus === 'complete') return 'complete';
 
         if (stepIdx < currentIdx) return 'complete';
         if (stepIdx === currentIdx) return 'active';
@@ -1078,6 +1149,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
             });
 
             console.debug('[Solana Bridge] Burn successful', result);
+            console.debug('[Solana Bridge] Burn nonce for polling:', result.burnNonce);
 
             setBridgeTxHash(result.signature);
             setBurnNonce(result.burnNonce !== undefined ? Number(result.burnNonce) : null);
@@ -1118,7 +1190,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
         return null;
     }, [amount, solanaWallet?.balance]);
 
-    const canBridge = solanaWallet && amount && parseFloat(amount) > 0 && !amountError && !isBridging && bridgeStatus === 'idle';
+    const canBridge = solanaWallet && amount && parseFloat(amount) > 0 && !amountError && !isBridging && (bridgeStatus === 'idle' || bridgeStatus === 'error');
 
     // Reset for new bridge
     const handleNewBridge = () => {
@@ -1186,17 +1258,39 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                                 Disconnect
                             </DisconnectButton>
                         </WalletRow>
-                        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                            <WalletBalance style={{ color: '#14F195' }}>
-                                {solanaWallet.mirageBalance !== null
-                                    ? `${solanaWallet.mirageBalance.toLocaleString()} MIRAGE`
-                                    : 'Loading...'}
-                            </WalletBalance>
-                            <WalletBalance style={{ color: '#9945FF' }}>
-                                {solanaWallet.solBalance !== null
-                                    ? `${solanaWallet.solBalance.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} SOL`
-                                    : 'Loading...'}
-                            </WalletBalance>
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '0.35rem 0.6rem',
+                                background: 'rgba(20, 241, 149, 0.1)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(20, 241, 149, 0.3)',
+                            }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme?.colors?.text || '#fff' }}>
+                                    {solanaWallet.mirageBalance !== null
+                                        ? solanaWallet.mirageBalance.toLocaleString()
+                                        : '...'}
+                                </span>
+                                <span style={{ fontSize: '0.7rem', color: theme?.colors?.subtleText || '#888', fontWeight: 500 }}>MIRAGE</span>
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                padding: '0.35rem 0.6rem',
+                                background: 'rgba(20, 241, 149, 0.1)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(20, 241, 149, 0.3)',
+                            }}>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: theme?.colors?.text || '#fff' }}>
+                                    {solanaWallet.solBalance !== null
+                                        ? solanaWallet.solBalance.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+                                        : '...'}
+                                </span>
+                                <span style={{ fontSize: '0.7rem', color: theme?.colors?.subtleText || '#888', fontWeight: 500 }}>SOL</span>
+                            </div>
                         </div>
                         {solanaWallet.mirageBalance === 0 && solanaCluster !== 'mainnet' && (
                             <div style={{
@@ -1231,7 +1325,14 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                                 onChange={(e) => {
                                     const val = e.target.value.replace(/,/g, '');
                                     if (/^\d*\.?\d*$/.test(val)) {
-                                        setAmount(formatAmountDisplay(val));
+                                        // Cap at max balance
+                                        const numVal = parseFloat(val) || 0;
+                                        const maxBalance = solanaWallet?.mirageBalance ?? Infinity;
+                                        if (numVal > maxBalance && maxBalance !== Infinity) {
+                                            setAmount(formatAmountDisplay(String(maxBalance)));
+                                        } else {
+                                            setAmount(formatAmountDisplay(val));
+                                        }
                                     }
                                 }}
                                 $error={!!amountError}
@@ -1278,7 +1379,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
 
                     {/* Transaction Summary */}
                     {amount && parseFloat(amount.replace(/,/g, '')) > 0 && (
-                        <InputSection style={{ marginTop: '0.5rem' }}>
+                        <InputSection style={{ marginTop: '0.5rem', marginBottom: '0.75rem' }}>
                             <div style={{
                                 display: 'flex',
                                 justifyContent: 'space-between',
@@ -1301,42 +1402,45 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                                 <span>You will receive</span>
                                 <span style={{ color: '#14F195', fontWeight: 600 }}>{amount} MIRAGE</span>
                             </div>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                                color: theme?.colors?.subtleText || '#888',
+                                padding: '0.5rem 0',
+                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
+                            }}>
+                                <span>Mirage balance before</span>
+                                <span style={{ color: theme?.colors?.text || '#fff' }}>
+                                    ~{Math.round(mirageBalance / 1_000_000).toLocaleString()} MIRAGE
+                                </span>
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                fontSize: '0.8rem',
+                                color: theme?.colors?.subtleText || '#888',
+                                padding: '0.5rem 0',
+                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
+                            }}>
+                                <span>Mirage balance after</span>
+                                <span style={{ color: '#14F195', fontWeight: 600 }}>
+                                    ~{Math.round((mirageBalance / 1_000_000) + parseFloat(amount.replace(/,/g, ''))).toLocaleString()} MIRAGE
+                                </span>
+                            </div>
                         </InputSection>
                     )}
 
-                    {/* Bridge Button */}
-                    <Button
-                        variant="primary"
-                        fullWidth
-                        disabled={bridgeStatus === 'complete' ? false : !canBridge}
-                        loading={isBridging}
-                        onClick={bridgeStatus === 'complete' ? handleNewBridge : handleBridge}
-                        style={{
-                            background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)',
-                            marginTop: '0.5rem',
-                        }}
-                    >
-                        {bridgeStatus === 'complete'
-                            ? 'New Bridge'
-                            : isBridging
-                                ? 'Confirm in Wallet...'
-                                : bridgeStatus === 'pending'
-                                    ? 'Bridging...'
-                                    : !amount || parseFloat(amount) <= 0
-                                        ? 'Enter Amount'
-                                        : `Bridge ${amount} MIRAGE`}
-                    </Button>
-
                     {/* Progress Steps */}
                     {bridgeStatus !== 'idle' && (
-                        <StepsCard style={{ marginTop: '1rem' }}>
+                        <StepsCard>
                             <StepsList>
-                                {/* Step 1: Confirm burn on Solana */}
+                                {/* Step 1: Confirm transfer on Solana */}
                                 <StepItem>
                                     <StepDot $state={getStepState('confirming')} />
                                     <StepText>
                                         <StepTitle>
-                                            Confirm burn on Solana{formatStepTime('confirming')}
+                                            Confirm transfer on Solana{formatStepTime('confirming')}
                                         </StepTitle>
                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                             {bridgeStatus === 'confirming' ? (
@@ -1370,11 +1474,11 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                                         </StepTitle>
                                         <StepMeta>
                                             {bridgeStatus === 'confirming' ? (
-                                                'Waiting for burn confirmation'
+                                                'Waiting for transfer confirmation'
                                             ) : bridgeStatus === 'pending' && mintStatus.state !== 'minted' ? (
-                                                'Scanning Solana for burn event'
+                                                'Scanning Solana for transfer'
                                             ) : mintStatus.state === 'minted' || bridgeStatus === 'complete' ? (
-                                                'Burn detected by orchestrator'
+                                                'Transfer detected by orchestrator'
                                             ) : (
                                                 'Waiting'
                                             )}
@@ -1428,6 +1532,30 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                             )}
                         </StepsCard>
                     )}
+
+                    {/* Bridge Button */}
+                    <div ref={buttonRef} style={{ paddingBottom: '1rem' }}>
+                        <Button
+                            variant="primary"
+                            fullWidth
+                            disabled={bridgeStatus === 'complete' ? false : !canBridge}
+                            loading={isBridging}
+                            onClick={bridgeStatus === 'complete' ? handleNewBridge : handleBridge}
+                            style={{
+                                background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)',
+                            }}
+                        >
+                            {bridgeStatus === 'complete'
+                                ? 'New Bridge'
+                                : isBridging
+                                    ? 'Confirm in Wallet...'
+                                    : bridgeStatus === 'pending'
+                                        ? 'Bridging...'
+                                        : !amount || parseFloat(amount) <= 0
+                                            ? 'Enter Amount'
+                                            : `Bridge ${amount} MIRAGE`}
+                        </Button>
+                    </div>
                 </>
             )}
         </>
@@ -2023,9 +2151,16 @@ export default function BridgeView({ state }) {
         const rawValue = e.target.value.replace(/,/g, '');
         // Allow only numbers and single decimal point
         if (/^\d*\.?\d*$/.test(rawValue)) {
+            // Cap at max balance
+            const numVal = parseFloat(rawValue) || 0;
+            const maxBalance = balance / 1_000_000;
+            let finalValue = rawValue;
+            if (numVal > maxBalance && maxBalance > 0) {
+                finalValue = maxBalance.toFixed(6);
+            }
             // Store formatted value with commas
-            setAmount(formatAmountDisplay(rawValue));
-            const error = validateAmount(rawValue);
+            setAmount(formatAmountDisplay(finalValue));
+            const error = validateAmount(finalValue);
             setErrors(prev => ({ ...prev, amount: error }));
             if (submitStage !== 'idle') resetSubmitState();
         }
@@ -2183,7 +2318,7 @@ export default function BridgeView({ state }) {
     // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
         const mirage = Math.round(umirage / 1_000_000);
-        return mirage.toLocaleString();
+        return '~' + mirage.toLocaleString();
     };
 
     const stepOrder = ['submitting', 'verifying', 'confirmed'];
@@ -2513,7 +2648,7 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>
                                                                         {isSolanaBridge
-                                                                            ? 'Confirming token burn on Mirage'
+                                                                            ? 'Confirming transfer on Mirage'
                                                                             : 'Confirming transaction on Mirage'}
                                                                         {formatStepTime('verifying')}
                                                                     </StepTitle>
