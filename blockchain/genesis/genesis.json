@@ -126,6 +126,12 @@
                         "chain_id": "solana",
                         "enabled": true,
                         "fee": "500000000"
+                    },
+                    {
+                        "chain_id": "osmosis",
+                        "enabled": true,
+                        "fee": "500000000",
+                        "ibc_channel": "channel-0"
                     }
                 ],
                 "bridge_attestation_threshold": "6667",

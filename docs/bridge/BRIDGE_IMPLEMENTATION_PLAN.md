@@ -205,8 +205,7 @@ message BridgeChainConfig {
   string chain_id = 1;      // "solana", "osmosis", etc.
   bool enabled = 2;         // Can be disabled via governance
   uint64 fee = 3;           // Per-chain fee in umirage (e.g., 500000000 = 500 MIRAGE for Solana)
-  bool is_ibc = 4;          // True for IBC chains (Osmosis), false for attested (Solana)
-  string ibc_channel = 5;   // IBC channel ID (only for IBC chains)
+  string ibc_channel = 4;   // IBC channel ID, empty for attested chains
 }
 
 // In Params message:

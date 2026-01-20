@@ -122,12 +122,12 @@ message Params {
 
 }
 
-// BridgeChainConfig defines the configuration for a bridgeable chain (attested bridge only).
-// IBC transfers are handled separately by the IBC module and don't need allowlisting.
+// BridgeChainConfig defines the configuration for a bridgeable chain.
+// Supports both IBC chains (Osmosis, etc.) and attested chains (Solana, etc.)
 message BridgeChainConfig {
   option (gogoproto.equal) = true;
 
-  // chain_id is the unique identifier for this chain (e.g., "solana", "ethereum")
+  // chain_id is the unique identifier for this chain (e.g., "solana", "osmosis")
   string chain_id = 1;
 
   // enabled indicates whether bridging to/from this chain is currently allowed
@@ -136,4 +136,8 @@ message BridgeChainConfig {
   // fee is the flat fee in umirage charged and burned for bridge transfers to this chain
   // Default: 1000000 = 1 MIRAGE
   uint64 fee = 3;
+
+  // ibc_channel is the IBC channel ID for IBC chains (e.g., "channel-0")
+  // Empty means attested bridge (Solana, etc.)
+  string ibc_channel = 4;
 }

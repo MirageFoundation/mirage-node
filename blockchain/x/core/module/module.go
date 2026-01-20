@@ -2585,16 +2585,28 @@ func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) 
 		return nil, fmt.Errorf("amount must be > 0")
 	}
 
-	// IBC transfers have no bridge fee (trustless protocol)
-	// Fee is only charged for attested bridges (Solana, etc.)
+	// Validate source channel first
+	sourceChannel := strings.TrimSpace(req.GetSourceChannel())
+	if sourceChannel == "" {
+		return nil, fmt.Errorf("source_channel cannot be empty")
+	}
+
+	// Look up IBC chain config to get the fee
+	params := am.k.GetParams(sdkCtx)
+	chainConfig := types.FindIBCChainConfig(sourceChannel, params.BridgeChains)
+
+	// Determine bridge fee from config (or 0 if chain not configured)
 	bridgeFee := uint64(0)
+	if chainConfig != nil {
+		bridgeFee = chainConfig.Fee
+	}
 	totalNeeded := amount + bridgeFee
 
 	// Check balance
 	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
 	if balance.LT(sdkmath.NewIntFromUint64(totalNeeded)) {
-		return nil, fmt.Errorf("insufficient balance: need %d, have %s",
-			totalNeeded, balance.String())
+		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
+			totalNeeded, amount, bridgeFee, balance.String())
 	}
 
 	// Validate owner address
@@ -2607,13 +2619,6 @@ func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) 
 	if receiver == "" {
 		return nil, fmt.Errorf("receiver cannot be empty")
 	}
-
-	// Validate source channel
-	sourceChannel := strings.TrimSpace(req.GetSourceChannel())
-	if sourceChannel == "" {
-		return nil, fmt.Errorf("source_channel cannot be empty")
-	}
-	// Note: No IBC channel allowlist - IBC is trustless and handles its own security
 
 	// Burn the bridge fee (deflationary)
 	if bridgeFee > 0 {

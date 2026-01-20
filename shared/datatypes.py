@@ -343,6 +343,7 @@ def _build_pool():
     add_f(bridge_config, "chain_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(bridge_config, "enabled", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(bridge_config, "fee", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(bridge_config, "ibc_channel", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # MsgBridgeAttest (validator attestation for external chain burns)
     msg_bridge_attest = file_proto.message_type.add()
