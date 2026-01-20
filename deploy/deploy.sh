@@ -186,6 +186,53 @@ maybe_proto_gen_and_go_build() {
     echo "==> Protobuf inputs unchanged; skipping proto-gen."
   fi
 
+  local miraged_bin="$REPO_ROOT/blockchain/bin/miraged"
+  local orchestrator_bin="$REPO_ROOT/blockchain/bin/orchestrator"
+  local need_build=0
+
+  # Check if binaries exist
+  if [ ! -f "$miraged_bin" ]; then
+    echo "==> miraged binary not found; rebuild needed"
+    need_build=1
+  fi
+  if [ ! -f "$orchestrator_bin" ]; then
+    echo "==> orchestrator binary not found; rebuild needed"
+    need_build=1
+  fi
+
+  # Check if any source file is newer than binaries
+  if [ "$need_build" -eq 0 ]; then
+    local newest_source
+    newest_source="$(find \
+      "$REPO_ROOT/blockchain/go.mod" \
+      "$REPO_ROOT/blockchain/go.sum" \
+      "$REPO_ROOT/blockchain/app" \
+      "$REPO_ROOT/blockchain/cmd" \
+      "$REPO_ROOT/blockchain/orchestrator" \
+      "$REPO_ROOT/blockchain/x" \
+      -type f -newer "$miraged_bin" 2>/dev/null | head -1)"
+    if [ -n "$newest_source" ]; then
+      echo "==> Source newer than miraged: $newest_source"
+      need_build=1
+    fi
+  fi
+  if [ "$need_build" -eq 0 ]; then
+    local newest_source
+    newest_source="$(find \
+      "$REPO_ROOT/blockchain/go.mod" \
+      "$REPO_ROOT/blockchain/go.sum" \
+      "$REPO_ROOT/blockchain/app" \
+      "$REPO_ROOT/blockchain/cmd" \
+      "$REPO_ROOT/blockchain/orchestrator" \
+      "$REPO_ROOT/blockchain/x" \
+      -type f -newer "$orchestrator_bin" 2>/dev/null | head -1)"
+    if [ -n "$newest_source" ]; then
+      echo "==> Source newer than orchestrator: $newest_source"
+      need_build=1
+    fi
+  fi
+
+  # Also check hash for content changes (handles case where file was touched but reverted)
   local new_go_hash
   new_go_hash="$(hash_tree \
     "$REPO_ROOT/blockchain/go.mod" \
@@ -201,11 +248,18 @@ maybe_proto_gen_and_go_build() {
     old_go_hash="$(cat "$go_hash_file" 2>/dev/null || echo "")"
   fi
   if [ -z "$old_go_hash" ] || [ "$old_go_hash" != "$new_go_hash" ]; then
-    echo "==> Go inputs changed; building miraged and orchestrator..."
+    echo "==> Go source hash changed"
+    need_build=1
+  fi
+
+  if [ "$need_build" -eq 1 ]; then
+    echo "==> Building miraged and orchestrator..."
+    # Delete old binaries to force Go to rebuild (bypasses Go's build cache)
+    rm -f "$miraged_bin" "$orchestrator_bin"
     ( cd "$REPO_ROOT/blockchain" && make build-all )
     echo "$new_go_hash" > "$go_hash_file"
   else
-    echo "==> Go inputs unchanged; skipping go build."
+    echo "==> Go binaries up to date; skipping build."
   fi
 }
 

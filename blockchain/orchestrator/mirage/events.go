@@ -78,15 +78,20 @@ func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent
 	destAddrs := events["bridge_burn.destination_address"]
 	amounts := events["bridge_burn.amount"]
 	owners := events["bridge_burn.owner"]
+	sequences := events["bridge_burn.sequence"]
 
-	if len(destChains) != len(burnIDs) || len(destAddrs) != len(burnIDs) || len(amounts) != len(burnIDs) || len(owners) != len(burnIDs) {
-		return nil, fmt.Errorf("bridge burn event attribute mismatch: burn_ids=%d chains=%d addresses=%d amounts=%d owners=%d",
-			len(burnIDs), len(destChains), len(destAddrs), len(amounts), len(owners))
+	if len(destChains) != len(burnIDs) || len(destAddrs) != len(burnIDs) || len(amounts) != len(burnIDs) || len(owners) != len(burnIDs) || len(sequences) != len(burnIDs) {
+		return nil, fmt.Errorf("bridge burn event attribute mismatch: burn_ids=%d chains=%d addresses=%d amounts=%d owners=%d sequences=%d",
+			len(burnIDs), len(destChains), len(destAddrs), len(amounts), len(owners), len(sequences))
 	}
 
 	burns := make([]chains.MirageBurnEvent, 0, len(burnIDs))
 	for i, burnID := range burnIDs {
 		amount, err := parseUint64(amounts[i], "bridge_burn.amount")
+		if err != nil {
+			return nil, err
+		}
+		sequence, err := parseUint64(sequences[i], "bridge_burn.sequence")
 		if err != nil {
 			return nil, err
 		}
@@ -96,6 +101,7 @@ func parseBridgeBurnEvents(events map[string][]string) ([]chains.MirageBurnEvent
 			DestinationAddress: strings.TrimSpace(destAddrs[i]),
 			Amount:             amount,
 			Owner:              strings.TrimSpace(owners[i]),
+			Sequence:           sequence,
 		})
 	}
 	return burns, nil

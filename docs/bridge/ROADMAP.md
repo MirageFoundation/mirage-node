@@ -57,9 +57,39 @@ verify_ed25519(payload, mirage_signature, mirage_pubkey)?;
 
 ---
 
-## 2. (Add future items here)
+## 2. Automatic Validator Set from Chain Stakers
 
-**Status:** -
+**Status:** Planned
+
+### Problem
+
+Currently, bridge authorities must be manually added to the Solana program via `add_validator` instructions. This creates:
+
+1. **Redundant registration** - Validators already stake on the Mirage chain; re-adding them to the bridge is duplicate work
+2. **Sync issues** - The bridge validator set can drift from the actual chain validator set
+3. **Administrative overhead** - Every new validator requires a separate bridge registration transaction
+4. **Stake mismatch** - Bridge authority weights must be manually kept in sync with chain stake
+
+### Solution
+
+Derive the bridge authority set directly from the Mirage chain's active validator set:
+
+- **No manual addition** - Any staked validator on Mirage automatically becomes a bridge authority
+- **Stake-weighted voting** - Authority weight equals their staked amount on the chain
+- **Dynamic set** - Validator joins/exits/stake changes automatically reflected in bridge consensus
+
+### Implementation Considerations
+
+1. **State proof verification** - Solana program verifies Mirage chain state proofs to determine validator set
+2. **Epoch boundaries** - Validator set changes at epoch boundaries for predictability
+3. **Minimum stake threshold** - Only validators above a minimum stake participate in bridge consensus
+
+### Benefits
+
+- Zero administrative overhead for validator onboarding
+- Perfect alignment between chain security and bridge security
+- Stake-weighted consensus matches chain's economic security model
+- Single source of truth for validator set
 
 ---
 

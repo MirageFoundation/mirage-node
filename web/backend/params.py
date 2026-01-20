@@ -94,9 +94,7 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
     return result
 
 
-def load_params(
-    force: bool = False, max_retries: int = 360, retry_interval: float = 10.0
-) -> Dict[str, Any]:
+def load_params(force: bool = False, max_retries: int = 360, retry_interval: float = 10.0) -> Dict[str, Any]:
     """Load params from chain, waiting for chain to be available.
 
     Args:

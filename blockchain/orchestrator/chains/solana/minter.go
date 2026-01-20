@@ -46,6 +46,10 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if err != nil {
 		return fmt.Errorf("failed to derive bridge config PDA: %w", err)
 	}
+	bridgeStatePDA, _, err := solana.FindProgramAddress([][]byte{[]byte(bridgeStateSeed)}, w.programID)
+	if err != nil {
+		return fmt.Errorf("failed to derive bridge state PDA: %w", err)
+	}
 	mintRecordPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(mintRecordSeed), burnHash[:]}, w.programID)
 	if err != nil {
 		return fmt.Errorf("failed to derive mint record PDA: %w", err)
@@ -54,47 +58,48 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if err != nil {
 		return fmt.Errorf("failed to derive recipient ATA: %w", err)
 	}
+	validatorRegistryPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(validatorRegistrySeed)}, w.programID)
+	if err != nil {
+		return fmt.Errorf("failed to derive validator registry PDA: %w", err)
+	}
 
-	// Build instructions list - create ATA if it doesn't exist
+	// Anchor's init_if_needed handles ATA creation, no separate instruction needed
 	instructions := []solana.Instruction{}
 
-	ataExists, err := w.accountExists(ctx, recipientATA)
-	if err != nil {
-		return fmt.Errorf("failed to check recipient ATA: %w", err)
-	}
-	if !ataExists {
-		// Create ATA instruction (idempotent - will succeed even if account exists)
-		createATAInstr := associatedtokenaccount.NewCreateInstruction(
-			orchestratorPub, // payer
-			recipient,       // wallet
-			mintPDA,         // mint
-		).Build()
-		instructions = append(instructions, createATAInstr)
-		w.logger.Printf("DEBUG creating ATA for recipient=%s", recipient.String())
-	}
-
+	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, burn.Amount, recipient)
 	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, burn.Amount, recipient)
 	if err != nil {
 		return err
 	}
 
-	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, burn.Amount, attestationSig)
+	// Add Ed25519 verify instruction (must precede mint instruction for on-chain verification)
+	ed25519Instr := buildEd25519VerifyInstruction(orchestratorPub, attestationPayload, attestationSig)
+	instructions = append(instructions, ed25519Instr)
+
+	data, err := buildMintInstructionData(w.discMint, burnHash, burn.Owner, burn.Amount, burn.Sequence, attestationSig)
 	if err != nil {
 		return err
 	}
 
+	// Instructions sysvar for Ed25519 signature verification
+	instructionsSysvar := solana.MustPublicKeyFromBase58("Sysvar1nstructions1111111111111111111111111")
+
+	// NewAccountMeta signature: (pubKey, WRITABLE, SIGNER)
 	mintInstruction := &genericInstruction{
 		programID: w.programID,
 		accounts: []*solana.AccountMeta{
-			solana.NewAccountMeta(orchestratorPub, true, true),
-			solana.NewAccountMeta(recipient, false, false),
-			solana.NewAccountMeta(recipientATA, false, true),
-			solana.NewAccountMeta(mintPDA, false, true),
-			solana.NewAccountMeta(bridgeConfigPDA, false, true),
-			solana.NewAccountMeta(mintRecordPDA, false, true),
-			solana.NewAccountMeta(token.ProgramID, false, false),
-			solana.NewAccountMeta(associatedtokenaccount.ProgramID, false, false),
-			solana.NewAccountMeta(system.ProgramID, false, false),
+			solana.NewAccountMeta(orchestratorPub, true, true),                    // orchestrator (writable, signer)
+			solana.NewAccountMeta(recipient, false, false),                        // recipient
+			solana.NewAccountMeta(recipientATA, true, false),                      // recipient_token_account (writable)
+			solana.NewAccountMeta(mintPDA, true, false),                           // token_mint (writable)
+			solana.NewAccountMeta(bridgeConfigPDA, true, false),                   // bridge_config (writable)
+			solana.NewAccountMeta(bridgeStatePDA, true, false),                    // bridge_state (writable)
+			solana.NewAccountMeta(mintRecordPDA, true, false),                     // mint_record (writable)
+			solana.NewAccountMeta(validatorRegistryPDA, false, false),             // validator_registry
+			solana.NewAccountMeta(instructionsSysvar, false, false),               // instructions_sysvar
+			solana.NewAccountMeta(token.ProgramID, false, false),                  // token_program
+			solana.NewAccountMeta(associatedtokenaccount.ProgramID, false, false), // associated_token_program
+			solana.NewAccountMeta(system.ProgramID, false, false),                 // system_program
 		},
 		data: data,
 	}
@@ -129,7 +134,9 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if err != nil {
 		return fmt.Errorf("failed to send transaction: %w", err)
 	}
+	explorerURL := w.solscanURL(sig)
 	w.logger.Printf("DEBUG solana mint submitted burn_id=%s signature=%s", burn.BurnID, sig.String())
+	w.logger.Printf("INFO  solscan: %s", explorerURL)
 
 	if err := w.waitForConfirmation(ctx, sig); err != nil {
 		return err
@@ -200,7 +207,7 @@ func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount 
 	return buf.Bytes()
 }
 
-func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSender string, amount uint64, sig [64]byte) ([]byte, error) {
+func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSender string, amount uint64, sequence uint64, sig [64]byte) ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	if _, err := buf.Write(discriminator[:]); err != nil {
 		return nil, err
@@ -208,6 +215,9 @@ func buildMintInstructionData(discriminator [8]byte, burnHash [32]byte, mirageSe
 	buf.Write(burnHash[:])
 	writeBorshString(buf, mirageSender)
 	if err := binary.Write(buf, binary.LittleEndian, amount); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(buf, binary.LittleEndian, sequence); err != nil {
 		return nil, err
 	}
 	buf.Write(sig[:])
@@ -218,6 +228,50 @@ func writeBorshString(buf *bytes.Buffer, value string) {
 	length := uint32(len(value))
 	_ = binary.Write(buf, binary.LittleEndian, length)
 	buf.WriteString(value)
+}
+
+// Ed25519 program ID
+var ed25519ProgramID = solana.MustPublicKeyFromBase58("Ed25519SigVerify111111111111111111111111111")
+
+// buildEd25519VerifyInstruction creates an Ed25519 signature verification instruction.
+// This must precede the mint instruction for on-chain signature verification.
+func buildEd25519VerifyInstruction(pubkey solana.PublicKey, message []byte, signature [64]byte) solana.Instruction {
+	// Ed25519 instruction format:
+	// [0]: num_signatures (1)
+	// [1]: padding (0)
+	// [2-3]: signature_offset (16 for first signature)
+	// [4-5]: signature_instruction_index (0xFFFF = same transaction)
+	// [6-7]: public_key_offset
+	// [8-9]: public_key_instruction_index (0xFFFF)
+	// [10-11]: message_offset
+	// [12-13]: message_size
+	// [14-15]: message_instruction_index (0xFFFF)
+	// Then: signature (64 bytes), pubkey (32 bytes), message (variable)
+
+	signatureOffset := uint16(16) // Starts right after header
+	pubkeyOffset := signatureOffset + 64
+	messageOffset := pubkeyOffset + 32
+	messageSize := uint16(len(message))
+
+	buf := bytes.NewBuffer(nil)
+	buf.WriteByte(1)    // num_signatures
+	buf.WriteByte(0)    // padding
+	binary.Write(buf, binary.LittleEndian, signatureOffset)
+	binary.Write(buf, binary.LittleEndian, uint16(0xFFFF)) // signature_instruction_index
+	binary.Write(buf, binary.LittleEndian, pubkeyOffset)
+	binary.Write(buf, binary.LittleEndian, uint16(0xFFFF)) // public_key_instruction_index
+	binary.Write(buf, binary.LittleEndian, messageOffset)
+	binary.Write(buf, binary.LittleEndian, messageSize)
+	binary.Write(buf, binary.LittleEndian, uint16(0xFFFF)) // message_instruction_index
+	buf.Write(signature[:])
+	buf.Write(pubkey[:])
+	buf.Write(message)
+
+	return &genericInstruction{
+		programID: ed25519ProgramID,
+		accounts:  []*solana.AccountMeta{}, // Ed25519 program takes no accounts
+		data:      buf.Bytes(),
+	}
 }
 
 // genericInstruction implements solana.Instruction for custom program instructions
