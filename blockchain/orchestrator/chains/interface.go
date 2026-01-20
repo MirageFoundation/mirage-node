@@ -27,4 +27,7 @@ type ChainWatcher interface {
 	WatchBurns(ctx context.Context, events chan<- ExternalBurnEvent) error
 	ExecuteMint(ctx context.Context, burn MirageBurnEvent) (string, error)
 	ChainID() string
+	// GetLastSequence returns the last processed sequence number from the chain's bridge state.
+	// Used for replay protection - orchestrator should reject sequences <= this value.
+	GetLastSequence(ctx context.Context) (uint64, error)
 }

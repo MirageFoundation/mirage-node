@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"mirage/orchestrator/chains"
@@ -18,6 +19,10 @@ type Attestor struct {
 	mirage   *mirage.Client
 	watchers []chains.ChainWatcher
 	logger   *log.Logger
+
+	// Sequence tracking for replay protection (per destination chain)
+	lastSeqMu sync.RWMutex
+	lastSeq   map[string]uint64
 }
 
 func New(cfg *config.Config, mirageClient *mirage.Client, logger *log.Logger) (*Attestor, error) {
@@ -45,12 +50,26 @@ func New(cfg *config.Config, mirageClient *mirage.Client, logger *log.Logger) (*
 		mirage:   mirageClient,
 		watchers: watchers,
 		logger:   logger,
+		lastSeq:  make(map[string]uint64),
 	}, nil
 }
 
 func (a *Attestor) Run(ctx context.Context) error {
 	if len(a.watchers) == 0 {
 		return fmt.Errorf("no enabled chain watchers")
+	}
+
+	// Initialize sequence tracking by querying each chain's bridge state
+	for _, watcher := range a.watchers {
+		lastSeq, err := watcher.GetLastSequence(ctx)
+		if err != nil {
+			a.logger.Printf("WARN failed to get last sequence for %s: %v (starting at 0)", watcher.ChainID(), err)
+			lastSeq = 0
+		}
+		a.lastSeqMu.Lock()
+		a.lastSeq[watcher.ChainID()] = lastSeq
+		a.lastSeqMu.Unlock()
+		a.logger.Printf("INFO  [REPLAY] initialized %s last_sequence=%d", watcher.ChainID(), lastSeq)
 	}
 
 	externalBurns := make(chan chains.ExternalBurnEvent, a.cfg.Attestor.BatchSize)
@@ -127,6 +146,17 @@ func (a *Attestor) submitAttestationBatch(ctx context.Context, burns []chains.Ex
 
 func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBurnEvent) error {
 	for _, burn := range burns {
+		// Replay protection: validate sequence before processing
+		a.lastSeqMu.RLock()
+		lastSeq := a.lastSeq[burn.DestinationChain]
+		a.lastSeqMu.RUnlock()
+
+		if burn.Sequence <= lastSeq {
+			a.logger.Printf("WARN [REPLAY] rejecting stale sequence: burn_id=%s chain=%s seq=%d last_seq=%d",
+				burn.BurnID, burn.DestinationChain, burn.Sequence, lastSeq)
+			continue // Skip this burn, don't return error
+		}
+
 		watcher, err := a.findWatcher(burn.DestinationChain)
 		if err != nil {
 			return err
@@ -141,6 +171,14 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 		}
 
 		if sig != "" {
+			// Update last sequence after successful mint
+			a.lastSeqMu.Lock()
+			if burn.Sequence > a.lastSeq[burn.DestinationChain] {
+				a.lastSeq[burn.DestinationChain] = burn.Sequence
+				a.logger.Printf("DEBUG [REPLAY] updated %s last_sequence=%d", burn.DestinationChain, burn.Sequence)
+			}
+			a.lastSeqMu.Unlock()
+
 			if err := a.retry(ctx, func() error {
 				return a.mirage.SubmitBridgeMinted(ctx, burn.BurnID, burn.DestinationChain, sig, burn.BridgeFee)
 			}); err != nil {
