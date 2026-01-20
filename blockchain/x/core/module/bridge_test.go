@@ -285,11 +285,11 @@ func (e *validationError) Error() string {
 	return e.msg
 }
 
-// TestBridgeMintedValidation tests validation logic for MsgBridgeMinted
-func TestBridgeMintedValidation(t *testing.T) {
+// TestBridgeAttestMintedValidation tests validation logic for MsgBridgeAttestMinted
+func TestBridgeAttestMintedValidation(t *testing.T) {
 	tests := []struct {
 		name      string
-		authority string
+		validator string
 		burnID    string
 		destChain string
 		destTx    string
@@ -298,33 +298,33 @@ func TestBridgeMintedValidation(t *testing.T) {
 	}{
 		{
 			name:      "valid request",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
 			wantErr:   false,
 		},
 		{
-			name:      "empty authority",
-			authority: "",
+			name:      "empty validator",
+			validator: "",
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
 			wantErr:   true,
-			errSubstr: "authority",
+			errSubstr: "validator",
 		},
 		{
-			name:      "whitespace authority",
-			authority: "   ",
+			name:      "whitespace validator",
+			validator: "   ",
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
 			wantErr:   true,
-			errSubstr: "authority",
+			errSubstr: "validator",
 		},
 		{
 			name:      "invalid burn_id - too short",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
@@ -333,7 +333,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "invalid burn_id - invalid chars",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "xyz123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "SolanaSignature123",
@@ -342,7 +342,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "empty destination_chain",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "",
 			destTx:    "SolanaSignature123",
@@ -351,7 +351,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_chain too long",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: strings.Repeat("a", 65),
 			destTx:    "SolanaSignature123",
@@ -360,7 +360,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "empty destination_tx",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "",
@@ -369,7 +369,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx too long",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    strings.Repeat("a", 129),
@@ -378,7 +378,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx with invalid char (space)",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "Solana Signature123",
@@ -387,7 +387,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 		},
 		{
 			name:      "destination_tx with invalid char (slash)",
-			authority: testAccAddressString(),
+			validator: testAccAddressString(),
 			burnID:    "abc123def456789012345678901234567890123456789012345678901234",
 			destChain: "solana",
 			destTx:    "Solana/Signature123",
@@ -398,7 +398,7 @@ func TestBridgeMintedValidation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateBridgeMintedRequest(tc.authority, tc.burnID, tc.destChain, tc.destTx)
+			err := validateBridgeMintedRequest(tc.validator, tc.burnID, tc.destChain, tc.destTx)
 			if tc.wantErr {
 				if err == nil {
 					t.Error("expected error, got nil")
@@ -414,14 +414,14 @@ func TestBridgeMintedValidation(t *testing.T) {
 	}
 }
 
-// validateBridgeMintedRequest mirrors the validation in module.go BridgeMinted handler
-func validateBridgeMintedRequest(authority, burnID, destChain, destTx string) error {
-	authority = strings.TrimSpace(authority)
-	if authority == "" {
-		return &validationError{"authority cannot be empty"}
+// validateBridgeAttestMintedRequest mirrors the validation in module.go BridgeMinted handler
+func validateBridgeMintedRequest(validator, burnID, destChain, destTx string) error {
+	validator = strings.TrimSpace(validator)
+	if validator == "" {
+		return &validationError{"validator cannot be empty"}
 	}
-	if _, err := sdk.AccAddressFromBech32(authority); err != nil {
-		return &validationError{"invalid authority address"}
+	if _, err := sdk.AccAddressFromBech32(validator); err != nil {
+		return &validationError{"invalid validator address"}
 	}
 
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
@@ -526,18 +526,18 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 	}
 }
 
-// TestMsgBridgeMintedFields tests the message structure
-func TestMsgBridgeMintedFields(t *testing.T) {
-	authority := testAccAddressString()
-	msg := &types.MsgBridgeMinted{
-		Authority:        authority,
+// TestMsgBridgeAttestMintedFields tests the message structure
+func TestMsgBridgeAttestMintedFields(t *testing.T) {
+	validator := testAccAddressString()
+	msg := &types.MsgBridgeAttestMinted{
+		Validator:        validator,
 		BurnId:           "abc123def456789012345678901234567890123456789012345678901234",
 		DestinationChain: "solana",
 		DestinationTx:    "SolanaSignature123",
 	}
 
-	if msg.Authority != authority {
-		t.Errorf("Authority = %s, want %s", msg.Authority, authority)
+	if msg.Validator != validator {
+		t.Errorf("Validator = %s, want %s", msg.Validator, validator)
 	}
 	if msg.BurnId != "abc123def456789012345678901234567890123456789012345678901234" {
 		t.Errorf("BurnId mismatch")
