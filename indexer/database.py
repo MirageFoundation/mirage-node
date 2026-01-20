@@ -680,6 +680,46 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_owner ON invite_codes(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_invite_codes_used_by ON invite_codes(LOWER(used_by))")
 
+                # ========== Bridge Transaction Tables ==========
+                # bridge_transactions: tracks all bridge-related messages for status queries
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS bridge_transactions (
+                        id SERIAL PRIMARY KEY,
+                        tx_hash TEXT NOT NULL,
+                        direction TEXT NOT NULL,
+                        msg_type TEXT NOT NULL,
+                        source_chain TEXT,
+                        destination_chain TEXT,
+                        burn_id TEXT NOT NULL,
+                        sender TEXT,
+                        recipient TEXT,
+                        amount BIGINT NOT NULL,
+                        validator TEXT,
+                        destination_tx TEXT,
+                        minted BOOLEAN DEFAULT FALSE,
+                        created_at BIGINT NOT NULL,
+                        height BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bridge_burn_id ON bridge_transactions(burn_id, source_chain)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bridge_tx_hash ON bridge_transactions(LOWER(tx_hash))"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bridge_direction ON bridge_transactions(direction, created_at DESC)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_bridge_recipient ON bridge_transactions(LOWER(recipient))"
+                )
+                # Prevent duplicate entries during re-indexing
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_bridge_unique_tx ON bridge_transactions(tx_hash, msg_type)"
+                )
+
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
         with self._connect() as conn:
@@ -1799,3 +1839,141 @@ class DatabaseManager:
         logger.info(
             f"v1.6.3 similarity migration: Completed. Cached {total_cached} similarity entries for {len(users_with_prefs)} users"
         )
+
+    # ========== Bridge Transaction Methods ==========
+
+    def insert_bridge_transaction(
+        self,
+        tx_hash: str,
+        direction: str,
+        msg_type: str,
+        burn_id: str,
+        amount: int,
+        created_at: int,
+        height: int,
+        source_chain: Optional[str] = None,
+        destination_chain: Optional[str] = None,
+        sender: Optional[str] = None,
+        recipient: Optional[str] = None,
+        validator: Optional[str] = None,
+        destination_tx: Optional[str] = None,
+        minted: bool = False,
+    ) -> bool:
+        """Insert a bridge transaction record. Skips duplicates during re-indexing."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO bridge_transactions (
+                        tx_hash, direction, msg_type, source_chain, destination_chain,
+                        burn_id, sender, recipient, amount, validator, destination_tx,
+                        minted, created_at, height
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tx_hash, msg_type) DO NOTHING
+                    """,
+                    (
+                        tx_hash, direction, msg_type, source_chain, destination_chain,
+                        burn_id, sender, recipient, amount, validator, destination_tx,
+                        minted, created_at, height,
+                    ),
+                )
+                return cur.rowcount > 0  # True if inserted, False if duplicate
+
+    def get_bridge_attestation(self, source_chain: str, burn_id: str) -> dict:
+        """Get inbound bridge attestation by source_chain and burn_id.
+        
+        Returns dict with: found, minted, tx_hash, recipient, amount, validator, created_at
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT tx_hash, recipient, amount, validator, minted, created_at
+                    FROM bridge_transactions
+                    WHERE direction = 'in'
+                      AND msg_type = 'attest_burned'
+                      AND LOWER(source_chain) = LOWER(%s)
+                      AND burn_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (source_chain, burn_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"found": False, "minted": False}
+                return {
+                    "found": True,
+                    "minted": bool(row[4]),
+                    "tx_hash": row[0],
+                    "recipient": row[1],
+                    "amount": row[2],
+                    "validator": row[3],
+                    "created_at": row[5],
+                }
+
+    def get_bridge_burn(self, burn_id: str) -> dict:
+        """Get outbound bridge burn by burn_id (tx_hash).
+        
+        Returns dict with: found, minted, destination_chain, destination_address, 
+                          destination_tx, amount, created_at
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                # First get the burn record
+                cur.execute(
+                    """
+                    SELECT destination_chain, recipient, amount, created_at
+                    FROM bridge_transactions
+                    WHERE direction = 'out'
+                      AND msg_type = 'burn'
+                      AND LOWER(tx_hash) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (burn_id,),
+                )
+                burn_row = cur.fetchone()
+                if not burn_row:
+                    return {"found": False, "minted": False}
+
+                # Check if there's a minted confirmation for this burn
+                cur.execute(
+                    """
+                    SELECT destination_tx, created_at
+                    FROM bridge_transactions
+                    WHERE direction = 'out'
+                      AND msg_type = 'attest_minted'
+                      AND LOWER(burn_id) = LOWER(%s)
+                    LIMIT 1
+                    """,
+                    (burn_id,),
+                )
+                minted_row = cur.fetchone()
+
+                return {
+                    "found": True,
+                    "minted": minted_row is not None,
+                    "destination_chain": burn_row[0],
+                    "destination_address": burn_row[1],
+                    "amount": burn_row[2],
+                    "created_at": burn_row[3],
+                    "destination_tx": minted_row[0] if minted_row else None,
+                    "minted_at": minted_row[1] if minted_row else None,
+                }
+
+    def update_bridge_attestation_minted(self, source_chain: str, burn_id: str, minted: bool) -> bool:
+        """Update the minted status of an attestation record."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE bridge_transactions
+                    SET minted = %s
+                    WHERE direction = 'in'
+                      AND msg_type = 'attest_burned'
+                      AND LOWER(source_chain) = LOWER(%s)
+                      AND burn_id = %s
+                    """,
+                    (minted, source_chain, burn_id),
+                )
+                return cur.rowcount > 0

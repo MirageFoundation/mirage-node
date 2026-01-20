@@ -3494,7 +3494,7 @@ func (m *MsgBridgeBurn) GetAmount() uint64 {
 }
 
 type MsgBridgeBurnResponse struct {
-	BurnId string `protobuf:"bytes,1,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+	BurnId uint64 `protobuf:"varint,1,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
 }
 
 func (m *MsgBridgeBurnResponse) Reset()         { *m = MsgBridgeBurnResponse{} }
@@ -3530,16 +3530,16 @@ func (m *MsgBridgeBurnResponse) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_MsgBridgeBurnResponse proto.InternalMessageInfo
 
-func (m *MsgBridgeBurnResponse) GetBurnId() string {
+func (m *MsgBridgeBurnResponse) GetBurnId() uint64 {
 	if m != nil {
 		return m.BurnId
 	}
-	return ""
+	return 0
 }
 
-// MsgBridgeAttest allows validators to attest to a burn on an external chain
+// MsgBridgeAttestBurned allows validators to attest to a burn on an external chain
 // NOTE: This message does NOT use envelope fields - it's signed directly by validator
-type MsgBridgeAttest struct {
+type MsgBridgeAttestBurned struct {
 	// validator is the validator operator address submitting the attestation
 	Validator string `protobuf:"bytes,1,opt,name=validator,proto3" json:"validator,omitempty"`
 	// source_chain is the external chain where the burn occurred
@@ -3552,18 +3552,18 @@ type MsgBridgeAttest struct {
 	Amount uint64 `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
 }
 
-func (m *MsgBridgeAttest) Reset()         { *m = MsgBridgeAttest{} }
-func (m *MsgBridgeAttest) String() string { return proto.CompactTextString(m) }
-func (*MsgBridgeAttest) ProtoMessage()    {}
-func (*MsgBridgeAttest) Descriptor() ([]byte, []int) {
+func (m *MsgBridgeAttestBurned) Reset()         { *m = MsgBridgeAttestBurned{} }
+func (m *MsgBridgeAttestBurned) String() string { return proto.CompactTextString(m) }
+func (*MsgBridgeAttestBurned) ProtoMessage()    {}
+func (*MsgBridgeAttestBurned) Descriptor() ([]byte, []int) {
 	return fileDescriptor_6bf938bf63970629, []int{48}
 }
-func (m *MsgBridgeAttest) XXX_Unmarshal(b []byte) error {
+func (m *MsgBridgeAttestBurned) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgBridgeAttest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgBridgeAttestBurned) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgBridgeAttest.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgBridgeAttestBurned.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -3573,71 +3573,71 @@ func (m *MsgBridgeAttest) XXX_Marshal(b []byte, deterministic bool) ([]byte, err
 		return b[:n], nil
 	}
 }
-func (m *MsgBridgeAttest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgBridgeAttest.Merge(m, src)
+func (m *MsgBridgeAttestBurned) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBridgeAttestBurned.Merge(m, src)
 }
-func (m *MsgBridgeAttest) XXX_Size() int {
+func (m *MsgBridgeAttestBurned) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgBridgeAttest) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgBridgeAttest.DiscardUnknown(m)
+func (m *MsgBridgeAttestBurned) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBridgeAttestBurned.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgBridgeAttest proto.InternalMessageInfo
+var xxx_messageInfo_MsgBridgeAttestBurned proto.InternalMessageInfo
 
-func (m *MsgBridgeAttest) GetValidator() string {
+func (m *MsgBridgeAttestBurned) GetValidator() string {
 	if m != nil {
 		return m.Validator
 	}
 	return ""
 }
 
-func (m *MsgBridgeAttest) GetSourceChain() string {
+func (m *MsgBridgeAttestBurned) GetSourceChain() string {
 	if m != nil {
 		return m.SourceChain
 	}
 	return ""
 }
 
-func (m *MsgBridgeAttest) GetBurnId() string {
+func (m *MsgBridgeAttestBurned) GetBurnId() string {
 	if m != nil {
 		return m.BurnId
 	}
 	return ""
 }
 
-func (m *MsgBridgeAttest) GetMirageRecipient() string {
+func (m *MsgBridgeAttestBurned) GetMirageRecipient() string {
 	if m != nil {
 		return m.MirageRecipient
 	}
 	return ""
 }
 
-func (m *MsgBridgeAttest) GetAmount() uint64 {
+func (m *MsgBridgeAttestBurned) GetAmount() uint64 {
 	if m != nil {
 		return m.Amount
 	}
 	return 0
 }
 
-type MsgBridgeAttestResponse struct {
-	Minted        bool  `protobuf:"varint,1,opt,name=minted,proto3" json:"minted,omitempty"`
+type MsgBridgeAttestBurnedResponse struct {
+	Confirmed     bool  `protobuf:"varint,1,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
 	AttestedPower int64 `protobuf:"varint,2,opt,name=attested_power,json=attestedPower,proto3" json:"attested_power,omitempty"`
 	RequiredPower int64 `protobuf:"varint,3,opt,name=required_power,json=requiredPower,proto3" json:"required_power,omitempty"`
 }
 
-func (m *MsgBridgeAttestResponse) Reset()         { *m = MsgBridgeAttestResponse{} }
-func (m *MsgBridgeAttestResponse) String() string { return proto.CompactTextString(m) }
-func (*MsgBridgeAttestResponse) ProtoMessage()    {}
-func (*MsgBridgeAttestResponse) Descriptor() ([]byte, []int) {
+func (m *MsgBridgeAttestBurnedResponse) Reset()         { *m = MsgBridgeAttestBurnedResponse{} }
+func (m *MsgBridgeAttestBurnedResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgBridgeAttestBurnedResponse) ProtoMessage()    {}
+func (*MsgBridgeAttestBurnedResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_6bf938bf63970629, []int{49}
 }
-func (m *MsgBridgeAttestResponse) XXX_Unmarshal(b []byte) error {
+func (m *MsgBridgeAttestBurnedResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgBridgeAttestResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgBridgeAttestBurnedResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgBridgeAttestResponse.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgBridgeAttestBurnedResponse.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -3647,63 +3647,65 @@ func (m *MsgBridgeAttestResponse) XXX_Marshal(b []byte, deterministic bool) ([]b
 		return b[:n], nil
 	}
 }
-func (m *MsgBridgeAttestResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgBridgeAttestResponse.Merge(m, src)
+func (m *MsgBridgeAttestBurnedResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBridgeAttestBurnedResponse.Merge(m, src)
 }
-func (m *MsgBridgeAttestResponse) XXX_Size() int {
+func (m *MsgBridgeAttestBurnedResponse) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgBridgeAttestResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgBridgeAttestResponse.DiscardUnknown(m)
+func (m *MsgBridgeAttestBurnedResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBridgeAttestBurnedResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgBridgeAttestResponse proto.InternalMessageInfo
+var xxx_messageInfo_MsgBridgeAttestBurnedResponse proto.InternalMessageInfo
 
-func (m *MsgBridgeAttestResponse) GetMinted() bool {
+func (m *MsgBridgeAttestBurnedResponse) GetConfirmed() bool {
 	if m != nil {
-		return m.Minted
+		return m.Confirmed
 	}
 	return false
 }
 
-func (m *MsgBridgeAttestResponse) GetAttestedPower() int64 {
+func (m *MsgBridgeAttestBurnedResponse) GetAttestedPower() int64 {
 	if m != nil {
 		return m.AttestedPower
 	}
 	return 0
 }
 
-func (m *MsgBridgeAttestResponse) GetRequiredPower() int64 {
+func (m *MsgBridgeAttestBurnedResponse) GetRequiredPower() int64 {
 	if m != nil {
 		return m.RequiredPower
 	}
 	return 0
 }
 
-// MsgBridgeMinted allows validators to report a successful mint on a destination chain.
-type MsgBridgeMinted struct {
-	// authority is the validator operator address submitting the mint confirmation
-	Authority string `protobuf:"bytes,1,opt,name=authority,proto3" json:"authority,omitempty"`
-	// burn_id is the Mirage tx hash of the original burn
+// MsgBridgeAttestMinted allows validators to report a successful mint on a destination chain.
+type MsgBridgeAttestMinted struct {
+	// validator is the validator operator address submitting the attestation
+	Validator string `protobuf:"bytes,1,opt,name=validator,proto3" json:"validator,omitempty"`
+	// burn_id is the Mirage burn sequence number (as string)
 	BurnId string `protobuf:"bytes,2,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
 	// destination_chain is the external chain identifier (e.g., "solana")
 	DestinationChain string `protobuf:"bytes,3,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
 	// destination_tx is the tx signature/hash on the destination chain
 	DestinationTx string `protobuf:"bytes,4,opt,name=destination_tx,json=destinationTx,proto3" json:"destination_tx,omitempty"`
+	// mirage_tx_hash is the original Mirage burn tx hash (for indexing/linking)
+	MirageTxHash string `protobuf:"bytes,5,opt,name=mirage_tx_hash,json=mirageTxHash,proto3" json:"mirage_tx_hash,omitempty"`
 }
 
-func (m *MsgBridgeMinted) Reset()         { *m = MsgBridgeMinted{} }
-func (m *MsgBridgeMinted) String() string { return proto.CompactTextString(m) }
-func (*MsgBridgeMinted) ProtoMessage()    {}
-func (*MsgBridgeMinted) Descriptor() ([]byte, []int) {
+func (m *MsgBridgeAttestMinted) Reset()         { *m = MsgBridgeAttestMinted{} }
+func (m *MsgBridgeAttestMinted) String() string { return proto.CompactTextString(m) }
+func (*MsgBridgeAttestMinted) ProtoMessage()    {}
+func (*MsgBridgeAttestMinted) Descriptor() ([]byte, []int) {
 	return fileDescriptor_6bf938bf63970629, []int{50}
 }
-func (m *MsgBridgeMinted) XXX_Unmarshal(b []byte) error {
+func (m *MsgBridgeAttestMinted) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgBridgeMinted) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgBridgeAttestMinted) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgBridgeMinted.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgBridgeAttestMinted.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -3713,61 +3715,71 @@ func (m *MsgBridgeMinted) XXX_Marshal(b []byte, deterministic bool) ([]byte, err
 		return b[:n], nil
 	}
 }
-func (m *MsgBridgeMinted) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgBridgeMinted.Merge(m, src)
+func (m *MsgBridgeAttestMinted) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBridgeAttestMinted.Merge(m, src)
 }
-func (m *MsgBridgeMinted) XXX_Size() int {
+func (m *MsgBridgeAttestMinted) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgBridgeMinted) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgBridgeMinted.DiscardUnknown(m)
+func (m *MsgBridgeAttestMinted) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBridgeAttestMinted.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgBridgeMinted proto.InternalMessageInfo
+var xxx_messageInfo_MsgBridgeAttestMinted proto.InternalMessageInfo
 
-func (m *MsgBridgeMinted) GetAuthority() string {
+func (m *MsgBridgeAttestMinted) GetValidator() string {
 	if m != nil {
-		return m.Authority
+		return m.Validator
 	}
 	return ""
 }
 
-func (m *MsgBridgeMinted) GetBurnId() string {
+func (m *MsgBridgeAttestMinted) GetBurnId() string {
 	if m != nil {
 		return m.BurnId
 	}
 	return ""
 }
 
-func (m *MsgBridgeMinted) GetDestinationChain() string {
+func (m *MsgBridgeAttestMinted) GetDestinationChain() string {
 	if m != nil {
 		return m.DestinationChain
 	}
 	return ""
 }
 
-func (m *MsgBridgeMinted) GetDestinationTx() string {
+func (m *MsgBridgeAttestMinted) GetDestinationTx() string {
 	if m != nil {
 		return m.DestinationTx
 	}
 	return ""
 }
 
-type MsgBridgeMintedResponse struct {
+func (m *MsgBridgeAttestMinted) GetMirageTxHash() string {
+	if m != nil {
+		return m.MirageTxHash
+	}
+	return ""
 }
 
-func (m *MsgBridgeMintedResponse) Reset()         { *m = MsgBridgeMintedResponse{} }
-func (m *MsgBridgeMintedResponse) String() string { return proto.CompactTextString(m) }
-func (*MsgBridgeMintedResponse) ProtoMessage()    {}
-func (*MsgBridgeMintedResponse) Descriptor() ([]byte, []int) {
+type MsgBridgeAttestMintedResponse struct {
+	Confirmed     bool  `protobuf:"varint,1,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	AttestedPower int64 `protobuf:"varint,2,opt,name=attested_power,json=attestedPower,proto3" json:"attested_power,omitempty"`
+	RequiredPower int64 `protobuf:"varint,3,opt,name=required_power,json=requiredPower,proto3" json:"required_power,omitempty"`
+}
+
+func (m *MsgBridgeAttestMintedResponse) Reset()         { *m = MsgBridgeAttestMintedResponse{} }
+func (m *MsgBridgeAttestMintedResponse) String() string { return proto.CompactTextString(m) }
+func (*MsgBridgeAttestMintedResponse) ProtoMessage()    {}
+func (*MsgBridgeAttestMintedResponse) Descriptor() ([]byte, []int) {
 	return fileDescriptor_6bf938bf63970629, []int{51}
 }
-func (m *MsgBridgeMintedResponse) XXX_Unmarshal(b []byte) error {
+func (m *MsgBridgeAttestMintedResponse) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *MsgBridgeMintedResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *MsgBridgeAttestMintedResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_MsgBridgeMintedResponse.Marshal(b, m, deterministic)
+		return xxx_messageInfo_MsgBridgeAttestMintedResponse.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -3777,17 +3789,38 @@ func (m *MsgBridgeMintedResponse) XXX_Marshal(b []byte, deterministic bool) ([]b
 		return b[:n], nil
 	}
 }
-func (m *MsgBridgeMintedResponse) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_MsgBridgeMintedResponse.Merge(m, src)
+func (m *MsgBridgeAttestMintedResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_MsgBridgeAttestMintedResponse.Merge(m, src)
 }
-func (m *MsgBridgeMintedResponse) XXX_Size() int {
+func (m *MsgBridgeAttestMintedResponse) XXX_Size() int {
 	return m.Size()
 }
-func (m *MsgBridgeMintedResponse) XXX_DiscardUnknown() {
-	xxx_messageInfo_MsgBridgeMintedResponse.DiscardUnknown(m)
+func (m *MsgBridgeAttestMintedResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_MsgBridgeAttestMintedResponse.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_MsgBridgeMintedResponse proto.InternalMessageInfo
+var xxx_messageInfo_MsgBridgeAttestMintedResponse proto.InternalMessageInfo
+
+func (m *MsgBridgeAttestMintedResponse) GetConfirmed() bool {
+	if m != nil {
+		return m.Confirmed
+	}
+	return false
+}
+
+func (m *MsgBridgeAttestMintedResponse) GetAttestedPower() int64 {
+	if m != nil {
+		return m.AttestedPower
+	}
+	return 0
+}
+
+func (m *MsgBridgeAttestMintedResponse) GetRequiredPower() int64 {
+	if m != nil {
+		return m.RequiredPower
+	}
+	return 0
+}
 
 func init() {
 	proto.RegisterType((*MsgUpdateParams)(nil), "mirage.core.v1.MsgUpdateParams")
@@ -3838,10 +3871,10 @@ func init() {
 	proto.RegisterType((*MsgIBCTransferResponse)(nil), "mirage.core.v1.MsgIBCTransferResponse")
 	proto.RegisterType((*MsgBridgeBurn)(nil), "mirage.core.v1.MsgBridgeBurn")
 	proto.RegisterType((*MsgBridgeBurnResponse)(nil), "mirage.core.v1.MsgBridgeBurnResponse")
-	proto.RegisterType((*MsgBridgeAttest)(nil), "mirage.core.v1.MsgBridgeAttest")
-	proto.RegisterType((*MsgBridgeAttestResponse)(nil), "mirage.core.v1.MsgBridgeAttestResponse")
-	proto.RegisterType((*MsgBridgeMinted)(nil), "mirage.core.v1.MsgBridgeMinted")
-	proto.RegisterType((*MsgBridgeMintedResponse)(nil), "mirage.core.v1.MsgBridgeMintedResponse")
+	proto.RegisterType((*MsgBridgeAttestBurned)(nil), "mirage.core.v1.MsgBridgeAttestBurned")
+	proto.RegisterType((*MsgBridgeAttestBurnedResponse)(nil), "mirage.core.v1.MsgBridgeAttestBurnedResponse")
+	proto.RegisterType((*MsgBridgeAttestMinted)(nil), "mirage.core.v1.MsgBridgeAttestMinted")
+	proto.RegisterType((*MsgBridgeAttestMintedResponse)(nil), "mirage.core.v1.MsgBridgeAttestMintedResponse")
 }
 
 func init() { proto.RegisterFile("mirage/core/v1/tx.proto", fileDescriptor_6bf938bf63970629) }
@@ -4038,10 +4071,10 @@ type MsgClient interface {
 	BridgeBurn(ctx context.Context, in *MsgBridgeBurn, opts ...grpc.CallOption) (*MsgBridgeBurnResponse, error)
 	// BridgeAttest allows validators to attest to a burn on an external chain.
 	// Does NOT use envelope - signed directly by validator's consensus key.
-	BridgeAttest(ctx context.Context, in *MsgBridgeAttest, opts ...grpc.CallOption) (*MsgBridgeAttestResponse, error)
+	BridgeAttest(ctx context.Context, in *MsgBridgeAttestBurned, opts ...grpc.CallOption) (*MsgBridgeAttestBurnedResponse, error)
 	// BridgeMinted allows validators to report successful mint on a destination chain.
 	// Signed by validator's operator key.
-	BridgeMinted(ctx context.Context, in *MsgBridgeMinted, opts ...grpc.CallOption) (*MsgBridgeMintedResponse, error)
+	BridgeMinted(ctx context.Context, in *MsgBridgeAttestMinted, opts ...grpc.CallOption) (*MsgBridgeAttestMintedResponse, error)
 }
 
 type msgClient struct {
@@ -4268,8 +4301,8 @@ func (c *msgClient) BridgeBurn(ctx context.Context, in *MsgBridgeBurn, opts ...g
 	return out, nil
 }
 
-func (c *msgClient) BridgeAttest(ctx context.Context, in *MsgBridgeAttest, opts ...grpc.CallOption) (*MsgBridgeAttestResponse, error) {
-	out := new(MsgBridgeAttestResponse)
+func (c *msgClient) BridgeAttest(ctx context.Context, in *MsgBridgeAttestBurned, opts ...grpc.CallOption) (*MsgBridgeAttestBurnedResponse, error) {
+	out := new(MsgBridgeAttestBurnedResponse)
 	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/BridgeAttest", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -4277,8 +4310,8 @@ func (c *msgClient) BridgeAttest(ctx context.Context, in *MsgBridgeAttest, opts 
 	return out, nil
 }
 
-func (c *msgClient) BridgeMinted(ctx context.Context, in *MsgBridgeMinted, opts ...grpc.CallOption) (*MsgBridgeMintedResponse, error) {
-	out := new(MsgBridgeMintedResponse)
+func (c *msgClient) BridgeMinted(ctx context.Context, in *MsgBridgeAttestMinted, opts ...grpc.CallOption) (*MsgBridgeAttestMintedResponse, error) {
+	out := new(MsgBridgeAttestMintedResponse)
 	err := c.cc.Invoke(ctx, "/mirage.core.v1.Msg/BridgeMinted", in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -4342,10 +4375,10 @@ type MsgServer interface {
 	BridgeBurn(context.Context, *MsgBridgeBurn) (*MsgBridgeBurnResponse, error)
 	// BridgeAttest allows validators to attest to a burn on an external chain.
 	// Does NOT use envelope - signed directly by validator's consensus key.
-	BridgeAttest(context.Context, *MsgBridgeAttest) (*MsgBridgeAttestResponse, error)
+	BridgeAttest(context.Context, *MsgBridgeAttestBurned) (*MsgBridgeAttestBurnedResponse, error)
 	// BridgeMinted allows validators to report successful mint on a destination chain.
 	// Signed by validator's operator key.
-	BridgeMinted(context.Context, *MsgBridgeMinted) (*MsgBridgeMintedResponse, error)
+	BridgeMinted(context.Context, *MsgBridgeAttestMinted) (*MsgBridgeAttestMintedResponse, error)
 }
 
 // UnimplementedMsgServer can be embedded to have forward compatible implementations.
@@ -4424,10 +4457,10 @@ func (*UnimplementedMsgServer) IBCTransfer(ctx context.Context, req *MsgIBCTrans
 func (*UnimplementedMsgServer) BridgeBurn(ctx context.Context, req *MsgBridgeBurn) (*MsgBridgeBurnResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BridgeBurn not implemented")
 }
-func (*UnimplementedMsgServer) BridgeAttest(ctx context.Context, req *MsgBridgeAttest) (*MsgBridgeAttestResponse, error) {
+func (*UnimplementedMsgServer) BridgeAttest(ctx context.Context, req *MsgBridgeAttestBurned) (*MsgBridgeAttestBurnedResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BridgeAttest not implemented")
 }
-func (*UnimplementedMsgServer) BridgeMinted(ctx context.Context, req *MsgBridgeMinted) (*MsgBridgeMintedResponse, error) {
+func (*UnimplementedMsgServer) BridgeMinted(ctx context.Context, req *MsgBridgeAttestMinted) (*MsgBridgeAttestMintedResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BridgeMinted not implemented")
 }
 
@@ -4868,7 +4901,7 @@ func _Msg_BridgeBurn_Handler(srv interface{}, ctx context.Context, dec func(inte
 }
 
 func _Msg_BridgeAttest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgBridgeAttest)
+	in := new(MsgBridgeAttestBurned)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -4880,13 +4913,13 @@ func _Msg_BridgeAttest_Handler(srv interface{}, ctx context.Context, dec func(in
 		FullMethod: "/mirage.core.v1.Msg/BridgeAttest",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).BridgeAttest(ctx, req.(*MsgBridgeAttest))
+		return srv.(MsgServer).BridgeAttest(ctx, req.(*MsgBridgeAttestBurned))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _Msg_BridgeMinted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MsgBridgeMinted)
+	in := new(MsgBridgeAttestMinted)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -4898,7 +4931,7 @@ func _Msg_BridgeMinted_Handler(srv interface{}, ctx context.Context, dec func(in
 		FullMethod: "/mirage.core.v1.Msg/BridgeMinted",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MsgServer).BridgeMinted(ctx, req.(*MsgBridgeMinted))
+		return srv.(MsgServer).BridgeMinted(ctx, req.(*MsgBridgeAttestMinted))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -7520,17 +7553,15 @@ func (m *MsgBridgeBurnResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if len(m.BurnId) > 0 {
-		i -= len(m.BurnId)
-		copy(dAtA[i:], m.BurnId)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.BurnId)))
+	if m.BurnId != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.BurnId))
 		i--
-		dAtA[i] = 0xa
+		dAtA[i] = 0x8
 	}
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgBridgeAttest) Marshal() (dAtA []byte, err error) {
+func (m *MsgBridgeAttestBurned) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -7540,12 +7571,12 @@ func (m *MsgBridgeAttest) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgBridgeAttest) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestBurned) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgBridgeAttest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestBurned) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -7586,7 +7617,7 @@ func (m *MsgBridgeAttest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgBridgeAttestResponse) Marshal() (dAtA []byte, err error) {
+func (m *MsgBridgeAttestBurnedResponse) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -7596,12 +7627,12 @@ func (m *MsgBridgeAttestResponse) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgBridgeAttestResponse) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestBurnedResponse) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgBridgeAttestResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestBurnedResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -7616,9 +7647,9 @@ func (m *MsgBridgeAttestResponse) MarshalToSizedBuffer(dAtA []byte) (int, error)
 		i--
 		dAtA[i] = 0x10
 	}
-	if m.Minted {
+	if m.Confirmed {
 		i--
-		if m.Minted {
+		if m.Confirmed {
 			dAtA[i] = 1
 		} else {
 			dAtA[i] = 0
@@ -7629,7 +7660,7 @@ func (m *MsgBridgeAttestResponse) MarshalToSizedBuffer(dAtA []byte) (int, error)
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgBridgeMinted) Marshal() (dAtA []byte, err error) {
+func (m *MsgBridgeAttestMinted) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -7639,16 +7670,23 @@ func (m *MsgBridgeMinted) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgBridgeMinted) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestMinted) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgBridgeMinted) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestMinted) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
 	_ = l
+	if len(m.MirageTxHash) > 0 {
+		i -= len(m.MirageTxHash)
+		copy(dAtA[i:], m.MirageTxHash)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.MirageTxHash)))
+		i--
+		dAtA[i] = 0x2a
+	}
 	if len(m.DestinationTx) > 0 {
 		i -= len(m.DestinationTx)
 		copy(dAtA[i:], m.DestinationTx)
@@ -7670,17 +7708,17 @@ func (m *MsgBridgeMinted) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x12
 	}
-	if len(m.Authority) > 0 {
-		i -= len(m.Authority)
-		copy(dAtA[i:], m.Authority)
-		i = encodeVarintTx(dAtA, i, uint64(len(m.Authority)))
+	if len(m.Validator) > 0 {
+		i -= len(m.Validator)
+		copy(dAtA[i:], m.Validator)
+		i = encodeVarintTx(dAtA, i, uint64(len(m.Validator)))
 		i--
 		dAtA[i] = 0xa
 	}
 	return len(dAtA) - i, nil
 }
 
-func (m *MsgBridgeMintedResponse) Marshal() (dAtA []byte, err error) {
+func (m *MsgBridgeAttestMintedResponse) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -7690,16 +7728,36 @@ func (m *MsgBridgeMintedResponse) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *MsgBridgeMintedResponse) MarshalTo(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestMintedResponse) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *MsgBridgeMintedResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *MsgBridgeAttestMintedResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
 	_ = l
+	if m.RequiredPower != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.RequiredPower))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.AttestedPower != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.AttestedPower))
+		i--
+		dAtA[i] = 0x10
+	}
+	if m.Confirmed {
+		i--
+		if m.Confirmed {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
 	return len(dAtA) - i, nil
 }
 
@@ -8890,14 +8948,13 @@ func (m *MsgBridgeBurnResponse) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.BurnId)
-	if l > 0 {
-		n += 1 + l + sovTx(uint64(l))
+	if m.BurnId != 0 {
+		n += 1 + sovTx(uint64(m.BurnId))
 	}
 	return n
 }
 
-func (m *MsgBridgeAttest) Size() (n int) {
+func (m *MsgBridgeAttestBurned) Size() (n int) {
 	if m == nil {
 		return 0
 	}
@@ -8925,13 +8982,13 @@ func (m *MsgBridgeAttest) Size() (n int) {
 	return n
 }
 
-func (m *MsgBridgeAttestResponse) Size() (n int) {
+func (m *MsgBridgeAttestBurnedResponse) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	if m.Minted {
+	if m.Confirmed {
 		n += 2
 	}
 	if m.AttestedPower != 0 {
@@ -8943,13 +9000,13 @@ func (m *MsgBridgeAttestResponse) Size() (n int) {
 	return n
 }
 
-func (m *MsgBridgeMinted) Size() (n int) {
+func (m *MsgBridgeAttestMinted) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	l = len(m.Authority)
+	l = len(m.Validator)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
@@ -8965,15 +9022,28 @@ func (m *MsgBridgeMinted) Size() (n int) {
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
 	}
+	l = len(m.MirageTxHash)
+	if l > 0 {
+		n += 1 + l + sovTx(uint64(l))
+	}
 	return n
 }
 
-func (m *MsgBridgeMintedResponse) Size() (n int) {
+func (m *MsgBridgeAttestMintedResponse) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
+	if m.Confirmed {
+		n += 2
+	}
+	if m.AttestedPower != 0 {
+		n += 1 + sovTx(uint64(m.AttestedPower))
+	}
+	if m.RequiredPower != 0 {
+		n += 1 + sovTx(uint64(m.RequiredPower))
+	}
 	return n
 }
 
@@ -17110,10 +17180,10 @@ func (m *MsgBridgeBurnResponse) Unmarshal(dAtA []byte) error {
 		}
 		switch fieldNum {
 		case 1:
-			if wireType != 2 {
+			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field BurnId", wireType)
 			}
-			var stringLen uint64
+			m.BurnId = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowTx
@@ -17123,24 +17193,11 @@ func (m *MsgBridgeBurnResponse) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				m.BurnId |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthTx
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthTx
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.BurnId = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -17162,7 +17219,7 @@ func (m *MsgBridgeBurnResponse) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgBridgeAttest) Unmarshal(dAtA []byte) error {
+func (m *MsgBridgeAttestBurned) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -17185,10 +17242,10 @@ func (m *MsgBridgeAttest) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgBridgeAttest: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgBridgeAttestBurned: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgBridgeAttest: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgBridgeAttestBurned: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
@@ -17359,7 +17416,7 @@ func (m *MsgBridgeAttest) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgBridgeAttestResponse) Unmarshal(dAtA []byte) error {
+func (m *MsgBridgeAttestBurnedResponse) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -17382,10 +17439,10 @@ func (m *MsgBridgeAttestResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgBridgeAttestResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgBridgeAttestBurnedResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgBridgeAttestResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgBridgeAttestBurnedResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
@@ -17407,7 +17464,7 @@ func (m *MsgBridgeAttestResponse) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.Minted = bool(v != 0)
+			m.Confirmed = bool(v != 0)
 		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field AttestedPower", wireType)
@@ -17467,7 +17524,7 @@ func (m *MsgBridgeAttestResponse) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgBridgeMinted) Unmarshal(dAtA []byte) error {
+func (m *MsgBridgeAttestMinted) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -17490,15 +17547,15 @@ func (m *MsgBridgeMinted) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgBridgeMinted: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgBridgeAttestMinted: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgBridgeMinted: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgBridgeAttestMinted: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Authority", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Validator", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -17526,7 +17583,7 @@ func (m *MsgBridgeMinted) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Authority = string(dAtA[iNdEx:postIndex])
+			m.Validator = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
@@ -17624,6 +17681,38 @@ func (m *MsgBridgeMinted) Unmarshal(dAtA []byte) error {
 			}
 			m.DestinationTx = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MirageTxHash", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MirageTxHash = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])
@@ -17645,7 +17734,7 @@ func (m *MsgBridgeMinted) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *MsgBridgeMintedResponse) Unmarshal(dAtA []byte) error {
+func (m *MsgBridgeAttestMintedResponse) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -17668,12 +17757,70 @@ func (m *MsgBridgeMintedResponse) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: MsgBridgeMintedResponse: wiretype end group for non-group")
+			return fmt.Errorf("proto: MsgBridgeAttestMintedResponse: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: MsgBridgeMintedResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: MsgBridgeAttestMintedResponse: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Confirmed", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Confirmed = bool(v != 0)
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AttestedPower", wireType)
+			}
+			m.AttestedPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AttestedPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequiredPower", wireType)
+			}
+			m.RequiredPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RequiredPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipTx(dAtA[iNdEx:])

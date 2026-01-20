@@ -715,4 +715,37 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.10.0-bridge-refactor: Bridge attestation refactor
+	// - BridgeBurn no longer creates state records (event-only)
+	// - Unified BridgeAttestation model with direction field
+	// - MsgBridgeAttest renamed to MsgBridgeAttestBurned
+	// - MsgBridgeMinted renamed to MsgBridgeAttestMinted
+	// - Response fields use 'confirmed' instead of 'minted'
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.0-bridge-refactor",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.0-bridge-refactor...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Note: The bridge refactor removes BridgeBurn as state.
+			// Existing burns are still tracked via:
+			// 1. burn_sequence counter (already exists)
+			// 2. BridgeMintedRecord (for outbound burn confirmations)
+			// 3. BridgeAttestation (for inbound/outbound attestations)
+			//
+			// No state migration needed because:
+			// - Old BridgeBurnRecords can remain in state (harmless)
+			// - New burns will use event-only model
+			// - Orchestrators watch events, not state
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.0-bridge-refactor complete")
+			return toVM, nil
+		},
+	)
 }

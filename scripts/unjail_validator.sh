@@ -440,7 +440,7 @@ $BIN tx slashing unjail \
   --chain-id "$CHAIN_ID" \
   --generate-only \
   --gas 200000 \
-  --gas-prices 1.0umirage \
+  --gas-prices 5000umirage \
   -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
 
 $BIN tx sign "$UNSIGNED" \
@@ -560,7 +560,7 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
     --chain-id "$CHAIN_ID" \
     --generate-only \
     --gas 200000 \
-    --gas-prices 1.0umirage \
+    --gas-prices 5000umirage \
     -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx (retry)"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
   
   $BIN tx sign "$UNSIGNED" \

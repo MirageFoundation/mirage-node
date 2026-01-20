@@ -20,6 +20,7 @@ type MirageBurnEvent struct {
 	BridgeFee          uint64 // Fee deducted from amount
 	Owner              string
 	Sequence           uint64
+	TxHash             string // Mirage transaction hash (hex)
 }
 
 // ChainWatcher watches for burns on an external chain.

@@ -37,14 +37,9 @@ service Query {
     option (google.api.http).get = "/mirage/core/v1/bridge/status";
   }
 
-  // GetBridgeAttestation queries a specific attestation by chain and burn_id.
+  // GetBridgeAttestation queries a specific inbound attestation by source chain and burn_id.
   rpc GetBridgeAttestation(QueryBridgeAttestationRequest) returns (QueryBridgeAttestationResponse) {
     option (google.api.http).get = "/mirage/core/v1/bridge/attestation/{source_chain}/{burn_id}";
-  }
-
-  // GetBridgeMinted queries the mint confirmation for an outbound bridge burn.
-  rpc GetBridgeMinted(QueryBridgeMintedRequest) returns (QueryBridgeMintedResponse) {
-    option (google.api.http).get = "/mirage/core/v1/bridge/minted/{burn_id}";
   }
 
   // GetBridgeConfig queries the bridge configuration parameters.
@@ -134,8 +129,11 @@ message QueryBridgeStatusResponse {
 }
 
 // QueryBridgeAttestationRequest is the request type for the Query/BridgeAttestation RPC method.
+// Queries inbound bridge attestations (external chain -> Mirage).
 message QueryBridgeAttestationRequest {
+  // source_chain is the external chain where the burn occurred (e.g., "solana")
   string source_chain = 1;
+  // burn_id is the unique identifier of the burn on the external chain (tx hash)
   string burn_id = 2;
 }
 
@@ -161,18 +159,6 @@ message QueryBridgeAttestationResponse {
   bool minted = 9;
   // created_at is the block height when attestation was first created
   int64 created_at = 10;
-}
-
-// QueryBridgeMintedRequest is the request type for the Query/BridgeMinted RPC method.
-message QueryBridgeMintedRequest {
-  string burn_id = 1;
-}
-
-// QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
-message QueryBridgeMintedResponse {
-  bool minted = 1;
-  string destination_chain = 2;
-  string destination_tx = 3;
 }
 
 // QueryBridgeConfigRequest is the request type for the Query/BridgeConfig RPC method.

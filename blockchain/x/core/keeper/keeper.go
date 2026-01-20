@@ -1378,6 +1378,23 @@ func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64
 	return seq, nil
 }
 
+// GetCurrentBridgeSequence returns the current sequence number for a destination chain (without incrementing)
+func (k Keeper) GetCurrentBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := []byte(types.BridgeSequencePrefix + destChain)
+
+	bz, err := store.Get(key)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(bz) == 0 {
+		return 0, nil // No burns yet for this chain
+	}
+
+	return binary.BigEndian.Uint64(bz), nil
+}
+
 // SetBridgeSequence sets the sequence number for a destination chain (HACK for state recovery)
 func (k Keeper) SetBridgeSequence(ctx sdk.Context, destChain string, seq uint64) error {
 	store := k.storeService.OpenKVStore(ctx)

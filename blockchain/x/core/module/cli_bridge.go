@@ -172,8 +172,8 @@ func GetCmdBridgeMinted() *cobra.Command {
 				return err
 			}
 
-			msg := &types.MsgBridgeMinted{
-				Authority:        clientCtx.GetFromAddress().String(),
+			msg := &types.MsgBridgeAttestMinted{
+				Validator:        clientCtx.GetFromAddress().String(),
 				BurnId:           args[0],
 				DestinationChain: args[1],
 				DestinationTx:    args[2],
@@ -227,16 +227,17 @@ Example:
 	return cmd
 }
 
-// GetCmdBridgeAttest implements the bridge attest command for validators.
+// GetCmdBridgeAttest implements the bridge attest-burned command for validators (inbound).
 func GetCmdBridgeAttest() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "attest [source_chain] [burn_id] [mirage_recipient] [amount]",
-		Short: "Attest to a burn on an external chain (validators only)",
+		Use:   "attest-burned [source_chain] [burn_id] [mirage_recipient] [amount]",
+		Short: "Attest to a burn on an external chain (validators only, inbound)",
 		Long: `Submit an attestation for a burn that occurred on an external chain.
 This is typically called by validator orchestrator processes, not manually.
+When 2/3 validators attest, tokens are minted on Mirage.
 
 Example:
-  miraged tx bridge attest solana abc123txhash mirage1abc... 1000000 --from validator`,
+  miraged tx bridge attest-burned solana abc123txhash mirage1abc... 1000000 --from validator`,
 		Args: cobra.ExactArgs(4),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientTxContext(cmd)
@@ -252,7 +253,7 @@ Example:
 				return fmt.Errorf("invalid amount: %w", err)
 			}
 
-			msg := &types.MsgBridgeAttest{
+			msg := &types.MsgBridgeAttestBurned{
 				Validator:       clientCtx.GetFromAddress().String(),
 				SourceChain:     sourceChain,
 				BurnId:          burnID,

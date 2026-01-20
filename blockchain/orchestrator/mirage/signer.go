@@ -31,7 +31,7 @@ const simulationGasLimit = 1_000_000
 
 func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBurnEvent) error {
 	burnID := strings.ToLower(strings.TrimSpace(burn.BurnID))
-	msg := &coretypes.MsgBridgeAttest{
+	msg := &coretypes.MsgBridgeAttestBurned{
 		Validator:       c.FromAddress(),
 		SourceChain:     burn.SourceChain,
 		BurnId:          burnID,
@@ -63,13 +63,14 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 	return nil
 }
 
-func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, bridgeFeeUmirage uint64) error {
+func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, bridgeFeeUmirage uint64, mirageTxHash string) error {
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
-	msg := &coretypes.MsgBridgeMinted{
-		Authority:        c.FromAddress(),
+	msg := &coretypes.MsgBridgeAttestMinted{
+		Validator:        c.FromAddress(),
 		BurnId:           burnID,
 		DestinationChain: strings.TrimSpace(destChain),
 		DestinationTx:    strings.TrimSpace(destTx),
+		MirageTxHash:     strings.ToUpper(strings.TrimSpace(mirageTxHash)),
 	}
 
 	txBytes, gasFeeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)

@@ -90,13 +90,15 @@ service Msg {
   // Uses envelope fields for relay signature verification.
   rpc BridgeBurn(MsgBridgeBurn) returns (MsgBridgeBurnResponse);
 
-  // BridgeAttest allows validators to attest to a burn on an external chain.
+  // BridgeAttestBurned allows validators to attest to a burn on an external chain (inbound).
+  // When 2/3 threshold is met, tokens are minted on Mirage.
   // Does NOT use envelope - signed directly by validator's consensus key.
-  rpc BridgeAttest(MsgBridgeAttest) returns (MsgBridgeAttestResponse);
+  rpc BridgeAttestBurned(MsgBridgeAttestBurned) returns (MsgBridgeAttestBurnedResponse);
 
-  // BridgeMinted allows validators to report successful mint on a destination chain.
+  // BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
+  // When 2/3 threshold is met, BridgeConfirmed event is emitted.
   // Signed by validator's operator key.
-  rpc BridgeMinted(MsgBridgeMinted) returns (MsgBridgeMintedResponse);
+  rpc BridgeAttestMinted(MsgBridgeAttestMinted) returns (MsgBridgeAttestMintedResponse);
 
 }
 
@@ -655,19 +657,20 @@ message MsgBridgeBurn {
 }
 
 message MsgBridgeBurnResponse {
-  string burn_id = 1;  // unique burn identifier (tx hash)
+  uint64 burn_id = 1;  // sequence number assigned to this burn
 }
 
-// MsgBridgeAttest allows validators to attest to a burn on an external chain
-// NOTE: This message does NOT use envelope fields - it's signed directly by validator
-message MsgBridgeAttest {
+// MsgBridgeAttestBurned allows validators to attest to a burn on an external chain (inbound).
+// When attestations reach 2/3 validator threshold, tokens are minted on Mirage.
+// NOTE: This message does NOT use envelope fields - it's signed directly by validator.
+message MsgBridgeAttestBurned {
   option (cosmos.msg.v1.signer) = "validator";
-  option (amino.name) = "mirage/x/core/MsgBridgeAttest";
+  option (amino.name) = "mirage/x/core/MsgBridgeAttestBurned";
 
   // validator is the validator operator address submitting the attestation
   string validator = 1;
 
-  // source_chain is the external chain where the burn occurred
+  // source_chain is the external chain where the burn occurred (e.g., "solana")
   string source_chain = 2;
 
   // burn_id is the unique identifier of the burn on the external chain (tx hash)
@@ -680,21 +683,22 @@ message MsgBridgeAttest {
   uint64 amount = 5;
 }
 
-message MsgBridgeAttestResponse {
-  bool minted = 1;           // true if this attestation triggered minting
+message MsgBridgeAttestBurnedResponse {
+  bool confirmed = 1;        // true if this attestation triggered confirmation (mint)
   int64 attested_power = 2;  // total voting power that has attested
-  int64 required_power = 3;  // voting power required to mint (66.67% threshold)
+  int64 required_power = 3;  // voting power required to confirm (2/3 threshold)
 }
 
-// MsgBridgeMinted allows validators to report a successful mint on a destination chain.
-message MsgBridgeMinted {
-  option (cosmos.msg.v1.signer) = "authority";
-  option (amino.name) = "mirage/x/core/MsgBridgeMinted";
+// MsgBridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
+// When attestations reach 2/3 validator threshold, BridgeConfirmed event is emitted.
+message MsgBridgeAttestMinted {
+  option (cosmos.msg.v1.signer) = "validator";
+  option (amino.name) = "mirage/x/core/MsgBridgeAttestMinted";
 
-  // authority is the validator operator address submitting the mint confirmation
-  string authority = 1;
+  // validator is the validator operator address submitting the attestation
+  string validator = 1;
 
-  // burn_id is the Mirage tx hash of the original burn
+  // burn_id is the Mirage burn sequence number (as string for consistency)
   string burn_id = 2;
 
   // destination_chain is the external chain identifier (e.g., "solana")
@@ -702,6 +706,13 @@ message MsgBridgeMinted {
 
   // destination_tx is the tx signature/hash on the destination chain
   string destination_tx = 4;
+
+  // mirage_tx_hash is the original Mirage burn tx hash (for indexing/linking)
+  string mirage_tx_hash = 5;
 }
 
-message MsgBridgeMintedResponse {}
+message MsgBridgeAttestMintedResponse {
+  bool confirmed = 1;        // true if this attestation triggered confirmation
+  int64 attested_power = 2;  // total voting power that has attested
+  int64 required_power = 3;  // voting power required to confirm (2/3 threshold)
+}

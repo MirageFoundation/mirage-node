@@ -7,7 +7,7 @@ Endpoints:
 - POST /api/bridge/burn: Relay burn for attested bridge to non-IBC chains (e.g., Solana)
 - GET /api/bridge/config: Get bridge configuration (enabled chains, fees)
 - GET /api/bridge/status: Get bridge status (pending transfers)
-- GET /api/bridge/get_minted: Query outbound mint confirmation by burn_id
+- GET /api/bridge/get_minted: Query bridge mint status from indexer DB
 """
 
 import base64
@@ -16,8 +16,6 @@ from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 from google.protobuf.any_pb2 import Any as AnyPB
-from google.protobuf.json_format import MessageToDict
-import grpc as _grpc
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 
 from bech32 import bech32_decode, convertbits  # type: ignore
@@ -25,10 +23,6 @@ from bech32 import bech32_decode, convertbits  # type: ignore
 from shared.datatypes import (
     MsgIBCTransfer,
     MsgBridgeBurn,
-    QueryBridgeMintedRequest,
-    QueryBridgeMintedResponse,
-    QueryBridgeAttestationRequest,
-    QueryBridgeAttestationResponse,
 )
 from shared.canon import canon_signed_with_pow
 
@@ -38,6 +32,7 @@ from params import expect_params
 from pow import canon_base_ibc_transfer, canon_base_bridge_burn
 from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast_tx
 from chain import classify_reject, get_current_pow_difficulty, is_node_catching_up, is_valid_recent_block_hash
+from db import connect_db
 
 # Import shared helpers from core module
 from routes.core import is_subscriber, _verify_signature, get_user_level, _hex_to_bytes, GAS_BUFFER_MULTIPLIER
@@ -77,40 +72,81 @@ def _is_private_ip(ip: str) -> bool:
     return False
 
 
-def _query_bridge_minted(burn_id: str, timeout: float = 3.0) -> dict:
-    def _deserialize(data: bytes) -> QueryBridgeMintedResponse:
-        msg = QueryBridgeMintedResponse()
-        msg.ParseFromString(data)
-        return msg
+def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
+    """Query inbound bridge attestation from indexer DB."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT tx_hash, recipient, amount, validator, minted, created_at
+                FROM bridge_transactions
+                WHERE direction = 'in'
+                  AND msg_type = 'attest_burned'
+                  AND LOWER(source_chain) = LOWER(%s)
+                  AND burn_id = %s
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (source_chain, burn_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return {"found": False, "confirmed": False}
+            return {
+                "found": True,
+                "confirmed": bool(row[4]),
+                "mint_tx": row[0],  # Frontend expects mint_tx for inbound bridges
+                "recipient": row[1],
+                "amount": row[2],
+                "validator": row[3],
+                "created_at": row[5],
+            }
 
-    target = require_runtime().grpc_target
-    with _grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetBridgeMinted",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        resp = method(QueryBridgeMintedRequest(burn_id=burn_id), timeout=timeout)
-    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
+def _query_bridge_burn_from_db(burn_id: str) -> dict:
+    """Query outbound bridge burn from indexer DB."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            # First get the burn record
+            cur.execute(
+                """
+                SELECT destination_chain, recipient, amount, created_at
+                FROM bridge_transactions
+                WHERE direction = 'out'
+                  AND msg_type = 'burn'
+                  AND LOWER(tx_hash) = LOWER(%s)
+                LIMIT 1
+                """,
+                (burn_id,),
+            )
+            burn_row = cur.fetchone()
+            if not burn_row:
+                return {"found": False, "confirmed": False}
 
-def _query_bridge_attestation(source_chain: str, burn_id: str, timeout: float = 3.0) -> dict:
-    """Query inbound bridge attestation (external chain -> Mirage)."""
+            # Check if there's an attest_minted confirmation for this burn
+            cur.execute(
+                """
+                SELECT destination_tx, created_at
+                FROM bridge_transactions
+                WHERE direction = 'out'
+                  AND msg_type = 'attest_minted'
+                  AND LOWER(burn_id) = LOWER(%s)
+                LIMIT 1
+                """,
+                (burn_id,),
+            )
+            minted_row = cur.fetchone()
 
-    def _deserialize(data: bytes) -> QueryBridgeAttestationResponse:
-        msg = QueryBridgeAttestationResponse()
-        msg.ParseFromString(data)
-        return msg
-
-    target = require_runtime().grpc_target
-    with _grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetBridgeAttestation",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        resp = method(QueryBridgeAttestationRequest(source_chain=source_chain, burn_id=burn_id), timeout=timeout)
-    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
+            return {
+                "found": True,
+                "confirmed": minted_row is not None,
+                "destination_chain": burn_row[0],
+                "destination_address": burn_row[1],
+                "amount": burn_row[2],
+                "created_at": burn_row[3],
+                "destination_tx": minted_row[0] if minted_row else None,
+                "confirmed_at": minted_row[1] if minted_row else None,
+            }
 
 
 def _base58_decode(s: str) -> bytes:
@@ -271,7 +307,7 @@ def bridge_config():
 
 @bridge_bp.route("/api/bridge/get_minted", methods=["GET"])
 def get_bridge_minted():
-    """Query bridge mint confirmation by burn_id.
+    """Query bridge mint status from indexer DB.
 
     For outbound bridges (Mirage -> external): just pass burn_id
     For inbound bridges (external -> Mirage): pass burn_id and chain (e.g., chain=solana)
@@ -292,23 +328,23 @@ def get_bridge_minted():
     try:
         if chain:
             # Inbound bridge: query attestation by source chain and burn_id
-            result = _query_bridge_attestation(chain, burn_id)
+            result = _query_bridge_attestation_from_db(chain, burn_id)
             log_event(
                 rid,
                 "get_bridge_minted.ok",
                 burn_id=burn_id,
                 chain=chain,
                 found=result.get("found", False),
-                minted=result.get("minted", False),
+                confirmed=result.get("confirmed", False),
             )
         else:
             # Outbound bridge: query by burn_id (tx hash)
-            result = _query_bridge_minted(burn_id.lower())
+            result = _query_bridge_burn_from_db(burn_id.lower())
             log_event(
                 rid,
                 "get_bridge_minted.ok",
                 burn_id=burn_id,
-                minted=result.get("minted", False),
+                confirmed=result.get("confirmed", False),
                 destination_chain=result.get("destination_chain"),
             )
         return jsonify(result)
