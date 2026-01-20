@@ -434,3 +434,36 @@ func instructionDiscriminator(name string) [8]byte {
 	copy(out[:], hash[:8])
 	return out
 }
+
+// GetLastSequence fetches the last processed sequence from the Solana bridge state.
+// This is used for replay protection - the orchestrator should reject sequences <= this value.
+func (w *Watcher) GetLastSequence(ctx context.Context) (uint64, error) {
+	// Derive bridge_state PDA
+	bridgeStatePDA, _, err := solana.FindProgramAddress([][]byte{[]byte(bridgeStateSeed)}, w.programID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to derive bridge state PDA: %w", err)
+	}
+
+	// Fetch account data
+	info, err := w.rpcClient.GetAccountInfo(ctx, bridgeStatePDA)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch bridge state account: %w", err)
+	}
+	if info == nil || info.Value == nil || info.Value.Data == nil {
+		return 0, fmt.Errorf("bridge state account not found")
+	}
+
+	data := info.Value.Data.GetBinary()
+	// BridgeState layout (Anchor):
+	//   8 bytes: discriminator
+	//   1 byte:  bump
+	//   32 bytes: authority
+	//   8 bytes: last_sequence
+	// Total offset for last_sequence: 8 + 1 + 32 = 41
+	if len(data) < 49 {
+		return 0, fmt.Errorf("bridge state data too short: %d bytes", len(data))
+	}
+
+	lastSequence := binary.LittleEndian.Uint64(data[41:49])
+	return lastSequence, nil
+}

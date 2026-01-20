@@ -6,6 +6,8 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
 
 **Upgrade Name:** `v1.9.0-bridge`
 
+**Patch Upgrade:** `v1.9.1-seq-fix` (optional, only if Solana state is stale after chain reset)
+
 ---
 
 ## Major Features
@@ -21,6 +23,8 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
   - Watches Solana for burn events
   - Submits attestations to Mirage chain
   - Configurable via `orchestrator.env`
+  - **Replay protection**: validates sequences against chain state before processing
+  - **Idempotent minting**: handles "AlreadyMinted" gracefully for crash recovery
 
 ### New Chain Parameters
 
@@ -62,6 +66,16 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
 - Fixed Delete message authorization to require governance for indexed content
 - Security hardening in core module message handlers
 
+### Bridge Replay Protection (Defense-in-Depth)
+
+| Layer | Check | Result |
+|-------|-------|--------|
+| **Orchestrator** | `sequence <= lastSeq` | Logged & skipped |
+| **Solana Program** | Sliding window bitmap (1024 sequences) | `AlreadyMinted` or `TransactionTooOld` |
+
+- Orchestrator queries Solana bridge state on startup to initialize sequence tracking
+- Prevents processing of stale/malicious burn events even if they pass Mirage chain validation
+
 ---
 
 ## Infrastructure Changes
@@ -80,6 +94,7 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
   - `ORCHESTRATOR_SOLANA_PROGRAM_ID`
   - `ORCHESTRATOR_SOLANA_RPC` / `ORCHESTRATOR_SOLANA_WS`
   - `ORCHESTRATOR_SOLANA_KEYPAIR`
+  - `ORCHESTRATOR_SOLANA_CLUSTER` - explicit cluster for Solscan URLs (`devnet`, `testnet`, or empty for mainnet)
 
 ### Deploy Migrations (v1.9.0)
 
@@ -116,9 +131,39 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
 
 ---
 
+## Sequence Reset (v1.9.1-seq-fix)
+
+If Solana bridge state becomes stale (e.g., after Mirage chain reset but Solana devnet persists), use the `v1.9.1-seq-fix` upgrade to advance the sequence counter:
+
+```bash
+# Submit governance proposal for sequence fix
+miraged tx gov submit-proposal software-upgrade v1.9.1-seq-fix \
+  --upgrade-height <height> \
+  --title "Bridge sequence reset" \
+  --summary "Advance Solana bridge sequence to skip stale devnet state"
+```
+
+This sets the Solana bridge sequence to 100, so new burns start at seq=101.
+
+**Keeper function available:** `SetBridgeSequence(ctx, chain, seq)` for future manual adjustments.
+
+---
+
+## API Changes
+
+### Backend Endpoints
+
+| Old | New | Description |
+|-----|-----|-------------|
+| `/api/get_bridge_minted` | `/api/bridge/get_minted` | Query mint confirmation by burn_id |
+
+All bridge endpoints now consistently use `/api/bridge/` prefix.
+
+---
+
 ## Breaking Changes
 
-- None for standard node operators
+- **API**: `/api/get_bridge_minted` renamed to `/api/bridge/get_minted`
 - Orchestrator is optional (only needed for bridge attestation participation)
 
 ---
@@ -156,6 +201,12 @@ Run `python3 scripts/verify_upgrade.py --phase post` which checks:
 - [ ] Gov params unchanged
 - [ ] Local config valid (app.toml, genesis.json)
 - [ ] Deploy migrations applied
+
+### Orchestrator Verification
+
+After starting the orchestrator, verify in logs:
+- `[REPLAY] initialized solana last_sequence=<N>` - confirms replay protection is active
+- `solscan: https://solscan.io/tx/...` - confirms correct cluster URL
 
 ---
 
