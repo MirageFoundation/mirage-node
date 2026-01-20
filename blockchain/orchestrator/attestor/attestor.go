@@ -156,6 +156,11 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 			return ctx.Err()
 		}
 		if err := fn(); err != nil {
+			// Don't retry permanent errors
+			if isPermanentError(err) {
+				a.logger.Printf("INFO  permanent error (no retry): %v", err)
+				return nil // Return nil to skip this burn and continue
+			}
 			lastErr = err
 			a.logger.Printf("DEBUG retry attempt=%d err=%v", attempt, err)
 			timer := time.NewTimer(a.cfg.Attestor.RetryInterval)
@@ -170,4 +175,23 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 		return nil
 	}
 	return fmt.Errorf("max retries exceeded: %w", lastErr)
+}
+
+// isPermanentError returns true for errors that should not be retried
+func isPermanentError(err error) bool {
+	errStr := err.Error()
+	// Solana program errors that indicate already processed or invalid data
+	permanentPatterns := []string{
+		"AlreadyMinted",            // Replay protection triggered
+		"error: 6021",              // AlreadyMinted error code
+		"Custom\": (json.Number) (len=4) \"6021\"", // JSON-RPC format
+		"TransactionTooOld",        // Sequence too old
+		"error: 6020",              // TransactionTooOld error code
+	}
+	for _, pattern := range permanentPatterns {
+		if strings.Contains(errStr, pattern) {
+			return true
+		}
+	}
+	return false
 }
