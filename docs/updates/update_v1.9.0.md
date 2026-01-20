@@ -25,6 +25,9 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
   - Configurable via `orchestrator.env`
   - **Replay protection**: validates sequences against chain state before processing
   - **Idempotent minting**: handles "AlreadyMinted" gracefully for crash recovery
+  - **Gas simulation**: dynamically calculates tx fees via RPC simulation
+  - **Unordered transactions**: uses 5-minute timeout for replay protection
+  - **Fee logging**: `[FEES]` logs show gas fees, bridge fees received, and net profit
 
 ### New Chain Parameters
 
@@ -32,6 +35,12 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
 |-----------|-------|-------------|
 | `bridge_chains` | `[{chain_id: "solana", enabled: true, fee: 500000000}]` | Enabled bridge chains with per-chain fees |
 | `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
+
+### Frontend Changes
+
+- **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain (no hardcoded values)
+- **Multi-step progress UI**: shows burn → mint → confirm stages with real-time polling
+- **Fee tooltip**: "Bridge fee paid to validator"
 
 ### New CLI Commands
 
@@ -92,9 +101,8 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
 - **New**: `orchestrator.env` for bridge orchestrator configuration
   - `ORCHESTRATOR_ENABLED`
   - `ORCHESTRATOR_SOLANA_PROGRAM_ID`
-  - `ORCHESTRATOR_SOLANA_RPC` / `ORCHESTRATOR_SOLANA_WS`
+  - `ORCHESTRATOR_SOLANA_RPC` / `ORCHESTRATOR_SOLANA_WS` - cluster auto-detected from URL (devnet/testnet/mainnet)
   - `ORCHESTRATOR_SOLANA_KEYPAIR`
-  - `ORCHESTRATOR_SOLANA_CLUSTER` - explicit cluster for Solscan URLs (`devnet`, `testnet`, or empty for mainnet)
 
 ### Deploy Migrations (v1.9.0)
 
@@ -153,9 +161,16 @@ This sets the Solana bridge sequence to 100, so new burns start at seq=101.
 
 ### Backend Endpoints
 
-| Old | New | Description |
-|-----|-----|-------------|
-| `/api/get_bridge_minted` | `/api/bridge/get_minted` | Query mint confirmation by burn_id |
+**New endpoints:**
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/bridge/config` | GET | Returns bridge chain configs with per-chain fees |
+| `/api/bridge/get_minted` | GET | Query mint confirmation by burn_id |
+
+**Renamed:**
+| Old | New |
+|-----|-----|
+| `/api/get_bridge_minted` | `/api/bridge/get_minted` |
 
 All bridge endpoints now consistently use `/api/bridge/` prefix.
 
@@ -183,6 +198,9 @@ All bridge endpoints now consistently use `/api/bridge/` prefix.
 - `deploy/entrypoint.sh` - Orchestrator startup, env var renames
 - `deploy/templates/env/indexer.env` - Renamed variables
 - `shared/config.py` - Updated env var names
+- `shared/datatypes.py` - Added `fee` field to `BridgeChainConfig`
+- `indexer/message_processor.py` - Added handlers for bridge message types
+- `web/frontend/src/views/BridgeView.js` - Dynamic fees, multi-step progress UI
 - Various scripts updated for new env var names
 
 ---

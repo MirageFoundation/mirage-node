@@ -330,7 +330,7 @@ func (w *Watcher) commitment() rpc.CommitmentType {
 }
 
 // solscanURL returns a Solscan explorer URL for the given transaction signature.
-// Cluster is explicitly configured in the orchestrator env (no implicit detection).
+// Cluster is derived from the RPC URL (devnet/testnet detected, else mainnet).
 func (w *Watcher) solscanURL(sig solana.Signature) string {
 	cluster := ""
 	switch strings.ToLower(strings.TrimSpace(w.cfg.Cluster)) {
