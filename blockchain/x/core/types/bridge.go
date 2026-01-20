@@ -14,6 +14,10 @@ const (
 
 	// BridgePendingCountKey stores the count of pending (unminted) attestations
 	BridgePendingCountKey = "bridge_pending_count"
+
+	// BridgeSequencePrefix stores the next sequence number for a destination chain
+	// Key: bridge_sequence/{dest_chain} -> uint64 (BigEndian)
+	BridgeSequencePrefix = "bridge_sequence/"
 )
 
 // BridgeAttestation tracks the state of an incoming bridge transfer from an external chain.

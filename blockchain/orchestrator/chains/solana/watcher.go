@@ -25,9 +25,11 @@ import (
 )
 
 const (
-	bridgeConfigSeed = "bridge_config"
-	mintSeed         = "mint"
-	mintRecordSeed   = "mint_record"
+	bridgeConfigSeed      = "bridge_config"
+	bridgeStateSeed       = "bridge_state"
+	mintSeed              = "mint"
+	mintRecordSeed        = "mint_record"
+	validatorRegistrySeed = "validator_registry"
 )
 
 type Watcher struct {
@@ -325,6 +327,19 @@ func (w *Watcher) commitment() rpc.CommitmentType {
 		return rpc.CommitmentFinalized
 	}
 	return rpc.CommitmentConfirmed
+}
+
+// solscanURL returns a Solscan explorer URL for the given transaction signature.
+// It automatically detects devnet vs mainnet based on the RPC URL.
+func (w *Watcher) solscanURL(sig solana.Signature) string {
+	cluster := ""
+	rpcLower := strings.ToLower(w.cfg.RPC)
+	if strings.Contains(rpcLower, "devnet") {
+		cluster = "?cluster=devnet"
+	} else if strings.Contains(rpcLower, "testnet") {
+		cluster = "?cluster=testnet"
+	}
+	return fmt.Sprintf("https://solscan.io/tx/%s%s", sig.String(), cluster)
 }
 
 type burnInitiatedEvent struct {

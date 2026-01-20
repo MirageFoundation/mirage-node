@@ -2749,6 +2749,12 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		return nil, err
 	}
 
+	// Get next sequence for this destination
+	sequence, err := am.k.GetNextBridgeSequence(sdkCtx, destChain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get next sequence: %w", err)
+	}
+
 	// Burn the total amount (fee + transfer amount)
 	if err := am.k.BurnFromAccount(sdkCtx, owner, totalBurn); err != nil {
 		return nil, fmt.Errorf("failed to burn tokens: %w", err)
@@ -2772,6 +2778,7 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
 			sdk.NewAttribute("burn_id", burnID),
 			sdk.NewAttribute("bridge_fee", fmt.Sprintf("%d", bridgeFee)),
+			sdk.NewAttribute("sequence", fmt.Sprintf("%d", sequence)),
 		),
 	)
 
@@ -2782,6 +2789,7 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		"amount", amount,
 		"burn_id", burnID,
 		"bridge_fee", bridgeFee,
+		"sequence", sequence,
 	)
 
 	return &types.MsgBridgeBurnResponse{BurnId: burnID}, nil

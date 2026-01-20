@@ -30,6 +30,7 @@ const pickThemeColor = (theme, key) => {
 };
 
 // Welcome card that appears for first-time visitors on the front page
+// eslint-disable-next-line no-unused-vars
 const WelcomeCard = styled.div`
     margin-top: 1rem;
     background-color: rgba(251, 191, 36, 0.1);
@@ -53,6 +54,7 @@ const WelcomeCard = styled.div`
     }
 `;
 
+// eslint-disable-next-line no-unused-vars
 const WelcomeDescription = styled.div`
     color: #f59e0b;
     font-size: 0.75rem;
@@ -62,6 +64,7 @@ const WelcomeDescription = styled.div`
     }
 `;
 
+// eslint-disable-next-line no-unused-vars
 const WelcomeFooter = styled.div`
     display: flex;
     align-items: center;
@@ -70,6 +73,7 @@ const WelcomeFooter = styled.div`
     flex-wrap: wrap;
 `;
 
+// eslint-disable-next-line no-unused-vars
 const WelcomeText = styled.a`
     color: #f59e0b;
     text-decoration: none;
@@ -1277,6 +1281,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const forceHardRefreshRef = useRef(isInitialPageLoad()); // Bypass debounce on initial page load
 
     // First-visit welcome card: show on front page until dismissed (only for guests)
+    // eslint-disable-next-line no-unused-vars
     const [showWelcomeCard, setShowWelcomeCard] = useState(() => {
         try {
             return !Storage.load('welcome_card_dismissed_v1', false);
@@ -1284,6 +1289,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             return true;
         }
     });
+    // eslint-disable-next-line no-unused-vars
     const dismissWelcomeCard = () => {
         try { Storage.save('welcome_card_dismissed_v1', true); } catch (_) { }
         setShowWelcomeCard(false);

@@ -607,11 +607,16 @@ export default function BridgeView({ state }) {
         if (!value || value === '') return null;
         const num = parseFloat(value);
         if (isNaN(num) || num <= 0) return 'Please enter a valid amount';
-        if (selectedNetwork && num < selectedNetwork.minAmount) {
-            return `Minimum amount is ${selectedNetwork.minAmount} MIRAGE`;
+        // Fee is subtracted from amount, so amount must be greater than fee
+        if (num <= bridgeFee) {
+            return `Amount must be greater than ${bridgeFee} MIRAGE fee`;
         }
-        if (num + bridgeFee > balance / 1_000_000) {
-            return 'Insufficient balance (including fee)';
+        const receiveAmt = num - bridgeFee;
+        if (selectedNetwork && receiveAmt < selectedNetwork.minAmount) {
+            return `Receive amount must be at least ${selectedNetwork.minAmount} MIRAGE (after ${bridgeFee} fee)`;
+        }
+        if (num > balance / 1_000_000) {
+            return 'Insufficient balance';
         }
         return null;
     }, [selectedNetwork, balance, bridgeFee]);
@@ -696,7 +701,8 @@ export default function BridgeView({ state }) {
     
     const handleMaxAmount = () => {
         if (!selectedNetwork) return;
-        const maxAmount = Math.max(0, (balance / 1_000_000) - bridgeFee);
+        // Fee is subtracted from amount, so MAX is full balance
+        const maxAmount = Math.max(0, balance / 1_000_000);
         setAmount(formatAmountDisplay(maxAmount.toFixed(6)));
         setErrors(prev => ({ ...prev, amount: null }));
     };
@@ -776,8 +782,9 @@ export default function BridgeView({ state }) {
     };
     
     // Calculate preview values
+    // Fee is SUBTRACTED - user pays (amount), receives (amount - fee) on destination
     const parsedAmount = parseFloat(rawAmount) || 0;
-    const receiveAmount = Math.max(0, parsedAmount - bridgeFee);
+    const receiveAmount = Math.max(0, parsedAmount - bridgeFee); // Fee is deducted from receive
     
     // Determine if we can submit
     const needsManualAddress = !selectedNetwork?.canDerive || useDifferentAddress;
@@ -991,9 +998,9 @@ export default function BridgeView({ state }) {
                                                 </PreviewRow>
                                                 <PreviewRow>
                                                     <PreviewLabel data-tooltip="Flat bridge fee (burned, deflationary)">
-                                                        Fee
+                                                        − Fee
                                                     </PreviewLabel>
-                                                    <PreviewValue>{bridgeFee} MIRAGE</PreviewValue>
+                                                    <PreviewValue>−{bridgeFee} MIRAGE</PreviewValue>
                                                 </PreviewRow>
                                                 <Divider />
                                                 <PreviewRow>

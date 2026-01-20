@@ -1261,6 +1261,31 @@ func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnI
 	return attestation, nil
 }
 
+// GetNextBridgeSequence increments and returns the next sequence number for a destination chain
+func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := []byte(types.BridgeSequencePrefix + destChain)
+
+	bz, err := store.Get(key)
+	if err != nil {
+		return 0, err
+	}
+
+	var seq uint64 = 1 // Start at 1
+	if len(bz) > 0 {
+		seq = binary.BigEndian.Uint64(bz) + 1
+	}
+
+	// Store the new sequence
+	bzNew := make([]byte, 8)
+	binary.BigEndian.PutUint64(bzNew, seq)
+	if err := store.Set(key, bzNew); err != nil {
+		return 0, err
+	}
+
+	return seq, nil
+}
+
 // GetBridgePendingCount returns the count of pending (unminted) attestations
 func (k Keeper) GetBridgePendingCount(ctx sdk.Context) (uint64, error) {
 	store := k.storeService.OpenKVStore(ctx)

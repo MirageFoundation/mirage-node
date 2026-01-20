@@ -92,7 +92,7 @@ core_bp = Blueprint("core", __name__)
 
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
 # state changes between simulation and execution.
-GAS_BUFFER_MULTIPLIER = 1.15  # 15% buffer
+GAS_BUFFER_MULTIPLIER = 1.25  # 25% buffer
 
 
 def _query_chain_profile_full(addr: str) -> dict | None:
