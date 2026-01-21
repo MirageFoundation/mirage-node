@@ -106,6 +106,51 @@ const BridgeLayout = styled.div`
     width: 100%;
 `;
 
+// Balance banner at the top of Bridge Out
+const BalanceBanner = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, 
+        ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'} 0%, 
+        ${({ theme }) => theme?.colors?.panel || '#23272C'} 100%);
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.25rem;
+`;
+
+const BalanceBannerLabel = styled.span`
+    font-size: 0.75rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-weight: 500;
+`;
+
+const BalanceBannerValue = styled.span`
+    font-size: 1.1rem;
+    color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    font-weight: 700;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
+`;
+
+const BalanceBannerSuffix = styled.span`
+    font-size: 0.7rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-weight: 500;
+`;
+
+const BalanceBannerError = styled.span`
+    font-size: 0.75rem;
+    color: #f56565;
+    cursor: pointer;
+    &:hover {
+        text-decoration: underline;
+    }
+`;
+
 const SectionTitle = styled.h3`
     font-size: 0.75rem;
     font-weight: 600;
@@ -1886,6 +1931,8 @@ export default function BridgeView({ state }) {
     const [destinationAddress, setDestinationAddress] = useState('');
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(null);
+    const [balanceLoading, setBalanceLoading] = useState(false);
+    const [balanceError, setBalanceError] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStage, setSubmitStage] = useState('idle'); // idle | submitting | verifying | confirmed | error
     const [submitError, setSubmitError] = useState('');
@@ -1971,10 +2018,13 @@ export default function BridgeView({ state }) {
     const refreshBalance = useCallback(async (reason = 'init') => {
         if (!address) {
             setBalance(null);
+            setBalanceError(null);
             console.debug('[Bridge] Balance fetch skipped (no address)');
             return;
         }
         console.debug('[Bridge] Fetching on-chain balance', { address, reason });
+        setBalanceLoading(true);
+        setBalanceError(null);
         try {
             const data = await Api.get(
                 'get_user_status',
@@ -1992,9 +2042,13 @@ export default function BridgeView({ state }) {
                 throw new Error('Invalid balance from get_user_status');
             }
             setBalance(balanceVal);
+            setBalanceError(null);
             console.debug('[Bridge] Balance updated', { balance: balanceVal });
         } catch (e) {
             console.error('[Bridge] Balance fetch failed:', e);
+            setBalanceError(e.message || 'Failed to load balance');
+        } finally {
+            setBalanceLoading(false);
         }
     }, [address]);
 
@@ -2569,6 +2623,21 @@ export default function BridgeView({ state }) {
                                 ) : (
                                     <BridgeContainer>
                                         <BridgeLayout>
+                                            {/* Balance Banner */}
+                                            <BalanceBanner>
+                                                <BalanceBannerLabel>Your Balance</BalanceBannerLabel>
+                                                {balanceError ? (
+                                                    <BalanceBannerError onClick={() => refreshBalance('retry')}>
+                                                        Failed to load - click to retry
+                                                    </BalanceBannerError>
+                                                ) : (
+                                                    <BalanceBannerValue>
+                                                        {balanceLoading ? 'Loading...' : formatBalance(balance)}
+                                                        {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
+                                                    </BalanceBannerValue>
+                                                )}
+                                            </BalanceBanner>
+
                                             {/* Step 1: Network Selection */}
                                             <SectionTitle>
                                                 <StepNumber>1</StepNumber>
@@ -2629,7 +2698,9 @@ export default function BridgeView({ state }) {
                                                 </InputWrapper>
                                                 <BalanceDisplay>
                                                     <BalanceLabel>Available:</BalanceLabel>
-                                                    <BalanceValue>{formatBalance(balance)} MIRAGE</BalanceValue>
+                                                    <BalanceValue>
+                                                        {balanceLoading ? 'Loading...' : balanceError ? 'Error' : `${formatBalance(balance)} MIRAGE`}
+                                                    </BalanceValue>
                                                 </BalanceDisplay>
                                                 {errors.amount && (
                                                     <ErrorText>⚠ {errors.amount}</ErrorText>

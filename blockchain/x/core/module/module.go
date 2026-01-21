@@ -2770,43 +2770,6 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	}, nil
 }
 
-// BridgeMintAttestation queries a specific outbound mint attestation
-func (am AppModule) GetBridgeMintAttestation(ctx context.Context, req *types.QueryBridgeMintAttestationRequest) (*types.QueryBridgeMintAttestationResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	params := am.k.GetParams(sdkCtx)
-
-	destChain := strings.TrimSpace(req.GetDestinationChain())
-	burnID := strings.TrimSpace(req.GetBurnId())
-
-	if destChain == "" || burnID == "" {
-		return nil, fmt.Errorf("destination_chain and burn_id are required")
-	}
-
-	attestation, found, err := am.k.GetBridgeMintAttestation(sdkCtx, destChain, burnID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get mint attestation: %w", err)
-	}
-
-	if !found {
-		return &types.QueryBridgeMintAttestationResponse{Found: false}, nil
-	}
-
-	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
-	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
-
-	return &types.QueryBridgeMintAttestationResponse{
-		Found:            true,
-		BurnId:           attestation.BurnID,
-		DestinationChain: attestation.DestinationChain,
-		DestinationTx:    attestation.DestinationTx,
-		Attestors:        attestation.AttestorList(),
-		AttestedPower:    attestation.AttestedPower,
-		RequiredPower:    requiredPower,
-		Confirmed:        attestation.Confirmed,
-		CreatedAt:        attestation.CreatedAt,
-	}, nil
-}
-
 // GetBridgeMinted queries a mint confirmation by burn_id and destination_chain
 func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)

@@ -47,9 +47,9 @@ service Query {
     option (google.api.http).get = "/mirage/core/v1/bridge/config";
   }
 
-  // GetBridgeMinted queries a mint confirmation by burn_id (outbound bridge).
+  // GetBridgeMinted queries a mint confirmation by destination_chain and burn_id (outbound bridge).
   rpc GetBridgeMinted(QueryBridgeMintedRequest) returns (QueryBridgeMintedResponse) {
-    option (google.api.http).get = "/mirage/core/v1/bridge/minted/{burn_id}";
+    option (google.api.http).get = "/mirage/core/v1/bridge/minted/{destination_chain}/{burn_id}";
   }
 }
 
@@ -180,8 +180,10 @@ message QueryBridgeConfigResponse {
 // QueryBridgeMintedRequest is the request type for the Query/BridgeMinted RPC method.
 // Queries outbound bridge mint confirmations (Mirage -> external chain).
 message QueryBridgeMintedRequest {
-  // burn_id is the Mirage burn sequence number or tx hash
-  string burn_id = 1;
+  // destination_chain is the external chain where mint should occur (e.g., "solana")
+  string destination_chain = 1;
+  // burn_id is the Mirage burn sequence number
+  string burn_id = 2;
 }
 
 // QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
