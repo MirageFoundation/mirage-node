@@ -529,6 +529,96 @@ func TestBridgeAttestationAttestorList(t *testing.T) {
 	}
 }
 
+func TestBridgeAttestationGetAttestorPower(t *testing.T) {
+	a := NewBridgeAttestation("solana", "burn123", "mirage1recipient", 1000000, 100)
+
+	// Before attestation, power should be 0
+	if power := a.GetAttestorPower("validator1"); power != 0 {
+		t.Errorf("GetAttestorPower before attestation = %d, want 0", power)
+	}
+
+	a.AddAttestation("validator1", 100)
+	a.AddAttestation("validator2", 50)
+	a.AddAttestation("validator3", 75)
+
+	// Verify each validator's stored power
+	if power := a.GetAttestorPower("validator1"); power != 100 {
+		t.Errorf("GetAttestorPower(validator1) = %d, want 100", power)
+	}
+	if power := a.GetAttestorPower("validator2"); power != 50 {
+		t.Errorf("GetAttestorPower(validator2) = %d, want 50", power)
+	}
+	if power := a.GetAttestorPower("validator3"); power != 75 {
+		t.Errorf("GetAttestorPower(validator3) = %d, want 75", power)
+	}
+
+	// Unknown validator should return 0
+	if power := a.GetAttestorPower("unknown"); power != 0 {
+		t.Errorf("GetAttestorPower(unknown) = %d, want 0", power)
+	}
+}
+
+func TestBridgeMintAttestationGetAttestorPower(t *testing.T) {
+	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
+
+	// Before attestation, power should be 0
+	if power := a.GetAttestorPower("validator1"); power != 0 {
+		t.Errorf("GetAttestorPower before attestation = %d, want 0", power)
+	}
+
+	a.AddAttestation("validator1", 300)
+	a.AddAttestation("validator2", 250)
+	a.AddAttestation("validator3", 200)
+
+	// Verify each validator's stored power
+	if power := a.GetAttestorPower("validator1"); power != 300 {
+		t.Errorf("GetAttestorPower(validator1) = %d, want 300", power)
+	}
+	if power := a.GetAttestorPower("validator2"); power != 250 {
+		t.Errorf("GetAttestorPower(validator2) = %d, want 250", power)
+	}
+	if power := a.GetAttestorPower("validator3"); power != 200 {
+		t.Errorf("GetAttestorPower(validator3) = %d, want 200", power)
+	}
+
+	// Verify total attested power
+	if a.AttestedPower != 750 {
+		t.Errorf("AttestedPower = %d, want 750", a.AttestedPower)
+	}
+}
+
+func TestProportionalFeeDistribution(t *testing.T) {
+	// Test the math for proportional fee distribution
+	// Simulates: 3 validators with powers 300, 250, 200 = 750 total
+	// Fee of 1000 should be split as: 400, 333, 266 = 999 (1 dust)
+	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
+	a.AddAttestation("validator1", 300)
+	a.AddAttestation("validator2", 250)
+	a.AddAttestation("validator3", 200)
+
+	totalFee := uint64(1000)
+	var distributed uint64 = 0
+	expectedShares := map[string]uint64{
+		"validator1": 400, // 1000 * 300 / 750 = 400
+		"validator2": 333, // 1000 * 250 / 750 = 333
+		"validator3": 266, // 1000 * 200 / 750 = 266
+	}
+
+	for valAddr, power := range a.Attestors {
+		share := totalFee * uint64(power) / uint64(a.AttestedPower)
+		if share != expectedShares[valAddr] {
+			t.Errorf("Share for %s = %d, want %d", valAddr, share, expectedShares[valAddr])
+		}
+		distributed += share
+	}
+
+	// Should have 1 dust remaining (1000 - 999 = 1)
+	dust := totalFee - distributed
+	if dust != 1 {
+		t.Errorf("Dust = %d, want 1", dust)
+	}
+}
+
 func TestValidateBridgeChain(t *testing.T) {
 	chains := []*BridgeChainConfig{
 		{ChainId: "solana", Enabled: true, Fee: 100000},

@@ -127,14 +127,14 @@ Tracks inbound attestations from external chains to Mirage.
 
 ```go
 type BridgeAttestation struct {
-    SourceChain     string   // "solana"
-    BurnID          string   // tx hash on external chain
-    MirageRecipient string   // destination on Mirage
-    Amount          uint64   // in umirage
-    Attestors       []string // validator operator addresses
-    AttestedPower   int64    // accumulated voting power
-    Minted          bool     // threshold met, tokens minted
-    CreatedAt       int64    // block height
+    SourceChain     string           // "solana"
+    BurnID          string           // tx hash on external chain
+    MirageRecipient string           // destination on Mirage
+    Amount          uint64           // in umirage
+    Attestors       map[string]int64 // validator operator address -> voting power at attestation
+    AttestedPower   int64            // accumulated voting power
+    Minted          bool             // threshold met, tokens minted
+    CreatedAt       int64            // block height
 }
 ```
 
@@ -168,7 +168,7 @@ type BridgeMintAttestation struct {
     BurnID           string            // Sequence number (as string)
     DestinationChain string            // "solana"
     DestinationTx    string            // tx signature on Solana (from first attestor)
-    Attestors        map[string]bool   // validator operator address -> attested
+    Attestors        map[string]int64  // validator operator address -> voting power at attestation
     AttestedPower    int64             // accumulated voting power
     Confirmed        bool              // threshold met
     CreatedAt        int64             // block height
@@ -233,8 +233,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - destination_chain must match the original burn record
 - destination_tx must match the first attestor's value (consistency check)
 - **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
-- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, pay escrowed bridge fee to threshold-crossing validator
-- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is transferred ONCE when threshold is met
+- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, distribute bridge fee proportionally
+- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is distributed ONCE when threshold is met:
+  - Each attestor receives `fee * their_power / total_attested_power`
+  - Rounding dust (if any) goes to the validator that crossed the threshold
 
 ## Orchestrator Architecture
 
@@ -425,10 +427,15 @@ message Params {
 
 ## Version History
 
+- **v1.10.3**: Proportional fee distribution
+  - `Attestors` map changed from `map[string]bool` to `map[string]int64` to store voting power
+  - Bridge fee is now distributed proportionally among all attestors based on their voting power
+  - Added `GetAttestorPower()` method to retrieve individual attestor's power contribution
+  - Rounding dust from integer division goes to the threshold-crossing validator
+
 - **v1.10.2**: Outbound 2/3 threshold enforcement
   - Added `BridgeMintAttestation` state record to accumulate validator attestations for outbound bridges
   - `MsgBridgeAttestMinted` now requires 2/3 voting power threshold before confirming
-  - Bridge fee is paid ONCE to the validator that crosses the threshold
   - `bridge_attest_minted` event now includes `attested_power`, `required_power`, and `minted` attributes
   - Indexer updated to flip `minted=true` on threshold-crossing event
   - Frontend shows attestation progress during "Validator confirmations" step
