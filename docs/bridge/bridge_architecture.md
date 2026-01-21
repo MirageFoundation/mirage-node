@@ -140,22 +140,39 @@ type BridgeAttestation struct {
 
 **Key:** `source_chain + burn_id`
 
+### BridgeBurnRecord (Outbound)
+
+Tracks outbound burns for fee payout and auditing.
+
+```go
+type BridgeBurnRecord struct {
+    BurnID             string // Sequence number as string
+    Owner              string // Mirage sender address
+    DestinationChain   string // "solana"
+    DestinationAddress string // Recipient on external chain
+    Amount             uint64 // Gross amount (includes fee)
+    BridgeFee          uint64 // Fee escrowed for validator
+    Sequence           uint64 // Per-chain sequence number
+    CreatedAt          int64  // Block height
+}
+```
+
+**Key:** `burn_id` (sequence number)
+
 ### BridgeMintedRecord (Outbound)
 
 Tracks outbound mint confirmations from Mirage to external chains.
 
 ```go
 type BridgeMintedRecord struct {
-    BurnID           string   // Mirage burn tx hash (lowercase)
-    DestinationChain string   // "solana"
-    DestinationTx    string   // tx signature on Solana
-    Attestors        []string // validator operator addresses
-    AttestedPower    int64    // accumulated voting power
-    Confirmed        bool     // 2/3 threshold met
+    BurnID           string // Sequence number (matches BridgeBurnRecord)
+    DestinationChain string // "solana"
+    DestinationTx    string // tx signature on Solana
+    CreatedAt        int64  // Block height
 }
 ```
 
-**Key:** `burn_id` (lowercase Mirage tx hash)
+**Key:** `burn_id` (sequence number)
 
 ### burn_sequence
 
@@ -166,17 +183,23 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 | Event | Emitted When | Key Attributes |
 |-------|--------------|----------------|
 | `bridge_burn` | User burns on Mirage | burn_id, owner, destination_chain, destination_address, amount, bridge_fee, sequence |
-| `bridge_attest` | Validator attests inbound | source_chain, burn_id, validator, attested_power |
-| `bridge_minted` | Validator attests outbound | burn_id, destination_chain, destination_tx, validator |
+| `bridge_attest` | Validator attests inbound | source_chain, burn_id, validator, attested_power, required_power, **minted** |
+| `bridge_attest_minted` | Validator attests outbound | burn_id, destination_chain, destination_tx, validator |
+
+**Note:** The `minted` attribute in `bridge_attest` is `true` when the attestation triggers the 2/3 threshold mint. The indexer watches for this to update the database.
 
 ## Validation Rules
 
 ### MsgBridgeBurn
-- Sender must have sufficient MIRAGE balance
+- Sender must have sufficient MIRAGE balance (amount includes fee)
 - Destination chain must be enabled in params
-- Amount must be > 0
-- **Actions:** Burn tokens, emit event, increment sequence
-- **No state record created** (event-only model)
+- Amount must be > bridge fee
+- **Fee Handling:**
+  - `amount` is the gross amount (what user enters)
+  - `burn_amount = amount - bridge_fee` is burned from user
+  - `bridge_fee` is escrowed in the core module account (paid to validator on confirmation)
+- **Actions:** Burn net amount, escrow fee, store `BridgeBurnRecord`, emit event, increment sequence
+- **State:** `BridgeBurnRecord` stored (keyed by sequence) for fee payout on confirmation
 
 ### MsgBridgeAttestBurned (inbound)
 - Signer must be active validator with voting power
@@ -188,9 +211,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 ### MsgBridgeAttestMinted (outbound)
 - Signer must be active validator with voting power
 - Validator cannot double-attest same burn_id
-- destination_tx must be consistent across attestations
-- `mirage_tx_hash` must match an existing burn (via sequence validation)
-- **Threshold met →** Set `confirmed=true`
+- burn_id must be a valid sequence number (≤ current sequence)
+- destination_chain must match the original burn record
+- **Actions:** Store `BridgeMintedRecord`, pay escrowed bridge fee to attesting validator
+- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is transferred from module escrow to the validator's account
 
 ## Orchestrator Architecture
 
@@ -262,6 +286,17 @@ The indexer watches all Mirage blocks and indexes bridge transactions:
 ### Linking Outbound Transactions
 
 For outbound bridges, the `burn_id` column uses the Mirage tx hash (from `mirage_tx_hash` field in `MsgBridgeAttestMinted`) to link attestations to the original burn.
+
+### Minted Status Updates
+
+For inbound bridges (Solana → Mirage), the indexer updates `minted=true` by processing tx events:
+
+1. When `MsgBridgeAttestBurned` is processed, the record is inserted with `minted=false`
+2. The indexer also processes tx events for each transaction
+3. When a `bridge_attest` event has `minted=true`, the indexer calls `update_bridge_attestation_minted()`
+4. This flips `minted=true` in the database, allowing the frontend to show completion
+
+This event-driven approach ensures the UI reflects the actual chain state.
 
 ## API Endpoints
 
@@ -369,6 +404,12 @@ message Params {
 5. **Validator-Only**: Only active validators with voting power can attest
 
 ## Version History
+
+- **v1.10.1**: Fee handling and indexer fixes
+  - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee payout
+  - Bridge fee is escrowed (not burned) and paid to attesting validator on confirmation
+  - Indexer processes tx events to update `minted=true` from `bridge_attest` events
+  - Fixed "Orchestrator detection" UI getting stuck on inbound bridges
 
 - **v1.10.0**: Major bridge refactor
   - Renamed `MsgBridgeAttest` → `MsgBridgeAttestBurned`
