@@ -23,9 +23,11 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if !w.ready {
 		return "", fmt.Errorf("solana watcher not ready")
 	}
-	burnHash, err := decodeBurnHash(burn.BurnID)
+	// Use TxHash (Mirage transaction hash) as the unique burn identifier for Solana
+	// BurnID is the sequence number, TxHash is the 64-char hex hash
+	burnHash, err := decodeBurnHash(burn.TxHash)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("invalid mirage tx hash: %w", err)
 	}
 	recipient, err := solana.PublicKeyFromBase58(strings.TrimSpace(burn.DestinationAddress))
 	if err != nil {
