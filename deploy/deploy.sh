@@ -38,6 +38,7 @@ Options:
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
   --prune              Run docker system prune during update (slow; not recommended).
+  --no-cache           Force full Docker rebuild without using build cache.
 
 Local deployment:
   deploy/deploy.sh --local --update
@@ -73,12 +74,14 @@ TARBALL_FILE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
 PRUNE=0
+NO_CACHE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
     --prune) PRUNE=1 ; shift ;;
+    --no-cache) NO_CACHE=1 ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
       shift
@@ -272,6 +275,7 @@ docker_build() {
 
   local tags=()
   local out_args=()
+  local cache_args=()
   if [ "$mode" = "push" ]; then
     out_args+=(--push)
     tags+=(-t "$IMAGE_SHA_TAG")
@@ -283,13 +287,21 @@ docker_build() {
     tags+=(-t "mirage:local")
   fi
 
+  # Add cache args unless --no-cache was specified
+  if [ "$NO_CACHE" -eq 1 ]; then
+    echo "==> Building WITHOUT cache (--no-cache)"
+    cache_args+=(--no-cache)
+  else
+    cache_args+=(--cache-from "type=local,src=$cache_base")
+    cache_args+=(--cache-to "type=local,dest=$cache_base,mode=max")
+  fi
+
   docker buildx build \
     "${out_args[@]}" \
     "${tags[@]}" \
+    "${cache_args[@]}" \
     --build-arg GIT_BRANCH="$GIT_BRANCH" \
     --build-arg GIT_HASH="$GIT_HASH" \
-    --cache-from "type=local,src=$cache_base" \
-    --cache-to "type=local,dest=$cache_base,mode=max" \
     -f "$REPO_ROOT/deploy/Dockerfile" \
     "$REPO_ROOT"
 }
