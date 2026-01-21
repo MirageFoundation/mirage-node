@@ -3,16 +3,98 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 from bech32 import bech32_encode, convertbits  # type: ignore
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# Solana bridge state constants (from orchestrator)
+# BridgeState account layout (Anchor):
+#   8 bytes: discriminator
+#   1 byte:  bump
+#   32 bytes: authority
+#   8 bytes: last_sequence
+# Total offset for last_sequence: 8 + 1 + 32 = 41
+
+
+def query_solana_last_sequence() -> int | None:
+    """Query Solana's bridge_state account to get the last_sequence.
+    
+    Returns the last_sequence value, or None if query fails.
+    This is used to initialize Mirage's burn_sequence counter to match Solana.
+    """
+    solana_rpc = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.devnet.solana.com")
+    program_id = os.environ.get("ORCHESTRATOR_SOLANA_PROGRAM_ID", "9rMS8JEHCM5UTGjwKoXV7V32tzkgM9b16LZcbVdPAMdp")
+    
+    if not program_id:
+        status("WARNING: ORCHESTRATOR_SOLANA_PROGRAM_ID not set, cannot query Solana")
+        return None
+    
+    try:
+        # Derive bridge_state PDA (seed = "bridge_state")
+        # We use a simple approach: query via getProgramAccounts with memcmp filter
+        # or compute the PDA directly. For simplicity, let's try to find it.
+        from solders.pubkey import Pubkey  # type: ignore
+        
+        program_pubkey = Pubkey.from_string(program_id)
+        bridge_state_pda, _ = Pubkey.find_program_address([b"bridge_state"], program_pubkey)
+        
+        # Query the account
+        req_data = json.dumps({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                str(bridge_state_pda),
+                {"encoding": "base64"}
+            ]
+        }).encode()
+        
+        req = urllib.request.Request(
+            solana_rpc,
+            data=req_data,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.load(resp)
+        
+        account_info = result.get("result", {}).get("value")
+        if not account_info:
+            status(f"WARNING: Solana bridge_state account not found at {bridge_state_pda}")
+            return None
+        
+        # Decode base64 data
+        data_b64 = account_info.get("data", [None])[0]
+        if not data_b64:
+            status("WARNING: Solana bridge_state has no data")
+            return None
+        
+        data = base64.b64decode(data_b64)
+        if len(data) < 49:
+            status(f"WARNING: Solana bridge_state data too short: {len(data)} bytes")
+            return None
+        
+        # Extract last_sequence (little-endian uint64 at offset 41)
+        last_sequence = struct.unpack("<Q", data[41:49])[0]
+        status(f"Solana bridge_state last_sequence: {last_sequence}")
+        return last_sequence
+        
+    except ImportError:
+        status("WARNING: solders not installed, cannot derive Solana PDA")
+        return None
+    except Exception as e:
+        status(f"WARNING: Failed to query Solana bridge_state: {e}")
+        return None
 MIRAGE_TMP = Path.home() / ".mirage" / "tmp"
 
 
@@ -650,8 +732,27 @@ def transform_to_single_validator(
         indexer_profiles = load_profiles_from_indexer_db()
         if indexer_profiles:
             core_state["initial_profiles"] = indexer_profiles
-            app_state["core"] = core_state
             status(f"Injected {len(indexer_profiles)} profiles from indexer DB into genesis")
+
+    # Query Solana's last_sequence and inject into genesis raw_state
+    # This ensures Mirage's burn sequence counter starts at the right value
+    solana_last_seq = query_solana_last_sequence()
+    if solana_last_seq is not None and solana_last_seq > 0:
+        # Create or update raw_state with bridge_sequence/solana
+        raw_state = core_state.get("raw_state") or []
+        # Key: "bridge_sequence/solana" (base64 encoded)
+        # Value: uint64 big-endian (base64 encoded)
+        seq_key = base64.b64encode(b"bridge_sequence/solana").decode()
+        seq_value = base64.b64encode(struct.pack(">Q", solana_last_seq)).decode()
+        
+        # Remove any existing entry for this key
+        raw_state = [kv for kv in raw_state if kv.get("key") != seq_key]
+        raw_state.append({"key": seq_key, "value": seq_value})
+        
+        core_state["raw_state"] = raw_state
+        status(f"Injected bridge_sequence/solana={solana_last_seq} into genesis raw_state")
+    
+    app_state["core"] = core_state
 
     # Find staking module account addresses (needed to fix bank balances)
     auth_accounts = auth.get("accounts") or []
