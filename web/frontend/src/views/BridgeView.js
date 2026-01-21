@@ -80,6 +80,15 @@ const MINT_POLL_SCHEDULE = {
     ],
 };
 
+const formatAttestationPower = (attestedPower, requiredPower, thresholdBps) => {
+    const required = Number(requiredPower) || 0;
+    const threshold = Number(thresholdBps) || 0;
+    if (required <= 0 || threshold <= 0) return '';
+    const thresholdPercent = threshold / 100;
+    const percentOfTotal = Math.min(100, (Number(attestedPower) || 0) / required * thresholdPercent);
+    return `${percentOfTotal.toFixed(1)}% power, need ${thresholdPercent.toFixed(1)}%`;
+};
+
 
 // Animations
 const fadeIn = keyframes`
@@ -782,7 +791,7 @@ const BRIDGE_IN_POLL_SCHEDULE = {
 };
 
 // Solana Bridge In Flow Component
-function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
+function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThresholdBps }) {
     const [solanaWallet, setSolanaWallet] = useState(null); // { address, mirageBalance, solBalance }
     const [isConnecting, setIsConnecting] = useState(false);
     const [amount, setAmount] = useState('');
@@ -797,6 +806,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
     const [stepTimestamps, setStepTimestamps] = useState({});
     const [stepElapsed, setStepElapsed] = useState({});
     const [mintStatus, setMintStatus] = useState({ state: 'idle', txHash: '', error: '' });
+    const [attestationProgress, setAttestationProgress] = useState({
+        attestorCount: 0,
+        attestedPower: 0,
+        requiredPower: 0,
+        confirmed: false,
+    });
     const buttonRef = useRef(null);
 
     const refreshMirageBalance = useCallback(async (reason = 'init') => {
@@ -896,11 +911,35 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
         let attestationFoundTime = null; // Track when we first see found=true
 
         setMintStatus({ state: 'pending', txHash: '', error: '' });
+        setAttestationProgress({
+            attestorCount: 0,
+            attestedPower: 0,
+            requiredPower: 0,
+            confirmed: false,
+        });
 
         const poll = async (attempt) => {
             if (cancelled) return;
             try {
                 console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_id:', burnNonce);
+
+                // Query attestation progress first
+                try {
+                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_id=${burnNonce}&chain=solana`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        console.debug('[Solana Bridge In] Attestation status:', statusData);
+                        setAttestationProgress({
+                            attestorCount: statusData.attestor_count || 0,
+                            attestedPower: Number(statusData.attested_power || 0),
+                            requiredPower: Number(statusData.required_power || 0),
+                            confirmed: statusData.confirmed || false,
+                        });
+                    }
+                } catch (e) {
+                    console.debug('[Solana Bridge In] Attestation status fetch error:', e.message);
+                }
+
                 // Query the backend for mint status using the burn nonce
                 const res = await fetch(`/api/bridge/get_minted?burn_id=${burnNonce}&chain=solana`);
                 if (!res.ok) {
@@ -925,6 +964,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
 
                 if (data.confirmed) {
                     setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
+                    setAttestationProgress(prev => ({ ...prev, confirmed: true }));
                     // Calculate final elapsed time for the 'complete' (mint) step
                     const now = Date.now();
                     const mintStartTime = attestationFoundTime || stepTimestamps.pending || now;
@@ -965,6 +1005,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
         if (elapsed === undefined) return '';
         return ` (${elapsed.toFixed(1)}s)`;
     };
+
+    const attestationPowerText = formatAttestationPower(
+        attestationProgress.attestedPower,
+        attestationProgress.requiredPower,
+        attestationThresholdBps
+    );
 
     // Get step state for styling
     const getStepState = (step) => {
@@ -1494,15 +1540,21 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                                     <StepDot $state={getStepState('pending')} />
                                     <StepText>
                                         <StepTitle>
-                                            Orchestrator detection{formatStepTime('pending')}
+                                            Validator confirmations{formatStepTime('pending')}
                                         </StepTitle>
                                         <StepMeta>
                                             {bridgeStatus === 'confirming' ? (
                                                 'Waiting for transfer confirmation'
                                             ) : bridgeStatus === 'pending' && mintStatus.state !== 'minted' ? (
-                                                'Scanning Solana for transfer'
+                                                attestationProgress.attestorCount > 0 ? (
+                                                    attestationPowerText
+                                                        ? `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested (${attestationPowerText})`
+                                                        : `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested`
+                                                ) : (
+                                                    'Waiting for validator attestations...'
+                                                )
                                             ) : mintStatus.state === 'minted' || bridgeStatus === 'complete' ? (
-                                                'Transfer detected by orchestrator'
+                                                'Threshold reached - confirmed'
                                             ) : (
                                                 'Waiting'
                                             )}
@@ -1799,6 +1851,7 @@ function BridgeInPanel({ address, chainConfigs }) {
                         mirageAddress={address}
                         theme={theme}
                         chainConfigs={chainConfigs}
+                        attestationThresholdBps={attestationThresholdBps}
                     />
                 )}
 
@@ -1852,7 +1905,14 @@ export default function BridgeView({ state }) {
         error: '',
         completedAt: null, // timestamp when mint completed (for final timer display)
     });
+    const [outboundAttestationProgress, setOutboundAttestationProgress] = useState({
+        attestorCount: 0,
+        attestedPower: 0,
+        requiredPower: 0,
+        confirmed: false,
+    });
     const [chainConfigs, setChainConfigs] = useState({}); // chain_id -> { fee_mirage, enabled, ... }
+    const [attestationThresholdBps, setAttestationThresholdBps] = useState(null);
 
     // Sync tab state with URL changes (browser back/forward)
     useEffect(() => {
@@ -1876,6 +1936,9 @@ export default function BridgeView({ state }) {
                     }
                     setChainConfigs(configs);
                     console.debug('[Bridge] Loaded chain configs:', configs);
+                }
+                if (typeof data.attestation_threshold_bps !== 'undefined') {
+                    setAttestationThresholdBps(Number(data.attestation_threshold_bps));
                 }
             })
             .catch(err => console.error('[Bridge] Failed to load config:', err));
@@ -2028,6 +2091,12 @@ export default function BridgeView({ state }) {
         setStepTimestamps({});
         setStepElapsed({});
         setMintStatus({ state: 'idle', destinationTx: '', destinationChain: '', error: '', completedAt: null });
+        setOutboundAttestationProgress({
+            attestorCount: 0,
+            attestedPower: 0,
+            requiredPower: 0,
+            confirmed: false,
+        });
     }, []);
 
     // Track step timing: record timestamp when stage changes
@@ -2074,6 +2143,12 @@ export default function BridgeView({ state }) {
             destinationChain: '',
             error: '',
         });
+        setOutboundAttestationProgress({
+            attestorCount: 0,
+            attestedPower: 0,
+            requiredPower: 0,
+            confirmed: false,
+        });
 
         console.debug('[Bridge] Mint poll schedule (ms):', {
             initialDelayMs,
@@ -2084,6 +2159,24 @@ export default function BridgeView({ state }) {
             if (cancelled) return;
             try {
                 console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
+
+                // Query attestation progress first
+                try {
+                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_id=${submitTxHash}`);
+                    if (statusRes.ok) {
+                        const statusData = await statusRes.json();
+                        console.debug('[Bridge] Outbound attestation status:', statusData);
+                        setOutboundAttestationProgress({
+                            attestorCount: statusData.attestor_count || 0,
+                            attestedPower: Number(statusData.attested_power || 0),
+                            requiredPower: Number(statusData.required_power || 0),
+                            confirmed: statusData.confirmed || false,
+                        });
+                    }
+                } catch (e) {
+                    console.debug('[Bridge] Outbound attestation status fetch error:', e.message);
+                }
+
                 const res = await fetch(`/api/bridge/get_minted?burn_id=${submitTxHash}`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
@@ -2097,6 +2190,7 @@ export default function BridgeView({ state }) {
                         error: '',
                         completedAt: Date.now(),
                     });
+                    setOutboundAttestationProgress(prev => ({ ...prev, confirmed: true }));
                     return;
                 }
             } catch (e) {
@@ -2428,6 +2522,11 @@ export default function BridgeView({ state }) {
 
     const confirmedStepState = getStepState('confirmed');
     const showMintTimer = isSolanaBridge && (confirmedStepState === 'active' || confirmedStepState === 'complete' || confirmedStepState === 'error');
+    const outboundAttestationPowerText = formatAttestationPower(
+        outboundAttestationProgress.attestedPower,
+        outboundAttestationProgress.requiredPower,
+        attestationThresholdBps
+    );
 
     return (
         <ContentGrid>
@@ -2739,8 +2838,12 @@ export default function BridgeView({ state }) {
                                                                                 `Error: ${mintStatus.error || 'mint confirmation failed'}`
                                                                             ) : mintStatus.state === 'timeout' ? (
                                                                                 'Pending: confirmation taking longer than expected.'
+                                                                            ) : outboundAttestationProgress.attestorCount > 0 ? (
+                                                                                outboundAttestationPowerText
+                                                                                    ? `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested (${outboundAttestationPowerText})`
+                                                                                    : `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested`
                                                                             ) : (
-                                                                                'Pending: waiting for orchestrator confirmation.'
+                                                                                'Waiting for validator attestations...'
                                                                             )
                                                                         ) : (
                                                                             submitStage === 'confirmed'

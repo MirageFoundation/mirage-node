@@ -50,6 +50,8 @@ _REQUIRED_INT_PARAMS = [
     # Relay fee params
     "relay_min_gas_price",
     "relay_max_gas_fee",
+    # Bridge params
+    "bridge_attestation_threshold",
 ]
 
 # Required float params

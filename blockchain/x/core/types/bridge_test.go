@@ -94,6 +94,80 @@ func TestBridgeMintedRecordUnmarshalInvalid(t *testing.T) {
 	}
 }
 
+func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
+	original := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
+	original.AddAttestation("val1", 1000)
+	original.AddAttestation("val2", 2000)
+	original.Confirmed = true
+
+	data, err := original.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	restored, err := UnmarshalBridgeMintAttestation(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if restored.BurnID != original.BurnID {
+		t.Errorf("BurnID mismatch: got %s, want %s", restored.BurnID, original.BurnID)
+	}
+	if restored.DestinationChain != original.DestinationChain {
+		t.Errorf("DestinationChain mismatch: got %s, want %s", restored.DestinationChain, original.DestinationChain)
+	}
+	if restored.DestinationTx != original.DestinationTx {
+		t.Errorf("DestinationTx mismatch: got %s, want %s", restored.DestinationTx, original.DestinationTx)
+	}
+	if restored.AttestedPower != original.AttestedPower {
+		t.Errorf("AttestedPower mismatch: got %d, want %d", restored.AttestedPower, original.AttestedPower)
+	}
+	if restored.Confirmed != original.Confirmed {
+		t.Errorf("Confirmed mismatch: got %v, want %v", restored.Confirmed, original.Confirmed)
+	}
+	if len(restored.Attestors) != 2 {
+		t.Errorf("Attestors count mismatch: got %d, want 2", len(restored.Attestors))
+	}
+}
+
+func TestBridgeMintAttestationUnmarshalInvalid(t *testing.T) {
+	_, err := UnmarshalBridgeMintAttestation([]byte("not valid json"))
+	if err == nil {
+		t.Error("Expected error for invalid JSON, got nil")
+	}
+}
+
+func TestBridgeMintAttestationUnmarshalNilAttestors(t *testing.T) {
+	// Test that Attestors map is initialized even if JSON has null
+	data := []byte(`{"burn_id":"1","destination_chain":"solana","attestors":null}`)
+	restored, err := UnmarshalBridgeMintAttestation(data)
+	if err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	if restored.Attestors == nil {
+		t.Error("Expected Attestors map to be initialized, got nil")
+	}
+}
+
+func TestBridgeMintAttestationKey(t *testing.T) {
+	tests := []struct {
+		destChain string
+		burnID    string
+		expected  string
+	}{
+		{"solana", "1", "bridge_mint_attestations/solana/1"},
+		{"solana", "42", "bridge_mint_attestations/solana/42"},
+		{"", "1", "bridge_mint_attestations//1"},
+	}
+
+	for _, tc := range tests {
+		key := BridgeMintAttestationKey(tc.destChain, tc.burnID)
+		if string(key) != tc.expected {
+			t.Errorf("BridgeMintAttestationKey(%s, %s) = %s, want %s", tc.destChain, tc.burnID, string(key), tc.expected)
+		}
+	}
+}
+
 func TestMsgBridgeAttestMintedMirageTxHashTag(t *testing.T) {
 	field, ok := reflect.TypeOf(MsgBridgeAttestMinted{}).FieldByName("MirageTxHash")
 	if !ok {
