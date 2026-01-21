@@ -456,6 +456,7 @@ def _build_pool():
     msg_bridge_minted_req = file_proto.message_type.add()
     msg_bridge_minted_req.name = "QueryBridgeMintedRequest"
     add_f(msg_bridge_minted_req, "burn_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bridge_minted_req, "destination_chain", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # QueryBridgeMintedResponse
     msg_bridge_minted_resp = file_proto.message_type.add()

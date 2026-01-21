@@ -205,36 +205,38 @@ func TestBridgeBurnRecordUnmarshalInvalid(t *testing.T) {
 
 func TestBridgeBurnKey(t *testing.T) {
 	tests := []struct {
-		burnID   string
-		expected string
+		destChain string
+		burnID    string
+		expected  string
 	}{
-		{"abc123", "bridge_burns/abc123"},
-		{"", "bridge_burns/"},
-		{"ABCDEF123456", "bridge_burns/ABCDEF123456"},
+		{"solana", "1", "bridge_burns/solana/1"},
+		{"ethereum", "42", "bridge_burns/ethereum/42"},
+		{"solana", "", "bridge_burns/solana/"},
 	}
 
 	for _, tc := range tests {
-		key := BridgeBurnKey(tc.burnID)
+		key := BridgeBurnKey(tc.destChain, tc.burnID)
 		if string(key) != tc.expected {
-			t.Errorf("BridgeBurnKey(%q) = %q, want %q", tc.burnID, string(key), tc.expected)
+			t.Errorf("BridgeBurnKey(%q, %q) = %q, want %q", tc.destChain, tc.burnID, string(key), tc.expected)
 		}
 	}
 }
 
 func TestBridgeMintedKey(t *testing.T) {
 	tests := []struct {
-		burnID   string
-		expected string
+		destChain string
+		burnID    string
+		expected  string
 	}{
-		{"abc123", "bridge_mints/abc123"},
-		{"", "bridge_mints/"},
-		{"ABCDEF123456", "bridge_mints/ABCDEF123456"},
+		{"solana", "1", "bridge_mints/solana/1"},
+		{"ethereum", "42", "bridge_mints/ethereum/42"},
+		{"solana", "", "bridge_mints/solana/"},
 	}
 
 	for _, tc := range tests {
-		key := BridgeMintedKey(tc.burnID)
+		key := BridgeMintedKey(tc.destChain, tc.burnID)
 		if string(key) != tc.expected {
-			t.Errorf("BridgeMintedKey(%q) = %q, want %q", tc.burnID, string(key), tc.expected)
+			t.Errorf("BridgeMintedKey(%q, %q) = %q, want %q", tc.destChain, tc.burnID, string(key), tc.expected)
 		}
 	}
 }

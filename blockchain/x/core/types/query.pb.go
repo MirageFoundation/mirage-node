@@ -1090,6 +1090,8 @@ func (m *QueryBridgeConfigResponse) GetAttestationThreshold() uint64 {
 type QueryBridgeMintedRequest struct {
 	// burn_id is the Mirage burn sequence number or tx hash
 	BurnId string `protobuf:"bytes,1,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+	// destination_chain is the external chain identifier (e.g., "solana")
+	DestinationChain string `protobuf:"bytes,2,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
 }
 
 func (m *QueryBridgeMintedRequest) Reset()         { *m = QueryBridgeMintedRequest{} }
@@ -1128,6 +1130,13 @@ var xxx_messageInfo_QueryBridgeMintedRequest proto.InternalMessageInfo
 func (m *QueryBridgeMintedRequest) GetBurnId() string {
 	if m != nil {
 		return m.BurnId
+	}
+	return ""
+}
+
+func (m *QueryBridgeMintedRequest) GetDestinationChain() string {
+	if m != nil {
+		return m.DestinationChain
 	}
 	return ""
 }

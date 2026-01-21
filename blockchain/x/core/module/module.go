@@ -3067,16 +3067,13 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		return nil, fmt.Errorf("invalid burn_id: %d (current sequence: %d)", burnIDNum, currentSeq)
 	}
 
-	// Load burn record to verify destination chain matches
-	burnRecord, found, err := am.k.GetBridgeBurnRecord(sdkCtx, burnIDStr)
+	// Load burn record to verify it exists for this destination chain
+	burnRecord, found, err := am.k.GetBridgeBurnRecord(sdkCtx, destChain, burnIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load bridge burn record: %w", err)
 	}
 	if !found {
-		return nil, fmt.Errorf("bridge burn record not found for burn_id %s", burnIDStr)
-	}
-	if strings.TrimSpace(burnRecord.DestinationChain) != destChain {
-		return nil, fmt.Errorf("destination_chain mismatch for burn_id %s", burnIDStr)
+		return nil, fmt.Errorf("bridge burn record not found for %s/%s", destChain, burnIDStr)
 	}
 
 	// Get or create mint attestation
@@ -3336,16 +3333,21 @@ func (am AppModule) GetBridgeMintAttestation(ctx context.Context, req *types.Que
 	}, nil
 }
 
-// GetBridgeMinted queries a mint confirmation by burn_id
+// GetBridgeMinted queries a mint confirmation by burn_id and destination_chain
 func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
-	burnID := strings.ToLower(strings.TrimSpace(req.GetBurnId()))
-	if err := validateTxHash(burnID); err != nil {
-		return nil, fmt.Errorf("invalid burn_id: %w", err)
+	burnID := strings.TrimSpace(req.GetBurnId())
+	if burnID == "" {
+		return nil, fmt.Errorf("burn_id is required")
 	}
 
-	record, found, err := am.k.GetBridgeMintedRecord(sdkCtx, burnID)
+	destChain := strings.ToLower(strings.TrimSpace(req.GetDestinationChain()))
+	if destChain == "" {
+		return nil, fmt.Errorf("destination_chain is required")
+	}
+
+	record, found, err := am.k.GetBridgeMintedRecord(sdkCtx, destChain, burnID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load mint record: %w", err)
 	}
