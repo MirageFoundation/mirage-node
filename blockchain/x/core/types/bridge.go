@@ -187,6 +187,9 @@ func (a *BridgeMintAttestation) HasAttested(validatorAddr string) bool {
 // Stores the validator's power for proportional fee distribution.
 // Returns true if the attestation is new (validator hadn't attested before)
 func (a *BridgeMintAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
+	if votingPower <= 0 {
+		return false
+	}
 	if _, exists := a.Attestors[validatorAddr]; exists {
 		return false
 	}
@@ -249,6 +252,9 @@ func (a *BridgeAttestation) HasAttested(validatorAddr string) bool {
 // Stores the validator's power for proportional fee distribution.
 // Returns true if the attestation is new (validator hadn't attested before)
 func (a *BridgeAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
+	if votingPower <= 0 {
+		return false
+	}
 	if _, exists := a.Attestors[validatorAddr]; exists {
 		return false
 	}

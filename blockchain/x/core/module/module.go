@@ -3149,7 +3149,15 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 
 			for valAddr, power := range attestation.Attestors {
 				// Calculate proportional share: fee * validatorPower / totalAttestedPower
-				share := totalFee * uint64(power) / uint64(attestation.AttestedPower)
+				// Use sdk.Int to prevent overflow during multiplication
+				if power <= 0 {
+					continue
+				}
+				share := sdkmath.NewIntFromUint64(totalFee).
+					MulRaw(power).
+					QuoRaw(attestation.AttestedPower).
+					Uint64()
+
 				if share > 0 {
 					if err := am.k.SendFromModule(sdkCtx, valAddr, share); err != nil {
 						return nil, fmt.Errorf("failed to pay bridge fee to %s: %w", valAddr, err)
