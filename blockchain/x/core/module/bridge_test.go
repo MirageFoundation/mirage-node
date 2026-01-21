@@ -906,3 +906,573 @@ func TestBridgeBurnEventAttributes(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// Multi-Chain Key Isolation Tests
+// =============================================================================
+
+// TestMultiChainBurnRecordIsolation verifies that burn records for different
+// destination chains don't collide even with the same sequence number
+func TestMultiChainBurnRecordIsolation(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	// Create burn records with same sequence but different chains
+	solanaRecord := &types.BridgeBurnRecord{
+		BurnID:             "1",
+		Owner:              "mirage1owner",
+		DestinationChain:   "solana",
+		DestinationAddress: "SolanaAddr123",
+		Amount:             1000000,
+		BridgeFee:          10000,
+		Sequence:           1,
+		CreatedAt:          100,
+	}
+
+	ethereumRecord := &types.BridgeBurnRecord{
+		BurnID:             "1", // Same sequence!
+		Owner:              "mirage1owner",
+		DestinationChain:   "ethereum",
+		DestinationAddress: "0xEthereumAddr123",
+		Amount:             2000000,
+		BridgeFee:          20000,
+		Sequence:           1,
+		CreatedAt:          100,
+	}
+
+	// Store both
+	if err := mk.SetBridgeBurnRecord(ctx, solanaRecord); err != nil {
+		t.Fatalf("SetBridgeBurnRecord(solana) error: %v", err)
+	}
+	if err := mk.SetBridgeBurnRecord(ctx, ethereumRecord); err != nil {
+		t.Fatalf("SetBridgeBurnRecord(ethereum) error: %v", err)
+	}
+
+	// Retrieve and verify they are distinct
+	gotSolana, found, err := mk.GetBridgeBurnRecord(ctx, "solana", "1")
+	if err != nil {
+		t.Fatalf("GetBridgeBurnRecord(solana) error: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected solana record to exist")
+	}
+	if gotSolana.Amount != 1000000 {
+		t.Errorf("Solana amount = %d, want 1000000", gotSolana.Amount)
+	}
+	if gotSolana.DestinationAddress != "SolanaAddr123" {
+		t.Errorf("Solana dest = %s, want SolanaAddr123", gotSolana.DestinationAddress)
+	}
+
+	gotEthereum, found, err := mk.GetBridgeBurnRecord(ctx, "ethereum", "1")
+	if err != nil {
+		t.Fatalf("GetBridgeBurnRecord(ethereum) error: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected ethereum record to exist")
+	}
+	if gotEthereum.Amount != 2000000 {
+		t.Errorf("Ethereum amount = %d, want 2000000", gotEthereum.Amount)
+	}
+	if gotEthereum.DestinationAddress != "0xEthereumAddr123" {
+		t.Errorf("Ethereum dest = %s, want 0xEthereumAddr123", gotEthereum.DestinationAddress)
+	}
+
+	// Verify cross-chain lookup returns not found
+	_, found, _ = mk.GetBridgeBurnRecord(ctx, "polygon", "1")
+	if found {
+		t.Error("Expected polygon record to not exist")
+	}
+}
+
+// TestMultiChainMintedRecordIsolation verifies mint records don't collide
+func TestMultiChainMintedRecordIsolation(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	solanaRecord := &types.BridgeMintedRecord{
+		BurnID:           "1",
+		DestinationChain: "solana",
+		DestinationTx:    "SolanaSig123",
+		CreatedAt:        100,
+	}
+
+	ethereumRecord := &types.BridgeMintedRecord{
+		BurnID:           "1", // Same sequence!
+		DestinationChain: "ethereum",
+		DestinationTx:    "0xEthTxHash123",
+		CreatedAt:        100,
+	}
+
+	if err := mk.SetBridgeMintedRecord(ctx, solanaRecord); err != nil {
+		t.Fatalf("SetBridgeMintedRecord(solana) error: %v", err)
+	}
+	if err := mk.SetBridgeMintedRecord(ctx, ethereumRecord); err != nil {
+		t.Fatalf("SetBridgeMintedRecord(ethereum) error: %v", err)
+	}
+
+	gotSolana, found, _ := mk.GetBridgeMintedRecord(ctx, "solana", "1")
+	if !found || gotSolana.DestinationTx != "SolanaSig123" {
+		t.Error("Solana minted record mismatch")
+	}
+
+	gotEthereum, found, _ := mk.GetBridgeMintedRecord(ctx, "ethereum", "1")
+	if !found || gotEthereum.DestinationTx != "0xEthTxHash123" {
+		t.Error("Ethereum minted record mismatch")
+	}
+}
+
+// =============================================================================
+// Inbound Attestation (BridgeAttestation) Tests
+// =============================================================================
+
+// TestBridgeAttestationStorage tests inbound attestation storage
+func TestBridgeAttestationStorage(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	sourceChain := "solana"
+	burnID := "12345"
+
+	// Initially should not exist
+	_, found, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err != nil {
+		t.Fatalf("GetBridgeAttestation error: %v", err)
+	}
+	if found {
+		t.Error("Expected attestation to not exist initially")
+	}
+
+	// Create and store
+	attestation := types.NewBridgeAttestation(sourceChain, burnID, "mirage1recipient", 1000000, 100)
+	attestation.AddAttestation("validator1", 100)
+	attestation.AttestedPower = 100
+
+	if err := mk.SetBridgeAttestation(ctx, attestation); err != nil {
+		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+
+	// Retrieve and verify
+	restored, found, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err != nil {
+		t.Fatalf("GetBridgeAttestation error: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected attestation to exist")
+	}
+	if restored.SourceChain != sourceChain {
+		t.Errorf("SourceChain = %s, want %s", restored.SourceChain, sourceChain)
+	}
+	if restored.AttestedPower != 100 {
+		t.Errorf("AttestedPower = %d, want 100", restored.AttestedPower)
+	}
+	if !restored.HasAttested("validator1") {
+		t.Error("Expected validator1 to have attested")
+	}
+}
+
+// TestBridgeAttestationAccumulation tests multi-validator attestation accumulation
+func TestBridgeAttestationAccumulation(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "12345", "mirage1recipient", 1000000, 100)
+
+	// First validator attests with 40% power
+	if !attestation.AddAttestation("val1", 40) {
+		t.Error("First attestation should succeed")
+	}
+	attestation.AttestedPower = 40
+
+	// Second validator attests with 30% power
+	if !attestation.AddAttestation("val2", 30) {
+		t.Error("Second attestation should succeed")
+	}
+	attestation.AttestedPower = 70
+
+	// Check threshold (need 67% = 6700 bps)
+	totalPower := int64(100)
+	thresholdBps := uint64(6700)
+
+	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("Expected 70% to meet 67% threshold")
+	}
+
+	// Verify attestor powers
+	if attestation.GetAttestorPower("val1") != 40 {
+		t.Errorf("val1 power = %d, want 40", attestation.GetAttestorPower("val1"))
+	}
+	if attestation.GetAttestorPower("val2") != 30 {
+		t.Errorf("val2 power = %d, want 30", attestation.GetAttestorPower("val2"))
+	}
+}
+
+// TestBridgeAttestationDuplicateRejectionInbound tests inbound duplicate rejection
+func TestBridgeAttestationDuplicateRejectionInbound(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "12345", "mirage1recipient", 1000000, 100)
+
+	// First attestation should succeed
+	if !attestation.AddAttestation("validator1", 50) {
+		t.Error("First attestation should succeed")
+	}
+
+	// Duplicate should fail
+	if attestation.AddAttestation("validator1", 50) {
+		t.Error("Duplicate attestation should be rejected")
+	}
+
+	// Different validator should succeed
+	if !attestation.AddAttestation("validator2", 30) {
+		t.Error("Different validator attestation should succeed")
+	}
+}
+
+// =============================================================================
+// Fee Distribution Edge Cases
+// =============================================================================
+
+// TestFeeDistributionZeroFee tests that zero fee doesn't cause issues
+func TestFeeDistributionZeroFee(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+	attestation.AddAttestation("val1", 50)
+	attestation.AddAttestation("val2", 50)
+	attestation.AttestedPower = 100
+
+	totalFee := uint64(0)
+
+	// With zero fee, all shares should be zero
+	for _, power := range attestation.Attestors {
+		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
+		if share != 0 {
+			t.Errorf("Expected zero share for zero fee, got %d", share)
+		}
+	}
+}
+
+// TestFeeDistributionSingleValidator tests single validator gets full fee
+func TestFeeDistributionSingleValidator(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+	attestation.AddAttestation("val1", 100)
+	attestation.AttestedPower = 100
+
+	totalFee := uint64(10000)
+
+	var totalDistributed uint64
+	for _, power := range attestation.Attestors {
+		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
+		totalDistributed += share
+	}
+
+	if totalDistributed != totalFee {
+		t.Errorf("Single validator should get full fee: got %d, want %d", totalDistributed, totalFee)
+	}
+}
+
+// TestFeeDistributionDustHandling tests that rounding dust is handled correctly
+func TestFeeDistributionDustHandling(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+	attestation.AddAttestation("val1", 33)
+	attestation.AddAttestation("val2", 33)
+	attestation.AddAttestation("val3", 34)
+	attestation.AttestedPower = 100
+
+	totalFee := uint64(100) // 100 / 3 = 33.33... each
+
+	var totalDistributed uint64
+	for _, power := range attestation.Attestors {
+		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
+		totalDistributed += share
+	}
+
+	// Due to rounding, we may lose some dust
+	dust := totalFee - totalDistributed
+	if dust > 2 { // Max 2 units of dust for 3 validators
+		t.Errorf("Too much dust: %d", dust)
+	}
+
+	// In actual implementation, dust goes to threshold-crossing validator
+	// This test just verifies the math doesn't overflow or panic
+}
+
+// TestFeeDistributionLargeValues tests fee distribution with large values
+func TestFeeDistributionLargeValues(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+	attestation.AddAttestation("val1", 1000000000) // 1 billion power
+	attestation.AddAttestation("val2", 2000000000) // 2 billion power
+	attestation.AttestedPower = 3000000000
+
+	totalFee := uint64(1000000000000) // 1 trillion fee
+
+	var totalDistributed uint64
+	for _, power := range attestation.Attestors {
+		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
+		totalDistributed += share
+	}
+
+	// val1 should get ~333B, val2 should get ~666B
+	expectedVal1 := uint64(333333333333)
+	expectedVal2 := uint64(666666666666)
+
+	val1Share := sdkmath.NewIntFromUint64(totalFee).MulRaw(1000000000).QuoRaw(3000000000).Uint64()
+	val2Share := sdkmath.NewIntFromUint64(totalFee).MulRaw(2000000000).QuoRaw(3000000000).Uint64()
+
+	if val1Share != expectedVal1 {
+		t.Errorf("val1 share = %d, want %d", val1Share, expectedVal1)
+	}
+	if val2Share != expectedVal2 {
+		t.Errorf("val2 share = %d, want %d", val2Share, expectedVal2)
+	}
+}
+
+// =============================================================================
+// Threshold Boundary Tests
+// =============================================================================
+
+// TestThresholdExactlyAtBoundary tests attestation exactly at 2/3 threshold
+func TestThresholdExactlyAtBoundary(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
+
+	totalPower := int64(100)
+	thresholdBps := uint64(6667) // 66.67%
+
+	// Implementation uses floor: required = floor(100 * 6667 / 10000) = 66
+	// So 66 power SHOULD meet threshold (66 >= 66)
+	attestation.AttestedPower = 66
+	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("66% should meet threshold (required=66 due to floor)")
+	}
+
+	// 65 power should NOT meet threshold
+	attestation.AttestedPower = 65
+	if attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("65% should not meet 66.67% threshold")
+	}
+
+	// 67 power should definitely meet threshold
+	attestation.AttestedPower = 67
+	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("67% should meet 66.67% threshold")
+	}
+}
+
+// TestThresholdWithOddTotalPower tests threshold with non-round numbers
+func TestThresholdWithOddTotalPower(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
+
+	totalPower := int64(150)
+	thresholdBps := uint64(6667) // 66.67%
+
+	// Required: floor(150 * 6667 / 10000) = floor(100.005) = 100
+	// So 100 SHOULD meet threshold
+	attestation.AttestedPower = 100
+	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("100/150 should meet threshold (required=100 due to floor)")
+	}
+
+	// 99 should NOT meet
+	attestation.AttestedPower = 99
+	if attestation.MeetsThreshold(totalPower, thresholdBps) {
+		t.Error("99/150 should not meet threshold")
+	}
+}
+
+// =============================================================================
+// MintAttestation Consistency Tests  
+// =============================================================================
+
+// TestMintAttestationDestinationTxConsistency tests that destination_tx must match
+func TestMintAttestationDestinationTxConsistency(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	// Create attestation with first destination_tx
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+	attestation.AddAttestation("val1", 50)
+	attestation.AttestedPower = 50
+
+	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
+		t.Fatalf("SetBridgeMintAttestation error: %v", err)
+	}
+
+	// Retrieve and verify
+	restored, found, _ := mk.GetBridgeMintAttestation(ctx, "solana", "1")
+	if !found {
+		t.Fatal("Expected attestation to exist")
+	}
+	if restored.DestinationTx != "sig123" {
+		t.Errorf("DestinationTx = %s, want sig123", restored.DestinationTx)
+	}
+
+	// In the actual handler, second attestor with different dest_tx would be rejected
+	// This test just verifies storage works correctly
+}
+
+// TestGetOrCreateMintAttestation tests the GetOrCreate helper
+func TestGetOrCreateMintAttestationNew(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	// First call should create
+	attestation, err := mk.GetOrCreateBridgeMintAttestation(ctx, "1", "solana", "sig123")
+	if err != nil {
+		t.Fatalf("GetOrCreateBridgeMintAttestation error: %v", err)
+	}
+	if attestation.BurnID != "1" {
+		t.Errorf("BurnID = %s, want 1", attestation.BurnID)
+	}
+	if attestation.DestinationChain != "solana" {
+		t.Errorf("DestinationChain = %s, want solana", attestation.DestinationChain)
+	}
+	if attestation.DestinationTx != "sig123" {
+		t.Errorf("DestinationTx = %s, want sig123", attestation.DestinationTx)
+	}
+
+	// Add an attestation and save
+	attestation.AddAttestation("val1", 50)
+	attestation.AttestedPower = 50
+	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
+		t.Fatalf("SetBridgeMintAttestation error: %v", err)
+	}
+
+	// Second call should return existing
+	attestation2, err := mk.GetOrCreateBridgeMintAttestation(ctx, "1", "solana", "sig123")
+	if err != nil {
+		t.Fatalf("GetOrCreateBridgeMintAttestation (2nd) error: %v", err)
+	}
+	if attestation2.AttestedPower != 50 {
+		t.Errorf("AttestedPower = %d, want 50 (should return existing)", attestation2.AttestedPower)
+	}
+}
+
+// =============================================================================
+// Query Response Tests
+// =============================================================================
+
+// TestQueryBridgeAttestationResponse tests inbound attestation query response
+func TestQueryBridgeAttestationResponse(t *testing.T) {
+	// Test response structure
+	resp := &types.QueryBridgeAttestationResponse{
+		Found:           true,
+		SourceChain:     "solana",
+		BurnId:          "12345",
+		MirageRecipient: "mirage1recipient",
+		Amount:          1000000,
+		AttestedPower:   70,
+		RequiredPower:   67,
+		Minted:          true,
+	}
+
+	if !resp.Found {
+		t.Error("Expected Found = true")
+	}
+	if resp.AttestedPower < resp.RequiredPower {
+		t.Error("AttestedPower should be >= RequiredPower when minted")
+	}
+}
+
+// TestQueryBridgeMintAttestationResponse tests outbound attestation query response
+func TestQueryBridgeMintAttestationResponse(t *testing.T) {
+	resp := &types.QueryBridgeMintAttestationResponse{
+		Found:            true,
+		BurnId:           "1",
+		DestinationChain: "solana",
+		DestinationTx:    "sig123",
+		Attestors:        []string{"val1", "val2"},
+		AttestedPower:    70,
+		RequiredPower:    67,
+		Confirmed:        true,
+		CreatedAt:        100,
+	}
+
+	if len(resp.Attestors) != 2 {
+		t.Errorf("Expected 2 attestors, got %d", len(resp.Attestors))
+	}
+	if !resp.Confirmed {
+		t.Error("Expected Confirmed = true")
+	}
+}
+
+// =============================================================================
+// Error Scenario Tests
+// =============================================================================
+
+// TestZeroPowerAttestation tests that zero power attestations are rejected
+func TestZeroPowerAttestation(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
+
+	// Zero power should be rejected
+	if attestation.AddAttestation("val1", 0) {
+		t.Error("Zero power attestation should be rejected")
+	}
+
+	// Negative power should be rejected
+	if attestation.AddAttestation("val1", -10) {
+		t.Error("Negative power attestation should be rejected")
+	}
+}
+
+// TestZeroPowerMintAttestation tests that zero power attestations are rejected for outbound
+func TestZeroPowerMintAttestation(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+
+	if attestation.AddAttestation("val1", 0) {
+		t.Error("Zero power attestation should be rejected")
+	}
+
+	if attestation.AddAttestation("val1", -10) {
+		t.Error("Negative power attestation should be rejected")
+	}
+}
+
+// TestEmptyValidatorAddress tests empty validator handling
+func TestEmptyValidatorAddress(t *testing.T) {
+	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
+
+	// Empty validator address - AddAttestation doesn't validate this,
+	// but the map will accept it. This should be caught at handler level.
+	// Just verify it doesn't panic.
+	attestation.AddAttestation("", 50)
+
+	if attestation.HasAttested("") {
+		// Empty string was added
+		t.Log("Empty validator was added (should be prevented at handler level)")
+	}
+}
+
+// TestAttestationNotFoundBehavior tests behavior when attestation doesn't exist
+func TestAttestationNotFoundBehavior(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	// Non-existent inbound attestation
+	_, found, err := mk.GetBridgeAttestation(ctx, "solana", "nonexistent")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if found {
+		t.Error("Expected not found for non-existent attestation")
+	}
+
+	// Non-existent outbound attestation
+	_, found, err = mk.GetBridgeMintAttestation(ctx, "solana", "nonexistent")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if found {
+		t.Error("Expected not found for non-existent mint attestation")
+	}
+
+	// Non-existent burn record
+	_, found, err = mk.GetBridgeBurnRecord(ctx, "solana", "nonexistent")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if found {
+		t.Error("Expected not found for non-existent burn record")
+	}
+
+	// Non-existent minted record
+	_, found, err = mk.GetBridgeMintedRecord(ctx, "solana", "nonexistent")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if found {
+		t.Error("Expected not found for non-existent minted record")
+	}
+}
