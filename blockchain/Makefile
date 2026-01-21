@@ -94,7 +94,7 @@ proto-deps:
 
 proto-gen:
 	@echo "Generating protobuf files..."
-	@buf generate --template proto/buf.gen.gogo.yaml
+	@ignite generate proto-go --yes
 
 .PHONY: proto-gen
 

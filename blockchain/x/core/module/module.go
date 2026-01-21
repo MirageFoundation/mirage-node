@@ -2775,16 +2775,7 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 	// Emit event for orchestrators to pick up
 	// NOTE: No state record is stored - attestations will track bridge status
 	sdkCtx.EventManager().EmitEvent(
-		sdk.NewEvent(
-			"bridge_burn",
-			sdk.NewAttribute("burn_id", fmt.Sprintf("%d", sequence)),
-			sdk.NewAttribute("owner", owner),
-			sdk.NewAttribute("destination_chain", destChain),
-			sdk.NewAttribute("destination_address", destAddr),
-			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
-			sdk.NewAttribute("bridge_fee", fmt.Sprintf("%d", bridgeFee)),
-			sdk.NewAttribute("sequence", fmt.Sprintf("%d", sequence)),
-		),
+		buildBridgeBurnEvent(owner, destChain, destAddr, amount, bridgeFee, sequence),
 	)
 
 	sdkCtx.Logger().Info("BridgeBurn",
@@ -2802,8 +2793,9 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 
 // BridgeAttest allows validators to attest to a burn on an external chain (inbound).
 // When 2/3 threshold is met, tokens are minted on Mirage.
-// Note: Method name is BridgeAttest (matching proto service) but message type is MsgBridgeAttestBurned.
-func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttestBurned) (*types.MsgBridgeAttestBurnedResponse, error) {
+// BridgeAttestBurned allows validators to attest to a burn on an external chain (inbound).
+// When 2/3 threshold is met, tokens are minted on Mirage.
+func (am AppModule) BridgeAttestBurned(ctx context.Context, req *types.MsgBridgeAttestBurned) (*types.MsgBridgeAttestBurnedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
@@ -2983,8 +2975,9 @@ func (am AppModule) BridgeAttest(ctx context.Context, req *types.MsgBridgeAttest
 
 // BridgeMinted allows validators to attest to a mint on an external chain (outbound).
 // When 2/3 threshold is met, BridgeConfirmed event is emitted.
-// Note: Method name is BridgeMinted (matching proto service) but message type is MsgBridgeAttestMinted.
-func (am AppModule) BridgeMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
+// BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
+// When 2/3 threshold is met, BridgeConfirmed event is emitted.
+func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	validator := strings.TrimSpace(req.GetValidator())

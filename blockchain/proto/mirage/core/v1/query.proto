@@ -46,6 +46,11 @@ service Query {
   rpc GetBridgeConfig(QueryBridgeConfigRequest) returns (QueryBridgeConfigResponse) {
     option (google.api.http).get = "/mirage/core/v1/bridge/config";
   }
+
+  // GetBridgeMinted queries a mint confirmation by burn_id (outbound bridge).
+  rpc GetBridgeMinted(QueryBridgeMintedRequest) returns (QueryBridgeMintedResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/minted/{burn_id}";
+  }
 }
 
 // QueryParamsRequest is request type for the Query/Params RPC method.
@@ -170,4 +175,21 @@ message QueryBridgeConfigResponse {
   repeated BridgeChainConfig chains = 1;
   // attestation_threshold is the voting power threshold (basis points, e.g., 6667 = 66.67%)
   uint64 attestation_threshold = 2;
+}
+
+// QueryBridgeMintedRequest is the request type for the Query/BridgeMinted RPC method.
+// Queries outbound bridge mint confirmations (Mirage -> external chain).
+message QueryBridgeMintedRequest {
+  // burn_id is the Mirage burn sequence number or tx hash
+  string burn_id = 1;
+}
+
+// QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
+message QueryBridgeMintedResponse {
+  // minted indicates whether the mint has been confirmed
+  bool minted = 1;
+  // destination_chain is the external chain where mint occurred (e.g., "solana")
+  string destination_chain = 2;
+  // destination_tx is the tx signature/hash on the destination chain
+  string destination_tx = 3;
 }
