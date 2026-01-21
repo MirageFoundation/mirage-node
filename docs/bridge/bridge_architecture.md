@@ -159,9 +159,27 @@ type BridgeBurnRecord struct {
 
 **Key:** `burn_id` (sequence number)
 
+### BridgeMintAttestation (Outbound)
+
+Tracks validator attestations for outbound mint confirmations (before threshold is met).
+
+```go
+type BridgeMintAttestation struct {
+    BurnID           string            // Sequence number (as string)
+    DestinationChain string            // "solana"
+    DestinationTx    string            // tx signature on Solana (from first attestor)
+    Attestors        map[string]bool   // validator operator address -> attested
+    AttestedPower    int64             // accumulated voting power
+    Confirmed        bool              // threshold met
+    CreatedAt        int64             // block height
+}
+```
+
+**Key:** `destination_chain + burn_id`
+
 ### BridgeMintedRecord (Outbound)
 
-Tracks outbound mint confirmations from Mirage to external chains.
+Tracks final outbound mint confirmations (written only when threshold is met).
 
 ```go
 type BridgeMintedRecord struct {
@@ -183,10 +201,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 | Event | Emitted When | Key Attributes |
 |-------|--------------|----------------|
 | `bridge_burn` | User burns on Mirage | burn_id, owner, destination_chain, destination_address, amount, bridge_fee, sequence |
-| `bridge_attest` | Validator attests inbound | source_chain, burn_id, validator, attested_power, required_power, **minted** |
-| `bridge_attest_minted` | Validator attests outbound | burn_id, destination_chain, destination_tx, validator |
+| `bridge_attest` | Validator attests inbound | source_chain, burn_id, validator, power, attested_power, required_power, **minted** |
+| `bridge_attest_minted` | Validator attests outbound | burn_id, destination_chain, destination_tx, validator, power, attested_power, required_power, **minted**, mirage_tx_hash |
 
-**Note:** The `minted` attribute in `bridge_attest` is `true` when the attestation triggers the 2/3 threshold mint. The indexer watches for this to update the database.
+**Note:** The `minted` attribute is `true` when the attestation triggers the 2/3 threshold. The indexer watches for this to update the database. For outbound, `mirage_tx_hash` links the attestation to the original burn transaction.
 
 ## Validation Rules
 
@@ -213,8 +231,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - Validator cannot double-attest same burn_id
 - burn_id must be a valid sequence number (≤ current sequence)
 - destination_chain must match the original burn record
-- **Actions:** Store `BridgeMintedRecord`, pay escrowed bridge fee to attesting validator
-- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is transferred from module escrow to the validator's account
+- destination_tx must match the first attestor's value (consistency check)
+- **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
+- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, pay escrowed bridge fee to threshold-crossing validator
+- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is transferred ONCE when threshold is met
 
 ## Orchestrator Architecture
 
@@ -404,6 +424,15 @@ message Params {
 5. **Validator-Only**: Only active validators with voting power can attest
 
 ## Version History
+
+- **v1.10.2**: Outbound 2/3 threshold enforcement
+  - Added `BridgeMintAttestation` state record to accumulate validator attestations for outbound bridges
+  - `MsgBridgeAttestMinted` now requires 2/3 voting power threshold before confirming
+  - Bridge fee is paid ONCE to the validator that crosses the threshold
+  - `bridge_attest_minted` event now includes `attested_power`, `required_power`, and `minted` attributes
+  - Indexer updated to flip `minted=true` on threshold-crossing event
+  - Frontend shows attestation progress during "Validator confirmations" step
+  - Added `/api/bridge/attestation_status` endpoint for polling attestation progress
 
 - **v1.10.1**: Fee handling and indexer fixes
   - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee payout

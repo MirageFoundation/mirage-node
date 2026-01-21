@@ -2996,12 +2996,11 @@ func (am AppModule) BridgeAttestBurned(ctx context.Context, req *types.MsgBridge
 	}, nil
 }
 
-// BridgeMinted allows validators to attest to a mint on an external chain (outbound).
-// When 2/3 threshold is met, BridgeConfirmed event is emitted.
 // BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
-// When 2/3 threshold is met, BridgeConfirmed event is emitted.
+// When 2/3 threshold is met, the mint is confirmed and the bridge fee is paid.
 func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
 
 	validator := strings.TrimSpace(req.GetValidator())
 	if validator == "" {
@@ -3021,6 +3020,12 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 	}
 	if !bonded {
 		return nil, fmt.Errorf("validator %s is not bonded", valoper)
+	}
+
+	// Get validator's voting power
+	valPower, err := am.k.GetValidatorPower(sdkCtx, valoper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get validator power: %w", err)
 	}
 
 	burnIDStr := strings.TrimSpace(req.GetBurnId())
@@ -3050,6 +3055,8 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		}
 	}
 
+	mirageTxHash := strings.TrimSpace(req.GetMirageTxHash())
+
 	// Validate burn_id against burn_sequence counter
 	// burn_id must be <= current sequence (0 means no burns yet)
 	currentSeq, err := am.k.GetCurrentBridgeSequence(sdkCtx, destChain)
@@ -3060,14 +3067,7 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		return nil, fmt.Errorf("invalid burn_id: %d (current sequence: %d)", burnIDNum, currentSeq)
 	}
 
-	// TODO: Implement proper threshold-based attestation for outbound bridges
-	// For now, check if already confirmed via BridgeMintedRecord (legacy)
-	if _, exists, err := am.k.GetBridgeMintedRecord(sdkCtx, burnIDStr); err != nil {
-		return nil, fmt.Errorf("failed to check existing mint record: %w", err)
-	} else if exists {
-		return nil, fmt.Errorf("bridge mint already confirmed for burn_id %s", burnIDStr)
-	}
-
+	// Load burn record to verify destination chain matches
 	burnRecord, found, err := am.k.GetBridgeBurnRecord(sdkCtx, burnIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load bridge burn record: %w", err)
@@ -3079,36 +3079,108 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		return nil, fmt.Errorf("destination_chain mismatch for burn_id %s", burnIDStr)
 	}
 
-	// Store the mint confirmation (legacy - will be replaced by attestation threshold)
-	record := &types.BridgeMintedRecord{
-		BurnID:           burnIDStr,
-		DestinationChain: destChain,
-		DestinationTx:    destTx,
-		CreatedAt:        sdkCtx.BlockHeight(),
-	}
-	if err := am.k.SetBridgeMintedRecord(sdkCtx, record); err != nil {
-		return nil, fmt.Errorf("failed to store mint record: %w", err)
+	// Get or create mint attestation
+	attestation, err := am.k.GetOrCreateBridgeMintAttestation(sdkCtx, burnIDStr, destChain, destTx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get/create mint attestation: %w", err)
 	}
 
-	// Pay bridge fee to the attesting validator from escrow
-	if burnRecord.BridgeFee > 0 {
-		if err := am.k.SendFromModule(sdkCtx, validator, burnRecord.BridgeFee); err != nil {
-			return nil, fmt.Errorf("failed to pay bridge fee: %w", err)
-		}
-		sdkCtx.Logger().Debug("BridgeAttestMinted fee paid",
+	// Check if already confirmed
+	if attestation.Confirmed {
+		totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+		return &types.MsgBridgeAttestMintedResponse{
+			Confirmed:     true,
+			AttestedPower: attestation.AttestedPower,
+			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+		}, nil
+	}
+
+	// Verify destination_tx consistency (all attestors must agree)
+	if attestation.DestinationTx != destTx {
+		return nil, fmt.Errorf("destination_tx mismatch: existing %s, provided %s", attestation.DestinationTx, destTx)
+	}
+
+	// Check if validator already attested
+	if attestation.HasAttested(valoper) {
+		totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+		sdkCtx.Logger().Debug("BridgeAttestMinted validator already attested",
 			"burn_id", burnIDStr,
-			"validator", validator,
-			"bridge_fee", burnRecord.BridgeFee,
+			"validator", valoper,
+		)
+		return &types.MsgBridgeAttestMintedResponse{
+			Confirmed:     attestation.Confirmed,
+			AttestedPower: attestation.AttestedPower,
+			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+		}, nil
+	}
+
+	// Add attestation
+	attestation.AddAttestation(valoper, valPower)
+
+	// Check if threshold is met
+	totalPower, err := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total voting power: %w", err)
+	}
+
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+	confirmed := false
+
+	if attestation.MeetsThreshold(totalPower, params.BridgeAttestationThreshold) {
+		// Threshold met - confirm the mint
+		attestation.Confirmed = true
+		confirmed = true
+
+		// Store final mint record
+		record := &types.BridgeMintedRecord{
+			BurnID:           burnIDStr,
+			DestinationChain: destChain,
+			DestinationTx:    destTx,
+			CreatedAt:        sdkCtx.BlockHeight(),
+		}
+		if err := am.k.SetBridgeMintedRecord(sdkCtx, record); err != nil {
+			return nil, fmt.Errorf("failed to store mint record: %w", err)
+		}
+
+		// Pay bridge fee to the validator that crossed the threshold
+		if burnRecord.BridgeFee > 0 {
+			if err := am.k.SendFromModule(sdkCtx, validator, burnRecord.BridgeFee); err != nil {
+				return nil, fmt.Errorf("failed to pay bridge fee: %w", err)
+			}
+			sdkCtx.Logger().Info("BridgeAttestMinted fee paid on threshold",
+				"burn_id", burnIDStr,
+				"validator", validator,
+				"bridge_fee", burnRecord.BridgeFee,
+			)
+		}
+
+		sdkCtx.Logger().Info("BridgeAttestMinted threshold met",
+			"burn_id", burnIDStr,
+			"destination_chain", destChain,
+			"destination_tx", destTx,
+			"attested_power", attestation.AttestedPower,
+			"required_power", requiredPower,
 		)
 	}
 
+	// Save attestation state
+	if err := am.k.SetBridgeMintAttestation(sdkCtx, attestation); err != nil {
+		return nil, fmt.Errorf("failed to save mint attestation: %w", err)
+	}
+
+	// Emit attestation event (always, with current progress)
 	sdkCtx.EventManager().EmitEvent(
 		sdk.NewEvent(
 			"bridge_attest_minted",
 			sdk.NewAttribute("burn_id", burnIDStr),
 			sdk.NewAttribute("destination_chain", destChain),
 			sdk.NewAttribute("destination_tx", destTx),
-			sdk.NewAttribute("validator", validator),
+			sdk.NewAttribute("validator", valoper),
+			sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+			sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+			sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+			sdk.NewAttribute("minted", fmt.Sprintf("%t", confirmed)),
+			sdk.NewAttribute("mirage_tx_hash", mirageTxHash),
 		),
 	)
 
@@ -3116,16 +3188,17 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		"burn_id", burnIDStr,
 		"destination_chain", destChain,
 		"destination_tx", destTx,
-		"validator", validator,
-		"valoper", valoper,
+		"validator", valoper,
+		"power", valPower,
+		"attested_power", attestation.AttestedPower,
+		"required_power", requiredPower,
+		"confirmed", confirmed,
 	)
 
-	// TODO: Implement 2/3 threshold logic for outbound confirmations
-	// For now, single attestation confirms (existing behavior)
 	return &types.MsgBridgeAttestMintedResponse{
-		Confirmed:     true,
-		AttestedPower: 0,
-		RequiredPower: 0,
+		Confirmed:     confirmed,
+		AttestedPower: attestation.AttestedPower,
+		RequiredPower: requiredPower,
 	}, nil
 }
 
@@ -3184,6 +3257,43 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 		RequiredPower:   requiredPower,
 		Minted:          attestation.Minted,
 		CreatedAt:       attestation.CreatedAt,
+	}, nil
+}
+
+// BridgeMintAttestation queries a specific outbound mint attestation
+func (am AppModule) GetBridgeMintAttestation(ctx context.Context, req *types.QueryBridgeMintAttestationRequest) (*types.QueryBridgeMintAttestationResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+
+	destChain := strings.TrimSpace(req.GetDestinationChain())
+	burnID := strings.TrimSpace(req.GetBurnId())
+
+	if destChain == "" || burnID == "" {
+		return nil, fmt.Errorf("destination_chain and burn_id are required")
+	}
+
+	attestation, found, err := am.k.GetBridgeMintAttestation(sdkCtx, destChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get mint attestation: %w", err)
+	}
+
+	if !found {
+		return &types.QueryBridgeMintAttestationResponse{Found: false}, nil
+	}
+
+	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+	return &types.QueryBridgeMintAttestationResponse{
+		Found:            true,
+		BurnId:           attestation.BurnID,
+		DestinationChain: attestation.DestinationChain,
+		DestinationTx:    attestation.DestinationTx,
+		Attestors:        attestation.AttestorList(),
+		AttestedPower:    attestation.AttestedPower,
+		RequiredPower:    requiredPower,
+		Confirmed:        attestation.Confirmed,
+		CreatedAt:        attestation.CreatedAt,
 	}, nil
 }
 

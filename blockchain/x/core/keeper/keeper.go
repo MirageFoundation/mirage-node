@@ -1353,6 +1353,56 @@ func (k Keeper) SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMinte
 	return store.Set(key, bz)
 }
 
+// ============================================
+// Bridge Mint Attestation State Management (Outbound)
+// ============================================
+
+// GetBridgeMintAttestation retrieves a bridge mint attestation from state
+func (k Keeper) GetBridgeMintAttestation(ctx sdk.Context, destChain, burnID string) (*types.BridgeMintAttestation, bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintAttestationKey(destChain, burnID)
+	bz, err := store.Get(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bz) == 0 {
+		return nil, false, nil
+	}
+	attestation, err := types.UnmarshalBridgeMintAttestation(bz)
+	if err != nil {
+		return nil, false, err
+	}
+	return attestation, true, nil
+}
+
+// SetBridgeMintAttestation stores a bridge mint attestation in state
+func (k Keeper) SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintAttestationKey(attestation.DestinationChain, attestation.BurnID)
+	bz, err := attestation.Marshal()
+	if err != nil {
+		return err
+	}
+	return store.Set(key, bz)
+}
+
+// GetOrCreateBridgeMintAttestation retrieves or creates a new bridge mint attestation
+func (k Keeper) GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error) {
+	attestation, found, err := k.GetBridgeMintAttestation(ctx, destChain, burnID)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return attestation, nil
+	}
+	// Create new attestation
+	attestation = types.NewBridgeMintAttestation(burnID, destChain, destTx, ctx.BlockHeight())
+	if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
+		return nil, err
+	}
+	return attestation, nil
+}
+
 // GetNextBridgeSequence increments and returns the next sequence number for a destination chain
 func (k Keeper) GetNextBridgeSequence(ctx sdk.Context, destChain string) (uint64, error) {
 	store := k.storeService.OpenKVStore(ctx)

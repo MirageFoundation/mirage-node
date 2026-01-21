@@ -843,6 +843,156 @@ func (m *QueryBridgeAttestationResponse) GetCreatedAt() int64 {
 	return 0
 }
 
+// QueryBridgeMintAttestationRequest is the request type for the Query/BridgeMintAttestation RPC method.
+// Queries outbound bridge mint attestations (Mirage -> external).
+type QueryBridgeMintAttestationRequest struct {
+	// destination_chain is the external chain where the mint occurred (e.g., "solana")
+	DestinationChain string `protobuf:"bytes,1,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
+	// burn_id is the Mirage burn sequence number (as string)
+	BurnId string `protobuf:"bytes,2,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+}
+
+func (m *QueryBridgeMintAttestationRequest) Reset()         { *m = QueryBridgeMintAttestationRequest{} }
+func (m *QueryBridgeMintAttestationRequest) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeMintAttestationRequest) ProtoMessage()    {}
+func (*QueryBridgeMintAttestationRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{16}
+}
+func (m *QueryBridgeMintAttestationRequest) XXX_Unmarshal(b []byte) error {
+	return proto.Unmarshal(b, m)
+}
+func (m *QueryBridgeMintAttestationRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return proto.Marshal(m)
+}
+func (m *QueryBridgeMintAttestationRequest) XXX_Merge(src proto.Message) {
+	proto.Merge(m, src)
+}
+func (m *QueryBridgeMintAttestationRequest) XXX_Size() int {
+	return proto.Size(m)
+}
+func (m *QueryBridgeMintAttestationRequest) XXX_DiscardUnknown() {
+}
+
+func (m *QueryBridgeMintAttestationRequest) GetDestinationChain() string {
+	if m != nil {
+		return m.DestinationChain
+	}
+	return ""
+}
+
+func (m *QueryBridgeMintAttestationRequest) GetBurnId() string {
+	if m != nil {
+		return m.BurnId
+	}
+	return ""
+}
+
+// QueryBridgeMintAttestationResponse is the response type for the Query/BridgeMintAttestation RPC method.
+type QueryBridgeMintAttestationResponse struct {
+	// found indicates whether the attestation exists
+	Found bool `protobuf:"varint,1,opt,name=found,proto3" json:"found,omitempty"`
+	// burn_id is the Mirage burn sequence number
+	BurnId string `protobuf:"bytes,2,opt,name=burn_id,json=burnId,proto3" json:"burn_id,omitempty"`
+	// destination_chain is the external chain where the mint occurred
+	DestinationChain string `protobuf:"bytes,3,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
+	// destination_tx is the tx hash/signature on the destination chain
+	DestinationTx string `protobuf:"bytes,4,opt,name=destination_tx,json=destinationTx,proto3" json:"destination_tx,omitempty"`
+	// attestors lists the validator addresses that have attested
+	Attestors []string `protobuf:"bytes,5,rep,name=attestors,proto3" json:"attestors,omitempty"`
+	// attested_power is the total voting power that has attested
+	AttestedPower int64 `protobuf:"varint,6,opt,name=attested_power,json=attestedPower,proto3" json:"attested_power,omitempty"`
+	// required_power is the voting power required to confirm
+	RequiredPower int64 `protobuf:"varint,7,opt,name=required_power,json=requiredPower,proto3" json:"required_power,omitempty"`
+	// confirmed indicates whether threshold has been met
+	Confirmed bool `protobuf:"varint,8,opt,name=confirmed,proto3" json:"confirmed,omitempty"`
+	// created_at is the block height when attestation was first created
+	CreatedAt int64 `protobuf:"varint,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+}
+
+func (m *QueryBridgeMintAttestationResponse) Reset()         { *m = QueryBridgeMintAttestationResponse{} }
+func (m *QueryBridgeMintAttestationResponse) String() string { return proto.CompactTextString(m) }
+func (*QueryBridgeMintAttestationResponse) ProtoMessage()    {}
+func (*QueryBridgeMintAttestationResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_c69a11bcea5c6b00, []int{17}
+}
+func (m *QueryBridgeMintAttestationResponse) XXX_Unmarshal(b []byte) error {
+	return proto.Unmarshal(b, m)
+}
+func (m *QueryBridgeMintAttestationResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	return proto.Marshal(m)
+}
+func (m *QueryBridgeMintAttestationResponse) XXX_Merge(src proto.Message) {
+	proto.Merge(m, src)
+}
+func (m *QueryBridgeMintAttestationResponse) XXX_Size() int {
+	return proto.Size(m)
+}
+func (m *QueryBridgeMintAttestationResponse) XXX_DiscardUnknown() {
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetFound() bool {
+	if m != nil {
+		return m.Found
+	}
+	return false
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetBurnId() string {
+	if m != nil {
+		return m.BurnId
+	}
+	return ""
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetDestinationChain() string {
+	if m != nil {
+		return m.DestinationChain
+	}
+	return ""
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetDestinationTx() string {
+	if m != nil {
+		return m.DestinationTx
+	}
+	return ""
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetAttestors() []string {
+	if m != nil {
+		return m.Attestors
+	}
+	return nil
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetAttestedPower() int64 {
+	if m != nil {
+		return m.AttestedPower
+	}
+	return 0
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetRequiredPower() int64 {
+	if m != nil {
+		return m.RequiredPower
+	}
+	return 0
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetConfirmed() bool {
+	if m != nil {
+		return m.Confirmed
+	}
+	return false
+}
+
+func (m *QueryBridgeMintAttestationResponse) GetCreatedAt() int64 {
+	if m != nil {
+		return m.CreatedAt
+	}
+	return 0
+}
+
 // QueryBridgeConfigRequest is the request type for the Query/BridgeConfig RPC method.
 type QueryBridgeConfigRequest struct {
 }
@@ -1059,6 +1209,8 @@ func init() {
 	proto.RegisterType((*QueryBridgeStatusResponse)(nil), "mirage.core.v1.QueryBridgeStatusResponse")
 	proto.RegisterType((*QueryBridgeAttestationRequest)(nil), "mirage.core.v1.QueryBridgeAttestationRequest")
 	proto.RegisterType((*QueryBridgeAttestationResponse)(nil), "mirage.core.v1.QueryBridgeAttestationResponse")
+	proto.RegisterType((*QueryBridgeMintAttestationRequest)(nil), "mirage.core.v1.QueryBridgeMintAttestationRequest")
+	proto.RegisterType((*QueryBridgeMintAttestationResponse)(nil), "mirage.core.v1.QueryBridgeMintAttestationResponse")
 	proto.RegisterType((*QueryBridgeConfigRequest)(nil), "mirage.core.v1.QueryBridgeConfigRequest")
 	proto.RegisterType((*QueryBridgeConfigResponse)(nil), "mirage.core.v1.QueryBridgeConfigResponse")
 	proto.RegisterType((*QueryBridgeMintedRequest)(nil), "mirage.core.v1.QueryBridgeMintedRequest")
@@ -1186,6 +1338,8 @@ type QueryClient interface {
 	GetBridgeStatus(ctx context.Context, in *QueryBridgeStatusRequest, opts ...grpc.CallOption) (*QueryBridgeStatusResponse, error)
 	// GetBridgeAttestation queries a specific inbound attestation by source chain and burn_id.
 	GetBridgeAttestation(ctx context.Context, in *QueryBridgeAttestationRequest, opts ...grpc.CallOption) (*QueryBridgeAttestationResponse, error)
+	// GetBridgeMintAttestation queries a specific outbound mint attestation by destination chain and burn_id.
+	GetBridgeMintAttestation(ctx context.Context, in *QueryBridgeMintAttestationRequest, opts ...grpc.CallOption) (*QueryBridgeMintAttestationResponse, error)
 	// GetBridgeConfig queries the bridge configuration parameters.
 	GetBridgeConfig(ctx context.Context, in *QueryBridgeConfigRequest, opts ...grpc.CallOption) (*QueryBridgeConfigResponse, error)
 	// GetBridgeMinted queries a mint confirmation by burn_id (outbound bridge).
@@ -1254,6 +1408,15 @@ func (c *queryClient) GetBridgeAttestation(ctx context.Context, in *QueryBridgeA
 	return out, nil
 }
 
+func (c *queryClient) GetBridgeMintAttestation(ctx context.Context, in *QueryBridgeMintAttestationRequest, opts ...grpc.CallOption) (*QueryBridgeMintAttestationResponse, error) {
+	out := new(QueryBridgeMintAttestationResponse)
+	err := c.cc.Invoke(ctx, "/mirage.core.v1.Query/GetBridgeMintAttestation", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *queryClient) GetBridgeConfig(ctx context.Context, in *QueryBridgeConfigRequest, opts ...grpc.CallOption) (*QueryBridgeConfigResponse, error) {
 	out := new(QueryBridgeConfigResponse)
 	err := c.cc.Invoke(ctx, "/mirage.core.v1.Query/GetBridgeConfig", in, out, opts...)
@@ -1286,6 +1449,8 @@ type QueryServer interface {
 	GetBridgeStatus(context.Context, *QueryBridgeStatusRequest) (*QueryBridgeStatusResponse, error)
 	// GetBridgeAttestation queries a specific inbound attestation by source chain and burn_id.
 	GetBridgeAttestation(context.Context, *QueryBridgeAttestationRequest) (*QueryBridgeAttestationResponse, error)
+	// GetBridgeMintAttestation queries a specific outbound mint attestation by destination chain and burn_id.
+	GetBridgeMintAttestation(context.Context, *QueryBridgeMintAttestationRequest) (*QueryBridgeMintAttestationResponse, error)
 	// GetBridgeConfig queries the bridge configuration parameters.
 	GetBridgeConfig(context.Context, *QueryBridgeConfigRequest) (*QueryBridgeConfigResponse, error)
 	// GetBridgeMinted queries a mint confirmation by burn_id (outbound bridge).
@@ -1313,6 +1478,9 @@ func (*UnimplementedQueryServer) GetBridgeStatus(ctx context.Context, req *Query
 }
 func (*UnimplementedQueryServer) GetBridgeAttestation(ctx context.Context, req *QueryBridgeAttestationRequest) (*QueryBridgeAttestationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBridgeAttestation not implemented")
+}
+func (*UnimplementedQueryServer) GetBridgeMintAttestation(ctx context.Context, req *QueryBridgeMintAttestationRequest) (*QueryBridgeMintAttestationResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetBridgeMintAttestation not implemented")
 }
 func (*UnimplementedQueryServer) GetBridgeConfig(ctx context.Context, req *QueryBridgeConfigRequest) (*QueryBridgeConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBridgeConfig not implemented")
@@ -1433,6 +1601,24 @@ func _Query_GetBridgeAttestation_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Query_GetBridgeMintAttestation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryBridgeMintAttestationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(QueryServer).GetBridgeMintAttestation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/mirage.core.v1.Query/GetBridgeMintAttestation",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(QueryServer).GetBridgeMintAttestation(ctx, req.(*QueryBridgeMintAttestationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Query_GetBridgeConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(QueryBridgeConfigRequest)
 	if err := dec(in); err != nil {
@@ -1497,6 +1683,10 @@ var _Query_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBridgeAttestation",
 			Handler:    _Query_GetBridgeAttestation_Handler,
+		},
+		{
+			MethodName: "GetBridgeMintAttestation",
+			Handler:    _Query_GetBridgeMintAttestation_Handler,
 		},
 		{
 			MethodName: "GetBridgeConfig",

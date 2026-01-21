@@ -211,6 +211,186 @@ func TestBridgeMintedRecordStorage(t *testing.T) {
 	}
 }
 
+// TestBridgeMintAttestationStorage tests the keeper's mint attestation storage
+func TestBridgeMintAttestationStorage(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	burnID := "1"
+	destChain := "solana"
+
+	// Initially should not exist
+	_, found, err := mk.GetBridgeMintAttestation(ctx, destChain, burnID)
+	if err != nil {
+		t.Fatalf("GetBridgeMintAttestation error: %v", err)
+	}
+	if found {
+		t.Error("Expected mint attestation to not exist initially")
+	}
+
+	// Store an attestation
+	attestation := types.NewBridgeMintAttestation(burnID, destChain, "SolanaSignature123", 100)
+	attestation.AddAttestation("miragevaloper1abc", 1000)
+	attestation.AttestedPower = 1000
+
+	err = mk.SetBridgeMintAttestation(ctx, attestation)
+	if err != nil {
+		t.Fatalf("SetBridgeMintAttestation error: %v", err)
+	}
+
+	// Should now exist
+	restored, found, err := mk.GetBridgeMintAttestation(ctx, destChain, burnID)
+	if err != nil {
+		t.Fatalf("GetBridgeMintAttestation error: %v", err)
+	}
+	if !found {
+		t.Fatal("Expected mint attestation to exist")
+	}
+
+	if restored.BurnID != attestation.BurnID {
+		t.Errorf("BurnID mismatch: got %s, want %s", restored.BurnID, attestation.BurnID)
+	}
+	if restored.DestinationChain != attestation.DestinationChain {
+		t.Errorf("DestinationChain mismatch: got %s, want %s", restored.DestinationChain, attestation.DestinationChain)
+	}
+	if restored.AttestedPower != attestation.AttestedPower {
+		t.Errorf("AttestedPower mismatch: got %d, want %d", restored.AttestedPower, attestation.AttestedPower)
+	}
+}
+
+// TestBridgeMintAttestationMultiValidator tests multi-validator accumulation
+func TestBridgeMintAttestationMultiValidator(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+
+	// First validator attests
+	added := attestation.AddAttestation("val1", 1000)
+	if !added {
+		t.Error("Expected first attestation to be added")
+	}
+	if attestation.AttestedPower != 1000 {
+		t.Errorf("Expected attested power 1000, got %d", attestation.AttestedPower)
+	}
+
+	// Second validator attests
+	added = attestation.AddAttestation("val2", 2000)
+	if !added {
+		t.Error("Expected second attestation to be added")
+	}
+	if attestation.AttestedPower != 3000 {
+		t.Errorf("Expected attested power 3000, got %d", attestation.AttestedPower)
+	}
+
+	// Third validator attests
+	added = attestation.AddAttestation("val3", 500)
+	if !added {
+		t.Error("Expected third attestation to be added")
+	}
+	if attestation.AttestedPower != 3500 {
+		t.Errorf("Expected attested power 3500, got %d", attestation.AttestedPower)
+	}
+
+	// Verify attestor list
+	attestors := attestation.AttestorList()
+	if len(attestors) != 3 {
+		t.Errorf("Expected 3 attestors, got %d", len(attestors))
+	}
+}
+
+// TestBridgeMintAttestationDuplicateRejection tests duplicate attestation rejection
+func TestBridgeMintAttestationDuplicateRejection(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+
+	// First attestation from validator
+	added := attestation.AddAttestation("val1", 1000)
+	if !added {
+		t.Error("Expected first attestation to be added")
+	}
+	if attestation.AttestedPower != 1000 {
+		t.Errorf("Expected attested power 1000, got %d", attestation.AttestedPower)
+	}
+
+	// Duplicate attestation from same validator
+	added = attestation.AddAttestation("val1", 1000)
+	if added {
+		t.Error("Expected duplicate attestation to be rejected")
+	}
+	if attestation.AttestedPower != 1000 {
+		t.Errorf("Expected attested power to remain 1000, got %d", attestation.AttestedPower)
+	}
+
+	// HasAttested should return true for val1
+	if !attestation.HasAttested("val1") {
+		t.Error("Expected HasAttested to return true for val1")
+	}
+	// HasAttested should return false for val2
+	if attestation.HasAttested("val2") {
+		t.Error("Expected HasAttested to return false for val2")
+	}
+}
+
+// TestBridgeMintAttestationThreshold tests threshold logic
+func TestBridgeMintAttestationThreshold(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+
+	totalPower := int64(10000)
+	threshold := uint64(6667) // 66.67%
+
+	// Add 50% power - should not meet threshold
+	attestation.AddAttestation("val1", 5000)
+	if attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("Expected threshold NOT to be met with 50% power")
+	}
+
+	// Add 17% more power (total 67%) - should meet threshold
+	attestation.AddAttestation("val2", 1700)
+	if !attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("Expected threshold to be met with 67% power")
+	}
+
+	// Verify required power calculation
+	required := types.RequiredPower(totalPower, threshold)
+	if required != 6667 {
+		t.Errorf("Expected required power 6667, got %d", required)
+	}
+}
+
+// TestBridgeMintAttestationGetOrCreate tests get-or-create behavior
+func TestBridgeMintAttestationGetOrCreate(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	burnID := "1"
+	destChain := "solana"
+	destTx := "SolanaSignature123"
+
+	// First call should create
+	attestation1, err := mk.GetOrCreateBridgeMintAttestation(ctx, burnID, destChain, destTx)
+	if err != nil {
+		t.Fatalf("GetOrCreateBridgeMintAttestation error: %v", err)
+	}
+	if attestation1.BurnID != burnID {
+		t.Errorf("BurnID mismatch: got %s, want %s", attestation1.BurnID, burnID)
+	}
+	if attestation1.DestinationTx != destTx {
+		t.Errorf("DestinationTx mismatch: got %s, want %s", attestation1.DestinationTx, destTx)
+	}
+
+	// Modify and save
+	attestation1.AddAttestation("val1", 1000)
+	if err := mk.SetBridgeMintAttestation(ctx, attestation1); err != nil {
+		t.Fatalf("SetBridgeMintAttestation error: %v", err)
+	}
+
+	// Second call should return existing
+	attestation2, err := mk.GetOrCreateBridgeMintAttestation(ctx, burnID, destChain, destTx)
+	if err != nil {
+		t.Fatalf("GetOrCreateBridgeMintAttestation error: %v", err)
+	}
+	if attestation2.AttestedPower != 1000 {
+		t.Errorf("Expected existing attestation with power 1000, got %d", attestation2.AttestedPower)
+	}
+}
+
 // TestValidateTxHash tests tx hash validation (used by handlers)
 func TestValidateTxHash(t *testing.T) {
 	tests := []struct {

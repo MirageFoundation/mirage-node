@@ -1962,7 +1962,7 @@ class DatabaseManager:
                 }
 
     def update_bridge_attestation_minted(self, source_chain: str, burn_id: str, minted: bool) -> bool:
-        """Update the minted status of an attestation record."""
+        """Update the minted status of an inbound attestation record."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1975,5 +1975,21 @@ class DatabaseManager:
                       AND burn_id = %s
                     """,
                     (minted, source_chain, burn_id),
+                )
+                return cur.rowcount > 0
+
+    def update_bridge_mint_attestation_confirmed(self, burn_id: str, minted: bool) -> bool:
+        """Update the minted status of outbound attestation records (threshold met)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE bridge_transactions
+                    SET minted = %s
+                    WHERE direction = 'out'
+                      AND msg_type = 'attest_minted'
+                      AND LOWER(burn_id) = LOWER(%s)
+                    """,
+                    (minted, burn_id),
                 )
                 return cur.rowcount > 0
