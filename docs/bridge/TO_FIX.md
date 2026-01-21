@@ -10,5 +10,5 @@ This document captures issues identified in `docs/bridge/bridge_architecture.md`
 
 ## Medium
 
-- Finality/confirmation depth on Solana is not specified; orchestrators attest as soon as they detect burns. If a non-finalized tx is rolled back, Mirage could mint against a reverted event.
-- `burn_id` semantics diverge between chain state (sequence) and indexer/API (Mirage tx hash), which is easy for clients and scripts to misuse when correlating records.
+- ~~Finality/confirmation depth on Solana is not specified; orchestrators attest as soon as they detect burns. If a non-finalized tx is rolled back, Mirage could mint against a reverted event.~~ **FIXED**: Orchestrator now enforces Solana finalized commitment only (requires `ORCHESTRATOR_SOLANA_CONFIRMATIONS >= 32`).
+- ~~`burn_id` semantics diverge between chain state (sequence) and indexer/API (Mirage tx hash), which is easy for clients and scripts to misuse when correlating records.~~ **FIXED**: API now uses explicit fields `burn_sequence` and `burn_tx_hash` and disallows ambiguous query parameters.

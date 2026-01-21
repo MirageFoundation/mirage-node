@@ -921,11 +921,11 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         const poll = async (attempt) => {
             if (cancelled) return;
             try {
-                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_id:', burnNonce);
+                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
 
                 // Query attestation progress first
                 try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_id=${burnNonce}&chain=solana`);
+                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_sequence=${burnNonce}&chain=solana`);
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
                         console.debug('[Solana Bridge In] Attestation status:', statusData);
@@ -941,7 +941,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 }
 
                 // Query the backend for mint status using the burn nonce
-                const res = await fetch(`/api/bridge/get_minted?burn_id=${burnNonce}&chain=solana`);
+                const res = await fetch(`/api/bridge/get_minted?burn_sequence=${burnNonce}&chain=solana`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
                 }
@@ -1639,7 +1639,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 }
 
 // Bridge In Panel Component
-function BridgeInPanel({ address, chainConfigs }) {
+function BridgeInPanel({ address, chainConfigs, attestationThresholdBps }) {
     const theme = useTheme();
     const [selectedSource, setSelectedSource] = useState(null);
     const [addressConfirmed, setAddressConfirmed] = useState(null); // null = not answered, true = yes, false = no
@@ -2162,7 +2162,7 @@ export default function BridgeView({ state }) {
 
                 // Query attestation progress first
                 try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_id=${submitTxHash}`);
+                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_tx_hash=${submitTxHash}`);
                     if (statusRes.ok) {
                         const statusData = await statusRes.json();
                         console.debug('[Bridge] Outbound attestation status:', statusData);
@@ -2177,7 +2177,7 @@ export default function BridgeView({ state }) {
                     console.debug('[Bridge] Outbound attestation status fetch error:', e.message);
                 }
 
-                const res = await fetch(`/api/bridge/get_minted?burn_id=${submitTxHash}`);
+                const res = await fetch(`/api/bridge/get_minted?burn_tx_hash=${submitTxHash}`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
                 }
@@ -2893,6 +2893,7 @@ export default function BridgeView({ state }) {
                                 <BridgeInPanel
                                     address={address}
                                     chainConfigs={chainConfigs}
+                                    attestationThresholdBps={attestationThresholdBps}
                                 />
                             )}
                         </ContainerBody>

@@ -70,6 +70,8 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 		ready:     true,
 	}
 
+	logger.Printf("DEBUG solana watcher commitment=finalized confirmations=%d", cfg.Confirmations)
+
 	// Load persisted state (lastSig) if available
 	if err := watcher.loadState(); err != nil {
 		logger.Printf("WARN failed to load persisted state: %v (starting fresh)", err)
@@ -323,10 +325,7 @@ func (w *Watcher) parseBurnsFromSignature(ctx context.Context, signature string)
 }
 
 func (w *Watcher) commitment() rpc.CommitmentType {
-	if w.cfg.Confirmations >= 32 {
-		return rpc.CommitmentFinalized
-	}
-	return rpc.CommitmentConfirmed
+	return rpc.CommitmentFinalized
 }
 
 // solscanURL returns a Solscan explorer URL for the given transaction signature.

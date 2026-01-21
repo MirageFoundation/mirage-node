@@ -972,7 +972,7 @@ class TransactionHandler {
      * @param {string} destinationChain - Target chain ID (e.g., "solana")
      * @param {string} destinationAddress - Recipient address on target chain
      * @param {number} amountUmirage - Amount in umirage to burn and bridge
-     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, burn_id?: string, result?: any}>}
+     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, burn_tx_hash?: string, burn_sequence?: string|number|null, result?: any}>}
      */
     async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
         try {
