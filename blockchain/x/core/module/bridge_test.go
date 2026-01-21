@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"cosmossdk.io/core/store"
+	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -289,6 +290,14 @@ func TestBridgeMintAttestationMultiValidator(t *testing.T) {
 		t.Errorf("Expected attested power 3500, got %d", attestation.AttestedPower)
 	}
 
+	// Test zero or negative power should be rejected
+	if attestation.AddAttestation("valZero", 0) {
+		t.Error("Expected zero power attestation to be rejected")
+	}
+	if attestation.AddAttestation("valNeg", -100) {
+		t.Error("Expected negative power attestation to be rejected")
+	}
+
 	// Verify attestor list
 	attestors := attestation.AttestorList()
 	if len(attestors) != 3 {
@@ -327,7 +336,13 @@ func TestBridgeMintAttestationProportionalFeeDistribution(t *testing.T) {
 	shares := make(map[string]uint64)
 
 	for valAddr, power := range attestation.Attestors {
-		share := totalFee * uint64(power) / uint64(attestation.AttestedPower)
+		if power <= 0 {
+			continue
+		}
+		share := sdkmath.NewIntFromUint64(totalFee).
+			MulRaw(power).
+			QuoRaw(attestation.AttestedPower).
+			Uint64()
 		shares[valAddr] = share
 		distributed += share
 	}
