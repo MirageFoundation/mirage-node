@@ -111,9 +111,7 @@ const BalanceBanner = styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: linear-gradient(135deg, 
-        ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'} 0%, 
-        ${({ theme }) => theme?.colors?.panel || '#23272C'} 100%);
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     border-radius: 10px;
     padding: 0.75rem 1rem;
@@ -1424,7 +1422,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 <>
                     <SectionTitle>
                         <StepNumber>3</StepNumber>
-                        Enter Amount
+                        Send to Mirage
                     </SectionTitle>
                     <InputSection>
                         <InputWrapper>
@@ -1684,7 +1682,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 }
 
 // Bridge In Panel Component
-function BridgeInPanel({ address, chainConfigs, attestationThresholdBps }) {
+function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance, balanceLoading, balanceError, refreshBalance, formatBalance }) {
     const theme = useTheme();
     const [selectedSource, setSelectedSource] = useState(null);
     const [addressConfirmed, setAddressConfirmed] = useState(null); // null = not answered, true = yes, false = no
@@ -1731,6 +1729,21 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps }) {
     return (
         <BridgeContainer>
             <BridgeLayout>
+                {/* Balance Banner */}
+                <BalanceBanner>
+                    <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
+                    {balanceError ? (
+                        <BalanceBannerError onClick={() => refreshBalance('retry')}>
+                            Failed to load - click to retry
+                        </BalanceBannerError>
+                    ) : (
+                        <BalanceBannerValue>
+                            {balanceLoading ? 'Loading...' : formatBalance(balance)}
+                            {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
+                        </BalanceBannerValue>
+                    )}
+                </BalanceBanner>
+
                 {/* Step 1: Source Network Selection */}
                 <SectionTitle>
                     <StepNumber>1</StepNumber>
@@ -2508,8 +2521,8 @@ export default function BridgeView({ state }) {
     // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
         if (!Number.isFinite(umirage)) return '...';
-        const mirage = Math.round(umirage / 1_000_000);
-        return '~' + mirage.toLocaleString();
+        const mirage = Math.floor(umirage / 1_000_000);
+        return mirage.toLocaleString();
     };
 
     const stepOrder = ['submitting', 'verifying', 'confirmed'];
@@ -2625,7 +2638,7 @@ export default function BridgeView({ state }) {
                                         <BridgeLayout>
                                             {/* Balance Banner */}
                                             <BalanceBanner>
-                                                <BalanceBannerLabel>Your Balance</BalanceBannerLabel>
+                                                <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
                                                 {balanceError ? (
                                                     <BalanceBannerError onClick={() => refreshBalance('retry')}>
                                                         Failed to load - click to retry
@@ -2674,7 +2687,7 @@ export default function BridgeView({ state }) {
                                             {/* Step 2: Amount */}
                                             <SectionTitle>
                                                 <StepNumber>2</StepNumber>
-                                                Enter Amount
+                                                {selectedNetwork ? `Send to ${selectedNetwork.name}` : 'Enter Amount'}
                                             </SectionTitle>
                                             <InputSection>
                                                 <InputWrapper>
@@ -2696,12 +2709,6 @@ export default function BridgeView({ state }) {
                                                     </MaxButton>
                                                     <AmountSuffix>MIRAGE</AmountSuffix>
                                                 </InputWrapper>
-                                                <BalanceDisplay>
-                                                    <BalanceLabel>Available:</BalanceLabel>
-                                                    <BalanceValue>
-                                                        {balanceLoading ? 'Loading...' : balanceError ? 'Error' : `${formatBalance(balance)} MIRAGE`}
-                                                    </BalanceValue>
-                                                </BalanceDisplay>
                                                 {errors.amount && (
                                                     <ErrorText>⚠ {errors.amount}</ErrorText>
                                                 )}
@@ -2965,6 +2972,11 @@ export default function BridgeView({ state }) {
                                     address={address}
                                     chainConfigs={chainConfigs}
                                     attestationThresholdBps={attestationThresholdBps}
+                                    balance={balance}
+                                    balanceLoading={balanceLoading}
+                                    balanceError={balanceError}
+                                    refreshBalance={refreshBalance}
+                                    formatBalance={formatBalance}
                                 />
                             )}
                         </ContainerBody>
