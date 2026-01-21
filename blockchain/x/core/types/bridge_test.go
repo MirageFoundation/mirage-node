@@ -1,6 +1,9 @@
 package types
 
 import (
+	"bytes"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -88,6 +91,34 @@ func TestBridgeMintedRecordUnmarshalInvalid(t *testing.T) {
 	_, err := UnmarshalBridgeMintedRecord([]byte("not valid json"))
 	if err == nil {
 		t.Error("Expected error for invalid JSON, got nil")
+	}
+}
+
+func TestMsgBridgeAttestMintedMirageTxHashTag(t *testing.T) {
+	field, ok := reflect.TypeOf(MsgBridgeAttestMinted{}).FieldByName("MirageTxHash")
+	if !ok {
+		t.Fatal("MsgBridgeAttestMinted missing MirageTxHash field")
+	}
+	tag := field.Tag.Get("protobuf")
+	if !strings.Contains(tag, "bytes,5") {
+		t.Fatalf("MirageTxHash protobuf tag = %q, want field number 5", tag)
+	}
+	if !strings.Contains(tag, "name=mirage_tx_hash") {
+		t.Fatalf("MirageTxHash protobuf tag = %q, want name=mirage_tx_hash", tag)
+	}
+}
+
+func TestMsgBridgeAttestMintedMarshalIncludesTag5(t *testing.T) {
+	msg := &MsgBridgeAttestMinted{
+		MirageTxHash: "deadbeef",
+	}
+	bz, err := msg.Marshal()
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	expected := append([]byte{0x2a, 0x08}, []byte("deadbeef")...)
+	if !bytes.Equal(bz, expected) {
+		t.Fatalf("unexpected marshal bytes: got %x, want %x", bz, expected)
 	}
 }
 

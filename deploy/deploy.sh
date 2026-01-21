@@ -38,7 +38,7 @@ Options:
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
   --prune              Run docker system prune during update (slow; not recommended).
-  --no-cache           Force full Docker rebuild without using build cache.
+  --cache              Enable Docker build cache (disabled by default).
 
 Local deployment:
   deploy/deploy.sh --local --update
@@ -74,13 +74,14 @@ TARBALL_FILE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
 PRUNE=0
-NO_CACHE=0
+NO_CACHE=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
     --prune) PRUNE=1 ; shift ;;
+    --cache) NO_CACHE=0 ; shift ;;
     --no-cache) NO_CACHE=1 ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
@@ -165,6 +166,7 @@ maybe_proto_gen_and_go_build() {
   local proto_hash_file="$cdir/proto.${GIT_BRANCH}.sha256"
   local go_hash_file="$cdir/go.${GIT_BRANCH}.sha256"
 
+  # Step 1: Check if proto-gen is needed (based on .proto source files)
   local new_proto_hash
   new_proto_hash="$(hash_tree \
     "$REPO_ROOT/blockchain/proto" \
@@ -189,6 +191,18 @@ maybe_proto_gen_and_go_build() {
     echo "==> Protobuf inputs unchanged; skipping proto-gen."
   fi
 
+  # Step 2: Compute Go hash AFTER proto-gen (so it includes fresh .pb.go files)
+  # This is critical: if proto-gen updated any .pb.go files, the hash will change
+  local new_go_hash
+  new_go_hash="$(hash_tree \
+    "$REPO_ROOT/blockchain/go.mod" \
+    "$REPO_ROOT/blockchain/go.sum" \
+    "$REPO_ROOT/blockchain/app" \
+    "$REPO_ROOT/blockchain/cmd" \
+    "$REPO_ROOT/blockchain/orchestrator" \
+    "$REPO_ROOT/blockchain/x" \
+  )"
+
   local miraged_bin="$REPO_ROOT/blockchain/bin/miraged"
   local orchestrator_bin="$REPO_ROOT/blockchain/bin/orchestrator"
   local need_build=0
@@ -203,7 +217,7 @@ maybe_proto_gen_and_go_build() {
     need_build=1
   fi
 
-  # Check if any source file is newer than binaries
+  # Check if any source file is newer than binaries (catches proto-gen updates)
   if [ "$need_build" -eq 0 ]; then
     local newest_source
     newest_source="$(find \
@@ -235,29 +249,21 @@ maybe_proto_gen_and_go_build() {
     fi
   fi
 
-  # Also check hash for content changes (handles case where file was touched but reverted)
-  local new_go_hash
-  new_go_hash="$(hash_tree \
-    "$REPO_ROOT/blockchain/go.mod" \
-    "$REPO_ROOT/blockchain/go.sum" \
-    "$REPO_ROOT/blockchain/app" \
-    "$REPO_ROOT/blockchain/cmd" \
-    "$REPO_ROOT/blockchain/orchestrator" \
-    "$REPO_ROOT/blockchain/x" \
-  )"
-
-  local old_go_hash=""
-  if [ -f "$go_hash_file" ]; then
-    old_go_hash="$(cat "$go_hash_file" 2>/dev/null || echo "")"
-  fi
-  if [ -z "$old_go_hash" ] || [ "$old_go_hash" != "$new_go_hash" ]; then
-    echo "==> Go source hash changed"
-    need_build=1
+  # Check hash for content changes
+  if [ "$need_build" -eq 0 ]; then
+    local old_go_hash=""
+    if [ -f "$go_hash_file" ]; then
+      old_go_hash="$(cat "$go_hash_file" 2>/dev/null || echo "")"
+    fi
+    if [ -z "$old_go_hash" ] || [ "$old_go_hash" != "$new_go_hash" ]; then
+      echo "==> Go source hash changed"
+      need_build=1
+    fi
   fi
 
   if [ "$need_build" -eq 1 ]; then
     echo "==> Building miraged and orchestrator..."
-    # Delete old binaries to force Go to rebuild (bypasses Go's build cache)
+    # Delete old binaries to force Go to rebuild
     rm -f "$miraged_bin" "$orchestrator_bin"
     ( cd "$REPO_ROOT/blockchain" && make build-all )
     echo "$new_go_hash" > "$go_hash_file"
@@ -289,7 +295,7 @@ docker_build() {
 
   # Add cache args unless --no-cache was specified
   if [ "$NO_CACHE" -eq 1 ]; then
-    echo "==> Building WITHOUT cache (--no-cache)"
+    echo "==> Building WITHOUT cache (default; use --cache to enable)"
     cache_args+=(--no-cache)
   else
     cache_args+=(--cache-from "type=local,src=$cache_base")

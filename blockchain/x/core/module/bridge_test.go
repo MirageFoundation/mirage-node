@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -582,5 +583,51 @@ func TestDestinationTxCharacterValidation(t *testing.T) {
 					tc.destTx, hasInvalidChar, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestBridgeBurnEventAttributes(t *testing.T) {
+	owner := "mirage1owner"
+	destChain := "solana"
+	destAddr := "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs"
+	amount := uint64(12345)
+	bridgeFee := uint64(678)
+	sequence := uint64(42)
+
+	evt := buildBridgeBurnEvent(owner, destChain, destAddr, amount, bridgeFee, sequence)
+	if evt.Type != "bridge_burn" {
+		t.Fatalf("event type = %s, want bridge_burn", evt.Type)
+	}
+	if len(evt.Attributes) != 7 {
+		t.Fatalf("attribute count = %d, want 7", len(evt.Attributes))
+	}
+
+	attrs := make(map[string]string, len(evt.Attributes))
+	for _, attr := range evt.Attributes {
+		attrs[attr.Key] = attr.Value
+	}
+
+	expected := map[string]string{
+		"burn_id":             strconv.FormatUint(sequence, 10),
+		"owner":               owner,
+		"destination_chain":   destChain,
+		"destination_address": destAddr,
+		"amount":              strconv.FormatUint(amount, 10),
+		"bridge_fee":          strconv.FormatUint(bridgeFee, 10),
+		"sequence":            strconv.FormatUint(sequence, 10),
+	}
+
+	if len(attrs) != len(expected) {
+		t.Fatalf("unexpected attribute count = %d, want %d", len(attrs), len(expected))
+	}
+	for key, want := range expected {
+		got, ok := attrs[key]
+		if !ok {
+			t.Errorf("missing attribute %q", key)
+			continue
+		}
+		if got != want {
+			t.Errorf("attribute %q = %q, want %q", key, got, want)
+		}
 	}
 }
