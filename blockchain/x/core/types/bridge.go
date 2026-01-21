@@ -58,7 +58,7 @@ type BridgeAttestation struct {
 
 // BridgeBurnRecord tracks an outbound bridge burn on Mirage.
 type BridgeBurnRecord struct {
-	// BurnID is the Mirage burn tx hash (lowercase hex)
+	// BurnID is the Mirage burn sequence (string)
 	BurnID string `json:"burn_id"`
 
 	// Owner is the Mirage address that initiated the burn
@@ -70,7 +70,7 @@ type BridgeBurnRecord struct {
 	// DestinationAddress is the recipient address on the destination chain
 	DestinationAddress string `json:"destination_address"`
 
-	// Amount is the gross amount burned (in umirage)
+	// Amount is the gross amount (in umirage). Fee is deducted from this amount.
 	Amount uint64 `json:"amount"`
 
 	// BridgeFee is the fee deducted from the amount (in umirage)

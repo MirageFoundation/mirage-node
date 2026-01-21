@@ -4,6 +4,7 @@ import styled, { keyframes, css, useTheme } from 'styled-components';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from '../utils/Storage';
+import Api from '../lib/api';
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
 import Button from '../components/Button';
@@ -790,7 +791,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
     const [bridgeError, setBridgeError] = useState('');
     const [bridgeTxHash, setBridgeTxHash] = useState('');
     const [burnNonce, setBurnNonce] = useState(null);
-    const [mirageBalance, setMirageBalance] = useState(0); // Mirage network balance
+    const [mirageBalance, setMirageBalance] = useState(null); // Mirage network balance
 
     // Step tracking for progress UI
     const [stepTimestamps, setStepTimestamps] = useState({});
@@ -798,25 +799,44 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
     const [mintStatus, setMintStatus] = useState({ state: 'idle', txHash: '', error: '' });
     const buttonRef = useRef(null);
 
-    // Load Mirage balance from cache
-    useEffect(() => {
+    const refreshMirageBalance = useCallback(async (reason = 'init') => {
+        if (!mirageAddress) {
+            setMirageBalance(null);
+            console.debug('[Solana Bridge] Mirage balance fetch skipped (no address)');
+            return;
+        }
+        console.debug('[Solana Bridge] Fetching Mirage balance', { address: mirageAddress, reason });
         try {
-            const cachedBalance = Storage.load('user_balance', 0);
-            if (cachedBalance) {
-                setMirageBalance(Number(cachedBalance) || 0);
-            }
-        } catch (_) { }
-
-        try {
-            const configData = localStorage.getItem('configData');
-            if (configData) {
-                const cached = JSON.parse(configData);
-                if (cached.balance !== undefined) {
-                    setMirageBalance(Number(cached.balance) || 0);
+            const data = await Api.get(
+                'get_user_status',
+                { address: mirageAddress, _cb: Date.now() },
+                {
+                    timeoutMs: 10000,
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache',
+                    },
                 }
+            );
+            const balanceVal = Number(data?.balance);
+            if (!Number.isFinite(balanceVal)) {
+                throw new Error('Invalid balance from get_user_status');
             }
-        } catch (_) { }
-    }, []);
+            setMirageBalance(balanceVal);
+            console.debug('[Solana Bridge] Mirage balance updated', { balance: balanceVal });
+        } catch (e) {
+            console.error('[Solana Bridge] Mirage balance fetch failed:', e);
+        }
+    }, [mirageAddress]);
+
+    useEffect(() => {
+        refreshMirageBalance('init');
+    }, [refreshMirageBalance]);
+
+    useEffect(() => {
+        if (bridgeStatus !== 'complete') return;
+        refreshMirageBalance('minted');
+    }, [bridgeStatus, refreshMirageBalance]);
 
     // Scroll to button when bridge status changes from idle
     useEffect(() => {
@@ -1412,7 +1432,9 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                             }}>
                                 <span>Mirage balance before</span>
                                 <span style={{ color: theme?.colors?.text || '#fff' }}>
-                                    ~{Math.round(mirageBalance / 1_000_000).toLocaleString()} MIRAGE
+                                    {Number.isFinite(mirageBalance)
+                                        ? `~${Math.round(mirageBalance / 1_000_000).toLocaleString()} MIRAGE`
+                                        : '...'}
                                 </span>
                             </div>
                             <div style={{
@@ -1425,7 +1447,9 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs }) {
                             }}>
                                 <span>Mirage balance after</span>
                                 <span style={{ color: '#14F195', fontWeight: 600 }}>
-                                    ~{Math.round((mirageBalance / 1_000_000) + parseFloat(amount.replace(/,/g, ''))).toLocaleString()} MIRAGE
+                                    {Number.isFinite(mirageBalance)
+                                        ? `~${Math.round((mirageBalance / 1_000_000) + parseFloat(amount.replace(/,/g, ''))).toLocaleString()} MIRAGE`
+                                        : '...'}
                                 </span>
                             </div>
                         </InputSection>
@@ -1808,7 +1832,7 @@ export default function BridgeView({ state }) {
     const [amount, setAmount] = useState('');
     const [destinationAddress, setDestinationAddress] = useState('');
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
-    const [balance, setBalance] = useState(0);
+    const [balance, setBalance] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStage, setSubmitStage] = useState('idle'); // idle | submitting | verifying | confirmed | error
     const [submitError, setSubmitError] = useState('');
@@ -1881,26 +1905,44 @@ export default function BridgeView({ state }) {
         return destinationAddress;
     }, [selectedNetwork, useDifferentAddress, derivedAddress, destinationAddress]);
 
-    // Load user balance from cached config
-    useEffect(() => {
+    const refreshBalance = useCallback(async (reason = 'init') => {
+        if (!address) {
+            setBalance(null);
+            console.debug('[Bridge] Balance fetch skipped (no address)');
+            return;
+        }
+        console.debug('[Bridge] Fetching on-chain balance', { address, reason });
         try {
-            const cachedBalance = Storage.load('user_balance', 0);
-            if (cachedBalance) {
-                setBalance(Number(cachedBalance) || 0);
-            }
-        } catch (_) { }
-
-        // Also check configData for balance
-        try {
-            const configData = localStorage.getItem('configData');
-            if (configData) {
-                const cached = JSON.parse(configData);
-                if (cached.balance !== undefined) {
-                    setBalance(Number(cached.balance) || 0);
+            const data = await Api.get(
+                'get_user_status',
+                { address, _cb: Date.now() },
+                {
+                    timeoutMs: 10000,
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache',
+                    },
                 }
+            );
+            const balanceVal = Number(data?.balance);
+            if (!Number.isFinite(balanceVal)) {
+                throw new Error('Invalid balance from get_user_status');
             }
-        } catch (_) { }
-    }, []);
+            setBalance(balanceVal);
+            console.debug('[Bridge] Balance updated', { balance: balanceVal });
+        } catch (e) {
+            console.error('[Bridge] Balance fetch failed:', e);
+        }
+    }, [address]);
+
+    useEffect(() => {
+        refreshBalance('init');
+    }, [refreshBalance]);
+
+    useEffect(() => {
+        if (submitStage !== 'confirmed') return;
+        refreshBalance('confirmed');
+    }, [submitStage, refreshBalance]);
 
     // Validation
     const validateAmount = useCallback((value) => {
@@ -1919,7 +1961,7 @@ export default function BridgeView({ state }) {
         if (selectedNetwork && receiveAmt < selectedNetwork.minAmount) {
             return `Receive amount must be at least ${selectedNetwork.minAmount} MIRAGE (after ${bridgeFee} fee)`;
         }
-        if (num > balance / 1_000_000) {
+        if (Number.isFinite(balance) && num > balance / 1_000_000) {
             return 'Insufficient balance';
         }
         return null;
@@ -2153,9 +2195,9 @@ export default function BridgeView({ state }) {
         if (/^\d*\.?\d*$/.test(rawValue)) {
             // Cap at max balance
             const numVal = parseFloat(rawValue) || 0;
-            const maxBalance = balance / 1_000_000;
+            const maxBalance = Number.isFinite(balance) ? balance / 1_000_000 : null;
             let finalValue = rawValue;
-            if (numVal > maxBalance && maxBalance > 0) {
+            if (maxBalance !== null && numVal > maxBalance && maxBalance > 0) {
                 finalValue = maxBalance.toFixed(6);
             }
             // Store formatted value with commas
@@ -2167,7 +2209,7 @@ export default function BridgeView({ state }) {
     };
 
     const handleMaxAmount = () => {
-        if (!selectedNetwork) return;
+        if (!selectedNetwork || !Number.isFinite(balance)) return;
         // Fee is subtracted from amount, so MAX is full balance
         const maxAmount = Math.max(0, balance / 1_000_000);
         setAmount(formatAmountDisplay(maxAmount.toFixed(6)));
@@ -2317,6 +2359,7 @@ export default function BridgeView({ state }) {
 
     // Format balance for display (full number with thousands separators, no decimals)
     const formatBalance = (umirage) => {
+        if (!Number.isFinite(umirage)) return '...';
         const mirage = Math.round(umirage / 1_000_000);
         return '~' + mirage.toLocaleString();
     };

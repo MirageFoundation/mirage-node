@@ -233,8 +233,10 @@ class Indexer:
 
                         self.processor.process_core_message(any_msg.type_url, any_msg.value, tx_hash, ts, height)
 
+                    tx_events = txs_results[idx].get("events", []) if idx < len(txs_results) else []
+                    self.processor.process_tx_events(tx_events)
+
                     if pending_proposals:
-                        tx_events = txs_results[idx].get("events", []) if idx < len(txs_results) else []
                         proposal_ids_set: set[int] = set()
                         for ev_type, attrs in MessageProcessor.decode_events(tx_events):
                             pid = MessageProcessor.extract_proposal_id(attrs)

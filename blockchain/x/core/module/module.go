@@ -2731,16 +2731,17 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 
 	// Get bridge fee from chain config (per-chain fee)
 	bridgeFee := chainConfig.Fee
-	if amount > (math.MaxUint64 - bridgeFee) {
-		return nil, fmt.Errorf("amount too large")
+	if bridgeFee >= amount {
+		return nil, fmt.Errorf("amount must be greater than bridge fee")
 	}
-	totalBurn := amount + bridgeFee
+	burnAmount := amount - bridgeFee
+	totalSpend := amount
 
 	// Check balance
 	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
-	if balance.LT(sdkmath.NewIntFromUint64(totalBurn)) {
-		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
-			totalBurn, amount, bridgeFee, balance.String())
+	if balance.LT(sdkmath.NewIntFromUint64(totalSpend)) {
+		return nil, fmt.Errorf("insufficient balance: need %d (amount includes fee %d), have %s",
+			totalSpend, bridgeFee, balance.String())
 	}
 
 	// Validate destination address format for the target chain
@@ -2755,8 +2756,14 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		return nil, fmt.Errorf("failed to get next sequence: %w", err)
 	}
 
-	// Burn the transfer amount (fee is escrowed, not burned)
-	if err := am.k.BurnFromAccount(sdkCtx, owner, amount); err != nil {
+	sdkCtx.Logger().Debug("BridgeBurn amounts",
+		"amount", amount,
+		"bridge_fee", bridgeFee,
+		"burn_amount", burnAmount,
+	)
+
+	// Burn the net amount (gross amount minus fee)
+	if err := am.k.BurnFromAccount(sdkCtx, owner, burnAmount); err != nil {
 		return nil, fmt.Errorf("failed to burn tokens: %w", err)
 	}
 
@@ -2767,13 +2774,29 @@ func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*
 		}
 	}
 
+	// Persist burn record for fee payout and auditing
+	burnIDStr := fmt.Sprintf("%d", sequence)
+	record := &types.BridgeBurnRecord{
+		BurnID:             burnIDStr,
+		Owner:              owner,
+		DestinationChain:   destChain,
+		DestinationAddress: destAddr,
+		Amount:             amount,
+		BridgeFee:          bridgeFee,
+		Sequence:           sequence,
+		CreatedAt:          sdkCtx.BlockHeight(),
+	}
+	if err := am.k.SetBridgeBurnRecord(sdkCtx, record); err != nil {
+		return nil, fmt.Errorf("failed to store bridge burn record: %w", err)
+	}
+
 	// Deduct relay gas fee
 	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
 		return nil, err
 	}
 
 	// Emit event for orchestrators to pick up
-	// NOTE: No state record is stored - attestations will track bridge status
+	// NOTE: We persist a burn record for fee payout; attestations track confirmation.
 	sdkCtx.EventManager().EmitEvent(
 		buildBridgeBurnEvent(owner, destChain, destAddr, amount, bridgeFee, sequence),
 	)
@@ -3045,6 +3068,17 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 		return nil, fmt.Errorf("bridge mint already confirmed for burn_id %s", burnIDStr)
 	}
 
+	burnRecord, found, err := am.k.GetBridgeBurnRecord(sdkCtx, burnIDStr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load bridge burn record: %w", err)
+	}
+	if !found {
+		return nil, fmt.Errorf("bridge burn record not found for burn_id %s", burnIDStr)
+	}
+	if strings.TrimSpace(burnRecord.DestinationChain) != destChain {
+		return nil, fmt.Errorf("destination_chain mismatch for burn_id %s", burnIDStr)
+	}
+
 	// Store the mint confirmation (legacy - will be replaced by attestation threshold)
 	record := &types.BridgeMintedRecord{
 		BurnID:           burnIDStr,
@@ -3054,6 +3088,18 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 	}
 	if err := am.k.SetBridgeMintedRecord(sdkCtx, record); err != nil {
 		return nil, fmt.Errorf("failed to store mint record: %w", err)
+	}
+
+	// Pay bridge fee to the attesting validator from escrow
+	if burnRecord.BridgeFee > 0 {
+		if err := am.k.SendFromModule(sdkCtx, validator, burnRecord.BridgeFee); err != nil {
+			return nil, fmt.Errorf("failed to pay bridge fee: %w", err)
+		}
+		sdkCtx.Logger().Debug("BridgeAttestMinted fee paid",
+			"burn_id", burnIDStr,
+			"validator", validator,
+			"bridge_fee", burnRecord.BridgeFee,
+		)
 	}
 
 	sdkCtx.EventManager().EmitEvent(
