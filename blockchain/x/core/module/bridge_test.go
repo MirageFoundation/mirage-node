@@ -294,6 +294,71 @@ func TestBridgeMintAttestationMultiValidator(t *testing.T) {
 	if len(attestors) != 3 {
 		t.Errorf("Expected 3 attestors, got %d", len(attestors))
 	}
+
+	// Verify individual attestor powers are stored correctly (for proportional fee distribution)
+	if power := attestation.GetAttestorPower("val1"); power != 1000 {
+		t.Errorf("GetAttestorPower(val1) = %d, want 1000", power)
+	}
+	if power := attestation.GetAttestorPower("val2"); power != 2000 {
+		t.Errorf("GetAttestorPower(val2) = %d, want 2000", power)
+	}
+	if power := attestation.GetAttestorPower("val3"); power != 500 {
+		t.Errorf("GetAttestorPower(val3) = %d, want 500", power)
+	}
+}
+
+// TestBridgeMintAttestationProportionalFeeDistribution tests the proportional fee math
+func TestBridgeMintAttestationProportionalFeeDistribution(t *testing.T) {
+	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
+
+	// Three validators with different powers
+	attestation.AddAttestation("val1", 300) // 40%
+	attestation.AddAttestation("val2", 250) // 33.3%
+	attestation.AddAttestation("val3", 200) // 26.7%
+	// Total: 750
+
+	if attestation.AttestedPower != 750 {
+		t.Fatalf("Expected attested power 750, got %d", attestation.AttestedPower)
+	}
+
+	// Simulate fee distribution with 1000 umirage fee
+	totalFee := uint64(1000)
+	var distributed uint64 = 0
+	shares := make(map[string]uint64)
+
+	for valAddr, power := range attestation.Attestors {
+		share := totalFee * uint64(power) / uint64(attestation.AttestedPower)
+		shares[valAddr] = share
+		distributed += share
+	}
+
+	// Check proportional shares
+	// val1: 1000 * 300 / 750 = 400
+	// val2: 1000 * 250 / 750 = 333
+	// val3: 1000 * 200 / 750 = 266
+	// Total: 999 (1 dust)
+	expectedShares := map[string]uint64{
+		"val1": 400,
+		"val2": 333,
+		"val3": 266,
+	}
+
+	for val, expected := range expectedShares {
+		if shares[val] != expected {
+			t.Errorf("Share for %s = %d, want %d", val, shares[val], expected)
+		}
+	}
+
+	// Check dust
+	dust := totalFee - distributed
+	if dust != 1 {
+		t.Errorf("Dust = %d, want 1", dust)
+	}
+
+	// Total distributed + dust should equal total fee
+	if distributed+dust != totalFee {
+		t.Errorf("distributed(%d) + dust(%d) = %d, want %d", distributed, dust, distributed+dust, totalFee)
+	}
 }
 
 // TestBridgeMintAttestationDuplicateRejection tests duplicate attestation rejection

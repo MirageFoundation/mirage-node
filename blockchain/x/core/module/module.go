@@ -3142,15 +3142,46 @@ func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridge
 			return nil, fmt.Errorf("failed to store mint record: %w", err)
 		}
 
-		// Pay bridge fee to the validator that crossed the threshold
-		if burnRecord.BridgeFee > 0 {
-			if err := am.k.SendFromModule(sdkCtx, validator, burnRecord.BridgeFee); err != nil {
-				return nil, fmt.Errorf("failed to pay bridge fee: %w", err)
+		// Distribute bridge fee proportionally among all attestors based on their voting power
+		if burnRecord.BridgeFee > 0 && attestation.AttestedPower > 0 {
+			totalFee := burnRecord.BridgeFee
+			var distributed uint64 = 0
+
+			for valAddr, power := range attestation.Attestors {
+				// Calculate proportional share: fee * validatorPower / totalAttestedPower
+				share := totalFee * uint64(power) / uint64(attestation.AttestedPower)
+				if share > 0 {
+					if err := am.k.SendFromModule(sdkCtx, valAddr, share); err != nil {
+						return nil, fmt.Errorf("failed to pay bridge fee to %s: %w", valAddr, err)
+					}
+					distributed += share
+					sdkCtx.Logger().Debug("BridgeAttestMinted fee share paid",
+						"burn_id", burnIDStr,
+						"validator", valAddr,
+						"power", power,
+						"share", share,
+					)
+				}
 			}
-			sdkCtx.Logger().Info("BridgeAttestMinted fee paid on threshold",
+
+			// Handle rounding dust - give to the validator that crossed the threshold
+			if distributed < totalFee {
+				dust := totalFee - distributed
+				if err := am.k.SendFromModule(sdkCtx, validator, dust); err != nil {
+					return nil, fmt.Errorf("failed to pay bridge fee dust: %w", err)
+				}
+				sdkCtx.Logger().Debug("BridgeAttestMinted fee dust paid",
+					"burn_id", burnIDStr,
+					"validator", validator,
+					"dust", dust,
+				)
+			}
+
+			sdkCtx.Logger().Info("BridgeAttestMinted fee distributed proportionally",
 				"burn_id", burnIDStr,
-				"validator", validator,
-				"bridge_fee", burnRecord.BridgeFee,
+				"total_fee", totalFee,
+				"attestor_count", len(attestation.Attestors),
+				"distributed", distributed,
 			)
 		}
 
