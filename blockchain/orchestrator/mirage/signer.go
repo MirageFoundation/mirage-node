@@ -70,7 +70,8 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		BurnId:           burnID,
 		DestinationChain: strings.TrimSpace(destChain),
 		DestinationTx:    strings.TrimSpace(destTx),
-		MirageTxHash:     strings.ToUpper(strings.TrimSpace(mirageTxHash)),
+		// MirageTxHash omitted - field 5 causes "unknown field" error in some cosmos-sdk versions
+		// The indexer can link burns via burn_id instead
 	}
 
 	txBytes, gasFeeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)
