@@ -1648,6 +1648,28 @@ class MessageProcessor:
 
         return sorted(ids)
 
+    def process_tx_events(self, events: list) -> None:
+        """Process per-tx events for bridge confirmation updates."""
+        if not events:
+            return
+        for ev_type, attrs in self.decode_events(events):
+            if ev_type != "bridge_attest":
+                continue
+            source_chain = str(attrs.get("source_chain", "") or "").strip()
+            burn_id = str(attrs.get("burn_id", "") or "").strip()
+            minted_raw = str(attrs.get("minted", "") or "").strip().lower()
+            minted = minted_raw in ("true", "1", "t", "yes")
+            if not minted:
+                continue
+            if not source_chain or not burn_id:
+                logger.warning("bridge_attest event missing identifiers: %s", attrs)
+                continue
+            updated = self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
+            if updated:
+                logger.debug("Bridge attestation minted updated: %s:%s", source_chain, burn_id)
+            else:
+                logger.debug("Bridge attestation minted not updated (missing record): %s:%s", source_chain, burn_id)
+
     # ========== Bridge Message Handlers ==========
 
     def _handle_bridge_burn(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
