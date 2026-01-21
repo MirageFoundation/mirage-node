@@ -121,10 +121,11 @@ func TestBridgeBurnRecordStorage(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
-	burnID := "abc123def456789012345678901234567890123456789012345678901234"
+	destChain := "solana"
+	burnID := "1"
 
 	// Initially should not exist
-	_, found, err := mk.GetBridgeBurnRecord(ctx, burnID)
+	_, found, err := mk.GetBridgeBurnRecord(ctx, destChain, burnID)
 	if err != nil {
 		t.Fatalf("GetBridgeBurnRecord error: %v", err)
 	}
@@ -136,7 +137,7 @@ func TestBridgeBurnRecordStorage(t *testing.T) {
 	record := &types.BridgeBurnRecord{
 		BurnID:             burnID,
 		Owner:              "mirage1owner",
-		DestinationChain:   "solana",
+		DestinationChain:   destChain,
 		DestinationAddress: "SolanaAddr123",
 		Amount:             1000000,
 		BridgeFee:          10000,
@@ -150,7 +151,7 @@ func TestBridgeBurnRecordStorage(t *testing.T) {
 	}
 
 	// Should now exist
-	restored, found, err := mk.GetBridgeBurnRecord(ctx, burnID)
+	restored, found, err := mk.GetBridgeBurnRecord(ctx, destChain, burnID)
 	if err != nil {
 		t.Fatalf("GetBridgeBurnRecord error: %v", err)
 	}
@@ -164,6 +165,12 @@ func TestBridgeBurnRecordStorage(t *testing.T) {
 	if restored.DestinationChain != record.DestinationChain {
 		t.Errorf("DestinationChain mismatch: got %s, want %s", restored.DestinationChain, record.DestinationChain)
 	}
+
+	// Test that different destination chain doesn't find the record
+	_, found, _ = mk.GetBridgeBurnRecord(ctx, "ethereum", burnID)
+	if found {
+		t.Error("Expected burn record to not exist for different chain")
+	}
 }
 
 // TestBridgeMintedRecordStorage tests the keeper's minted record storage
@@ -171,10 +178,11 @@ func TestBridgeMintedRecordStorage(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
-	burnID := "abc123def456789012345678901234567890123456789012345678901234"
+	destChain := "solana"
+	burnID := "1"
 
 	// Initially should not exist
-	_, found, err := mk.GetBridgeMintedRecord(ctx, burnID)
+	_, found, err := mk.GetBridgeMintedRecord(ctx, destChain, burnID)
 	if err != nil {
 		t.Fatalf("GetBridgeMintedRecord error: %v", err)
 	}
@@ -185,7 +193,7 @@ func TestBridgeMintedRecordStorage(t *testing.T) {
 	// Store a record
 	record := &types.BridgeMintedRecord{
 		BurnID:           burnID,
-		DestinationChain: "solana",
+		DestinationChain: destChain,
 		DestinationTx:    "SolanaSignature123",
 		CreatedAt:        100,
 	}
@@ -196,7 +204,7 @@ func TestBridgeMintedRecordStorage(t *testing.T) {
 	}
 
 	// Should now exist
-	restored, found, err := mk.GetBridgeMintedRecord(ctx, burnID)
+	restored, found, err := mk.GetBridgeMintedRecord(ctx, destChain, burnID)
 	if err != nil {
 		t.Fatalf("GetBridgeMintedRecord error: %v", err)
 	}
@@ -209,6 +217,12 @@ func TestBridgeMintedRecordStorage(t *testing.T) {
 	}
 	if restored.DestinationTx != record.DestinationTx {
 		t.Errorf("DestinationTx mismatch: got %s, want %s", restored.DestinationTx, record.DestinationTx)
+	}
+
+	// Test that different destination chain doesn't find the record
+	_, found, _ = mk.GetBridgeMintedRecord(ctx, "ethereum", burnID)
+	if found {
+		t.Error("Expected minted record to not exist for different chain")
 	}
 }
 
@@ -719,11 +733,13 @@ func TestBurnIDNormalization(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
 
+	destChain := "solana"
+
 	// Store with lowercase
-	burnIDLower := "abc123def456789012345678901234567890123456789012345678901234"
+	burnIDLower := "1"
 	record := &types.BridgeMintedRecord{
 		BurnID:           burnIDLower,
-		DestinationChain: "solana",
+		DestinationChain: destChain,
 		DestinationTx:    "sig123",
 		CreatedAt:        100,
 	}
@@ -732,23 +748,22 @@ func TestBurnIDNormalization(t *testing.T) {
 		t.Fatalf("SetBridgeMintedRecord error: %v", err)
 	}
 
-	// Should be found with lowercase
-	_, found, _ := mk.GetBridgeMintedRecord(ctx, burnIDLower)
+	// Should be found with correct chain and burn_id
+	_, found, _ := mk.GetBridgeMintedRecord(ctx, destChain, burnIDLower)
 	if !found {
-		t.Error("Expected to find record with lowercase burn_id")
+		t.Error("Expected to find record with correct chain and burn_id")
 	}
 
-	// Store should use exact key, so uppercase won't find it
-	burnIDUpper := "ABC123DEF456789012345678901234567890123456789012345678901234"
-	_, found, _ = mk.GetBridgeMintedRecord(ctx, burnIDUpper)
+	// Different chain should not find it
+	_, found, _ = mk.GetBridgeMintedRecord(ctx, "ethereum", burnIDLower)
 	if found {
-		t.Error("Should not find record with uppercase burn_id (keys are case-sensitive)")
+		t.Error("Should not find record with different chain")
 	}
 
-	// After normalization (as done in handler), uppercase should map to lowercase
-	normalizedBurnID := strings.ToLower(burnIDUpper)
-	if normalizedBurnID != burnIDLower {
-		t.Errorf("Normalization failed: got %s, want %s", normalizedBurnID, burnIDLower)
+	// Different burn_id should not find it
+	_, found, _ = mk.GetBridgeMintedRecord(ctx, destChain, "2")
+	if found {
+		t.Error("Should not find record with different burn_id")
 	}
 }
 

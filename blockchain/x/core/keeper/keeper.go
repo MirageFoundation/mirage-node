@@ -1292,9 +1292,9 @@ func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnI
 // ============================================
 
 // GetBridgeBurnRecord retrieves a bridge burn record from state
-func (k Keeper) GetBridgeBurnRecord(ctx sdk.Context, burnID string) (*types.BridgeBurnRecord, bool, error) {
+func (k Keeper) GetBridgeBurnRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeBurnRecord, bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeBurnKey(burnID)
+	key := types.BridgeBurnKey(destChain, burnID)
 	bz, err := store.Get(key)
 	if err != nil {
 		return nil, false, err
@@ -1312,7 +1312,7 @@ func (k Keeper) GetBridgeBurnRecord(ctx sdk.Context, burnID string) (*types.Brid
 // SetBridgeBurnRecord stores a bridge burn record in state
 func (k Keeper) SetBridgeBurnRecord(ctx sdk.Context, record *types.BridgeBurnRecord) error {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeBurnKey(record.BurnID)
+	key := types.BridgeBurnKey(record.DestinationChain, record.BurnID)
 	bz, err := record.Marshal()
 	if err != nil {
 		return err
@@ -1325,9 +1325,9 @@ func (k Keeper) SetBridgeBurnRecord(ctx sdk.Context, record *types.BridgeBurnRec
 // ============================================
 
 // GetBridgeMintedRecord retrieves a bridge mint record from state
-func (k Keeper) GetBridgeMintedRecord(ctx sdk.Context, burnID string) (*types.BridgeMintedRecord, bool, error) {
+func (k Keeper) GetBridgeMintedRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeMintedRecord, bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintedKey(burnID)
+	key := types.BridgeMintedKey(destChain, burnID)
 	bz, err := store.Get(key)
 	if err != nil {
 		return nil, false, err
@@ -1345,7 +1345,7 @@ func (k Keeper) GetBridgeMintedRecord(ctx sdk.Context, burnID string) (*types.Br
 // SetBridgeMintedRecord stores a bridge mint record in state
 func (k Keeper) SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeMintedKey(record.BurnID)
+	key := types.BridgeMintedKey(record.DestinationChain, record.BurnID)
 	bz, err := record.Marshal()
 	if err != nil {
 		return err

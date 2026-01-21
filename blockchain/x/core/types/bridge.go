@@ -149,14 +149,16 @@ func BridgeAttestationKey(sourceChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeAttestationsPrefix, sourceChain, burnID))
 }
 
-// BridgeBurnKey returns the store key for a bridge burn record
-func BridgeBurnKey(burnID string) []byte {
-	return []byte(fmt.Sprintf("%s%s", BridgeBurnsPrefix, burnID))
+// BridgeBurnKey returns the store key for a bridge burn record.
+// Key includes destination chain to prevent collisions when bridging to multiple chains.
+func BridgeBurnKey(destChain, burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s", BridgeBurnsPrefix, destChain, burnID))
 }
 
-// BridgeMintedKey returns the store key for a bridge mint confirmation
-func BridgeMintedKey(burnID string) []byte {
-	return []byte(fmt.Sprintf("%s%s", BridgeMintsPrefix, burnID))
+// BridgeMintedKey returns the store key for a bridge mint confirmation.
+// Key includes destination chain to prevent collisions when bridging to multiple chains.
+func BridgeMintedKey(destChain, burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintsPrefix, destChain, burnID))
 }
 
 // BridgeMintAttestationKey returns the store key for a bridge mint attestation

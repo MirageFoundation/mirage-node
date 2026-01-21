@@ -217,7 +217,7 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
   - `burn_amount = amount - bridge_fee` is burned from user
   - `bridge_fee` is escrowed in the core module account (paid to validator on confirmation)
 - **Actions:** Burn net amount, escrow fee, store `BridgeBurnRecord`, emit event, increment sequence
-- **State:** `BridgeBurnRecord` stored (keyed by sequence) for fee payout on confirmation
+- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee payout on confirmation
 
 ### MsgBridgeAttestBurned (inbound)
 - Signer must be active validator with voting power
@@ -426,6 +426,12 @@ message Params {
 5. **Validator-Only**: Only active validators with voting power can attest
 
 ## Version History
+
+- **v1.10.4**: Fix outbound key collision for multi-chain support
+  - `BridgeBurnRecord` key changed from `bridge_burns/{burn_id}` to `bridge_burns/{dest_chain}/{burn_id}`
+  - `BridgeMintedRecord` key changed from `bridge_mints/{burn_id}` to `bridge_mints/{dest_chain}/{burn_id}`
+  - `QueryBridgeMintedRequest` now requires `destination_chain` parameter
+  - Prevents key collisions when bridging to multiple destination chains (e.g., Solana and Ethereum)
 
 - **v1.10.3**: Proportional fee distribution
   - `Attestors` map changed from `map[string]bool` to `map[string]int64` to store voting power
