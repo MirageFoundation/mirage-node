@@ -5,7 +5,6 @@ import (
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/cosmos/cosmos-sdk/types/msgservice"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	proto "github.com/cosmos/gogoproto/proto"
 )
@@ -50,9 +49,5 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMintedResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
-
-	// Register the Msg service descriptor for proto reflection (needed by tx simulation)
-	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
-
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }
