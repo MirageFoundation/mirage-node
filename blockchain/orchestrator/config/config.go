@@ -98,6 +98,9 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		errs = append(errs, err.Error())
 	}
+	if solanaConfirmations < 32 {
+		errs = append(errs, "ORCHESTRATOR_SOLANA_CONFIRMATIONS must be >= 32 to require finalized commitment")
+	}
 	solanaPollIntervalMin, err := envRequiredDuration("ORCHESTRATOR_SOLANA_POLL_INTERVAL_MIN")
 	if err != nil {
 		errs = append(errs, err.Error())

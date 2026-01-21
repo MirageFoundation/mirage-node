@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"cosmossdk.io/log"
 	"cosmossdk.io/core/store"
 	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
@@ -113,7 +114,11 @@ func testValoperAddressString() string {
 // Helper to create a mock SDK context
 func newMockContext() sdk.Context {
 	// Create a minimal context for testing
-	return sdk.Context{}.WithContext(context.Background()).WithBlockHeight(100)
+	return sdk.Context{}.
+		WithContext(context.Background()).
+		WithBlockHeight(100).
+		WithEventManager(sdk.NewEventManager()).
+		WithLogger(log.NewNopLogger())
 }
 
 // TestBridgeBurnRecordStorage tests the keeper's burn record storage

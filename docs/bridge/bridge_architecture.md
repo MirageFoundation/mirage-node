@@ -6,6 +6,21 @@ This document describes the complete bridge architecture for transferring MIRAGE
 
 The bridge uses a **validator attestation model** where validators independently observe and attest to cross-chain events. When 2/3+ of validator voting power attests to an event, the bridge operation is confirmed and finalized.
 
+## Identifiers (burn_sequence vs burn_tx_hash)
+
+The bridge exposes two distinct identifiers and they are **not interchangeable**:
+
+- **burn_sequence**: Canonical burn identifier.
+  - **Outbound (Mirage → external):** Mirage burn sequence number (per destination chain).
+  - **Inbound (external → Mirage):** External program burn sequence (e.g., Solana `BurnInitiated` sequence).
+- **burn_tx_hash**: Mirage transaction hash for `MsgBridgeBurn` (outbound only).
+
+**Why both?**
+- A tx hash proves a transaction happened, but **it does not uniquely identify a burn** on chains where a single tx can include multiple burns.
+- The sequence is monotonic and unique per burn, which makes it safe for state, attestation, and replay checks.
+
+**API rule:** Inbound queries use `burn_sequence`; outbound queries use `burn_tx_hash`. Responses include **both fields** so clients can display and link correctly.
+
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                      BRIDGE COMPONENTS                           │
@@ -259,6 +274,8 @@ Each validator runs an orchestrator daemon that:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+**Finality policy (Solana):** The watcher uses **finalized** commitment only. Configuration enforces `ORCHESTRATOR_SOLANA_CONFIRMATIONS >= 32` so attestations are never created from non-finalized Solana transactions.
+
 **Key files:**
 - `orchestrator/chains/interface.go` - Chain interface definitions
 - `orchestrator/chains/solana.go` - Solana burn/mint detection
@@ -328,7 +345,7 @@ Query bridge status from indexer database.
 
 **Inbound (Solana → Mirage):**
 ```http
-GET /api/bridge/get_minted?burn_id=<solana_tx_signature>&chain=solana
+GET /api/bridge/get_minted?burn_sequence=<solana_burn_sequence>&chain=solana
 ```
 
 Response:
@@ -336,6 +353,8 @@ Response:
 {
   "found": true,
   "confirmed": true,
+  "burn_sequence": "12345",
+  "burn_tx_hash": null,
   "mint_tx": "ABC123DEF456...",
   "recipient": "mirage1abc...",
   "amount": 1000000
@@ -344,7 +363,7 @@ Response:
 
 **Outbound (Mirage → Solana):**
 ```http
-GET /api/bridge/get_minted?burn_id=<mirage_tx_hash>
+GET /api/bridge/get_minted?burn_tx_hash=<mirage_tx_hash>
 ```
 
 Response:
@@ -352,6 +371,8 @@ Response:
 {
   "found": true,
   "confirmed": true,
+  "burn_tx_hash": "f2a1...9c",
+  "burn_sequence": "42",
   "destination_chain": "solana",
   "destination_tx": "5xYzABC...",
   "amount": 1000000
@@ -426,6 +447,15 @@ message Params {
 5. **Validator-Only**: Only active validators with voting power can attest
 
 ## Version History
+
+- **v1.10.6**: Clarify burn identifiers in API/UX
+  - Bridge API now uses explicit fields: `burn_sequence` and `burn_tx_hash`
+  - Inbound queries require `burn_sequence`; outbound queries require `burn_tx_hash`
+  - Responses include both fields to prevent ambiguity
+
+- **v1.10.5**: Enforce Solana finalized commitment in orchestrator
+  - Orchestrator requires `ORCHESTRATOR_SOLANA_CONFIRMATIONS >= 32`
+  - Solana watcher uses finalized commitment only (no confirmed/optimistic mode)
 
 - **v1.10.4**: Fix outbound key collision for multi-chain support
   - `BridgeBurnRecord` key changed from `bridge_burns/{burn_id}` to `bridge_burns/{dest_chain}/{burn_id}`

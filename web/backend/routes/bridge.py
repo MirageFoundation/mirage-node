@@ -110,8 +110,8 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
             }
 
 
-def _query_bridge_burn_from_db(burn_id: str) -> dict:
-    """Query outbound bridge burn from indexer DB."""
+def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
+    """Query outbound bridge burn from indexer DB by Mirage tx hash."""
     with connect_db() as conn:
         with conn.cursor() as cur:
             # First get the burn record
@@ -124,7 +124,7 @@ def _query_bridge_burn_from_db(burn_id: str) -> dict:
                   AND LOWER(tx_hash) = LOWER(%s)
                 LIMIT 1
                 """,
-                (burn_id,),
+                (burn_tx_hash,),
             )
             burn_row = cur.fetchone()
             if not burn_row:
@@ -141,7 +141,7 @@ def _query_bridge_burn_from_db(burn_id: str) -> dict:
                   AND minted = TRUE
                 LIMIT 1
                 """,
-                (burn_id,),
+                (burn_tx_hash,),
             )
             minted_row = cur.fetchone()
 
@@ -455,47 +455,76 @@ def bridge_config():
 def get_bridge_minted():
     """Query bridge mint status from indexer DB.
 
-    For outbound bridges (Mirage -> external): just pass burn_id
-    For inbound bridges (external -> Mirage): pass burn_id and chain (e.g., chain=solana)
+    Inbound (external -> Mirage): pass burn_sequence + chain (e.g., chain=solana)
+    Outbound (Mirage -> external): pass burn_tx_hash (Mirage burn tx hash)
     """
     rid = next_request_id()
-    burn_id = (request.args.get("burn_id") or "").strip()
+    burn_sequence = (request.args.get("burn_sequence") or "").strip()
+    burn_tx_hash = (request.args.get("burn_tx_hash") or "").strip().lower()
     chain = (request.args.get("chain") or "").strip().lower()
-    log_event(rid, "get_bridge_minted.begin", burn_id=burn_id, chain=chain)
+    log_event(
+        rid,
+        "get_bridge_minted.begin",
+        burn_sequence=burn_sequence,
+        burn_tx_hash=burn_tx_hash,
+        chain=chain,
+    )
 
-    if not burn_id:
-        return jsonify({"error": "burn_id required"}), 400
+    if chain:
+        if not burn_sequence:
+            return jsonify({"error": "burn_sequence required"}), 400
+        if burn_tx_hash:
+            return jsonify({"error": "burn_tx_hash not allowed for inbound queries"}), 400
+    else:
+        if not burn_tx_hash:
+            return jsonify({"error": "burn_tx_hash required"}), 400
+        if burn_sequence:
+            return jsonify({"error": "burn_sequence not allowed for outbound queries"}), 400
 
     client_ip = _client_ip()
     if not _is_private_ip(client_ip):
-        log_event(rid, "get_bridge_minted.forbidden", ip=client_ip, burn_id=burn_id)
+        log_event(rid, "get_bridge_minted.forbidden", ip=client_ip)
         return jsonify({"error": "forbidden"}), 403
 
     try:
         if chain:
-            # Inbound bridge: query attestation by source chain and burn_id
-            result = _query_bridge_attestation_from_db(chain, burn_id)
+            # Inbound bridge: query attestation by source chain and burn_sequence
+            result = _query_bridge_attestation_from_db(chain, burn_sequence)
+            result["burn_sequence"] = burn_sequence
+            result["burn_tx_hash"] = None
             log_event(
                 rid,
                 "get_bridge_minted.ok",
-                burn_id=burn_id,
+                burn_sequence=burn_sequence,
                 chain=chain,
                 found=result.get("found", False),
                 confirmed=result.get("confirmed", False),
             )
         else:
-            # Outbound bridge: query by burn_id (tx hash)
-            result = _query_bridge_burn_from_db(burn_id.lower())
+            # Outbound bridge: query by burn_tx_hash (Mirage tx hash)
+            tx_hash = burn_tx_hash.lower()
+            burn_attrs = _get_bridge_burn_event_from_tx_hash(tx_hash)
+            burn_seq = str(burn_attrs.get("burn_id", "") or "").strip()
+            dest_chain = str(burn_attrs.get("destination_chain", "") or "").strip().lower()
+            if not burn_seq or not dest_chain:
+                raise RuntimeError("bridge_burn event missing burn_id or destination_chain")
+
+            result = _query_bridge_burn_from_db(tx_hash)
+            result["burn_tx_hash"] = tx_hash
+            result["burn_sequence"] = burn_seq
+            if not result.get("destination_chain"):
+                result["destination_chain"] = dest_chain
             log_event(
                 rid,
                 "get_bridge_minted.ok",
-                burn_id=burn_id,
+                burn_tx_hash=tx_hash,
+                burn_sequence=burn_seq,
                 confirmed=result.get("confirmed", False),
                 destination_chain=result.get("destination_chain"),
             )
         return jsonify(result)
     except Exception as e:
-        log_event(rid, "get_bridge_minted.err", burn_id=burn_id, chain=chain, error=str(e))
+        log_event(rid, "get_bridge_minted.err", chain=chain, error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -503,8 +532,8 @@ def get_bridge_minted():
 def get_attestation_status():
     """Query bridge attestation progress from chain (gRPC + RPC).
 
-    For outbound bridges (Mirage -> external): just pass burn_id (tx hash)
-    For inbound bridges (external -> Mirage): pass burn_id and chain (e.g., chain=solana)
+    Inbound (external -> Mirage): pass burn_sequence + chain (e.g., chain=solana)
+    Outbound (Mirage -> external): pass burn_tx_hash (Mirage burn tx hash)
 
     Returns:
     - found: whether any attestations exist
@@ -515,26 +544,43 @@ def get_attestation_status():
     - required_power: voting power required to confirm
     """
     rid = next_request_id()
-    burn_id = (request.args.get("burn_id") or "").strip()
+    burn_sequence = (request.args.get("burn_sequence") or "").strip()
+    burn_tx_hash = (request.args.get("burn_tx_hash") or "").strip().lower()
     chain = (request.args.get("chain") or "").strip().lower()
-    log_event(rid, "attestation_status.begin", burn_id=burn_id, chain=chain)
+    log_event(
+        rid,
+        "attestation_status.begin",
+        burn_sequence=burn_sequence,
+        burn_tx_hash=burn_tx_hash,
+        chain=chain,
+    )
 
-    if not burn_id:
-        return jsonify({"error": "burn_id required"}), 400
+    if chain:
+        if not burn_sequence:
+            return jsonify({"error": "burn_sequence required"}), 400
+        if burn_tx_hash:
+            return jsonify({"error": "burn_tx_hash not allowed for inbound queries"}), 400
+    else:
+        if not burn_tx_hash:
+            return jsonify({"error": "burn_tx_hash required"}), 400
+        if burn_sequence:
+            return jsonify({"error": "burn_sequence not allowed for outbound queries"}), 400
 
     client_ip = _client_ip()
     if not _is_private_ip(client_ip):
-        log_event(rid, "attestation_status.forbidden", ip=client_ip, burn_id=burn_id)
+        log_event(rid, "attestation_status.forbidden", ip=client_ip)
         return jsonify({"error": "forbidden"}), 403
 
     try:
         if chain:
-            # Inbound bridge: query attestations by source chain and burn_id
-            data = _query_bridge_attestation_from_chain(chain, burn_id)
+            # Inbound bridge: query attestations by source chain and burn_sequence
+            data = _query_bridge_attestation_from_chain(chain, burn_sequence)
             if not data.get("found", False):
                 result = {
                     "found": False,
                     "confirmed": False,
+                    "burn_sequence": burn_sequence,
+                    "burn_tx_hash": None,
                     "attestors": [],
                     "attestor_count": 0,
                     "attested_power": 0,
@@ -545,6 +591,8 @@ def get_attestation_status():
                 result = {
                     "found": True,
                     "confirmed": bool(data.get("minted", False)),
+                    "burn_sequence": burn_sequence,
+                    "burn_tx_hash": None,
                     "attestors": attestors,
                     "attestor_count": len(attestors),
                     "attested_power": int(data.get("attested_power", 0) or 0),
@@ -552,9 +600,9 @@ def get_attestation_status():
                 }
         else:
             # Outbound bridge: resolve burn sequence from tx hash, then query chain
-            tx_hash = burn_id.lower()
+            tx_hash = burn_tx_hash.lower()
             if len(tx_hash) != 64 or any(c not in "0123456789abcdef" for c in tx_hash):
-                return jsonify({"error": "invalid burn_id (expected tx hash)"}), 400
+                return jsonify({"error": "invalid burn_tx_hash (expected tx hash)"}), 400
 
             burn_attrs = _get_bridge_burn_event_from_tx_hash(tx_hash)
             burn_seq = str(burn_attrs.get("burn_id", "") or "").strip()
@@ -567,18 +615,21 @@ def get_attestation_status():
                 result = {
                     "found": False,
                     "confirmed": False,
+                    "burn_tx_hash": tx_hash,
+                    "burn_sequence": burn_seq,
                     "attestors": [],
                     "attestor_count": 0,
                     "attested_power": 0,
                     "required_power": 0,
                     "destination_chain": dest_chain,
-                    "burn_sequence": burn_seq,
                 }
             else:
                 attestors = data.get("attestors") or []
                 result = {
                     "found": True,
                     "confirmed": bool(data.get("confirmed", False)),
+                    "burn_tx_hash": tx_hash,
+                    "burn_sequence": burn_seq,
                     "attestors": attestors,
                     "attestor_count": len(attestors),
                     "attested_power": int(data.get("attested_power", 0) or 0),
@@ -591,7 +642,8 @@ def get_attestation_status():
         log_event(
             rid,
             "attestation_status.ok",
-            burn_id=burn_id,
+            burn_sequence=burn_sequence,
+            burn_tx_hash=burn_tx_hash,
             chain=chain,
             found=result.get("found", False),
             confirmed=result.get("confirmed", False),
@@ -599,7 +651,7 @@ def get_attestation_status():
         )
         return jsonify(result)
     except Exception as e:
-        log_event(rid, "attestation_status.err", burn_id=burn_id, chain=chain, error=str(e))
+        log_event(rid, "attestation_status.err", chain=chain, error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -954,10 +1006,11 @@ def bridge_burn():
         return jsonify(
             {
                 "tx_hash": tx_hash,
+                "burn_tx_hash": tx_hash,
+                "burn_sequence": None,
                 "code": code,
                 "height": height,
                 "raw_log": raw_log,
-                "burn_id": tx_hash,  # burn_id is the tx hash
             }
         )
     except Exception as e:
