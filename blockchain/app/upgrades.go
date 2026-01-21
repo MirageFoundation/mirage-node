@@ -678,13 +678,20 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.9.0-bridge: params updated successfully")
 			}
 
-			// HACK: Advance Solana bridge sequence past any old Solana devnet state
+			// Advance Solana bridge sequence only if currently lower than minimum
 			// This prevents "AlreadyMinted" errors when Mirage chain is reset but Solana state persists
-			if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", 100); err != nil {
-				sdkCtx.Logger().Error("v1.9.0-bridge: failed to set bridge sequence", "err", err)
-				return nil, err
+			// but doesn't overwrite a higher value that may have been set via genesis
+			const minSolanaSeq uint64 = 100
+			currentSeq, _ := app.CoreKeeper.GetCurrentBridgeSequence(sdkCtx, "solana")
+			if currentSeq < minSolanaSeq {
+				if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", minSolanaSeq); err != nil {
+					sdkCtx.Logger().Error("v1.9.0-bridge: failed to set bridge sequence", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.9.0-bridge: advanced Solana bridge sequence", "from", currentSeq, "to", minSolanaSeq)
+			} else {
+				sdkCtx.Logger().Info("v1.9.0-bridge: kept existing Solana bridge sequence", "seq", currentSeq)
 			}
-			sdkCtx.Logger().Info("v1.9.0-bridge: set Solana bridge sequence to 100 (skip old devnet state)")
 
 			sdkCtx.Logger().Info("Upgrade to v1.9.0-bridge complete - cross-chain bridge enabled")
 			return toVM, nil
@@ -704,12 +711,18 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			// Advance Solana bridge sequence past any old Solana devnet state
-			if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", 100); err != nil {
-				sdkCtx.Logger().Error("v1.9.1-seq-fix: failed to set bridge sequence", "err", err)
-				return nil, err
+			// Advance Solana bridge sequence only if currently lower than minimum
+			const minSolanaSeq uint64 = 100
+			currentSeq, _ := app.CoreKeeper.GetCurrentBridgeSequence(sdkCtx, "solana")
+			if currentSeq < minSolanaSeq {
+				if err := app.CoreKeeper.SetBridgeSequence(sdkCtx, "solana", minSolanaSeq); err != nil {
+					sdkCtx.Logger().Error("v1.9.1-seq-fix: failed to set bridge sequence", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.9.1-seq-fix: advanced Solana bridge sequence", "from", currentSeq, "to", minSolanaSeq)
+			} else {
+				sdkCtx.Logger().Info("v1.9.1-seq-fix: kept existing Solana bridge sequence", "seq", currentSeq)
 			}
-			sdkCtx.Logger().Info("v1.9.1-seq-fix: set Solana bridge sequence to 100")
 
 			sdkCtx.Logger().Info("Upgrade to v1.9.1-seq-fix complete")
 			return toVM, nil
