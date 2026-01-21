@@ -5,16 +5,14 @@ import (
 
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/types/msgservice"
 	"github.com/cosmos/cosmos-sdk/types/tx"
 	proto "github.com/cosmos/gogoproto/proto"
 )
 
 // RegisterInterfaces registers the x/core interfaces.
 func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
-	// NOTE: Avoid msgservice.RegisterMsgServiceDesc here.
-	// Our gogo proto registry returns nil for some input/output types during startup,
-	// which triggers a reflect.New(nil) panic in cosmos-sdk. Explicit registration is
-	// deterministic and keeps the node booting.
+	// Register message implementations for sdk.Msg interface
 	msgTypes := []sdk.Msg{
 		&MsgUpdateParams{},
 		&MsgPost{}, &MsgEdit{}, &MsgVote{}, &MsgSetUsername{},
@@ -52,5 +50,9 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMintedResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
+
+	// Register the Msg service descriptor for proto reflection (needed by tx simulation)
+	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
+
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }
