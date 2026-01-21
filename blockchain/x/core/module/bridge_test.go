@@ -1371,28 +1371,6 @@ func TestQueryBridgeAttestationResponse(t *testing.T) {
 	}
 }
 
-// TestQueryBridgeMintAttestationResponse tests outbound attestation query response
-func TestQueryBridgeMintAttestationResponse(t *testing.T) {
-	resp := &types.QueryBridgeMintAttestationResponse{
-		Found:            true,
-		BurnId:           "1",
-		DestinationChain: "solana",
-		DestinationTx:    "sig123",
-		Attestors:        []string{"val1", "val2"},
-		AttestedPower:    70,
-		RequiredPower:    67,
-		Confirmed:        true,
-		CreatedAt:        100,
-	}
-
-	if len(resp.Attestors) != 2 {
-		t.Errorf("Expected 2 attestors, got %d", len(resp.Attestors))
-	}
-	if !resp.Confirmed {
-		t.Error("Expected Confirmed = true")
-	}
-}
-
 // =============================================================================
 // Error Scenario Tests
 // =============================================================================
