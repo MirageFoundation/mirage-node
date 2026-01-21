@@ -39,7 +39,7 @@ type SolanaConfig struct {
 	Confirmations   uint64
 	PollIntervalMin time.Duration
 	PollIntervalMax time.Duration
-	StateDir        string        // Directory to persist watcher state (lastSig)
+	StateDir        string // Directory to persist watcher state (lastSig)
 }
 
 type AttestorConfig struct {

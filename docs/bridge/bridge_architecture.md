@@ -165,7 +165,7 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 
 | Event | Emitted When | Key Attributes |
 |-------|--------------|----------------|
-| `bridge_burn` | User burns on Mirage | burn_id, sequence, sender, destination_chain, recipient, amount |
+| `bridge_burn` | User burns on Mirage | burn_id, owner, destination_chain, destination_address, amount, bridge_fee, sequence |
 | `bridge_attest` | Validator attests inbound | source_chain, burn_id, validator, attested_power |
 | `bridge_minted` | Validator attests outbound | burn_id, destination_chain, destination_tx, validator |
 
