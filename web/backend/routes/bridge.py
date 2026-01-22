@@ -165,15 +165,22 @@ def _query_bridge_attestation_from_chain(source_chain: str, burn_id: str, timeou
         msg.ParseFromString(data)
         return msg
 
-    target = require_runtime().grpc_target
-    with grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetBridgeAttestation",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        req = QueryBridgeAttestationRequest(source_chain=source_chain, burn_id=burn_id)
-        resp = method(req, timeout=timeout)
+    try:
+        target = require_runtime().grpc_target
+    except Exception as e:
+        raise RuntimeError(f"gRPC not configured: {e}")
+
+    try:
+        with grpc.insecure_channel(target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/GetBridgeAttestation",
+                request_serializer=lambda msg: msg.SerializeToString(),
+                response_deserializer=_deserialize,
+            )
+            req = QueryBridgeAttestationRequest(source_chain=source_chain, burn_id=burn_id)
+            resp = method(req, timeout=timeout)
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC error: {e.code()} - {e.details()}")
 
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
@@ -186,27 +193,43 @@ def _query_bridge_minted_from_chain(dest_chain: str, burn_id: str, timeout: floa
         msg.ParseFromString(data)
         return msg
 
-    target = require_runtime().grpc_target
-    with grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetBridgeMinted",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        req = QueryBridgeMintedRequest(destination_chain=dest_chain, burn_id=burn_id)
-        resp = method(req, timeout=timeout)
+    try:
+        target = require_runtime().grpc_target
+    except Exception as e:
+        raise RuntimeError(f"gRPC not configured: {e}")
+
+    try:
+        with grpc.insecure_channel(target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/GetBridgeMinted",
+                request_serializer=lambda msg: msg.SerializeToString(),
+                response_deserializer=_deserialize,
+            )
+            req = QueryBridgeMintedRequest(destination_chain=dest_chain, burn_id=burn_id)
+            resp = method(req, timeout=timeout)
+    except grpc.RpcError as e:
+        raise RuntimeError(f"gRPC error: {e.code()} - {e.details()}")
 
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
 def _decode_event_attributes(attrs: list) -> dict:
-    """Decode CometBFT base64 event attributes to a dict."""
+    """Decode CometBFT event attributes (handles both base64 and plain text formats)."""
     decoded: Dict[str, str] = {}
     for attr in attrs:
         if "key" not in attr or "value" not in attr:
             raise RuntimeError("tx event attribute missing key/value")
-        key = base64.b64decode(attr["key"]).decode("utf-8")
-        value = base64.b64decode(attr["value"]).decode("utf-8")
+        raw_key = attr["key"]
+        raw_value = attr["value"]
+        # Try base64 decode first (old CometBFT format), fall back to plain text (new format)
+        try:
+            key = base64.b64decode(raw_key).decode("utf-8")
+        except Exception:
+            key = str(raw_key)
+        try:
+            value = base64.b64decode(raw_value).decode("utf-8")
+        except Exception:
+            value = str(raw_value)
         decoded[key] = value
     return decoded
 
@@ -214,12 +237,35 @@ def _decode_event_attributes(attrs: list) -> dict:
 def _get_bridge_burn_event_from_tx_hash(tx_hash: str, timeout: float = 3.0) -> dict:
     """Fetch bridge_burn event attributes from a Mirage tx hash via RPC."""
     import urllib.request as _url
+    import urllib.error as _urlerr
 
-    rpc = require_runtime().rpc_url
+    try:
+        rpc = require_runtime().rpc_url
+    except Exception as e:
+        raise RuntimeError(f"RPC not configured: {e}")
+
     url = f"{rpc}/tx?hash=0x{tx_hash.upper()}&prove=false"
-    with _url.urlopen(url, timeout=timeout) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with _url.urlopen(url, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except _urlerr.HTTPError as e:
+        raise RuntimeError(f"RPC HTTP error {e.code}: {e.reason}")
+    except _urlerr.URLError as e:
+        raise RuntimeError(f"RPC connection error: {e.reason}")
+    except TimeoutError:
+        raise RuntimeError(f"RPC timeout after {timeout}s")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"RPC invalid JSON: {e}")
+
+    # Check for RPC-level error response
+    if "error" in (data or {}):
+        err = data["error"]
+        raise RuntimeError(f"RPC error: {err.get('message', err)}")
+
     txr = (data or {}).get("result", {})
+    if not txr:
+        raise RuntimeError("TX not found (not indexed yet?)")
+
     events = (txr.get("tx_result", {}) or {}).get("events", []) or []
     for ev in events:
         if str(ev.get("type", "") or "") != "bridge_burn":

@@ -1646,7 +1646,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 
                             {bridgeStatus === 'complete' && (
                                 <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                    ✓ Bridge complete! MIRAGE has been minted to your address.
+                                    ✓ Bridge complete! {amount ? `${amount} ` : ''}MIRAGE minted to your address.
                                 </StatusBanner>
                             )}
                         </StepsCard>
@@ -2245,31 +2245,24 @@ export default function BridgeView({ state }) {
                 }
 
                 const res = await fetch(`/api/bridge/get_minted?burn_tx_hash=${submitTxHash}`);
-                if (!res.ok) {
-                    throw new Error(`mint query failed (${res.status})`);
-                }
-                const data = await res.json();
-                if (data?.confirmed) {
-                    setMintStatus({
-                        state: 'minted',
-                        destinationTx: data.destination_tx || '',
-                        destinationChain: data.destination_chain || 'solana',
-                        error: '',
-                        completedAt: Date.now(),
-                    });
-                    setOutboundAttestationProgress(prev => ({ ...prev, confirmed: true }));
-                    return;
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data?.confirmed) {
+                        setMintStatus({
+                            state: 'minted',
+                            destinationTx: data.destination_tx || '',
+                            destinationChain: data.destination_chain || 'solana',
+                            error: '',
+                            completedAt: Date.now(),
+                        });
+                        setOutboundAttestationProgress(prev => ({ ...prev, confirmed: true }));
+                        return;
+                    }
+                } else {
+                    console.debug(`[Bridge] Mint query error (${res.status}), retrying...`);
                 }
             } catch (e) {
-                const message = e?.message || 'mint query failed';
-                setMintStatus({
-                    state: 'error',
-                    destinationTx: '',
-                    destinationChain: '',
-                    error: message,
-                    completedAt: Date.now(),
-                });
-                return;
+                console.debug('[Bridge] Mint poll error:', e.message);
             }
 
             if (attempt >= maxAttempts) {
@@ -2935,6 +2928,16 @@ export default function BridgeView({ state }) {
                                                         {submitStage === 'error' && submitError && (
                                                             <StatusBanner $error style={{ marginTop: '0.75rem' }}>
                                                                 ✗ {submitError}
+                                                            </StatusBanner>
+                                                        )}
+                                                        {isSolanaBridge && mintStatus.state === 'minted' && (
+                                                            <StatusBanner $success style={{ marginTop: '0.75rem' }}>
+                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
+                                                            </StatusBanner>
+                                                        )}
+                                                        {!isSolanaBridge && submitStage === 'confirmed' && (
+                                                            <StatusBanner $success style={{ marginTop: '0.75rem' }}>
+                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {selectedNetwork?.name || 'destination'}.
                                                             </StatusBanner>
                                                         )}
                                                     </StepsCard>
