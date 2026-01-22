@@ -38,7 +38,7 @@ Options:
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
   --prune              Run docker system prune during update (slow; not recommended).
-  --cache              Enable Docker build cache (disabled by default).
+  --no-cache           Disable Docker build cache (enabled by default).
 
 Local deployment:
   deploy/deploy.sh --local --update
@@ -74,14 +74,13 @@ TARBALL_FILE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
 PRUNE=0
-NO_CACHE=1
+NO_CACHE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
     --prune) PRUNE=1 ; shift ;;
-    --cache) NO_CACHE=0 ; shift ;;
     --no-cache) NO_CACHE=1 ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
@@ -295,7 +294,7 @@ docker_build() {
 
   # Add cache args unless --no-cache was specified
   if [ "$NO_CACHE" -eq 1 ]; then
-    echo "==> Building WITHOUT cache (default; use --cache to enable)"
+    echo "==> Building WITHOUT cache (use default to enable)"
     cache_args+=(--no-cache)
   else
     cache_args+=(--cache-from "type=local,src=$cache_base")
