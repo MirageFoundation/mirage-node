@@ -24,186 +24,75 @@ except ImportError as e:
     print("Install with: pip install base58 pynacl requests")
     sys.exit(1)
 
-# BIP39 English wordlist (2048 words)
+# Constants
 BIP39_WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt"
 _BIP39_WORDS = None
 
+MIRAGED_BIN = Path("/opt/mirage/blockchain/bin/miraged")
+NODE_HOME = Path.home() / ".mirage" / "node"
 ORCHESTRATOR_HOME = Path.home() / ".mirage" / "orchestrator"
 ORCHESTRATOR_REGISTRY = Path.home() / ".orchestrator"
 KEYPAIR_PATH = ORCHESTRATOR_HOME / "solana-keypair.json"
-MIN_SOL_BALANCE = 0.1  # Minimum SOL required
+MIN_SOL_BALANCE = 0.1
 VALOPER_PREFIX = "miragevaloper1"
 
-
-def get_bip39_wordlist() -> list[str]:
-    """Load BIP39 English wordlist."""
-    global _BIP39_WORDS
-    if _BIP39_WORDS is None:
-        # Try local cache first
-        cache_path = Path("/tmp/bip39_english.txt")
-        if cache_path.exists():
-            _BIP39_WORDS = cache_path.read_text().strip().split("\n")
-        else:
-            resp = requests.get(BIP39_WORDLIST_URL, timeout=10)
-            resp.raise_for_status()
-            _BIP39_WORDS = resp.text.strip().split("\n")
-            cache_path.write_text(resp.text)
-    return _BIP39_WORDS
+# Box drawing
+LINE = "─" * 58
+BOX_TOP = "┌" + LINE + "┐"
+BOX_BOT = "└" + LINE + "┘"
+BOX_MID = "│"
 
 
-def validate_mnemonic(mnemonic: str) -> tuple[bool, str]:
-    """Validate BIP39 mnemonic. Returns (is_valid, error_message)."""
-    words = mnemonic.strip().lower().split()
-    
-    if len(words) != 12:
-        return False, f"Expected 12 words, got {len(words)}"
-    
-    try:
-        wordlist = get_bip39_wordlist()
-    except Exception as e:
-        # If we can't fetch wordlist, skip validation
-        print(f"    Warning: Could not fetch BIP39 wordlist: {e}")
-        return True, ""
-    
-    for i, word in enumerate(words):
-        if word not in wordlist:
-            return False, f"Word {i+1} '{word}' is not a valid BIP39 word"
-    
-    # Checksum validation (simplified - just check word validity for now)
-    return True, ""
+def box(title: str) -> None:
+    """Print a section header."""
+    print()
+    print(BOX_TOP)
+    print(f"│ {title:<56} │")
+    print(BOX_BOT)
 
 
-def generate_mnemonic() -> str:
-    """Generate a new 12-word BIP39 mnemonic."""
-    wordlist = get_bip39_wordlist()
-    
-    # 128 bits of entropy for 12 words
-    entropy = secrets.token_bytes(16)
-    
-    # Calculate checksum: first 4 bits of SHA256(entropy)
-    checksum = hashlib.sha256(entropy).digest()[0] >> 4
-    
-    # Combine entropy + checksum into 132 bits, split into 12 x 11-bit indices
-    # Convert entropy to integer, shift left 4 bits, add checksum
-    entropy_int = int.from_bytes(entropy, "big")
-    combined = (entropy_int << 4) | checksum
-    
-    # Extract 12 x 11-bit words (from MSB to LSB)
-    words = []
-    for i in range(12):
-        # Extract 11 bits starting from position (11 - i) * 11
-        shift = (11 - i) * 11
-        index = (combined >> shift) & 0x7FF  # 0x7FF = 2047 = 11 bits
-        words.append(wordlist[index])
-    
-    return " ".join(words)
+def info(label: str, value: str) -> None:
+    """Print a labeled value."""
+    print(f"  {label:<20} {value}")
 
 
-def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
-    """Derive seed from BIP39 mnemonic using PBKDF2."""
-    password = mnemonic.encode("utf-8")
-    salt = ("mnemonic" + passphrase).encode("utf-8")
-    return hashlib.pbkdf2_hmac("sha512", password, salt, 2048, 64)
+def ok(msg: str) -> None:
+    """Print success message."""
+    print(f"  [ok] {msg}")
 
 
-def derive_slip10_ed25519(seed: bytes, path: list[int]) -> bytes:
-    """
-    Derive ed25519 key using SLIP-10.
-    Path should be list of indices (already hardened, i.e., with 0x80000000 added).
-    Returns 32-byte private key seed.
-    """
-    import hmac
-    
-    # Master key derivation
-    I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
-    key = I[:32]
-    chain_code = I[32:]
-    
-    # Derive each level
-    for index in path:
-        # ed25519 only supports hardened derivation
-        data = b"\x00" + key + index.to_bytes(4, "big")
-        I = hmac.new(chain_code, data, hashlib.sha512).digest()
-        key = I[:32]
-        chain_code = I[32:]
-    
-    return key
+def err(msg: str) -> None:
+    """Print error message."""
+    print(f"  [error] {msg}")
 
 
-def create_solana_keypair(mnemonic: str, path: Path) -> str:
-    """Create Solana keypair from mnemonic using BIP44 derivation (Phantom-compatible)."""
-    seed = mnemonic_to_seed(mnemonic.strip().lower())
-    
-    # BIP44 path: m/44'/501'/0'/0' (Solana coin type = 501)
-    # Hardened indices have 0x80000000 added
-    HARDENED = 0x80000000
-    derivation_path = [
-        44 | HARDENED,   # purpose
-        501 | HARDENED,  # coin type (Solana)
-        0 | HARDENED,    # account
-        0 | HARDENED,    # change
-    ]
-    
-    # Derive key using SLIP-10
-    private_key_seed = derive_slip10_ed25519(seed, derivation_path)
-    
-    # Create ed25519 keypair
-    signing_key = SigningKey(private_key_seed)
-    verify_key = signing_key.verify_key
-    
-    # Solana keypair format: [32-byte private seed, 32-byte pubkey]
-    keypair = list(private_key_seed) + list(bytes(verify_key))
-    
-    # Save keypair
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(keypair, f)
-    os.chmod(path, 0o600)
-    
-    return base58.b58encode(bytes(verify_key)).decode()
+def warn(msg: str) -> None:
+    """Print warning message."""
+    print(f"  [warn] {msg}")
 
 
-def get_solana_balance(address: str, rpc_url: str) -> float | None:
-    """Get SOL balance for address. Returns None on error."""
-    try:
-        resp = requests.post(
-            rpc_url,
-            json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "getBalance",
-                "params": [address],
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if "result" in data and "value" in data["result"]:
-            lamports = data["result"]["value"]
-            return lamports / 1_000_000_000  # Convert lamports to SOL
-    except Exception as e:
-        print(f"    Warning: Could not check balance: {e}")
-    return None
+# ─────────────────────────────────────────────────────────────────────────────
+# Chain queries
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def get_local_validator_address() -> str | None:
     """Get validator address from local node keyring."""
-    miraged_bin = Path("/opt/mirage/blockchain/bin/miraged")
-    node_home = Path.home() / ".mirage" / "node"
-    
-    if not miraged_bin.exists():
+    if not MIRAGED_BIN.exists() or not NODE_HOME.exists():
         return None
-    if not node_home.exists():
-        return None
-    
     try:
         result = subprocess.run(
             [
-                str(miraged_bin),
-                "keys", "show", "validator",
-                "--home", str(node_home),
-                "--keyring-backend", "test",
-                "--bech", "val",
+                str(MIRAGED_BIN),
+                "keys",
+                "show",
+                "validator",
+                "--home",
+                str(NODE_HOME),
+                "--keyring-backend",
+                "test",
+                "--bech",
+                "val",
                 "-a",
             ],
             capture_output=True,
@@ -219,180 +108,291 @@ def get_local_validator_address() -> str | None:
     return None
 
 
+def get_validator_stake(valoper: str) -> int | None:
+    """Get validator's staked tokens from chain."""
+    if not MIRAGED_BIN.exists() or not NODE_HOME.exists():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                str(MIRAGED_BIN),
+                "q",
+                "staking",
+                "validator",
+                valoper,
+                "--home",
+                str(NODE_HOME),
+                "--node",
+                "tcp://127.0.0.1:26657",
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            # Handle both wrapped and unwrapped response formats
+            validator = data.get("validator", data)
+            tokens = validator.get("tokens")
+            if tokens:
+                return int(tokens)
+    except Exception:
+        pass
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Solana
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_solana_balance(address: str, rpc_url: str) -> float | None:
+    """Get SOL balance for address."""
+    try:
+        resp = requests.post(
+            rpc_url,
+            json={"jsonrpc": "2.0", "id": 1, "method": "getBalance", "params": [address]},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "result" in data and "value" in data["result"]:
+            return data["result"]["value"] / 1_000_000_000
+    except Exception:
+        pass
+    return None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BIP39 / Key derivation
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def get_bip39_wordlist() -> list[str]:
+    """Load BIP39 English wordlist."""
+    global _BIP39_WORDS
+    if _BIP39_WORDS is None:
+        cache_path = Path("/tmp/bip39_english.txt")
+        if cache_path.exists():
+            _BIP39_WORDS = cache_path.read_text().strip().split("\n")
+        else:
+            resp = requests.get(BIP39_WORDLIST_URL, timeout=10)
+            resp.raise_for_status()
+            _BIP39_WORDS = resp.text.strip().split("\n")
+            cache_path.write_text(resp.text)
+    return _BIP39_WORDS
+
+
+def validate_mnemonic(mnemonic: str) -> tuple[bool, str]:
+    """Validate BIP39 mnemonic."""
+    words = mnemonic.strip().lower().split()
+    if len(words) != 12:
+        return False, f"Expected 12 words, got {len(words)}"
+    try:
+        wordlist = get_bip39_wordlist()
+        for i, word in enumerate(words):
+            if word not in wordlist:
+                return False, f"Word {i+1} '{word}' is not a valid BIP39 word"
+    except Exception:
+        pass  # Skip validation if wordlist unavailable
+    return True, ""
+
+
+def generate_mnemonic() -> str:
+    """Generate a new 12-word BIP39 mnemonic."""
+    wordlist = get_bip39_wordlist()
+    entropy = secrets.token_bytes(16)
+    checksum = hashlib.sha256(entropy).digest()[0] >> 4
+    entropy_int = int.from_bytes(entropy, "big")
+    combined = (entropy_int << 4) | checksum
+    words = []
+    for i in range(12):
+        shift = (11 - i) * 11
+        index = (combined >> shift) & 0x7FF
+        words.append(wordlist[index])
+    return " ".join(words)
+
+
+def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
+    """Derive seed from BIP39 mnemonic using PBKDF2."""
+    password = mnemonic.encode("utf-8")
+    salt = ("mnemonic" + passphrase).encode("utf-8")
+    return hashlib.pbkdf2_hmac("sha512", password, salt, 2048, 64)
+
+
+def derive_slip10_ed25519(seed: bytes, path: list[int]) -> bytes:
+    """Derive ed25519 key using SLIP-10."""
+    import hmac
+
+    I = hmac.new(b"ed25519 seed", seed, hashlib.sha512).digest()
+    key, chain_code = I[:32], I[32:]
+    for index in path:
+        data = b"\x00" + key + index.to_bytes(4, "big")
+        I = hmac.new(chain_code, data, hashlib.sha512).digest()
+        key, chain_code = I[:32], I[32:]
+    return key
+
+
+def create_solana_keypair(mnemonic: str, path: Path) -> str:
+    """Create Solana keypair from mnemonic (Phantom-compatible BIP44)."""
+    seed = mnemonic_to_seed(mnemonic.strip().lower())
+    HARDENED = 0x80000000
+    derivation_path = [44 | HARDENED, 501 | HARDENED, 0 | HARDENED, 0 | HARDENED]
+    private_key_seed = derive_slip10_ed25519(seed, derivation_path)
+    signing_key = SigningKey(private_key_seed)
+    verify_key = signing_key.verify_key
+    keypair = list(private_key_seed) + list(bytes(verify_key))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(keypair, f)
+    os.chmod(path, 0o600)
+    return base58.b58encode(bytes(verify_key)).decode()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 def main():
-    print("==> Orchestrator Solana Wallet Setup")
+    box("ORCHESTRATOR SETUP")
+
+    # ── Step 1: Detect validator ──────────────────────────────────────────────
     print()
-    
-    # Step 1: Detect validator address (required)
-    print("==> Detecting local validator...")
+    print("  Detecting local validator...")
     validator = get_local_validator_address()
     if not validator:
-        print("    ERROR: Could not detect validator address from local node.")
+        err("Could not detect validator address")
         print()
-        print("    This script must be run on a node with a configured validator.")
-        print("    Ensure miraged keyring has a 'validator' key at ~/.mirage/node/")
+        print("  This script must be run on a node with a configured validator.")
+        print("  Ensure miraged keyring has a 'validator' key at ~/.mirage/node/")
         return 1
-    print(f"    ✓ Validator: {validator}")
+    ok(f"Validator: {validator}")
+
+    # ── Step 2: Get validator stake ───────────────────────────────────────────
     print()
-    
-    ORCHESTRATOR_HOME.mkdir(parents=True, exist_ok=True)
-    
-    if KEYPAIR_PATH.exists():
-        print(f"    Keypair already exists: {KEYPAIR_PATH}")
-        confirm = input("    Overwrite? [y/N]: ").strip().lower()
-        if confirm != "y":
-            print("    Aborted.")
-            return 0
+    print("  Querying validator stake...")
+    stake = get_validator_stake(validator)
+    if stake is None:
+        err("Could not query validator stake from chain")
         print()
-    
-    # Get RPC URL from env or use default
-    rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
-    
-    # Prompt for import or generate
+        print("  Ensure the node is running and synced.")
+        return 1
+    ok(f"Stake: {stake:,} umirage")
+
+    # ── Step 3: Check existing keypair ────────────────────────────────────────
+    ORCHESTRATOR_HOME.mkdir(parents=True, exist_ok=True)
+
+    if KEYPAIR_PATH.exists():
+        print()
+        warn(f"Keypair exists: {KEYPAIR_PATH}")
+        confirm = input("  Overwrite? [y/N]: ").strip().lower()
+        if confirm != "y":
+            print("  Aborted.")
+            return 0
+
+    # ── Step 4: Import or generate wallet ─────────────────────────────────────
+    box("SOLANA WALLET")
+    print()
     print("  [i] Import existing mnemonic")
     print("  [g] Generate new wallet")
     print()
-    choice = input("Select option [i/g]: ").strip().lower()
-    print()
-    
+    choice = input("  Select [i/g]: ").strip().lower()
+
     if choice == "g":
-        # Generate new mnemonic
         try:
             mnemonic = generate_mnemonic()
         except Exception as e:
-            print(f"ERROR: Failed to generate mnemonic: {e}")
+            err(f"Failed to generate mnemonic: {e}")
             return 1
-        
-        print("=" * 60)
-        print("NEW WALLET GENERATED - SAVE THIS SEED PHRASE!")
-        print("=" * 60)
+
+        box("SAVE THIS SEED PHRASE")
         print()
         print(f"  {mnemonic}")
         print()
-        print("=" * 60)
-        print("WARNING:")
-        print("  - This is the ONLY time this phrase will be shown")
-        print("  - Write it down and store it securely")
+        print(BOX_TOP)
+        print("│ WARNING                                                  │")
+        print("│   - This is the ONLY time this phrase will be shown      │")
+        print("│   - Write it down and store it securely                  │")
+        print("│   - Do NOT import into Phantom or any other wallet       │")
+        print("│   - Do NOT reuse for other orchestrator nodes            │")
+        print(BOX_BOT)
         print()
-        print("THIS WALLET IS FOR THIS NODE ONLY!")
-        print("  - Do NOT use this wallet for anything else")
-        print("  - Do NOT import this into Phantom or any other wallet")
-        print("  - Do NOT reuse this seed for other orchestrator nodes")
-        print("  - Each node MUST have its own unique wallet")
-        print("=" * 60)
-        print()
-        
-        confirm = input("Have you saved the seed phrase? [y/N]: ").strip().lower()
+        confirm = input("  Saved the seed phrase? [y/N]: ").strip().lower()
         if confirm != "y":
-            print("    Aborted. Run again when ready to save the phrase.")
+            print("  Aborted.")
             return 1
-        print()
     else:
-        # Import existing mnemonic
-        print("NOTE: This mnemonic must be UNIQUE to this node.")
-        print("      Do NOT reuse a mnemonic from another node or wallet.")
         print()
-        mnemonic = getpass.getpass("Enter 12-word Solana mnemonic: ")
-        
-        # Validate
+        print("  NOTE: This mnemonic must be UNIQUE to this node.")
+        print()
+        mnemonic = getpass.getpass("  Enter 12-word mnemonic: ")
         valid, error = validate_mnemonic(mnemonic)
         if not valid:
-            print(f"ERROR: {error}")
+            err(error)
             return 1
-        
-        print("    ✓ Mnemonic valid")
-    
-    # Create keypair
+        ok("Mnemonic valid")
+
+    # ── Step 5: Create keypair ────────────────────────────────────────────────
     address = create_solana_keypair(mnemonic, KEYPAIR_PATH)
-    print(f"    ✓ Keypair saved: {KEYPAIR_PATH}")
+    ok(f"Keypair saved: {KEYPAIR_PATH}")
+
+    # ── Step 6: Check balance ─────────────────────────────────────────────────
+    rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
     print()
-    print("=" * 50)
-    print("SOLANA WALLET READY")
-    print("=" * 50)
-    print()
-    print(f"  Address: {address}")
-    print(f"  Keypair: {KEYPAIR_PATH}")
-    print()
-    
-    # Check balance
-    print("==> Checking balance...")
+    print("  Checking Solana balance...")
     balance = get_solana_balance(address, rpc_url)
-    
+
     if balance is not None:
-        print(f"    Balance: {balance:.4f} SOL")
-        
+        ok(f"Balance: {balance:.4f} SOL")
         if balance < MIN_SOL_BALANCE:
             print()
-            print("=" * 50)
-            print("WAITING FOR FUNDING")
-            print("=" * 50)
-            print(f"Minimum required: {MIN_SOL_BALANCE} SOL")
+            warn(f"Low balance (min {MIN_SOL_BALANCE} SOL recommended)")
+            print(f"  Send SOL to: {address}")
             print()
-            print(f"Send SOL to: {address}")
-            print()
-            print("Checking every 30 seconds... (Ctrl+C to skip)")
-            print("=" * 50)
-            
+            print("  Waiting for funding... (Ctrl+C to skip)")
             try:
                 while True:
                     time.sleep(30)
                     balance = get_solana_balance(address, rpc_url)
                     if balance is not None:
-                        print(f"    Balance: {balance:.4f} SOL")
+                        print(f"  Balance: {balance:.4f} SOL")
                         if balance >= MIN_SOL_BALANCE:
-                            print("==> Funding complete!")
+                            ok("Funding complete")
                             break
             except KeyboardInterrupt:
                 print()
-                print("    Skipped funding wait.")
-    
-    # Validator already detected at start
-    print()
-    print("==> Validator Registration")
-    print()
-    print(f"    Validator: {validator}")
-    
-    while True:
-        stake_input = input("Enter stake amount in umirage (e.g. 1000000): ").strip()
-        try:
-            stake = int(stake_input)
-            if stake <= 0:
-                print("    ERROR: Stake must be positive")
-                continue
-            break
-        except ValueError:
-            print("    ERROR: Must be a number")
-            continue
-    
-    # Save orchestrator config
+                warn("Skipped funding wait")
+    else:
+        warn("Could not check balance")
+
+    # ── Step 7: Save config ───────────────────────────────────────────────────
     ORCHESTRATOR_REGISTRY.mkdir(parents=True, exist_ok=True)
     config_path = ORCHESTRATOR_REGISTRY / f"{validator}.json"
-    
     config = {
         "orchestratorPubkey": address,
         "mirageValidator": validator,
         "stake": stake,
     }
-    
+    config_json = json.dumps(config, indent=2)
     with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
+        f.write(config_json)
+        f.write("\n")
     os.chmod(config_path, 0o600)
-    
-    print()
-    print("=" * 50)
-    print("SETUP COMPLETE")
-    print("=" * 50)
+
+    # ── Done ──────────────────────────────────────────────────────────────────
+    box("SETUP COMPLETE")
     print()
     print(f"  Config saved: {config_path}")
     print()
-    print(json.dumps(config, indent=2))
+    print("  This wallet is EXCLUSIVE to this orchestrator node.")
+    print("  Maintain at least 0.1 SOL for transaction fees.")
     print()
-    print("This wallet is EXCLUSIVE to this orchestrator node.")
-    print("Do NOT use it for anything else or on any other node.")
+    print(config_json)
     print()
-    print("Maintain enough SOL for transaction fees (~0.1 SOL).")
-    print()
-    
+
     return 0
 
 
@@ -400,5 +400,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\n    Aborted.")
+        print("\n  Aborted.")
         sys.exit(0)

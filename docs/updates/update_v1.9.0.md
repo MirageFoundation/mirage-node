@@ -1,8 +1,10 @@
 # Mirage v1.9.0 Release Notes
 
-## Overview
+### Overview
 
-v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers between Mirage and external blockchains. This release includes the Solana bridge (attested) with infrastructure ready for IBC bridges (Osmosis, Cosmos Hub).
+v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers between Mirage and external blockchains. This release includes the Solana bridge (attested) and Osmosis IBC bridge, with infrastructure ready for additional chains.
+
+The bridge system uses a dual approach: **attested bridges** for non-IBC chains like Solana (where validators run orchestrators to watch external chains and submit attestations), and **IBC bridges** for Cosmos ecosystem chains like Osmosis (using native IBC transfer protocol). Both bridge types support per-chain fees that are distributed proportionally among validators who submit attestations.
 
 **Upgrade Name:** `v1.9.0-bridge`
 
@@ -10,37 +12,62 @@ v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers
 
 ---
 
-## Major Features
-
 ### Cross-Chain Bridge
 
 - **Attested Bridge** for non-IBC chains (Solana, future Ethereum support)
   - Validators run orchestrators that watch external chains for burns
   - Attestations require 66.67% of voting power to mint tokens
-  - Per-chain bridge fee (500 MIRAGE for Solana) paid to validator who confirms mint
+  - Per-chain bridge fee (500 MIRAGE) distributed proportionally among attestors
 
-- **Bridge Orchestrator** - new component for validators
-  - Watches Solana for burn events
-  - Submits attestations to Mirage chain
-  - Configurable via `orchestrator.env`
-  - **Replay protection**: validates sequences against chain state before processing
-  - **Idempotent minting**: handles "AlreadyMinted" gracefully for crash recovery
-  - **Gas simulation**: dynamically calculates tx fees via RPC simulation
-  - **Unordered transactions**: uses 5-minute timeout for replay protection
-  - **Fee logging**: `[FEES]` logs show gas fees, bridge fees received, and net profit
+- **IBC Bridge** for Cosmos ecosystem chains (Osmosis)
+  - Uses native IBC transfer protocol with MsgIBCTransfer
+  - Per-chain bridge fee (500 MIRAGE for Osmosis)
+  - Auto-configured channel for Osmosis (channel-0)
+
+- **Bidirectional attestation model**
+  - Inbound: burn on external chain → attestations → mint on Mirage
+  - Outbound: burn on Mirage → attestations from external chain → confirmation
+
+- **Fee distribution**: bridge fees split proportionally among all validators who attested
+
+---
+
+### Bridge Orchestrator
+
+- New component for validators to participate in bridge attestations
+- Watches Solana for burn events and submits attestations to Mirage
+- Configurable via `orchestrator.env`
+- **Replay protection**: validates sequences against chain state before processing
+- **Idempotent minting**: handles "AlreadyMinted" gracefully for crash recovery
+- **Gas simulation**: dynamically calculates tx fees via RPC simulation
+- **Unordered transactions**: uses 5-minute timeout for replay protection
+- **Fee logging**: `[FEES]` logs show gas fees, bridge fees received, and net profit
+- **Auto-detects Solana cluster** from RPC URL (devnet/testnet/mainnet)
+- **Startup banner** shows validator and Solana addresses
 
 ### New Chain Parameters
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `bridge_chains` | `[{chain_id: "solana", enabled: true, fee: 500000000}]` | Enabled bridge chains with per-chain fees |
+| `bridge_chains` | Solana + Osmosis enabled | Per-chain config with fees and IBC channels |
 | `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
+
+**Bridge chain configs in genesis:**
+- Solana: `{chain_id: "solana", enabled: true, fee: 500000000}`
+- Osmosis: `{chain_id: "osmosis", enabled: true, fee: 500000000, ibc_channel: "channel-0"}`
+
+---
 
 ### Frontend Changes
 
-- **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain (no hardcoded values)
-- **Multi-step progress UI**: shows burn → mint → confirm stages with real-time polling
-- **Fee tooltip**: "Bridge fee paid to validator"
+- **Bidirectional bridge UI**: supports both Bridge In (to Mirage) and Bridge Out (from Mirage)
+- **Solana wallet integration**: connect Phantom/Solflare for Bridge In transactions
+- **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain
+- **Multi-step progress UI**: shows burn → attestation → confirm stages with real-time polling
+- **Balance display**: shows both Mirage and external chain balances
+- **Chain icons**: SVG icons for Solana and Osmosis in `/public/bridges/`
+
+---
 
 ### New CLI Commands
 
@@ -51,31 +78,35 @@ miraged q bridge status
 # Query bridge configuration  
 miraged q bridge config
 
-# Submit attestation (validators only)
-miraged tx bridge attest <source_chain> <burn_id> <recipient> <amount>
+# Query attestations for a burn
+miraged q bridge attestations <chain> <burn_id>
 
-# Initiate bridge out
-miraged tx bridge send <dest_chain> <dest_address> <amount>
+# Submit attestation (validators only)
+miraged tx bridge attest-burned <source_chain> <burn_id> <recipient> <amount>
+
+# Confirm external mint (validators only)
+miraged tx bridge attest-minted <dest_chain> <burn_id> <external_tx_hash>
+
+# Initiate bridge out (burn on Mirage)
+miraged tx bridge burn <dest_chain> <dest_address> <amount>
 ```
 
 ---
 
-## Security Improvements
+### Security Improvements
 
-### Rate Limiting
-
+**Rate Limiting:**
 - **P2P Rate Limiting** via iptables (deploy migration `v1_9_0_p2p_rate_limiting`)
   - Max 5 concurrent connections per IP to port 26656
   - Max 10 new connections per minute per IP
-
 - **Caddy Rate Limiting** reduced from 100 to 30 req/s per IP
 
-### Authorization Fixes
-
+**Authorization Fixes:**
 - Fixed Delete message authorization to require governance for indexed content
 - Security hardening in core module message handlers
+- Governance messages forced through standard ante handler (prevents relay bypass)
 
-### Bridge Replay Protection (Defense-in-Depth)
+**Bridge Replay Protection (Defense-in-Depth):**
 
 | Layer | Check | Result |
 |-------|-------|--------|
@@ -83,13 +114,14 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
 | **Solana Program** | Sliding window bitmap (1024 sequences) | `AlreadyMinted` or `TransactionTooOld` |
 
 - Orchestrator queries Solana bridge state on startup to initialize sequence tracking
-- Prevents processing of stale/malicious burn events even if they pass Mirage chain validation
+- Prevents processing of stale/malicious burn events
+- Integer overflow protection in fee distribution calculations
 
 ---
 
-## Infrastructure Changes
+### Infrastructure Changes
 
-### Environment Variables
+**Environment Variables:**
 
 - **Renamed**: `MIRAGE_INDEXER_*` → `INDEXER_*`
   - `INDEXER_ENABLED` (was `MIRAGE_INDEXER_ENABLED`)
@@ -99,113 +131,136 @@ miraged tx bridge send <dest_chain> <dest_address> <amount>
 - **Removed**: `MIRAGE_MODE` from `backend.env` (unused)
 
 - **New**: `orchestrator.env` for bridge orchestrator configuration
-  - `ORCHESTRATOR_ENABLED`
+  - `ORCHESTRATOR_ENABLED` - must be explicitly set
   - `ORCHESTRATOR_SOLANA_PROGRAM_ID`
-  - `ORCHESTRATOR_SOLANA_RPC` / `ORCHESTRATOR_SOLANA_WS` - cluster auto-detected from URL (devnet/testnet/mainnet)
+  - `ORCHESTRATOR_SOLANA_RPC` / `ORCHESTRATOR_SOLANA_WS` - cluster auto-detected from URL
   - `ORCHESTRATOR_SOLANA_KEYPAIR`
 
-### Deploy Migrations (v1.9.0)
+**Build Changes:**
+- Blockchain binaries now built to `blockchain/bin/` directory
+- New build targets: `make build-orchestrator`, `make build-all`, `make test-fast`
+
+**Deploy Migrations:**
 
 | Migration | Description |
 |-----------|-------------|
 | `v1_9_0_indexer_env_rename` | Renames MIRAGE_INDEXER_* to INDEXER_* |
 | `v1_9_0_p2p_rate_limiting` | Adds iptables rules for P2P rate limiting |
 
+**Setup Scripts (converted from bash to Python):**
+- `deploy/setup_orchestrator.py` - generates Solana wallet, configures orchestrator
+- `deploy/setup_letsencrypt.py` - SSL certificate setup
+- `deploy/setup_hermes.py` - IBC relayer configuration
+
 ---
 
-## Validator Requirements
+### Validator Requirements
 
-### Before Upgrade Height
+**Before Upgrade Height:**
+1. Update binary to v1.9.0
+2. Restart node with new binary (it will halt at upgrade height)
 
-1. **Update binary** to v1.9.0
-2. **Restart node** with new binary (it will halt at upgrade height)
+**After Upgrade (Optional but Recommended):**
 
-### After Upgrade (Optional but Recommended)
-
-1. **Set up orchestrator** if participating in bridge attestations:
+1. Set up orchestrator if participating in bridge attestations:
    ```bash
-   # Generate Solana wallet
+   # Run setup script (generates wallet, registers validator)
    python3 deploy/setup_orchestrator.py
    
-   # Fund wallet with ~0.1 SOL for fees
-   # Configure orchestrator.env
-   # Restart container
+   # Fund Solana wallet with ~0.1 SOL for fees
+   # Restart container to start orchestrator
    ```
 
-2. **Verify upgrade** with verification script:
+2. Verify upgrade with verification script:
    ```bash
    python3 scripts/verify_upgrade.py --phase post
    ```
 
----
-
-## Sequence Reset (v1.9.1-seq-fix)
-
-If Solana bridge state becomes stale (e.g., after Mirage chain reset but Solana devnet persists), use the `v1.9.1-seq-fix` upgrade to advance the sequence counter:
-
-```bash
-# Submit governance proposal for sequence fix
-miraged tx gov submit-proposal software-upgrade v1.9.1-seq-fix \
-  --upgrade-height <height> \
-  --title "Bridge sequence reset" \
-  --summary "Advance Solana bridge sequence to skip stale devnet state"
-```
-
-This sets the Solana bridge sequence to 100, so new burns start at seq=101.
-
-**Keeper function available:** `SetBridgeSequence(ctx, chain, seq)` for future manual adjustments.
+**Orchestrator Verification:**
+After starting, check logs for:
+- `[REPLAY] initialized solana last_sequence=<N>` - replay protection active
+- `solscan: https://solscan.io/tx/...` - correct cluster URL
+- Startup banner showing validator and Solana addresses
 
 ---
 
-## API Changes
+### API Changes
 
-### Backend Endpoints
+**Backend Endpoints (New):**
 
-**New endpoints:**
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/bridge/config` | GET | Returns bridge chain configs with per-chain fees |
 | `/api/bridge/get_minted` | GET | Query mint confirmation by burn_id |
+| `/api/bridge/attestations` | GET | Query attestations for a burn |
 
-**Renamed:**
-| Old | New |
-|-----|-----|
-| `/api/get_bridge_minted` | `/api/bridge/get_minted` |
+**Query RPC Changes:**
+- All query RPCs renamed to use `Get` prefix for consistency
+- Example: `Params` → `GetParams`, `Profile` → `GetProfile`
 
-All bridge endpoints now consistently use `/api/bridge/` prefix.
+**New Messages:**
+- `MsgIBCTransfer` - IBC token transfer with envelope signature
+- `MsgBridgeBurn` - Burn tokens for outbound bridge
+- `MsgBridgeAttestBurned` - Validator attestation for inbound burns
+- `MsgBridgeAttestMinted` - Validator confirmation for outbound mints
+
+All bridge endpoints use `/api/bridge/` prefix.
 
 ---
 
-## Breaking Changes
+### Breaking Changes
 
 - **API**: `/api/get_bridge_minted` renamed to `/api/bridge/get_minted`
-- Orchestrator is optional (only needed for bridge attestation participation)
+- **Query RPCs**: All renamed to use `Get` prefix
+- **Build path**: `blockchain/miraged` → `blockchain/bin/miraged`
+- **Env vars**: `MIRAGE_INDEXER_*` → `INDEXER_*`
+
+Orchestrator is optional (only needed for bridge attestation participation).
 
 ---
 
-## File Changes Summary
+### Documentation
 
-### New Files
-- `blockchain/orchestrator/` - Bridge orchestrator implementation
-- `deploy/templates/env/orchestrator.env` - Orchestrator configuration template
-- `deploy/migrations/v1_9_0_indexer_env_rename.py`
-- `deploy/migrations/v1_9_0_p2p_rate_limiting.py`
-- `deploy/setup_orchestrator.py` - Orchestrator setup script
+New comprehensive module documentation in `docs/modules/`:
+- `BACKEND.md` - Python Flask backend architecture
+- `BLOCKCHAIN_CORE.md` - Go blockchain and core module
+- `DEPLOYMENT.md` - Deploy scripts, Docker, migrations
+- `FRONTEND.md` - React frontend architecture
+- `INDEXER.md` - Indexer service and database schema
+- `ORCHESTRATOR.md` - Bridge orchestrator operation
+- `SHARED_MODULES.md` - Shared Python libraries
 
-### Modified Files
-- `blockchain/x/core/` - Bridge message handlers and queries
+---
+
+### File Changes Summary
+
+**New Files:**
+- `blockchain/orchestrator/` - Bridge orchestrator (Go)
+- `blockchain/cmd/orchestrator/main.go` - Orchestrator binary entry
+- `blockchain/app/ante_canon_test.go` - Canonical serialization tests
+- `deploy/setup_orchestrator.py` - Orchestrator setup
+- `deploy/setup_letsencrypt.py` - SSL setup
+- `deploy/setup_hermes.py` - IBC relayer setup
+- `deploy/enable_rate_limiting.sh` - P2P rate limiting
+- `deploy/templates/env/orchestrator.env` - Orchestrator config
+- `deploy/migrations/v1_9_0_*.py` - Deploy migrations
+- `web/backend/routes/bridge.py` - Bridge API endpoints
+- `web/frontend/src/utils/solanaBridge.js` - Solana wallet integration
+- `web/frontend/public/bridges/*.svg` - Chain icons
+- `docs/modules/*.md` - Module documentation
+
+**Modified:**
+- `blockchain/x/core/` - Bridge handlers, queries, tests
 - `blockchain/proto/mirage/core/v1/` - Bridge proto definitions
-- `deploy/entrypoint.sh` - Orchestrator startup, env var renames
-- `deploy/templates/env/indexer.env` - Renamed variables
-- `shared/config.py` - Updated env var names
-- `shared/datatypes.py` - Added `fee` field to `BridgeChainConfig`
-- `indexer/message_processor.py` - Added handlers for bridge message types
-- `web/frontend/src/views/BridgeView.js` - Dynamic fees, multi-step progress UI
-- Various scripts updated for new env var names
+- `blockchain/app/upgrades.go` - v1.9.0-bridge, v1.9.1-seq-fix, v1.10.0-bridge-refactor
+- `blockchain/Makefile` - New build targets
+- `deploy/deploy.sh` - Improved UX, --no-cache flag
+- `indexer/message_processor.py` - Bridge message handlers
+- `web/frontend/src/views/BridgeView.js` - Complete bridge UI
 
 ---
 
-## Verification Checklist
+### Verification Checklist
 
 Run `python3 scripts/verify_upgrade.py --phase post` which checks:
 
@@ -214,20 +269,25 @@ Run `python3 scripts/verify_upgrade.py --phase post` which checks:
 - [ ] All core params set correctly
 - [ ] All 4 tiers configured with correct values
 - [ ] Solana bridge chain enabled with fee = 500,000,000 (500 MIRAGE)
+- [ ] Osmosis bridge chain enabled with fee = 500,000,000 (500 MIRAGE)
 - [ ] Bridge attestation threshold = 6667
 - [ ] Bridge queries working (status, config)
 - [ ] Gov params unchanged
 - [ ] Local config valid (app.toml, genesis.json)
 - [ ] Deploy migrations applied
 
-### Orchestrator Verification
+---
 
-After starting the orchestrator, verify in logs:
-- `[REPLAY] initialized solana last_sequence=<N>` - confirms replay protection is active
-- `solscan: https://solscan.io/tx/...` - confirms correct cluster URL
+### Rollback
+
+If issues occur, the upgrade cannot be rolled back without a coordinated hard fork. Ensure thorough testing on devnet before mainnet deployment.
 
 ---
 
-## Rollback
+### Upgrade Handlers
 
-If issues occur, the upgrade cannot be rolled back without a coordinated hard fork. Ensure thorough testing on devnet before mainnet deployment.
+| Handler | Description |
+|---------|-------------|
+| `v1.9.0-bridge` | Main bridge upgrade - enables Solana + Osmosis |
+| `v1.9.1-seq-fix` | Advances Solana sequence to 100 (recovery hack) |
+| `v1.10.0-bridge-refactor` | Bridge attestation model refactor |

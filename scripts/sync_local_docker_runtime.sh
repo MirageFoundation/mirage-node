@@ -64,7 +64,7 @@ if [[ "${RESTART_NODE}" == "1" ]]; then
 fi
 
 # Copy all code directories
-for dir in web/backend indexer shared scripts referrals; do
+for dir in web/backend indexer shared scripts referrals deploy; do
   local_path="${PROJECT_ROOT}/${dir}"
   remote_path="${ROOT_DIR}/${dir}"
   if [[ -d "${local_path}" ]]; then
