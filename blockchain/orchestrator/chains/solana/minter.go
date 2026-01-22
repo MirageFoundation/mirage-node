@@ -81,8 +81,8 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	// Anchor's init_if_needed handles ATA creation, no separate instruction needed
 	instructions := []solana.Instruction{}
 
-	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, mintAmount, recipient)
-	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, mintAmount, recipient)
+	attestationPayload := buildMintAttestationPayload(burnHash, burn.Owner, mintAmount, recipient, "solana")
+	attestationSig, err := signMintAttestation(orchestratorKey, burnHash, burn.Owner, mintAmount, recipient, "solana")
 	if err != nil {
 		return "", err
 	}
@@ -244,20 +244,21 @@ func decodeBurnHash(burnID string) ([32]byte, error) {
 	return out, nil
 }
 
-func signMintAttestation(key solana.PrivateKey, burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey) ([64]byte, error) {
-	payload := buildMintAttestationPayload(burnHash, mirageSender, amount, recipient)
+func signMintAttestation(key solana.PrivateKey, burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey, destinationChain string) ([64]byte, error) {
+	payload := buildMintAttestationPayload(burnHash, mirageSender, amount, recipient, destinationChain)
 	sig := ed25519.Sign(ed25519.PrivateKey(key), payload)
 	var out [64]byte
 	copy(out[:], sig)
 	return out, nil
 }
 
-func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey) []byte {
+func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount uint64, recipient solana.PublicKey, destinationChain string) []byte {
 	buf := bytes.NewBuffer(nil)
 	buf.Write(burnHash[:])
 	writeBorshString(buf, mirageSender)
 	_ = binary.Write(buf, binary.LittleEndian, amount)
 	buf.Write(recipient[:]) // 32 bytes - binds recipient to prevent redirection attacks
+	writeBorshString(buf, destinationChain) // binds destination chain to prevent cross-chain replay
 	return buf.Bytes()
 }
 

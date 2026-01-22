@@ -28,8 +28,8 @@ from shared.datatypes import (
     MsgBridgeBurn,
     QueryBridgeAttestationRequest,
     QueryBridgeAttestationResponse,
-    QueryBridgeMintAttestationRequest,
-    QueryBridgeMintAttestationResponse,
+    QueryBridgeMintedRequest,
+    QueryBridgeMintedResponse,
 )
 from shared.canon import canon_signed_with_pow
 
@@ -178,22 +178,22 @@ def _query_bridge_attestation_from_chain(source_chain: str, burn_id: str, timeou
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
-def _query_bridge_mint_attestation_from_chain(dest_chain: str, burn_id: str, timeout: float = 5.0) -> dict:
-    """Query outbound bridge mint attestation directly from chain via gRPC."""
+def _query_bridge_minted_from_chain(dest_chain: str, burn_id: str, timeout: float = 5.0) -> dict:
+    """Query outbound bridge mint status (attestation progress + completion) from chain via gRPC."""
 
-    def _deserialize(data: bytes) -> QueryBridgeMintAttestationResponse:
-        msg = QueryBridgeMintAttestationResponse()
+    def _deserialize(data: bytes) -> QueryBridgeMintedResponse:
+        msg = QueryBridgeMintedResponse()
         msg.ParseFromString(data)
         return msg
 
     target = require_runtime().grpc_target
     with grpc.insecure_channel(target) as channel:
         method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetBridgeMintAttestation",
+            "/mirage.core.v1.Query/GetBridgeMinted",
             request_serializer=lambda msg: msg.SerializeToString(),
             response_deserializer=_deserialize,
         )
-        req = QueryBridgeMintAttestationRequest(destination_chain=dest_chain, burn_id=burn_id)
+        req = QueryBridgeMintedRequest(destination_chain=dest_chain, burn_id=burn_id)
         resp = method(req, timeout=timeout)
 
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
@@ -610,7 +610,7 @@ def get_attestation_status():
             if not burn_seq or not dest_chain:
                 raise RuntimeError("bridge_burn event missing burn_id or destination_chain")
 
-            data = _query_bridge_mint_attestation_from_chain(dest_chain, burn_seq)
+            data = _query_bridge_minted_from_chain(dest_chain, burn_seq)
             if not data.get("found", False):
                 result = {
                     "found": False,
@@ -620,14 +620,14 @@ def get_attestation_status():
                     "attestors": [],
                     "attestor_count": 0,
                     "attested_power": 0,
-                    "required_power": 0,
+                    "required_power": int(data.get("required_power", 0) or 0),
                     "destination_chain": dest_chain,
                 }
             else:
                 attestors = data.get("attestors") or []
                 result = {
                     "found": True,
-                    "confirmed": bool(data.get("confirmed", False)),
+                    "confirmed": bool(data.get("minted", False)),
                     "burn_tx_hash": tx_hash,
                     "burn_sequence": burn_seq,
                     "attestors": attestors,
@@ -636,7 +636,6 @@ def get_attestation_status():
                     "required_power": int(data.get("required_power", 0) or 0),
                     "destination_chain": data.get("destination_chain") or dest_chain,
                     "destination_tx": data.get("destination_tx") or None,
-                    "burn_sequence": data.get("burn_id") or burn_seq,
                 }
 
         log_event(

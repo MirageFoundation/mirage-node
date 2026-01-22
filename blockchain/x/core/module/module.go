@@ -2770,9 +2770,11 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	}, nil
 }
 
-// GetBridgeMinted queries a mint confirmation by burn_id and destination_chain
+// GetBridgeMinted queries outbound mint status including attestation progress and completion.
+// Returns both attestation progress (attested_power, required_power) and completion status (minted).
 func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
 
 	burnID := strings.TrimSpace(req.GetBurnId())
 	if burnID == "" {
@@ -2784,19 +2786,43 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 		return nil, fmt.Errorf("destination_chain is required")
 	}
 
-	record, found, err := am.k.GetBridgeMintedRecord(sdkCtx, destChain, burnID)
+	// Query attestation progress (may exist even if not yet confirmed)
+	attestation, attFound, err := am.k.GetBridgeMintAttestation(sdkCtx, destChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load mint attestation: %w", err)
+	}
+
+	// Query final minted record (exists only after threshold was crossed)
+	record, recFound, err := am.k.GetBridgeMintedRecord(sdkCtx, destChain, burnID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load mint record: %w", err)
 	}
-	if !found {
-		return &types.QueryBridgeMintedResponse{Minted: false}, nil
+
+	// Calculate required power for threshold
+	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+	// Build response with all info
+	resp := &types.QueryBridgeMintedResponse{
+		Found:            attFound || recFound,
+		Minted:           recFound,
+		DestinationChain: destChain,
+		RequiredPower:    requiredPower,
 	}
 
-	return &types.QueryBridgeMintedResponse{
-		Minted:           true,
-		DestinationChain: record.DestinationChain,
-		DestinationTx:    record.DestinationTx,
-	}, nil
+	// Add attestation details if found
+	if attFound {
+		resp.Attestors = attestation.AttestorList()
+		resp.AttestedPower = attestation.AttestedPower
+		resp.DestinationTx = attestation.DestinationTx
+	}
+
+	// Override destination_tx from final record if available (authoritative)
+	if recFound {
+		resp.DestinationTx = record.DestinationTx
+	}
+
+	return resp, nil
 }
 
 // BridgeConfig queries the bridge configuration
