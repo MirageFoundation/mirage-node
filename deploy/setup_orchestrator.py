@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import secrets
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -185,8 +186,53 @@ def get_solana_balance(address: str, rpc_url: str) -> float | None:
     return None
 
 
+def get_local_validator_address() -> str | None:
+    """Get validator address from local node keyring."""
+    miraged_bin = Path("/opt/mirage/blockchain/bin/miraged")
+    node_home = Path.home() / ".mirage" / "node"
+    
+    if not miraged_bin.exists():
+        return None
+    if not node_home.exists():
+        return None
+    
+    try:
+        result = subprocess.run(
+            [
+                str(miraged_bin),
+                "keys", "show", "validator",
+                "--home", str(node_home),
+                "--keyring-backend", "test",
+                "--bech", "val",
+                "-a",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            addr = result.stdout.strip()
+            if addr.startswith(VALOPER_PREFIX):
+                return addr
+    except Exception:
+        pass
+    return None
+
+
 def main():
     print("==> Orchestrator Solana Wallet Setup")
+    print()
+    
+    # Step 1: Detect validator address (required)
+    print("==> Detecting local validator...")
+    validator = get_local_validator_address()
+    if not validator:
+        print("    ERROR: Could not detect validator address from local node.")
+        print()
+        print("    This script must be run on a node with a configured validator.")
+        print("    Ensure miraged keyring has a 'validator' key at ~/.mirage/node/")
+        return 1
+    print(f"    ✓ Validator: {validator}")
     print()
     
     ORCHESTRATOR_HOME.mkdir(parents=True, exist_ok=True)
@@ -203,13 +249,13 @@ def main():
     rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
     
     # Prompt for import or generate
-    print("  [1] Import existing mnemonic")
-    print("  [2] Generate new wallet")
+    print("  [i] Import existing mnemonic")
+    print("  [g] Generate new wallet")
     print()
-    choice = input("Select option [1/2]: ").strip()
+    choice = input("Select option [i/g]: ").strip().lower()
     print()
     
-    if choice == "2":
+    if choice == "g":
         # Generate new mnemonic
         try:
             mnemonic = generate_mnemonic()
@@ -300,20 +346,11 @@ def main():
                 print()
                 print("    Skipped funding wait.")
     
-    # Prompt for validator info
+    # Validator already detected at start
     print()
     print("==> Validator Registration")
     print()
-    
-    while True:
-        validator = input("Enter your Mirage validator address (miragevaloper1...): ").strip()
-        if not validator.startswith(VALOPER_PREFIX):
-            print(f"    ERROR: Address must start with '{VALOPER_PREFIX}'")
-            continue
-        if len(validator) < len(VALOPER_PREFIX) + 10:
-            print("    ERROR: Address too short")
-            continue
-        break
+    print(f"    Validator: {validator}")
     
     while True:
         stake_input = input("Enter stake amount in umirage (e.g. 1000000): ").strip()
