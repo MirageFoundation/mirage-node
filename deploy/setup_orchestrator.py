@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Orchestrator setup - imports Solana wallet from mnemonic.
+Orchestrator setup - imports or generates Solana wallet.
 
 Usage: python3 deploy/setup_orchestrator.py
 """
@@ -9,6 +9,7 @@ import getpass
 import hashlib
 import json
 import os
+import secrets
 import sys
 import time
 from pathlib import Path
@@ -67,6 +68,32 @@ def validate_mnemonic(mnemonic: str) -> tuple[bool, str]:
     
     # Checksum validation (simplified - just check word validity for now)
     return True, ""
+
+
+def generate_mnemonic() -> str:
+    """Generate a new 12-word BIP39 mnemonic."""
+    wordlist = get_bip39_wordlist()
+    
+    # 128 bits of entropy for 12 words
+    entropy = secrets.token_bytes(16)
+    
+    # Calculate checksum: first 4 bits of SHA256(entropy)
+    checksum = hashlib.sha256(entropy).digest()[0] >> 4
+    
+    # Combine entropy + checksum into 132 bits, split into 12 x 11-bit indices
+    # Convert entropy to integer, shift left 4 bits, add checksum
+    entropy_int = int.from_bytes(entropy, "big")
+    combined = (entropy_int << 4) | checksum
+    
+    # Extract 12 x 11-bit words (from MSB to LSB)
+    words = []
+    for i in range(12):
+        # Extract 11 bits starting from position (11 - i) * 11
+        shift = (11 - i) * 11
+        index = (combined >> shift) & 0x7FF  # 0x7FF = 2047 = 11 bits
+        words.append(wordlist[index])
+    
+    return " ".join(words)
 
 
 def mnemonic_to_seed(mnemonic: str, passphrase: str = "") -> bytes:
@@ -173,23 +200,66 @@ def main():
     # Get RPC URL from env or use default
     rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
     
-    # Prompt for mnemonic
-    mnemonic = getpass.getpass("Enter 12-word Solana mnemonic: ")
+    # Prompt for import or generate
+    print("  [1] Import existing mnemonic")
+    print("  [2] Generate new wallet")
+    print()
+    choice = input("Select option [1/2]: ").strip()
+    print()
     
-    # Validate
-    valid, error = validate_mnemonic(mnemonic)
-    if not valid:
-        print(f"ERROR: {error}")
-        return 1
-    
-    print("    ✓ Mnemonic valid")
+    if choice == "2":
+        # Generate new mnemonic
+        try:
+            mnemonic = generate_mnemonic()
+        except Exception as e:
+            print(f"ERROR: Failed to generate mnemonic: {e}")
+            return 1
+        
+        print("=" * 60)
+        print("NEW WALLET GENERATED - SAVE THIS SEED PHRASE!")
+        print("=" * 60)
+        print()
+        print(f"  {mnemonic}")
+        print()
+        print("=" * 60)
+        print("WARNING:")
+        print("  - This is the ONLY time this phrase will be shown")
+        print("  - Write it down and store it securely")
+        print()
+        print("THIS WALLET IS FOR THIS NODE ONLY!")
+        print("  - Do NOT use this wallet for anything else")
+        print("  - Do NOT import this into Phantom or any other wallet")
+        print("  - Do NOT reuse this seed for other orchestrator nodes")
+        print("  - Each node MUST have its own unique wallet")
+        print("=" * 60)
+        print()
+        
+        confirm = input("Have you saved the seed phrase? [y/N]: ").strip().lower()
+        if confirm != "y":
+            print("    Aborted. Run again when ready to save the phrase.")
+            return 1
+        print()
+    else:
+        # Import existing mnemonic
+        print("NOTE: This mnemonic must be UNIQUE to this node.")
+        print("      Do NOT reuse a mnemonic from another node or wallet.")
+        print()
+        mnemonic = getpass.getpass("Enter 12-word Solana mnemonic: ")
+        
+        # Validate
+        valid, error = validate_mnemonic(mnemonic)
+        if not valid:
+            print(f"ERROR: {error}")
+            return 1
+        
+        print("    ✓ Mnemonic valid")
     
     # Create keypair
     address = create_solana_keypair(mnemonic, KEYPAIR_PATH)
     print(f"    ✓ Keypair saved: {KEYPAIR_PATH}")
     print()
     print("=" * 50)
-    print("SOLANA WALLET IMPORTED")
+    print("SOLANA WALLET READY")
     print("=" * 50)
     print()
     print(f"  Address: {address}")
@@ -233,7 +303,9 @@ def main():
     print("SETUP COMPLETE")
     print("=" * 50)
     print()
-    print("The orchestrator will use this wallet for Solana transactions.")
+    print("This wallet is EXCLUSIVE to this orchestrator node.")
+    print("Do NOT use it for anything else or on any other node.")
+    print()
     print("Maintain enough SOL for transaction fees (~0.1 SOL).")
     print()
     

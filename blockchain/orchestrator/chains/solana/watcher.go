@@ -238,7 +238,7 @@ func (w *Watcher) pruneSeenSigs() {
 
 // stateFilePath returns the path to the state file
 func (w *Watcher) stateFilePath() string {
-	return filepath.Join(w.cfg.StateDir, "solana_watcher_state.txt")
+	return filepath.Join(w.cfg.StateDir, ".resume_state")
 }
 
 // loadState loads the persisted lastSig from disk
