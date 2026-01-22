@@ -13,6 +13,7 @@ import (
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/gogo/protobuf/proto"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 
 	"mirage/x/core/keeper"
@@ -774,13 +775,20 @@ func TestBurnIDNormalization(t *testing.T) {
 
 // TestGetBridgeMintedQueryResponse tests the query response structure
 func TestGetBridgeMintedQueryResponse(t *testing.T) {
-	// Test response when minted
+	// Test response when minted (threshold crossed)
 	mintedResp := &types.QueryBridgeMintedResponse{
+		Found:            true,
 		Minted:           true,
 		DestinationChain: "solana",
 		DestinationTx:    "SolanaSignature123",
+		Attestors:        []string{"val1", "val2"},
+		AttestedPower:    70,
+		RequiredPower:    67,
 	}
 
+	if !mintedResp.Found {
+		t.Error("Expected Found to be true")
+	}
 	if !mintedResp.Minted {
 		t.Error("Expected Minted to be true")
 	}
@@ -790,20 +798,102 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 	if mintedResp.DestinationTx != "SolanaSignature123" {
 		t.Errorf("DestinationTx = %s, want SolanaSignature123", mintedResp.DestinationTx)
 	}
-
-	// Test response when not minted
-	notMintedResp := &types.QueryBridgeMintedResponse{
-		Minted: false,
+	if len(mintedResp.Attestors) != 2 {
+		t.Errorf("Expected 2 attestors, got %d", len(mintedResp.Attestors))
+	}
+	if mintedResp.AttestedPower != 70 {
+		t.Errorf("AttestedPower = %d, want 70", mintedResp.AttestedPower)
+	}
+	if mintedResp.RequiredPower != 67 {
+		t.Errorf("RequiredPower = %d, want 67", mintedResp.RequiredPower)
 	}
 
-	if notMintedResp.Minted {
+	// Test response when attestation in progress (not yet confirmed)
+	inProgressResp := &types.QueryBridgeMintedResponse{
+		Found:            true,
+		Minted:           false,
+		DestinationChain: "solana",
+		DestinationTx:    "SolanaSignature123",
+		Attestors:        []string{"val1"},
+		AttestedPower:    30,
+		RequiredPower:    67,
+	}
+
+	if !inProgressResp.Found {
+		t.Error("Expected Found to be true for in-progress attestation")
+	}
+	if inProgressResp.Minted {
+		t.Error("Expected Minted to be false for in-progress attestation")
+	}
+	if inProgressResp.AttestedPower >= inProgressResp.RequiredPower {
+		t.Error("In-progress attestation should have AttestedPower < RequiredPower")
+	}
+
+	// Test response when no attestation found
+	notFoundResp := &types.QueryBridgeMintedResponse{
+		Found:         false,
+		Minted:        false,
+		RequiredPower: 67,
+	}
+
+	if notFoundResp.Found {
+		t.Error("Expected Found to be false")
+	}
+	if notFoundResp.Minted {
 		t.Error("Expected Minted to be false")
 	}
-	if notMintedResp.DestinationChain != "" {
-		t.Errorf("DestinationChain should be empty, got %s", notMintedResp.DestinationChain)
+	if notFoundResp.RequiredPower != 67 {
+		t.Errorf("RequiredPower should still be set, got %d", notFoundResp.RequiredPower)
 	}
-	if notMintedResp.DestinationTx != "" {
-		t.Errorf("DestinationTx should be empty, got %s", notMintedResp.DestinationTx)
+}
+
+// TestQueryBridgeMintedResponseMarshalRoundTrip ensures new fields serialize correctly.
+func TestQueryBridgeMintedResponseMarshalRoundTrip(t *testing.T) {
+	original := &types.QueryBridgeMintedResponse{
+		Found:            true,
+		Minted:           true,
+		DestinationChain: "solana",
+		DestinationTx:    "SolanaSignature123",
+		Attestors:        []string{"val1", "val2"},
+		AttestedPower:    70,
+		RequiredPower:    67,
+	}
+
+	bz, err := proto.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+
+	var decoded types.QueryBridgeMintedResponse
+	if err := proto.Unmarshal(bz, &decoded); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	if decoded.Found != original.Found {
+		t.Errorf("Found = %v, want %v", decoded.Found, original.Found)
+	}
+	if decoded.Minted != original.Minted {
+		t.Errorf("Minted = %v, want %v", decoded.Minted, original.Minted)
+	}
+	if decoded.DestinationChain != original.DestinationChain {
+		t.Errorf("DestinationChain = %s, want %s", decoded.DestinationChain, original.DestinationChain)
+	}
+	if decoded.DestinationTx != original.DestinationTx {
+		t.Errorf("DestinationTx = %s, want %s", decoded.DestinationTx, original.DestinationTx)
+	}
+	if len(decoded.Attestors) != len(original.Attestors) {
+		t.Fatalf("Attestors length = %d, want %d", len(decoded.Attestors), len(original.Attestors))
+	}
+	for i := range original.Attestors {
+		if decoded.Attestors[i] != original.Attestors[i] {
+			t.Fatalf("Attestors[%d] = %s, want %s", i, decoded.Attestors[i], original.Attestors[i])
+		}
+	}
+	if decoded.AttestedPower != original.AttestedPower {
+		t.Errorf("AttestedPower = %d, want %d", decoded.AttestedPower, original.AttestedPower)
+	}
+	if decoded.RequiredPower != original.RequiredPower {
+		t.Errorf("RequiredPower = %d, want %d", decoded.RequiredPower, original.RequiredPower)
 	}
 }
 

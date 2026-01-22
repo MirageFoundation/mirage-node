@@ -375,9 +375,15 @@ Response:
   "burn_sequence": "42",
   "destination_chain": "solana",
   "destination_tx": "5xYzABC...",
+  "attestors": ["miragevaloper1abc...", "miragevaloper1def..."],
+  "attestor_count": 2,
+  "attested_power": 70,
+  "required_power": 67,
   "amount": 1000000
 }
 ```
+
+**Note:** The `attested_power` and `required_power` fields allow the frontend to show attestation progress before `confirmed` becomes `true`.
 
 ### GET /api/bridge/config
 
@@ -447,6 +453,12 @@ message Params {
 5. **Validator-Only**: Only active validators with voting power can attest
 
 ## Version History
+
+- **v1.10.7**: Enhanced `GetBridgeMinted` query and attestation payload security
+  - `GetBridgeMinted` now returns attestation progress (found, attestors, attested_power, required_power) in addition to completion status
+  - Removed separate `GetBridgeMintAttestation` endpoint - `GetBridgeMinted` now serves both purposes
+  - Orchestrator attestation payload now includes `destination_chain` to prevent cross-chain replay attacks
+  - Solana program requires matching update to `build_attestation_payload` (see `CONSIDER_FIXING.md`)
 
 - **v1.10.6**: Clarify burn identifiers in API/UX
   - Bridge API now uses explicit fields: `burn_sequence` and `burn_tx_hash`

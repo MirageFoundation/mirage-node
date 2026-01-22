@@ -993,12 +993,20 @@ func (m *QueryBridgeMintedRequest) GetBurnId() string {
 
 // QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
 type QueryBridgeMintedResponse struct {
-	// minted indicates whether the mint has been confirmed
+	// minted indicates whether the mint has been confirmed (threshold crossed)
 	Minted bool `protobuf:"varint,1,opt,name=minted,proto3" json:"minted,omitempty"`
 	// destination_chain is the external chain where mint occurred (e.g., "solana")
 	DestinationChain string `protobuf:"bytes,2,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
 	// destination_tx is the tx signature/hash on the destination chain
 	DestinationTx string `protobuf:"bytes,3,opt,name=destination_tx,json=destinationTx,proto3" json:"destination_tx,omitempty"`
+	// found indicates whether any attestation record exists for this burn
+	Found bool `protobuf:"varint,4,opt,name=found,proto3" json:"found,omitempty"`
+	// attestors lists the validator addresses that have attested
+	Attestors []string `protobuf:"bytes,5,rep,name=attestors,proto3" json:"attestors,omitempty"`
+	// attested_power is the total voting power that has attested
+	AttestedPower int64 `protobuf:"varint,6,opt,name=attested_power,json=attestedPower,proto3" json:"attested_power,omitempty"`
+	// required_power is the voting power required to confirm
+	RequiredPower int64 `protobuf:"varint,7,opt,name=required_power,json=requiredPower,proto3" json:"required_power,omitempty"`
 }
 
 func (m *QueryBridgeMintedResponse) Reset()         { *m = QueryBridgeMintedResponse{} }
@@ -1053,6 +1061,34 @@ func (m *QueryBridgeMintedResponse) GetDestinationTx() string {
 		return m.DestinationTx
 	}
 	return ""
+}
+
+func (m *QueryBridgeMintedResponse) GetFound() bool {
+	if m != nil {
+		return m.Found
+	}
+	return false
+}
+
+func (m *QueryBridgeMintedResponse) GetAttestors() []string {
+	if m != nil {
+		return m.Attestors
+	}
+	return nil
+}
+
+func (m *QueryBridgeMintedResponse) GetAttestedPower() int64 {
+	if m != nil {
+		return m.AttestedPower
+	}
+	return 0
+}
+
+func (m *QueryBridgeMintedResponse) GetRequiredPower() int64 {
+	if m != nil {
+		return m.RequiredPower
+	}
+	return 0
 }
 
 func init() {
@@ -2246,6 +2282,35 @@ func (m *QueryBridgeMintedResponse) MarshalToSizedBuffer(dAtA []byte) (int, erro
 	_ = i
 	var l int
 	_ = l
+	if m.RequiredPower != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.RequiredPower))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.AttestedPower != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.AttestedPower))
+		i--
+		dAtA[i] = 0x30
+	}
+	if len(m.Attestors) > 0 {
+		for iNdEx := len(m.Attestors) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Attestors[iNdEx])
+			copy(dAtA[i:], m.Attestors[iNdEx])
+			i = encodeVarintQuery(dAtA, i, uint64(len(m.Attestors[iNdEx])))
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
+	if m.Found {
+		i--
+		if m.Found {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
+	}
 	if len(m.DestinationTx) > 0 {
 		i -= len(m.DestinationTx)
 		copy(dAtA[i:], m.DestinationTx)
@@ -2621,6 +2686,21 @@ func (m *QueryBridgeMintedResponse) Size() (n int) {
 	l = len(m.DestinationTx)
 	if l > 0 {
 		n += 1 + l + sovQuery(uint64(l))
+	}
+	if m.Found {
+		n += 2
+	}
+	if len(m.Attestors) > 0 {
+		for _, s := range m.Attestors {
+			l = len(s)
+			n += 1 + l + sovQuery(uint64(l))
+		}
+	}
+	if m.AttestedPower != 0 {
+		n += 1 + sovQuery(uint64(m.AttestedPower))
+	}
+	if m.RequiredPower != 0 {
+		n += 1 + sovQuery(uint64(m.RequiredPower))
 	}
 	return n
 }
@@ -4757,6 +4837,96 @@ func (m *QueryBridgeMintedResponse) Unmarshal(dAtA []byte) error {
 			}
 			m.DestinationTx = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Found", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Found = bool(v != 0)
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Attestors", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthQuery
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthQuery
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Attestors = append(m.Attestors, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AttestedPower", wireType)
+			}
+			m.AttestedPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AttestedPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RequiredPower", wireType)
+			}
+			m.RequiredPower = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.RequiredPower |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipQuery(dAtA[iNdEx:])
