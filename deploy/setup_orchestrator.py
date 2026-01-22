@@ -28,8 +28,10 @@ BIP39_WORDLIST_URL = "https://raw.githubusercontent.com/bitcoin/bips/master/bip-
 _BIP39_WORDS = None
 
 ORCHESTRATOR_HOME = Path.home() / ".mirage" / "orchestrator"
+ORCHESTRATOR_REGISTRY = Path.home() / ".orchestrator"
 KEYPAIR_PATH = ORCHESTRATOR_HOME / "solana-keypair.json"
 MIN_SOL_BALANCE = 0.1  # Minimum SOL required
+VALOPER_PREFIX = "miragevaloper1"
 
 
 def get_bip39_wordlist() -> list[str]:
@@ -298,10 +300,55 @@ def main():
                 print()
                 print("    Skipped funding wait.")
     
+    # Prompt for validator info
+    print()
+    print("==> Validator Registration")
+    print()
+    
+    while True:
+        validator = input("Enter your Mirage validator address (miragevaloper1...): ").strip()
+        if not validator.startswith(VALOPER_PREFIX):
+            print(f"    ERROR: Address must start with '{VALOPER_PREFIX}'")
+            continue
+        if len(validator) < len(VALOPER_PREFIX) + 10:
+            print("    ERROR: Address too short")
+            continue
+        break
+    
+    while True:
+        stake_input = input("Enter stake amount in umirage (e.g. 1000000): ").strip()
+        try:
+            stake = int(stake_input)
+            if stake <= 0:
+                print("    ERROR: Stake must be positive")
+                continue
+            break
+        except ValueError:
+            print("    ERROR: Must be a number")
+            continue
+    
+    # Save orchestrator config
+    ORCHESTRATOR_REGISTRY.mkdir(parents=True, exist_ok=True)
+    config_path = ORCHESTRATOR_REGISTRY / f"{validator}.json"
+    
+    config = {
+        "orchestratorPubkey": address,
+        "mirageValidator": validator,
+        "stake": stake,
+    }
+    
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    os.chmod(config_path, 0o600)
+    
     print()
     print("=" * 50)
     print("SETUP COMPLETE")
     print("=" * 50)
+    print()
+    print(f"  Config saved: {config_path}")
+    print()
+    print(json.dumps(config, indent=2))
     print()
     print("This wallet is EXCLUSIVE to this orchestrator node.")
     print("Do NOT use it for anything else or on any other node.")
