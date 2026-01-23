@@ -88,28 +88,28 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/backup_indexer.sql"
         "\" 2>/dev/null || true'")
     
-    # Step 3: Create tarball on remote
+    # Step 3: Stream tarball directly to local (no temp file on server - saves disk space)
     # Note: Some directories (orchestrator/) may not exist on pre-1.9.0 servers - that's fine
-    status("Creating backup tarball on remote (this may take several minutes)...")
+    # Excludes: tmp, logs, cs.wal (consensus WAL - regenerates on start)
+    status(f"Streaming backup to {local_path} (this may take several minutes)...")
     run(f"ssh {conn} '"
         "cd /root && "
-        f"tar czf /tmp/{backup_name} "
+        "tar czf - "
         "--exclude=\".mirage/tmp\" "
         "--exclude=\".mirage/logs\" "
         "--exclude=\".mirage/*.tgz\" "
-        ".mirage'")
+        "--exclude=\".mirage/node/data/cs.wal\" "
+        "--exclude=\".mirage/node/data/tx_index.db\" "
+        ".mirage"
+        f"' > '{local_path}'")
     
     # Step 4: Restart services on remote
     status("Restarting services on remote...")
     run(f"ssh {conn} 'docker restart mirage'")
     
-    # Step 5: Download backup
-    status(f"Downloading backup to {local_path} (this may take a while)...")
-    run(f"scp {conn}:/tmp/{backup_name} '{local_path}'")
-    
-    # Step 6: Cleanup remote
+    # Step 5: Cleanup remote (just the SQL dump)
     status("Cleaning up remote...")
-    run(f"ssh {conn} 'rm -f /tmp/{backup_name} /root/.mirage/backup_indexer.sql'")
+    run(f"ssh {conn} 'rm -f /root/.mirage/backup_indexer.sql'")
     
     # Get file size
     size_bytes = local_path.stat().st_size
