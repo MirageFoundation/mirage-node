@@ -26,6 +26,9 @@ pruning-interval = "100"
 # This keeps recent blocks/commits/txs so /block, /commit and tx lookups work.
 min-retain-blocks = 28800
 
+# Application database backend (goleveldb or pebbledb)
+app-db-backend = "goleveldb"
+
 [api]
 enable = true
 enabled-unsafe-cors = true
