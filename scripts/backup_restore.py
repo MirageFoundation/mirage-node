@@ -355,11 +355,11 @@ def restore(
         status("DEBUG MODE: Skipping steps 3-9")
     else:
         # -------------------------------------------------------------------------
-        # Step 3: Stop container (disable restart policy first to prevent restart loop)
+        # Step 3: Stop and remove container
         # -------------------------------------------------------------------------
-        status(f"Stopping container on {target_host}...")
+        status(f"Stopping and removing container on {target_host}...")
         run(
-            f"ssh {conn} 'docker update --restart=no mirage 2>/dev/null || true; docker stop mirage 2>/dev/null || true'"
+            f"ssh {conn} 'docker update --restart=no mirage 2>/dev/null || true; docker stop mirage 2>/dev/null || true; docker rm -f mirage 2>/dev/null || true'"
         )
 
         # -------------------------------------------------------------------------
