@@ -306,27 +306,7 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     )
     
     # -------------------------------------------------------------------------
-    # Step 10: Import validator account key (one-shot container)
-    # -------------------------------------------------------------------------
-    status("Importing validator account key...")
-    import_cmd = f"""docker run --rm -i \\
-        --entrypoint /opt/mirage/blockchain/bin/miraged \\
-        -v ~/.mirage:/root/.mirage \\
-        '{image}' keys add validator --recover --home /root/.mirage/node --keyring-backend test"""
-    
-    subprocess.run(
-        f"ssh {conn} '{import_cmd}'",
-        shell=True,
-        check=True,
-        text=True,
-        input=mnemonic,
-    )
-    
-    # Clear mnemonic from memory
-    mnemonic = None
-    
-    # -------------------------------------------------------------------------
-    # Step 11: Restore PostgreSQL
+    # Step 10: Restore PostgreSQL (also starts container)
     # -------------------------------------------------------------------------
     status("Restoring PostgreSQL database...")
     pg_script = r'''#!/bin/bash
@@ -359,6 +339,21 @@ rm -f /root/.mirage/backup_indexer.sql
 echo "PostgreSQL restore complete"
 '''
     run_ssh(conn, pg_script)
+    
+    # -------------------------------------------------------------------------
+    # Step 11: Import validator account key (container is now running)
+    # -------------------------------------------------------------------------
+    status("Importing validator account key...")
+    subprocess.run(
+        f"ssh {conn} 'docker exec -i mirage /opt/mirage/blockchain/bin/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test'",
+        shell=True,
+        check=True,
+        text=True,
+        input=mnemonic,
+    )
+    
+    # Clear mnemonic from memory
+    mnemonic = None
     
     # -------------------------------------------------------------------------
     # Step 12: Restart container
