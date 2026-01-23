@@ -162,9 +162,17 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     status("Cleaning up /tmp on remote...")
     run(f"ssh {conn} 'rm -f /tmp/mirage-backup-*.tgz /tmp/restore.tgz /tmp/pg_restore.sh /tmp/node_key.json'")
 
-    # Step 0.5: Ensure container is running (needed for pg_dump)
+    # Step 0.5: Ensure container is running (needed for pg_dump and image name)
     status("Ensuring container is running...")
     run(f"ssh {conn} 'docker start mirage 2>/dev/null || true'")
+
+    # Step 0.6: Save Docker image name to metadata file (needed for restore)
+    status("Saving Docker image name...")
+    image = run(
+        f"ssh {conn} \"docker inspect mirage --format '{{{{.Config.Image}}}}'\"",
+        capture=True,
+    )
+    run(f"ssh {conn} 'echo \"{image}\" > ~/.mirage/docker_image'")
 
     # Step 1: Stop application services (but keep container running for pg_dump)
     status("Stopping application services...")
@@ -274,6 +282,7 @@ def restore(
     force: bool = False,
     debug_skip: bool = False,
     migrate: bool = False,
+    image_override: str | None = None,
 ):
     """Restore a backup to a remote server.
     
@@ -284,6 +293,7 @@ def restore(
         force: Skip disk space check
         debug_skip: Debug mode - skip steps 3-9 and mnemonic
         migrate: If True, this is a cross-server restore (delete identity files, require mnemonic)
+        image_override: Docker image to use (overrides auto-detection)
     """
     conn = f"{ssh_user}@{target_host}"
 
@@ -326,17 +336,20 @@ def restore(
             sys.exit(0)
 
     # -------------------------------------------------------------------------
-    # Step 2: Get Docker image name BEFORE stopping (needed for key derivation later)
+    # Step 2: Try to get Docker image name from existing container (may not exist)
     # -------------------------------------------------------------------------
-    status("Getting Docker image name...")
-    image = run(
-        f"ssh -o StrictHostKeyChecking=accept-new {conn} \"docker inspect mirage --format '{{{{.Config.Image}}}}'\"",
-        capture=True,
-    )
+    image = image_override
     if not image:
-        print("ERROR: Could not get Docker image name from container 'mirage'", file=sys.stderr)
-        sys.exit(1)
-    status(f"Will use image: {image}")
+        status("Checking for existing container...")
+        try:
+            image = run(
+                f"ssh -o StrictHostKeyChecking=accept-new {conn} \"docker inspect mirage --format '{{{{.Config.Image}}}}'\"",
+                capture=True,
+            )
+            if image:
+                status(f"Found existing image: {image}")
+        except subprocess.CalledProcessError:
+            status("No existing container found (will read image from backup)")
 
     if debug_skip:
         status("DEBUG MODE: Skipping steps 3-9")
@@ -350,15 +363,13 @@ def restore(
         )
 
         # -------------------------------------------------------------------------
-        # Step 4: Delete old data, prune docker (except needed image), clean up disk space
+        # Step 4: Delete old data, clean up disk space
         # -------------------------------------------------------------------------
         status("Deleting old data and cleaning up disk space...")
         run_ssh(
             conn,
-            f"""
+            """
             rm -rf /root/.mirage
-            # Remove all docker images EXCEPT the one we need
-            docker images -q | grep -v "$(docker images -q '{image}' 2>/dev/null)" | xargs -r docker rmi -f 2>/dev/null || true
             docker image prune -f >/dev/null 2>&1 || true
             journalctl --vacuum-size=100M >/dev/null 2>&1 || true
         """,
@@ -417,6 +428,22 @@ def restore(
         # -------------------------------------------------------------------------
         status("Extracting backup (this may take a few minutes)...")
         run(f"ssh {conn} 'cd /root && tar xzf /tmp/restore.tgz'")
+
+        # -------------------------------------------------------------------------
+        # Step 6.5: Get Docker image from backup metadata (if not already known)
+        # -------------------------------------------------------------------------
+        if not image:
+            status("Reading Docker image from backup metadata...")
+            image = run(
+                f"ssh {conn} 'cat /root/.mirage/docker_image 2>/dev/null || echo \"\"'",
+                capture=True,
+            ).strip()
+            if image:
+                status(f"Using image from backup: {image}")
+            else:
+                print("ERROR: No Docker image found. Use --image to specify.", file=sys.stderr)
+                print("       Example: --image mirage:dev-20260115", file=sys.stderr)
+                sys.exit(1)
 
         # -------------------------------------------------------------------------
         # Step 7: Delete node_key.json (ALWAYS - will be regenerated with new P2P identity)
@@ -755,6 +782,11 @@ Examples:
         help="Cross-server restore: delete identity files from backup and derive new keys from mnemonic. "
         "Use when restoring a DIFFERENT server using another server's backup data.",
     )
+    restore_parser.add_argument(
+        "--image",
+        help="Docker image to use (e.g., mirage:dev-20260115). "
+        "Only needed if container doesn't exist and backup lacks metadata.",
+    )
 
     # Mutually exclusive: --file or --latest
     backup_source = restore_parser.add_mutually_exclusive_group(required=True)
@@ -787,7 +819,7 @@ Examples:
         else:
             backup_file = args.file
 
-        restore(args.target, backup_file, args.user, args.force, args.debug_skip, args.migrate)
+        restore(args.target, backup_file, args.user, args.force, args.debug_skip, args.migrate, args.image)
     elif args.command == "list":
         list_backups()
 

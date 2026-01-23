@@ -2,13 +2,13 @@
 
 ### Overview
 
-v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers between Mirage and external blockchains. This release includes the Solana bridge (attested) and Osmosis IBC bridge, with infrastructure ready for additional chains.
+v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers between Mirage and external blockchains. The flagship integration is with Solana, using a validator-attested bridge where 2/3 of stake must confirm each transfer before tokens are minted. This is not a centralized bridge with a multisig—it's secured by the same validators that run the Mirage chain itself.
 
 The bridge system uses a dual approach: **attested bridges** for non-IBC chains like Solana (where validators run orchestrators to watch external chains and submit attestations), and **IBC bridges** for Cosmos ecosystem chains like Osmosis (using native IBC transfer protocol). Both bridge types support per-chain fees that are distributed proportionally among validators who submit attestations.
 
-**Upgrade Name:** `v1.9.0-bridge`
+This release also introduces **disaster recovery tooling** for validator operators. Full node backups can be created with a single command and restored to any server—with or without the original mnemonic depending on whether you're restoring the same server or migrating to new hardware.
 
-**Patch Upgrade:** `v1.9.1-seq-fix` (optional, only if Solana state is stale after chain reset)
+**Upgrade Name:** `v1.9.0-bridge`
 
 ---
 
@@ -32,6 +32,39 @@ The bridge system uses a dual approach: **attested bridges** for non-IBC chains 
 
 ---
 
+### Solana Bridge Program (mirage-bridge-solana)
+
+A new **Anchor-based Solana program** deployed at `ghcr.io/miragefoundation/mirage-node` provides the on-chain component for Solana↔Mirage transfers.
+
+**Architecture:**
+- Ed25519 signatures verified on-chain
+- 2/3 validator stake threshold for mints
+- Sequence-based replay protection via sliding window bitmap (1024 sequences)
+- Zero marginal cost—rent is fully refunded after mint completion
+
+**PDAs:**
+
+| PDA | Seeds | Description |
+|-----|-------|-------------|
+| Bridge Config | `["bridge_config"]` | Global settings |
+| Bridge State | `["bridge_state"]` | Replay protection bitmap |
+| Validator Registry | `["validator_registry"]` | Validators + stake |
+| Token Mint | `["mint"]` | MIRAGE SPL token |
+| Mint Record | `["mint_record", burn_tx_hash]` | Temporary attestation tracking |
+| Burn Record | `["burn_record", nonce_le_bytes]` | Burn records |
+
+**Scripts:**
+
+| Command | Description |
+|---------|-------------|
+| `bun run bridge:init` | Initialize bridge (one-time) |
+| `bun run bridge:validators` | Update validator registry |
+| `bun run bridge:status` | View bridge status |
+| `bun run bridge:pause` | Pause bridge (emergency) |
+| `bun run bridge:unpause` | Unpause bridge |
+
+---
+
 ### Bridge Orchestrator
 
 - New component for validators to participate in bridge attestations
@@ -45,50 +78,63 @@ The bridge system uses a dual approach: **attested bridges** for non-IBC chains 
 - **Auto-detects Solana cluster** from RPC URL (devnet/testnet/mainnet)
 - **Startup banner** shows validator and Solana addresses
 
-### New Chain Parameters
+---
 
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `bridge_chains` | Solana + Osmosis enabled | Per-chain config with fees and IBC channels |
-| `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
+### Disaster Recovery (Backup/Restore)
 
-**Bridge chain configs in genesis:**
-- Solana: `{chain_id: "solana", enabled: true, fee: 500000000}`
-- Osmosis: `{chain_id: "osmosis", enabled: true, fee: 500000000, ibc_channel: "channel-0"}`
+New `scripts/backup_restore.py` provides full node backup and restore capabilities.
+
+**Backup:**
+```bash
+python3 scripts/backup_restore.py backup --source mirage.vote
+```
+
+- Streams tar directly to local machine (no remote disk space needed)
+- Progress bar via `pv` shows download progress
+- Backups organized per-server: `~/.mirage/backups/{server}/{server}-{timestamp}.tgz`
+- Includes blockchain data, config, keys, PostgreSQL dump, orchestrator files
+
+**Restore (same server):**
+```bash
+python3 scripts/backup_restore.py restore --target mirage.vote --latest
+```
+
+- **No mnemonic required**—identity files restored from backup
+- `--latest` automatically finds the most recent backup for that server
+- Docker image name saved in backup metadata
+
+**Restore (different server / migrate):**
+```bash
+python3 scripts/backup_restore.py restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123.tgz --migrate
+```
+
+- Requires mnemonic to derive new identity
+- Deletes backup's identity files and re-derives from mnemonic
+- Hermes and orchestrator must be set up manually afterward
+
+**What gets backed up:**
+- `~/.mirage/node/data/` - Full blockchain data and state
+- `~/.mirage/node/config/` - Node configuration, genesis, validator keys
+- `~/.mirage/node/keyring-*` - Keyring (validator account key)
+- `~/.mirage/postgres/` - PostgreSQL data directory
+- `~/.mirage/env/` - Environment files
+- `~/.mirage/orchestrator/` - Orchestrator files (Solana keypair)
+- PostgreSQL SQL dump - Clean dump for easy restore
 
 ---
 
-### Frontend Changes
+### PebbleDB Migration
 
-- **Bidirectional bridge UI**: supports both Bridge In (to Mirage) and Bridge Out (from Mirage)
-- **Solana wallet integration**: connect Phantom/Solflare for Bridge In transactions
-- **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain
-- **Multi-step progress UI**: shows burn → attestation → confirm stages with real-time polling
-- **Balance display**: shows both Mirage and external chain balances
-- **Chain icons**: SVG icons for Solana and Osmosis in `/public/bridges/`
+New `scripts/switch_to_pebbledb.py` migrates nodes from GoLevelDB to PebbleDB:
 
----
-
-### New CLI Commands
+- 40-60% faster block processing
+- Better memory efficiency
+- State-sync based migration (fresh state download)
+- Shows before/after disk usage comparison
+- Updates config templates and re-renders app.toml/config.toml
 
 ```bash
-# Query bridge status
-miraged q bridge status
-
-# Query bridge configuration  
-miraged q bridge config
-
-# Query attestations for a burn
-miraged q bridge attestations <chain> <burn_id>
-
-# Submit attestation (validators only)
-miraged tx bridge attest-burned <source_chain> <burn_id> <recipient> <amount>
-
-# Confirm external mint (validators only)
-miraged tx bridge attest-minted <dest_chain> <burn_id> <external_tx_hash>
-
-# Initiate bridge out (burn on Mirage)
-miraged tx bridge burn <dest_chain> <dest_address> <amount>
+python3 scripts/switch_to_pebbledb.py --target mirage.vote
 ```
 
 ---
@@ -116,6 +162,17 @@ miraged tx bridge burn <dest_chain> <dest_address> <amount>
 - Orchestrator queries Solana bridge state on startup to initialize sequence tracking
 - Prevents processing of stale/malicious burn events
 - Integer overflow protection in fee distribution calculations
+
+---
+
+### Frontend Changes
+
+- **Bidirectional bridge UI**: supports both Bridge In (to Mirage) and Bridge Out (from Mirage)
+- **Solana wallet integration**: connect Phantom/Solflare for Bridge In transactions
+- **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain
+- **Multi-step progress UI**: shows burn → attestation → confirm stages with real-time polling
+- **Balance display**: shows both Mirage and external chain balances
+- **Chain icons**: SVG icons for Solana and Osmosis in `/public/bridges/`
 
 ---
 
@@ -151,6 +208,43 @@ miraged tx bridge burn <dest_chain> <dest_address> <amount>
 - `deploy/setup_orchestrator.py` - generates Solana wallet, configures orchestrator
 - `deploy/setup_letsencrypt.py` - SSL certificate setup
 - `deploy/setup_hermes.py` - IBC relayer configuration
+
+---
+
+### New Chain Parameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `bridge_chains` | Solana + Osmosis enabled | Per-chain config with fees and IBC channels |
+| `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
+
+**Bridge chain configs in genesis:**
+- Solana: `{chain_id: "solana", enabled: true, fee: 500000000}`
+- Osmosis: `{chain_id: "osmosis", enabled: true, fee: 500000000, ibc_channel: "channel-0"}`
+
+---
+
+### New CLI Commands
+
+```bash
+# Query bridge status
+miraged q bridge status
+
+# Query bridge configuration  
+miraged q bridge config
+
+# Query attestations for a burn
+miraged q bridge attestations <chain> <burn_id>
+
+# Submit attestation (validators only)
+miraged tx bridge attest-burned <source_chain> <burn_id> <recipient> <amount>
+
+# Confirm external mint (validators only)
+miraged tx bridge attest-minted <dest_chain> <burn_id> <external_tx_hash>
+
+# Initiate bridge out (burn on Mirage)
+miraged tx bridge burn <dest_chain> <dest_address> <amount>
+```
 
 ---
 
@@ -244,10 +338,16 @@ New comprehensive module documentation in `docs/modules/`:
 - `deploy/enable_rate_limiting.sh` - P2P rate limiting
 - `deploy/templates/env/orchestrator.env` - Orchestrator config
 - `deploy/migrations/v1_9_0_*.py` - Deploy migrations
+- `scripts/backup_restore.py` - Disaster recovery backup/restore
+- `scripts/switch_to_pebbledb.py` - Database migration script
+- `scripts/status_dashboard.py` - Node status monitoring
 - `web/backend/routes/bridge.py` - Bridge API endpoints
 - `web/frontend/src/utils/solanaBridge.js` - Solana wallet integration
 - `web/frontend/public/bridges/*.svg` - Chain icons
 - `docs/modules/*.md` - Module documentation
+
+**New Repository:**
+- `mirage-bridge-solana/` - Anchor-based Solana program for bridge
 
 **Modified:**
 - `blockchain/x/core/` - Bridge handlers, queries, tests

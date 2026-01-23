@@ -25,7 +25,7 @@ import sys
 import time
 import argparse
 import socket
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -535,10 +535,20 @@ def check_node() -> ServiceStatus:
             debug_log(f"node: net_info failed: {e}")
             pass
 
+        # Get total validator count
+        validators_total = None
+        try:
+            val_resp = requests.get("http://127.0.0.1:26657/validators?per_page=1", timeout=2)
+            validators_total = int(val_resp.json().get("result", {}).get("total", 0))
+        except Exception as e:
+            debug_log(f"node: validators count failed: {e}")
+            pass
+
         details = {
             "height": height,
             "syncing": catching_up,
             "peers": peers,
+            "validators_total": validators_total,
             "chain_id": chain_id,
             "block_age": block_age,
             "block_age_secs": block_age_secs,
@@ -582,6 +592,120 @@ def check_node() -> ServiceStatus:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details={})
+
+
+def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
+    """
+    Get jail timing info from slashing module.
+    
+    Returns dict with:
+        - jailed_since: datetime when jailed (if calculable)
+        - jailed_since_secs: seconds since jailing
+        - jailed_until: datetime when can unjail
+        - tombstoned: bool if validator is tombstoned (permanent jail)
+    """
+    result = {}
+    
+    try:
+        # Query all signing infos - we'll match by finding the one that's jailed
+        # (There's typically only one validator per node anyway)
+        signing_result = subprocess.run(
+            [get_miraged_bin(), "query", "slashing", "signing-infos", "--home", node_home, "-o", "json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        
+        if signing_result.returncode != 0:
+            debug_log(f"validator: slashing signing-infos query failed: {signing_result.stderr}")
+            return result
+            
+        signing_data = json.loads(signing_result.stdout)
+        infos = signing_data.get("info", [])
+        
+        for info in infos:
+            # The address field is in bech32 format, but we can match by checking
+            # if this is likely our validator (there's usually only one local validator)
+            val_info = info.get("validator_signing_info", info)  # Handle both formats
+            
+            jailed_until_str = val_info.get("jailed_until", "")
+            
+            # Skip if not jailed (jailed_until is zero time)
+            if not jailed_until_str or jailed_until_str.startswith("0001-01-01"):
+                continue
+                
+            # Parse jailed_until
+            try:
+                # Handle various timestamp formats
+                jailed_until_str = jailed_until_str.replace("Z", "+00:00")
+                # Remove nanoseconds if present (keep only microseconds)
+                if "." in jailed_until_str:
+                    parts = jailed_until_str.split(".")
+                    frac_and_tz = parts[1]
+                    # Find where the fractional seconds end
+                    frac_end = 0
+                    for i, c in enumerate(frac_and_tz):
+                        if not c.isdigit():
+                            frac_end = i
+                            break
+                    else:
+                        frac_end = len(frac_and_tz)
+                    # Keep only 6 digits for microseconds
+                    frac = frac_and_tz[:frac_end][:6].ljust(6, '0')
+                    tz = frac_and_tz[frac_end:]
+                    jailed_until_str = f"{parts[0]}.{frac}{tz}"
+                    
+                jailed_until = datetime.fromisoformat(jailed_until_str)
+                if jailed_until.tzinfo is None:
+                    jailed_until = jailed_until.replace(tzinfo=timezone.utc)
+                    
+                result["jailed_until"] = jailed_until
+                
+                # Check for tombstone (far future date, like year 9999)
+                if jailed_until.year > 9000:
+                    result["tombstoned"] = True
+                    debug_log(f"validator: detected tombstone, jailed_until={jailed_until}")
+                    return result
+                    
+                result["tombstoned"] = False
+                
+                # Query slashing params to get downtime_jail_duration
+                params_result = subprocess.run(
+                    [get_miraged_bin(), "query", "slashing", "params", "--home", node_home, "-o", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                
+                if params_result.returncode == 0:
+                    params_data = json.loads(params_result.stdout)
+                    params = params_data.get("params", params_data)
+                    jail_duration_str = params.get("downtime_jail_duration", "")
+                    
+                    # Parse duration (format: "600s" or "600000000000" nanoseconds)
+                    jail_duration_secs = 0
+                    if jail_duration_str.endswith("s"):
+                        jail_duration_secs = float(jail_duration_str[:-1])
+                    elif jail_duration_str.isdigit():
+                        # Nanoseconds
+                        jail_duration_secs = int(jail_duration_str) / 1_000_000_000
+                    
+                    if jail_duration_secs > 0:
+                        jailed_since = jailed_until - timedelta(seconds=jail_duration_secs)
+                        result["jailed_since"] = jailed_since
+                        result["jailed_since_secs"] = (datetime.now(timezone.utc) - jailed_since).total_seconds()
+                        debug_log(f"validator: jailed_since={jailed_since} ({result['jailed_since_secs']:.0f}s ago)")
+                
+                break  # Found our validator's info
+                
+            except Exception as e:
+                debug_log(f"validator: failed to parse jailed_until={jailed_until_str!r}: {e}")
+                continue
+                
+    except Exception as e:
+        debug_log(f"validator: _get_jail_info failed: {e}")
+        
+    return result
 
 
 def check_validator() -> ServiceStatus:
@@ -679,11 +803,29 @@ def check_validator() -> ServiceStatus:
         }
 
         if jailed:
+            # Get jail timing info
+            jail_info = _get_jail_info(node_home, local_pubkey)
+            jail_details = {**base_details, "active": False, "jailed": True}
+            
+            if jail_info.get("tombstoned"):
+                jail_details["tombstoned"] = True
+                return ServiceStatus(
+                    name="Validator",
+                    status=Status.ERROR,
+                    message="TOMBSTONED",
+                    details=jail_details,
+                )
+            
+            if jail_info.get("jailed_since_secs") is not None:
+                jail_details["jailed_since_secs"] = jail_info["jailed_since_secs"]
+            if jail_info.get("jailed_until"):
+                jail_details["jailed_until"] = jail_info["jailed_until"].isoformat()
+                
             return ServiceStatus(
                 name="Validator",
                 status=Status.ERROR,
                 message="JAILED",
-                details={**base_details, "active": False, "jailed": True},
+                details=jail_details,
             )
 
         if in_set:
@@ -1577,6 +1719,9 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {h:,}")
             except (ValueError, TypeError):
                 lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']}")
+        if details.get("validators_total"):
+            val_total = details["validators_total"]
+            lines.append(f"{bullet}{Colors.DIM}Validators:{Colors.RESET} {val_total}")
         if "peers" in details:
             peers = details["peers"]
             peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_YELLOW
@@ -1633,8 +1778,16 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("voting_power"):
             vp = details["voting_power"]
             lines.append(f"{bullet}{Colors.DIM}Voting power:{Colors.RESET} {vp:,}")
-        if details.get("jailed"):
-            lines.append(f"{bullet}{Colors.BRIGHT_RED}JAILED!{Colors.RESET}")
+        if details.get("tombstoned"):
+            lines.append(f"{bullet}{Colors.BRIGHT_RED}TOMBSTONED (permanent){Colors.RESET}")
+        elif details.get("jailed"):
+            # Show jail duration if available
+            jailed_secs = details.get("jailed_since_secs")
+            if jailed_secs is not None:
+                jail_duration = format_age_secs(jailed_secs).replace(" ago", "")
+                lines.append(f"{bullet}{Colors.BRIGHT_RED}Jailed for: {jail_duration}{Colors.RESET}")
+            else:
+                lines.append(f"{bullet}{Colors.BRIGHT_RED}JAILED!{Colors.RESET}")
 
     elif status.name == "PostgreSQL":
         if details.get("tables") is not None:
