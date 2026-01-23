@@ -65,6 +65,55 @@ A new **Anchor-based Solana program** deployed at `ghcr.io/miragefoundation/mira
 
 ---
 
+### IBC Bridge (Osmosis)
+
+The Osmosis bridge uses standard **Inter-Blockchain Communication (IBC)** protocol, requiring no validator attestation—finality is handled via light client verification.
+
+**How it works:**
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│   Mirage    │    │   Hermes    │    │   Osmosis   │
+│   Chain     │───▶│   Relayer   │───▶│   Chain     │
+└─────────────┘    └─────────────┘    └─────────────┘
+```
+
+1. User initiates transfer with `MsgIBCTransfer` on Mirage
+2. Hermes relayer (run by validators) relays the packet
+3. Osmosis receives and credits the IBC-wrapped MIRAGE
+
+**Hermes relayer setup:**
+```bash
+python3 deploy/setup_hermes.py
+```
+
+The setup script:
+- Installs Hermes v1.13.2 binary
+- Generates config from `deploy/templates/hermes/config.toml`
+- Imports relayer keys for both chains (same mnemonic)
+- Finds existing IBC channel or creates new one
+- Starts relayer in tmux window
+
+**Relayer addresses need funding:**
+- Mirage: at least 100 MIRAGE
+- Osmosis: at least 100 OSMO
+
+**IBC channel:** `channel-0` (Mirage) ↔ `channel-108698` (Osmosis)
+
+**IBC denom on Osmosis:**
+```
+ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2
+```
+
+**Test transfer:**
+```bash
+miraged tx ibc-transfer transfer transfer channel-0 <OSMO_ADDR> 1000000umirage \
+  --from validator --chain-id mirage-1 --fees 50000umirage
+```
+
+**Key difference from Solana:** No orchestrator needed—the Hermes relayer handles everything. However, the relayer must run continuously to keep IBC clients alive (trusting period ~13 days).
+
+---
+
 ### Bridge Orchestrator
 
 - New component for validators to participate in bridge attestations
@@ -256,7 +305,7 @@ miraged tx bridge burn <dest_chain> <dest_address> <amount>
 
 **After Upgrade (Optional but Recommended):**
 
-1. Set up orchestrator if participating in bridge attestations:
+1. Set up Solana orchestrator if participating in Solana bridge attestations:
    ```bash
    # Run setup script (generates wallet, registers validator)
    python3 deploy/setup_orchestrator.py
@@ -265,7 +314,16 @@ miraged tx bridge burn <dest_chain> <dest_address> <amount>
    # Restart container to start orchestrator
    ```
 
-2. Verify upgrade with verification script:
+2. Set up Hermes relayer if participating in IBC relaying:
+   ```bash
+   python3 deploy/setup_hermes.py
+   
+   # Fund relayer addresses:
+   #   Mirage: at least 100 MIRAGE
+   #   Osmosis: at least 100 OSMO
+   ```
+
+3. Verify upgrade with verification script:
    ```bash
    python3 scripts/verify_upgrade.py --phase post
    ```
@@ -275,6 +333,12 @@ After starting, check logs for:
 - `[REPLAY] initialized solana last_sequence=<N>` - replay protection active
 - `solscan: https://solscan.io/tx/...` - correct cluster URL
 - Startup banner showing validator and Solana addresses
+
+**Hermes Verification:**
+After starting, check tmux window `hermes`:
+- `tmux select-window -t mirage:hermes`
+- Look for `spawned packet worker` messages
+- Run `hermes query channel end --chain mirage-1 --port transfer --channel channel-0` to verify channel is Open
 
 ---
 
