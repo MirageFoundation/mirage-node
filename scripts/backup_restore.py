@@ -166,23 +166,51 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     run(f"ssh {conn} 'docker stop mirage'")
 
     # Step 4: Stream tarball directly to local (avoids needing remote disk space)
-    status(f"Streaming backup to {local_path}...")
-    tar_cmd = (
-        "cd /root && tar czf - "
+    # Get estimated size for progress bar (uncompressed, so actual will be smaller)
+    status("Calculating backup size...")
+    size_output = run(
+        f"ssh {conn} 'du -sb ~/.mirage "
         '--exclude=".mirage/tmp" '
         '--exclude=".mirage/logs" '
         '--exclude=".mirage/*.tgz" '
         '--exclude=".mirage/node/data/cs.wal" '
         '--exclude=".mirage/node/data/tx_index.db" '
-        ".mirage"
+        "2>/dev/null | cut -f1'",
+        capture=True,
+    )
+    estimated_bytes = int(size_output.strip()) if size_output.strip() else 0
+    estimated_gb = estimated_bytes / (1024**3)
+    status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB uncompressed)...")
+
+    # Stream: remote tar | pv (local progress) | local file
+    # Use pv with estimated size (will show ~50% when done due to compression)
+    tar_cmd = (
+        "cd /root && tar cf - "
+        '--exclude=".mirage/tmp" '
+        '--exclude=".mirage/logs" '
+        '--exclude=".mirage/*.tgz" '
+        '--exclude=".mirage/node/data/cs.wal" '
+        '--exclude=".mirage/node/data/tx_index.db" '
+        ".mirage | gzip"
     )
     with open(local_path, "wb") as f:
-        subprocess.run(
+        # ssh -> pv (progress) -> file
+        ssh_proc = subprocess.Popen(
             ["ssh", conn, tar_cmd],
-            stdout=f,
-            stderr=None,  # Show stderr for progress/errors
-            check=True,
+            stdout=subprocess.PIPE,
+            stderr=None,
         )
+        pv_proc = subprocess.Popen(
+            ["pv", "-s", str(estimated_bytes), "-N", "Downloading"],
+            stdin=ssh_proc.stdout,
+            stdout=f,
+            stderr=None,
+        )
+        ssh_proc.stdout.close()  # Allow ssh_proc to receive SIGPIPE if pv exits
+        pv_proc.wait()
+        ssh_ret = ssh_proc.wait()
+        if ssh_ret != 0:
+            raise subprocess.CalledProcessError(ssh_ret, "ssh")
 
     # Step 5: Start container again
     status("Starting container...")
@@ -299,13 +327,31 @@ def restore(
         if remote_size == local_size:
             status(f"Backup already on server ({size_gb:.2f} GB) - skipping upload")
         else:
-            status("Uploading backup to server...")
-            run(f"scp '{backup_file}' {conn}:/tmp/restore.tgz")
+            status(f"Uploading backup to server ({size_gb:.2f} GB)...")
+            # Use pv for progress: pv file | ssh cat > remote
+            with open(backup_file, "rb") as f:
+                pv_proc = subprocess.Popen(
+                    ["pv", "-s", str(local_size), "-N", "Uploading"],
+                    stdin=f,
+                    stdout=subprocess.PIPE,
+                    stderr=None,
+                )
+                ssh_proc = subprocess.Popen(
+                    ["ssh", conn, "cat > /tmp/restore.tgz"],
+                    stdin=pv_proc.stdout,
+                    stdout=None,
+                    stderr=None,
+                )
+                pv_proc.stdout.close()
+                ssh_ret = ssh_proc.wait()
+                pv_proc.wait()
+                if ssh_ret != 0:
+                    raise subprocess.CalledProcessError(ssh_ret, "ssh")
 
         # -------------------------------------------------------------------------
         # Step 6: Extract backup
         # -------------------------------------------------------------------------
-        status("Extracting backup...")
+        status("Extracting backup (this may take a few minutes)...")
         run(f"ssh {conn} 'cd /root && tar xzf /tmp/restore.tgz'")
 
         # -------------------------------------------------------------------------
