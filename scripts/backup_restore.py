@@ -108,13 +108,15 @@ def find_latest_backup() -> Path:
 
 
 def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
-    """Create full backup from a remote server."""
+    """Create full backup from a remote server.
+    
+    Streams tar directly to local machine to avoid needing disk space on remote.
+    """
     conn = f"{ssh_user}@{source_host}"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Sanitize hostname for filename (replace dots with dashes)
     host_safe = source_host.replace(".", "-")
     backup_name = f"mirage-backup-{host_safe}-{timestamp}.tgz"
-    remote_path = f"/tmp/{backup_name}"
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     local_path = BACKUP_DIR / backup_name
@@ -163,33 +165,32 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     status("Stopping Docker container...")
     run(f"ssh {conn} 'docker stop mirage'")
 
-    # Step 4: Create tarball on remote (excludes: tmp, logs, cs.wal, tx_index.db)
-    status("Creating backup tarball on remote...")
-    run_ssh(
-        conn,
-        f"""
-        cd /root
-        tar czf {remote_path} \\
-            --exclude=".mirage/tmp" \\
-            --exclude=".mirage/logs" \\
-            --exclude=".mirage/*.tgz" \\
-            --exclude=".mirage/node/data/cs.wal" \\
-            --exclude=".mirage/node/data/tx_index.db" \\
-            .mirage
-    """,
+    # Step 4: Stream tarball directly to local (avoids needing remote disk space)
+    status(f"Streaming backup to {local_path}...")
+    tar_cmd = (
+        "cd /root && tar czf - "
+        '--exclude=".mirage/tmp" '
+        '--exclude=".mirage/logs" '
+        '--exclude=".mirage/*.tgz" '
+        '--exclude=".mirage/node/data/cs.wal" '
+        '--exclude=".mirage/node/data/tx_index.db" '
+        ".mirage"
     )
+    with open(local_path, "wb") as f:
+        subprocess.run(
+            ["ssh", conn, tar_cmd],
+            stdout=f,
+            stderr=None,  # Show stderr for progress/errors
+            check=True,
+        )
 
-    # Step 5: Download backup to local
-    status(f"Downloading backup to {local_path}...")
-    run(f"scp {conn}:{remote_path} '{local_path}'")
-
-    # Step 6: Start container again
+    # Step 5: Start container again
     status("Starting container...")
     run(f"ssh {conn} 'docker start mirage'")
 
-    # Step 7: Cleanup remote
+    # Step 6: Cleanup remote (just the SQL dump, no tarball to clean)
     status("Cleaning up remote...")
-    run(f"ssh {conn} 'rm -f {remote_path} /root/.mirage/backup_indexer.sql'")
+    run(f"ssh {conn} 'rm -f /root/.mirage/backup_indexer.sql'")
 
     # Report size
     size_gb = local_path.stat().st_size / (1024**3)
