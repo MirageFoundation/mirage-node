@@ -10,18 +10,21 @@ Usage:
 
     # Restore to same server (uses keys from backup - no mnemonic needed)
     python3 scripts/backup_restore.py restore --target mirage.vote --latest
-    python3 scripts/backup_restore.py restore --target mirage.vote --file ~/.mirage/backups/mirage-backup-mirage-vote-20260123-120000.tgz
+    python3 scripts/backup_restore.py restore --target mirage.vote --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz
 
     # Restore to DIFFERENT server using another server's backup data (requires mnemonic)
-    python3 scripts/backup_restore.py restore --target 139.59.9.96 --latest --migrate
+    python3 scripts/backup_restore.py restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz --migrate
 
     # List available backups
     python3 scripts/backup_restore.py list
 
-Backup naming:
-    Backups include the source server in the filename:
-    mirage-backup-{source-host}-{YYYYMMDD}-{HHMMSS}.tgz
-    Example: mirage-backup-mirage-vote-20260123-143052.tgz
+Backup storage:
+    Backups are organized by source server in folders:
+    ~/.mirage/backups/{server}/{server}-{YYYYMMDD}-{HHMMSS}.tgz
+    
+    Example:
+    ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz
+    ~/.mirage/backups/139.59.9.96/139.59.9.96-20260123-144530.tgz
 
 What gets backed up:
     - ~/.mirage/node/data/       - Full blockchain data and state
@@ -37,12 +40,14 @@ Restore modes:
         Restores everything from backup including identity files.
         Use when restoring the SAME server from its own backup.
         No mnemonic needed - keys come from backup.
+        --latest finds the most recent backup in ~/.mirage/backups/{target}/
 
     --migrate:
         Use when restoring a DIFFERENT server using another server's backup data.
         The backup's identity files (priv_validator_key.json, keyring) are deleted
         and new ones are derived from your mnemonic.
         You'll still need to manually set up hermes and orchestrator afterward.
+        Must use --file to specify which server's backup to use.
 
 WARNING: Backups are large (~5-10GB) and contain sensitive keys!
 """
@@ -98,20 +103,34 @@ def validate_mnemonic(mnemonic: str) -> None:
         sys.exit(1)
 
 
-def find_latest_backup() -> Path:
-    """Find the most recent backup file. Exits if none found."""
-    if not BACKUP_DIR.exists():
-        print(f"ERROR: Backups directory not found: {BACKUP_DIR}", file=sys.stderr)
+def find_latest_backup(target_host: str) -> Path:
+    """Find the most recent backup file for a specific server.
+    
+    Args:
+        target_host: Server hostname - looks in BACKUP_DIR/{target_host}/
+    
+    Exits if none found.
+    """
+    server_dir = BACKUP_DIR / target_host
+    
+    if not server_dir.exists():
+        print(f"ERROR: No backup folder for '{target_host}'", file=sys.stderr)
+        print(f"       Expected: {server_dir}", file=sys.stderr)
+        # Show available servers
+        if BACKUP_DIR.exists():
+            servers = [d.name for d in BACKUP_DIR.iterdir() if d.is_dir()]
+            if servers:
+                print(f"       Available servers: {', '.join(servers)}", file=sys.stderr)
         sys.exit(1)
 
     backups = sorted(
-        BACKUP_DIR.glob("mirage-backup-*.tgz"),
+        server_dir.glob("*.tgz"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
 
     if not backups:
-        print(f"ERROR: No backups found in {BACKUP_DIR}", file=sys.stderr)
+        print(f"ERROR: No backups found in {server_dir}", file=sys.stderr)
         sys.exit(1)
 
     return backups[0]
@@ -126,15 +145,16 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     """Create full backup from a remote server.
     
     Streams tar directly to local machine to avoid needing disk space on remote.
+    Saves to BACKUP_DIR/{source_host}/{source_host}-{timestamp}.tgz
     """
     conn = f"{ssh_user}@{source_host}"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    # Sanitize hostname for filename (replace dots with dashes)
-    host_safe = source_host.replace(".", "-")
-    backup_name = f"mirage-backup-{host_safe}-{timestamp}.tgz"
+    backup_name = f"{source_host}-{timestamp}.tgz"
 
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    local_path = BACKUP_DIR / backup_name
+    # Create server-specific backup folder
+    server_dir = BACKUP_DIR / source_host
+    server_dir.mkdir(parents=True, exist_ok=True)
+    local_path = server_dir / backup_name
 
     status(f"Creating full backup from {source_host}")
 
@@ -653,47 +673,39 @@ echo "PostgreSQL restore complete"
 # =============================================================================
 
 
-def parse_backup_source(filename: str) -> str | None:
-    """Extract source host from backup filename. Returns None for old-format backups."""
-    # New format: mirage-backup-{host-with-dashes}-{YYYYMMDD}-{HHMMSS}.tgz
-    # Old format: mirage-backup-{YYYYMMDD}-{HHMMSS}.tgz
-    import re
-
-    # Try new format first: mirage-backup-{host}-YYYYMMDD-HHMMSS.tgz
-    # Host part is everything between "mirage-backup-" and the timestamp
-    match = re.match(r"mirage-backup-(.+)-(\d{8})-(\d{6})\.tgz$", filename)
-    if match:
-        host_part = match.group(1)
-        # Convert dashes back to dots for display
-        return host_part.replace("-", ".")
-
-    return None
-
-
 def list_backups():
-    """List all available backups."""
+    """List all available backups, organized by server."""
     if not BACKUP_DIR.exists():
         print(f"No backups directory found at {BACKUP_DIR}")
         return
 
-    backups = sorted(
-        BACKUP_DIR.glob("mirage-backup-*.tgz"),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-
-    if not backups:
+    # Get all server directories
+    server_dirs = sorted([d for d in BACKUP_DIR.iterdir() if d.is_dir()])
+    
+    if not server_dirs:
         print("No backups found.")
         return
 
     print(f"Backups in {BACKUP_DIR}:\n")
-    for b in backups:
-        size_gb = b.stat().st_size / (1024**3)
-        mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-        marker = " (latest)" if b == backups[0] else ""
-        source = parse_backup_source(b.name)
-        source_str = f"  [{source}]" if source else ""
-        print(f"  {b.name}  {size_gb:.2f} GB  {mtime}{marker}{source_str}")
+    
+    for server_dir in server_dirs:
+        backups = sorted(
+            server_dir.glob("*.tgz"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        
+        if not backups:
+            continue
+            
+        print(f"  {server_dir.name}/")
+        for i, b in enumerate(backups):
+            size_gb = b.stat().st_size / (1024**3)
+            mtime = datetime.fromtimestamp(b.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            marker = " (latest)" if i == 0 else ""
+            print(f"    {b.name}  {size_gb:.2f} GB  {mtime}{marker}")
+        print()
+
 
 
 # =============================================================================
@@ -714,10 +726,10 @@ Examples:
   %(prog)s restore --target mirage.vote --latest
 
   # Restore using specific backup file
-  %(prog)s restore --target mirage.vote --file ~/.mirage/backups/mirage-backup-mirage-vote-20260123-143052.tgz
+  %(prog)s restore --target mirage.vote --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz
 
   # Restore DIFFERENT server using another server's backup (requires mnemonic)
-  %(prog)s restore --target 139.59.9.96 --latest --migrate
+  %(prog)s restore --target 139.59.9.96 --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz --migrate
 
   # List available backups
   %(prog)s list
@@ -747,7 +759,12 @@ Examples:
     # Mutually exclusive: --file or --latest
     backup_source = restore_parser.add_mutually_exclusive_group(required=True)
     backup_source.add_argument("--file", type=Path, help="Backup file to restore")
-    backup_source.add_argument("--latest", action="store_true", help="Use latest backup from ~/.mirage/backups/")
+    backup_source.add_argument(
+        "--latest",
+        action="store_true",
+        help="Use latest backup from ~/.mirage/backups/{target}/. "
+        "Only for same-server restore (incompatible with --migrate).",
+    )
 
     # List command
     subparsers.add_parser("list", help="List available backups")
@@ -757,10 +774,16 @@ Examples:
     if args.command == "backup":
         backup(args.source, args.user)
     elif args.command == "restore":
+        # --migrate requires --file (you must specify which server's backup to use)
+        if args.migrate and args.latest:
+            print("ERROR: --migrate requires --file (specify which server's backup to use)", file=sys.stderr)
+            sys.exit(1)
+        
         # Determine backup file
         if args.latest:
-            backup_file = find_latest_backup()
-            status(f"Using latest backup: {backup_file.name}")
+            # Same-server restore: find latest backup in target's folder
+            backup_file = find_latest_backup(args.target)
+            status(f"Using latest backup: {backup_file}")
         else:
             backup_file = args.file
 
