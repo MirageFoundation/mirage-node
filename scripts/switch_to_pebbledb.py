@@ -63,9 +63,13 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     # Check current DB backend
     current_backend = ssh(conn, 
         "grep '^db_backend' /root/.mirage/node/config/config.toml",
-        capture=True)
+        capture=True, check=False)
+    
     if not current_backend:
-        raise RuntimeError("db_backend not found in config.toml - run migration first")
+        # Key doesn't exist = node is on goleveldb (pre-migration state)
+        # This is deterministic, not a fallback - goleveldb was the only option before
+        current_backend = 'db_backend = "goleveldb"'
+        print("  Note: db_backend key missing (pre-migration), assuming goleveldb")
     
     if "pebbledb" in current_backend.lower():
         print("Already using PebbleDB! Nothing to do.")
