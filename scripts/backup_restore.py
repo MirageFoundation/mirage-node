@@ -192,26 +192,18 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     status(f"Restoring {backup_file.name} ({size_gb:.2f} GB) to {target_host}")
     
     # -------------------------------------------------------------------------
-    # Step 1: Prompt for mnemonic FIRST (fail fast before any uploads)
-    # -------------------------------------------------------------------------
-    print("\nThis restore requires your validator mnemonic to re-derive keys.")
-    mnemonic = getpass.getpass("Enter 12-word mnemonic: ")
-    validate_mnemonic(mnemonic)
-    status("Mnemonic validated (12 words)")
-    
-    # -------------------------------------------------------------------------
-    # Step 2: Confirmation
+    # Step 1: Warning and mnemonic prompt (fail fast before any uploads)
     # -------------------------------------------------------------------------
     print(f"\nWARNING: This will OVERWRITE all data on {target_host}!")
     print("         The node will be stopped and all existing state replaced.")
     print("         Validator keys will be re-derived from your mnemonic.")
-    confirm = input("\nType 'yes' to continue: ")
-    if confirm.lower() != "yes":
-        print("Aborted.")
-        sys.exit(0)
+    print("\nEnter your validator mnemonic to continue (Ctrl+C to abort).")
+    mnemonic = getpass.getpass("12-word mnemonic: ")
+    validate_mnemonic(mnemonic)
+    status("Mnemonic validated (12 words)")
     
     # -------------------------------------------------------------------------
-    # Step 3: Get Docker image name BEFORE stopping (needed for key derivation later)
+    # Step 2: Get Docker image name BEFORE stopping (needed for key derivation later)
     # -------------------------------------------------------------------------
     status("Getting Docker image name...")
     image = run(f"ssh -o StrictHostKeyChecking=accept-new {conn} \"docker inspect mirage --format '{{{{.Config.Image}}}}'\"", capture=True)
@@ -221,13 +213,13 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     status(f"Will use image: {image}")
     
     # -------------------------------------------------------------------------
-    # Step 4: Stop container
+    # Step 3: Stop container
     # -------------------------------------------------------------------------
     status(f"Stopping container on {target_host}...")
     run(f"ssh {conn} 'docker stop mirage 2>/dev/null || true'")
     
     # -------------------------------------------------------------------------
-    # Step 5: Delete old data, prune docker (except needed image), clean up disk space
+    # Step 4: Delete old data, prune docker (except needed image), clean up disk space
     # -------------------------------------------------------------------------
     status("Deleting old data and cleaning up disk space...")
     run_ssh(conn, f"""
@@ -254,7 +246,7 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
         status(f"Disk space OK: {avail_gb:.1f}GB available")
     
     # -------------------------------------------------------------------------
-    # Step 6: Upload backup to /tmp/restore.tgz (skip if already exists with correct size)
+    # Step 5: Upload backup to /tmp/restore.tgz (skip if already exists with correct size)
     # -------------------------------------------------------------------------
     local_size = backup_file.stat().st_size
     remote_size_output = run(f"ssh {conn} 'stat -c %s /tmp/restore.tgz 2>/dev/null || echo 0'", capture=True)
@@ -267,13 +259,13 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
         run(f"scp '{backup_file}' {conn}:/tmp/restore.tgz")
     
     # -------------------------------------------------------------------------
-    # Step 7: Extract backup
+    # Step 6: Extract backup
     # -------------------------------------------------------------------------
     status("Extracting backup...")
     run(f"ssh {conn} 'cd /root && tar xzf /tmp/restore.tgz'")
     
     # -------------------------------------------------------------------------
-    # Step 8: Delete node_key.json (will be regenerated) and remove self from persistent_peers
+    # Step 7: Delete node_key.json (will be regenerated) and remove self from persistent_peers
     # -------------------------------------------------------------------------
     status("Deleting node_key.json (will be regenerated with new P2P identity)...")
     run(f"ssh {conn} 'rm -f /root/.mirage/node/config/node_key.json'")
@@ -290,14 +282,14 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     """)
     
     # -------------------------------------------------------------------------
-    # Step 9: Delete identity files (priv_validator_key.json, keyring-*)
+    # Step 8: Delete identity files (priv_validator_key.json, keyring-*)
     # -------------------------------------------------------------------------
     status("Deleting old identity files...")
     run(f"ssh {conn} 'rm -f /root/.mirage/node/config/priv_validator_key.json'")
     run(f"ssh {conn} 'rm -rf /root/.mirage/node/keyring-*'")
     
     # -------------------------------------------------------------------------
-    # Step 10: Derive consensus key (one-shot container)
+    # Step 9: Derive consensus key (one-shot container)
     # -------------------------------------------------------------------------
     status("Deriving consensus key...")
     derive_cmd = f"""docker run --rm -i \\
@@ -314,7 +306,7 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     )
     
     # -------------------------------------------------------------------------
-    # Step 11: Import validator account key (one-shot container)
+    # Step 10: Import validator account key (one-shot container)
     # -------------------------------------------------------------------------
     status("Importing validator account key...")
     import_cmd = f"""docker run --rm -i \\
@@ -334,7 +326,7 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     mnemonic = None
     
     # -------------------------------------------------------------------------
-    # Step 12: Restore PostgreSQL
+    # Step 11: Restore PostgreSQL
     # -------------------------------------------------------------------------
     status("Restoring PostgreSQL database...")
     pg_script = r'''#!/bin/bash
@@ -369,13 +361,13 @@ echo "PostgreSQL restore complete"
     run_ssh(conn, pg_script)
     
     # -------------------------------------------------------------------------
-    # Step 13: Restart container
+    # Step 12: Restart container
     # -------------------------------------------------------------------------
     status("Restarting container...")
     run(f"ssh {conn} 'docker restart mirage'")
     
     # -------------------------------------------------------------------------
-    # Step 14: Wait for node to start
+    # Step 13: Wait for node to start
     # -------------------------------------------------------------------------
     status("Waiting for node to start...")
     import time
@@ -398,7 +390,7 @@ echo "PostgreSQL restore complete"
         print("WARNING: Node may not be running. Check manually.", file=sys.stderr)
     
     # -------------------------------------------------------------------------
-    # Step 15: Verification
+    # Step 14: Verification
     # -------------------------------------------------------------------------
     status(f"Restore complete on {target_host}")
     print("\nVerification commands:")
@@ -410,7 +402,7 @@ echo "PostgreSQL restore complete"
     print(f"  ssh {conn} 'docker exec mirage curl -sf http://127.0.0.1:5000/health'")
     
     # -------------------------------------------------------------------------
-    # Step 16: Prompt to delete backup from server
+    # Step 15: Prompt to delete backup from server
     # -------------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("Backup file is still on server at /tmp/restore.tgz")
