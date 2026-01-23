@@ -260,6 +260,7 @@ All paths below are relative to `public/mirage-node/`.
 
 - After you're done with stuff, give me a short cmdline to run it if I want to
 - I want you to add logs of debug statements, so that you can easily find it in the future and work with things
+- **Text editor**: Use `micro` only. NEVER add vim, nano, or other editors to containers or suggest them.
 
 ### Frontend: Blockchain Button Pattern
 

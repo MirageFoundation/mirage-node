@@ -85,7 +85,6 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     postgresql-common \
     tmux \
-    nano \
     micro \
     tree \
     curl \
@@ -95,6 +94,10 @@ RUN apt-get update && apt-get install -y \
     procps \
     dnsutils \
     cronolog \
+    htop \
+    less \
+    netcat-openbsd \
+    iputils-ping \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 

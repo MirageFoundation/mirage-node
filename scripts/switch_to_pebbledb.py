@@ -23,6 +23,7 @@ WARNING: This causes downtime (~5-10 minutes). The node will miss blocks during 
 """
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -50,9 +51,23 @@ def run(cmd: str, check: bool = True, capture: bool = False) -> str:
 
 def ssh(conn: str, cmd: str, check: bool = True, capture: bool = False) -> str:
     """Run command on remote host."""
-    # Escape single quotes for bash: ' -> '\''
-    escaped = cmd.replace("'", "'\"'\"'")
-    return run(f"ssh -o StrictHostKeyChecking=accept-new {conn} '{escaped}'", check=check, capture=capture)
+    # Use heredoc to avoid all quoting issues
+    return run(f"ssh -o StrictHostKeyChecking=accept-new {conn} bash <<'__MIRAGE_EOF__'\n{cmd}\n__MIRAGE_EOF__", check=check, capture=capture)
+
+
+def docker_curl_json(conn: str, url: str, check: bool = True):
+    """Fetch JSON via curl inside the container."""
+    payload = ssh(conn, f"docker exec mirage curl -sf {url}", capture=True, check=check)
+    if not payload:
+        if check:
+            raise RuntimeError(f"Empty response from {url}")
+        return None
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError as exc:
+        if check:
+            raise RuntimeError(f"Invalid JSON from {url}: {exc}") from exc
+        return None
 
 
 def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, ssh_user: str = SSH_USER):
@@ -78,10 +93,12 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
         sys.exit(0)
     
     # Get current block height
-    height = ssh(conn,
-        'docker exec mirage bash -c "curl -sf http://127.0.0.1:26657/status | jq -r \'.result.sync_info.latest_block_height\'"',
-        capture=True)
-    if not height or not height.isdigit():
+    status_json = docker_curl_json(conn, "http://127.0.0.1:26657/status")
+    try:
+        height = str(status_json["result"]["sync_info"]["latest_block_height"])
+    except (TypeError, KeyError) as exc:
+        raise RuntimeError("Unexpected status JSON structure") from exc
+    if not height.isdigit():
         raise RuntimeError(f"Failed to get current block height: {height}")
     
     # Get current data directory size (BEFORE)
@@ -207,30 +224,20 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     source_node = rpc_nodes[0]
 
     # Get a recent block for state-sync trust (via container tools)
-    trust_info = ssh(
-        conn,
-        "docker exec mirage bash -lc "
-        f"\"curl -sf {source_node}/block | "
-        "jq -r '\\\"\\\\(.result.block.header.height) \\\\(.result.block_id.hash)\\\"'\"",
-        capture=True,
-    )
-    
-    if not trust_info or " " not in trust_info:
-        raise RuntimeError("Failed to fetch trust height/hash for state-sync")
+    block_json = docker_curl_json(conn, f"{source_node}/block")
+    try:
+        latest_height = int(block_json["result"]["block"]["header"]["height"])
+    except (TypeError, KeyError, ValueError) as exc:
+        raise RuntimeError("Failed to read latest block height from RPC") from exc
+    trust_height = str(max(1, latest_height - 1000))
 
-    trust_height, trust_hash = trust_info.split(" ", 1)
-    trust_height = str(max(1, int(trust_height) - 1000))
-
-    trust_info2 = ssh(
-        conn,
-        "docker exec mirage bash -lc "
-        f"\"curl -sf {source_node}/block?height={trust_height} | "
-        "jq -r '.result.block_id.hash'\"",
-        capture=True,
-    )
-    if not trust_info2:
-        raise RuntimeError("Failed to fetch trust hash at height")
-    trust_hash = trust_info2
+    block_at_height = docker_curl_json(conn, f"{source_node}/block?height={trust_height}")
+    try:
+        trust_hash = block_at_height["result"]["block_id"]["hash"]
+    except (TypeError, KeyError) as exc:
+        raise RuntimeError("Failed to read trust hash at height") from exc
+    if not trust_hash:
+        raise RuntimeError("Trust hash is empty")
 
     status(f"State-sync trust: height={trust_height}, hash={trust_hash[:16]}...")
 
@@ -299,14 +306,18 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     status("Waiting for node to start...")
     started = False
     for i in range(60):
-        result = ssh(conn, 
-            'docker exec mirage bash -c "curl -sf http://127.0.0.1:26657/status | '
-            'jq -r \'.result.sync_info | \\\"Height: \\(.latest_block_height), Catching up: \\(.catching_up)\\\"\'"',
-            capture=True, check=False)
-        if result and "Height:" in result:
-            print(f"  {result}")
-            started = True
-            break
+        status_json = docker_curl_json(conn, "http://127.0.0.1:26657/status", check=False)
+        if status_json:
+            try:
+                sync_info = status_json["result"]["sync_info"]
+                latest = sync_info["latest_block_height"]
+                catching_up = sync_info["catching_up"]
+            except (TypeError, KeyError):
+                status_json = None
+            else:
+                print(f"  Height: {latest}, Catching up: {catching_up}")
+                started = True
+                break
         time.sleep(2)
     if not started:
         raise RuntimeError("Node failed to start within 120 seconds")
@@ -336,7 +347,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     status(f"Switch complete! Node is syncing from network.")
     print("\nNext steps:")
     print("  1. Monitor sync progress:")
-    print(f"     ssh {conn} 'docker exec mirage curl -s http://127.0.0.1:26657/status | jq .result.sync_info'")
+    print(f"     ssh {conn} 'docker exec mirage curl -s http://127.0.0.1:26657/status'")
     print("  2. Once caught up, verify the node is voting:")
     print(f"     ssh {conn} 'docker exec mirage tmux attach -t mirage:node'")
     if export_state:

@@ -68,44 +68,86 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     
     status(f"Creating full backup from {source_host}")
     
-    # Step 1: Stop services gracefully on remote
-    status("Stopping services on remote (node will restart after backup)...")
+    # Step 1: Stop application services (but keep container running for pg_dump)
+    status("Stopping application services...")
     run(f"ssh -o StrictHostKeyChecking=accept-new {conn} '"
         "docker exec mirage tmux send-keys -t mirage:node C-c 2>/dev/null || true; "
         "docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true; "
         "docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true; "
         "docker exec mirage tmux send-keys -t mirage:orchestrator C-c 2>/dev/null || true; "
-        "sleep 5; "
+        "sleep 3; "
         "docker exec mirage pkill -9 -f miraged 2>/dev/null || true; "
+        "docker exec mirage pkill -9 -f gunicorn 2>/dev/null || true; "
+        "docker exec mirage pkill -9 -f orchestrator 2>/dev/null || true; "
         "sleep 2'")
     
-    # Step 2: Create PostgreSQL dump
+    # Step 2: Dump PostgreSQL (services stopped, only postgres running)
     status("Dumping PostgreSQL database...")
     run(f"ssh {conn} '"
         "docker exec mirage bash -c \""
         "pg_ctlcluster 16 main start 2>/dev/null || true; "
-        "sleep 3; "
+        "sleep 2; "
         "PGPASSWORD=mirage pg_dump -h 127.0.0.1 -U mirage -d mirage > /root/.mirage/backup_indexer.sql"
         "\" 2>/dev/null || true'")
+    
+    # Step 3: Stop Docker container completely
+    status("Stopping Docker container...")
+    run(f"ssh {conn} 'docker stop mirage && sleep 2'")
     
     # Step 3: Stream tarball directly to local (no temp file on server - saves disk space)
     # Note: Some directories (orchestrator/) may not exist on pre-1.9.0 servers - that's fine
     # Excludes: tmp, logs, cs.wal (consensus WAL - regenerates on start)
-    status(f"Streaming backup to {local_path} (this may take several minutes)...")
-    run(f"ssh {conn} '"
+    status("Calculating backup size...")
+    size_output = run(f"ssh {conn} '"
         "cd /root && "
-        "tar czf - "
+        "du -sb .mirage "
         "--exclude=\".mirage/tmp\" "
         "--exclude=\".mirage/logs\" "
         "--exclude=\".mirage/*.tgz\" "
         "--exclude=\".mirage/node/data/cs.wal\" "
         "--exclude=\".mirage/node/data/tx_index.db\" "
-        ".mirage"
-        f"' > '{local_path}'")
+        "2>/dev/null | cut -f1"
+        "'", capture=True)
+    try:
+        total_bytes = int(size_output.strip())
+        size_str = f"{total_bytes / (1024**3):.1f} GB"
+    except ValueError:
+        total_bytes = 0
+        size_str = "unknown size"
     
-    # Step 4: Restart services on remote
-    status("Restarting services on remote...")
-    run(f"ssh {conn} 'docker restart mirage'")
+    status(f"Streaming backup to {local_path} ({size_str}, compressed)...")
+    # Check if pv is available for progress display
+    pv_available = subprocess.run("which pv", shell=True, capture_output=True).returncode == 0
+    
+    if total_bytes > 0 and pv_available:
+        run(f"ssh {conn} '"
+            "cd /root && "
+            "tar cf - "
+            "--exclude=\".mirage/tmp\" "
+            "--exclude=\".mirage/logs\" "
+            "--exclude=\".mirage/*.tgz\" "
+            "--exclude=\".mirage/node/data/cs.wal\" "
+            "--exclude=\".mirage/node/data/tx_index.db\" "
+            ".mirage"
+            f"' | pv -s {total_bytes} -p -e -r | gzip > '{local_path}'"
+        )
+    else:
+        if not pv_available:
+            print("    (install 'pv' for progress display: sudo pacman -S pv)")
+        run(f"ssh {conn} '"
+            "cd /root && "
+            "tar czf - "
+            "--exclude=\".mirage/tmp\" "
+            "--exclude=\".mirage/logs\" "
+            "--exclude=\".mirage/*.tgz\" "
+            "--exclude=\".mirage/node/data/cs.wal\" "
+            "--exclude=\".mirage/node/data/tx_index.db\" "
+            ".mirage"
+            f"' > '{local_path}'")
+    
+    # Step 4: Start container again
+    status("Starting container...")
+    run(f"ssh {conn} 'docker start mirage'")
     
     # Step 5: Cleanup remote (just the SQL dump)
     status("Cleaning up remote...")
