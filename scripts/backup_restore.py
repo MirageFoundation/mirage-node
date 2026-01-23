@@ -213,10 +213,10 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     status(f"Will use image: {image}")
     
     # -------------------------------------------------------------------------
-    # Step 3: Stop container
+    # Step 3: Stop container (disable restart policy first to prevent restart loop)
     # -------------------------------------------------------------------------
     status(f"Stopping container on {target_host}...")
-    run(f"ssh {conn} 'docker stop mirage 2>/dev/null || true'")
+    run(f"ssh {conn} 'docker update --restart=no mirage 2>/dev/null || true; docker stop mirage 2>/dev/null || true'")
     
     # -------------------------------------------------------------------------
     # Step 4: Delete old data, prune docker (except needed image), clean up disk space
@@ -312,11 +312,7 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     pg_script = r'''#!/bin/bash
 set -e
 
-# Disable restart policy and stop container (might be stuck restarting)
-docker update --restart=no mirage 2>/dev/null || true
-docker stop -t 5 mirage 2>/dev/null || docker kill mirage 2>/dev/null || true
-sleep 2
-docker update --restart=unless-stopped mirage 2>/dev/null || true
+# Start container (restart policy was disabled in step 3)
 docker start mirage
 sleep 10
 
@@ -361,10 +357,10 @@ echo "PostgreSQL restore complete"
     mnemonic = None
     
     # -------------------------------------------------------------------------
-    # Step 12: Restart container
+    # Step 12: Re-enable restart policy and restart container
     # -------------------------------------------------------------------------
     status("Restarting container...")
-    run(f"ssh {conn} 'docker restart mirage'")
+    run(f"ssh {conn} 'docker update --restart=unless-stopped mirage && docker restart mirage'")
     
     # -------------------------------------------------------------------------
     # Step 13: Wait for node to start
