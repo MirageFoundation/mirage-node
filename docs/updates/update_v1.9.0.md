@@ -2,11 +2,13 @@
 
 ### Overview
 
-v1.9.0 introduces **cross-chain bridge functionality**, enabling token transfers between Mirage and external blockchains. The flagship integration is with Solana, using a validator-attested bridge where 2/3 of stake must confirm each transfer before tokens are minted. This is not a centralized bridge with a multisig—it's secured by the same validators that run the Mirage chain itself.
+Mirage goes multi-chain. v1.9.0 delivers **native bridge support for Solana and Osmosis**, bringing MIRAGE tokens to two of the most active ecosystems in crypto. Transfer seamlessly between chains with the security guarantees you'd expect from a decentralized network—no centralized multisigs, no trusted third parties. Every bridge transfer is secured by the same validator set that runs the Mirage chain itself, requiring 2/3 of stake to confirm before tokens move.
 
-The bridge system uses a dual approach: **attested bridges** for non-IBC chains like Solana (where validators run orchestrators to watch external chains and submit attestations), and **IBC bridges** for Cosmos ecosystem chains like Osmosis (using native IBC transfer protocol). Both bridge types support per-chain fees that are distributed proportionally among validators who submit attestations.
+**Solana** gets a custom validator-attested bridge with an on-chain Anchor program. Validators run orchestrators that watch for burns on either chain and submit cryptographic attestations. When supermajority consensus is reached, tokens mint automatically. **Osmosis** connects via native IBC—the battle-tested Inter-Blockchain Communication protocol that powers the Cosmos ecosystem. The Hermes relayer handles packet forwarding with light client verification, no attestation needed.
 
-This release also introduces **disaster recovery tooling** for validator operators. Full node backups can be created with a single command and restored to any server—with or without the original mnemonic depending on whether you're restoring the same server or migrating to new hardware.
+The architecture is built for expansion. Adding new chains—whether EVM-compatible like Ethereum and Arbitrum, or entirely different architectures—requires only a new orchestrator module and chain-specific program. The core attestation logic, fee distribution, and replay protection are chain-agnostic by design. Solana and Osmosis are just the beginning.
+
+This release also ships **enterprise-grade disaster recovery** for validators. Full node backups stream directly to your local machine, and restores work with or without the original mnemonic depending on your recovery scenario. One command to backup, one command to restore.
 
 **Upgrade Name:** `v1.9.0-bridge`
 
