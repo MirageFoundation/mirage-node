@@ -79,7 +79,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     
     # Get current block height
     height = ssh(conn,
-        "docker exec mirage curl -sf http://127.0.0.1:26657/status | jq -r '.result.sync_info.latest_block_height'",
+        'docker exec mirage bash -c "curl -sf http://127.0.0.1:26657/status | jq -r \'.result.sync_info.latest_block_height\'"',
         capture=True)
     if not height or not height.isdigit():
         raise RuntimeError(f"Failed to get current block height: {height}")
@@ -152,7 +152,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     status("Switching db backend to PebbleDB...")
     ssh(
         conn,
-        "python3 - <<'PY'\n"
+        'python3 - <<"PY"\n'
         "from pathlib import Path\n"
         "import re\n"
         "\n"
@@ -160,20 +160,20 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
         "    p = Path(path)\n"
         "    lines = p.read_text().splitlines()\n"
         "    # Find first table header to keep key at top-level\n"
-        "    first_table = next((i for i, l in enumerate(lines) if l.strip().startswith(\"[\")), len(lines))\n"
+        '    first_table = next((i for i, l in enumerate(lines) if l.strip().startswith("[")), len(lines))\n'
         "    found = False\n"
         "    for i in range(first_table):\n"
-        "        if re.match(rf\"^\\s*{re.escape(key)}\\s*=\", lines[i]):\n"
-        "            lines[i] = f\"{key} = \\\"{value}\\\"\"\n"
+        '        if re.match(rf"^\\s*{re.escape(key)}\\s*=", lines[i]):\n'
+        '            lines[i] = f"{key} = \\"{value}\\""\n'
         "            found = True\n"
         "    if not found:\n"
         "        insert_at = first_table\n"
-        "        lines.insert(insert_at, f\"{key} = \\\"{value}\\\"\")\n"
-        "    p.write_text(\"\\n\".join(lines) + \"\\n\")\n"
+        '        lines.insert(insert_at, f"{key} = \\"{value}\\"")\n'
+        '    p.write_text("\\n".join(lines) + "\\n")\n'
         "\n"
-        "set_top_level_key(\"/root/.mirage/node/config/config.toml\", \"db_backend\", \"pebbledb\")\n"
-        "set_top_level_key(\"/root/.mirage/node/config/app.toml\", \"app-db-backend\", \"pebbledb\")\n"
-        "print(\"OK\")\n"
+        'set_top_level_key("/root/.mirage/node/config/config.toml", "db_backend", "pebbledb")\n'
+        'set_top_level_key("/root/.mirage/node/config/app.toml", "app-db-backend", "pebbledb")\n'
+        'print("OK")\n'
         "PY",
     )
     # Verify config change
@@ -237,15 +237,15 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     # Enable state-sync in config (add/update [statesync] section)
     ssh(
         conn,
-        f"python3 - <<'PY'\n"
+        f'python3 - <<"PY"\n'
         "from pathlib import Path\n"
         "\n"
-        f"rpc_servers = \"{rpc_servers}\"\n"
+        f'rpc_servers = "{rpc_servers}"\n'
         f"trust_height = {trust_height}\n"
-        f"trust_hash = \"{trust_hash}\"\n"
-        "trust_period = \"168h0m0s\"\n"
+        f'trust_hash = "{trust_hash}"\n'
+        'trust_period = "168h0m0s"\n'
         "\n"
-        "path = Path(\"/root/.mirage/node/config/config.toml\")\n"
+        'path = Path("/root/.mirage/node/config/config.toml")\n'
         "lines = path.read_text().splitlines()\n"
         "\n"
         "def set_statesync(lines):\n"
@@ -254,37 +254,37 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
         "    found = False\n"
         "    while i < len(lines):\n"
         "        line = lines[i]\n"
-        "        if line.strip() == \"[statesync]\":\n"
+        '        if line.strip() == "[statesync]":\n'
         "            found = True\n"
-        "            out.append(\"[statesync]\")\n"
+        '            out.append("[statesync]")\n'
         "            i += 1\n"
-        "            while i < len(lines) and not lines[i].strip().startswith(\"[\"):\n"
+        '            while i < len(lines) and not lines[i].strip().startswith("["):\n'
         "                i += 1\n"
         "            out.extend([\n"
-        "                \"enable = true\",\n"
-        "                f\"rpc_servers = \\\"{rpc_servers}\\\"\",\n"
-        "                f\"trust_height = {trust_height}\",\n"
-        "                f\"trust_hash = \\\"{trust_hash}\\\"\",\n"
-        "                f\"trust_period = \\\"{trust_period}\\\"\",\n"
+        '                "enable = true",\n'
+        '                f\'rpc_servers = "{rpc_servers}"\',\n'
+        '                f"trust_height = {trust_height}",\n'
+        '                f\'trust_hash = "{trust_hash}"\',\n'
+        '                f\'trust_period = "{trust_period}"\',\n'
         "            ])\n"
         "            continue\n"
         "        out.append(line)\n"
         "        i += 1\n"
         "    if not found:\n"
-        "        out.append(\"\")\n"
-        "        out.append(\"[statesync]\")\n"
+        '        out.append("")\n'
+        '        out.append("[statesync]")\n'
         "        out.extend([\n"
-        "            \"enable = true\",\n"
-        "            f\"rpc_servers = \\\"{rpc_servers}\\\"\",\n"
-        "            f\"trust_height = {trust_height}\",\n"
-        "            f\"trust_hash = \\\"{trust_hash}\\\"\",\n"
-        "            f\"trust_period = \\\"{trust_period}\\\"\",\n"
+        '            "enable = true",\n'
+        '            f\'rpc_servers = "{rpc_servers}"\',\n'
+        '            f"trust_height = {trust_height}",\n'
+        '            f\'trust_hash = "{trust_hash}"\',\n'
+        '            f\'trust_period = "{trust_period}"\',\n'
         "        ])\n"
         "    return out\n"
         "\n"
         "lines = set_statesync(lines)\n"
-        "path.write_text(\"\\n\".join(lines) + \"\\n\")\n"
-        "print(\"OK\")\n"
+        'path.write_text("\\n".join(lines) + "\\n")\n'
+        'print("OK")\n'
         "PY",
     )
     print("  State-sync enabled - should catch up quickly")
@@ -300,8 +300,8 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     started = False
     for i in range(60):
         result = ssh(conn, 
-            "docker exec mirage curl -sf http://127.0.0.1:26657/status | "
-            "jq -r '.result.sync_info | \"Height: \\(.latest_block_height), Catching up: \\(.catching_up)\"'",
+            'docker exec mirage bash -c "curl -sf http://127.0.0.1:26657/status | '
+            'jq -r \'.result.sync_info | \\\"Height: \\(.latest_block_height), Catching up: \\(.catching_up)\\\"\'"',
             capture=True, check=False)
         if result and "Height:" in result:
             print(f"  {result}")
