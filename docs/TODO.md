@@ -76,3 +76,11 @@ Cleaner separation between "what happened" and "current state"
 - 8 modules are pure bloat
 - 5 modules are IBC (debatable)
 - ~7 modules actually needed
+
+
+
+
+-----------
+
+
+we need to enable pebblddb i think because the existing db has massively bloat and never compacts the data. or is that because we forgot the right things to add into the config files? like db=XX?
