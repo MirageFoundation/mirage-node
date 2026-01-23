@@ -15,7 +15,7 @@ set -euo pipefail
 #  - Prints post-state (jailed flag, status)
 
 ROOT_DIR="${ROOT_DIR:-/opt/mirage}"
-BIN="${BIN:-$ROOT_DIR/blockchain/bin/miraged}"
+BIN="${BIN:-$ROOT_DIR/blockchain/miraged}"
 NODE_HOME="${HOME:-/root}/.mirage/node"
 
 # Safety check: prevent doubling .mirage/node
@@ -440,7 +440,7 @@ $BIN tx slashing unjail \
   --chain-id "$CHAIN_ID" \
   --generate-only \
   --gas 200000 \
-  --gas-prices 5000umirage \
+  --fees 1000000000umirage \
   -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
 
 $BIN tx sign "$UNSIGNED" \
@@ -560,7 +560,7 @@ if [ "$CODE" != "0" ] && { echo "$RAW" | grep -qi "account sequence mismatch"; e
     --chain-id "$CHAIN_ID" \
     --generate-only \
     --gas 200000 \
-    --gas-prices 5000umirage \
+    --fees 1000000000umirage \
     -o json > "$UNSIGNED" 2>&1 || { say "Failed to generate unsigned tx (retry)"; cat "$UNSIGNED" 2>/dev/null || true; rm -f "$UNSIGNED"; exit 1; }
   
   $BIN tx sign "$UNSIGNED" \
