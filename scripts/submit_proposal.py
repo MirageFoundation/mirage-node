@@ -17,7 +17,31 @@ import pexpect
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_DIR = ROOT / "scripts"
 BLOCKCHAIN_DIR = ROOT / "blockchain"
-MIRAGED = BLOCKCHAIN_DIR / "miraged"
+
+# Cached miraged path (detected at runtime)
+_miraged_path: Path | None = None
+
+
+def get_miraged_path() -> Path | None:
+    """Get the local miraged binary path.
+    
+    Handles both new (blockchain/miraged) and old (blockchain/bin/miraged) structures.
+    Returns None if binary is not found (will fall back to 'miraged' in PATH).
+    """
+    global _miraged_path
+    if _miraged_path is not None:
+        return _miraged_path
+    
+    # Check new path first, then fall back to old path
+    new_path = BLOCKCHAIN_DIR / "miraged"
+    old_path = BLOCKCHAIN_DIR / "bin" / "miraged"
+    
+    if new_path.exists():
+        _miraged_path = new_path
+    elif old_path.exists():
+        _miraged_path = old_path
+    
+    return _miraged_path
 
 KEYRING_BACKEND = "os"
 LOCAL_KEYRING_BACKEND = "test"
@@ -152,7 +176,8 @@ def get_keyring_home() -> str:
 
 def run_miraged_cmd(cmd: list[str], capture_output: bool = True, check: bool = False) -> subprocess.CompletedProcess:
     """Run miraged command, via docker exec for local mode"""
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    miraged = get_miraged_path()
+    bin_path = str(miraged) if miraged else "miraged"
     if _is_local_mode:
         full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd
     else:
@@ -172,7 +197,8 @@ def query_json_rpc(rpc_endpoint: str, cmd: list[str]) -> dict:
     if _is_local_mode:
         full_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + cmd_with_node
     else:
-        bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+        miraged = get_miraged_path()
+        bin_path = str(miraged) if miraged else "miraged"
         full_cmd = [bin_path] + cmd_with_node
     log_debug(f"Query: {' '.join(full_cmd)}")
     result = subprocess.run(full_cmd, capture_output=True, text=True, check=False)
@@ -333,7 +359,8 @@ def key_exists(account_name: str) -> bool:
 
 def get_address_from_seed(seed: str) -> str:
     """Derive address from seed without adding to keyring (dry-run)"""
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    miraged = get_miraged_path()
+    bin_path = str(miraged) if miraged else "miraged"
     temp_name = f"_temp_check_{int(time.time())}"
     cmd = [
         "keys",
@@ -405,7 +432,8 @@ def find_key_by_address(target_address: str) -> str:
 
 def import_key_from_seed(account_name: str, seed: str) -> str:
     """Import a key from seed into keyring. Returns the actual key name to use."""
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    miraged = get_miraged_path()
+    bin_path = str(miraged) if miraged else "miraged"
 
     if key_exists(account_name):
         log_debug(f"Key '{account_name}' already exists")
@@ -563,7 +591,8 @@ def main():
         return 0
 
     # Initialize keyring
-    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+    miraged = get_miraged_path()
+    bin_path = str(miraged) if miraged else "miraged"
     run_miraged_cmd(["keys", "list", "--keyring-backend", get_keyring_backend(), "--home", get_keyring_home()])
 
     # Query validators
@@ -889,7 +918,8 @@ def main():
                 if _is_local_mode:
                     tx_cmd = ["docker", "exec", LOCAL_CONTAINER, get_local_miraged_path()] + tx_args
                 else:
-                    bin_path = str(MIRAGED if MIRAGED.exists() else "miraged")
+                    miraged = get_miraged_path()
+                    bin_path = str(miraged) if miraged else "miraged"
                     tx_cmd = [bin_path] + tx_args
                 log_debug(f"TX verify attempt {attempt}: {' '.join(tx_cmd)}")
                 result = subprocess.run(tx_cmd, capture_output=True, text=True, check=False)
