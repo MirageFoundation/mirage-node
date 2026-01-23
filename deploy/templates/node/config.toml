@@ -1,4 +1,5 @@
 moniker = "${MONIKER}"
+db_backend = "goleveldb"
 
 [rpc]
 laddr = "tcp://0.0.0.0:26657"
@@ -16,5 +17,12 @@ max_num_outbound_peers = ${MAX_OUTBOUND_PEERS}
 create_empty_blocks = false
 create_empty_blocks_interval = "600s"
 timeout_commit = "3s"
+
+[statesync]
+enable = false
+rpc_servers = ""
+trust_height = 0
+trust_hash = ""
+trust_period = "168h0m0s"
 
 
