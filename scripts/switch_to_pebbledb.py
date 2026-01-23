@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Switch a Mirage node from GoLevelDB to PebbleDB with export/import.
+"""Switch a Mirage node from GoLevelDB to PebbleDB with state-sync.
 
 This script:
 1. Stops the node
-2. Exports chain state
-3. Backs up old data directory
-4. Switches config to PebbleDB
-5. Reimports state into fresh PebbleDB
-6. Restarts the node
+2. Exports chain state (emergency backup)
+3. Removes old data directory (frees space)
+4. Switches db backend to PebbleDB
+5. Configures state-sync and restarts the node
 
-The export/import also removes database bloat from poor LevelDB compaction.
+State-sync rebuilds the database and removes LevelDB bloat. The export is
+kept only as a fallback if something goes wrong.
 
 Usage:
     # Test on mirage.vote first!
@@ -108,29 +108,58 @@ def switch_to_pebbledb(target_host: str, ssh_user: str = SSH_USER):
     export_size = ssh(conn, f"ls -lh /root/.mirage/export-{timestamp}.json | awk '{{print $5}}'", capture=True)
     status(f"Export complete: {export_size}")
     
-    # Step 6: Backup old data directory
-    status("Backing up old data directory...")
-    ssh(conn, f"mv /root/.mirage/node/data /root/.mirage/node/data.backup-{timestamp}")
+    # Step 6: Save priv_validator_state.json then remove old data
+    # We can't keep data.backup - not enough disk space (only ~1.3GB free)
+    status("Saving validator state (prevents double signing)...")
+    ssh(conn, "cp /root/.mirage/node/data/priv_validator_state.json /root/.mirage/priv_validator_state.json.bak 2>/dev/null || true")
     
-    # Step 7: Switch config to PebbleDB
-    status("Switching to PebbleDB in config.toml...")
-    ssh(conn,
-        "sed -i 's/^db_backend = .*/db_backend = \"pebbledb\"/' /root/.mirage/node/config/config.toml || "
-        "echo 'db_backend = \"pebbledb\"' >> /root/.mirage/node/config/config.toml")
+    status("Removing old bloated data directory...")
+    ssh(conn, "rm -rf /root/.mirage/node/data")
     
+    # Step 7: Switch db backend to PebbleDB (CometBFT + app)
+    status("Switching db backend to PebbleDB...")
+    ssh(
+        conn,
+        "python3 - <<'PY'\n"
+        "from pathlib import Path\n"
+        "import re\n"
+        "\n"
+        "def set_top_level_key(path: str, key: str, value: str) -> None:\n"
+        "    p = Path(path)\n"
+        "    lines = p.read_text().splitlines()\n"
+        "    # Find first table header to keep key at top-level\n"
+        "    first_table = next((i for i, l in enumerate(lines) if l.strip().startswith(\"[\")), len(lines))\n"
+        "    found = False\n"
+        "    for i in range(first_table):\n"
+        "        if re.match(rf\"^\\s*{re.escape(key)}\\s*=\", lines[i]):\n"
+        "            lines[i] = f\"{key} = \\\"{value}\\\"\"\n"
+        "            found = True\n"
+        "    if not found:\n"
+        "        insert_at = first_table\n"
+        "        lines.insert(insert_at, f\"{key} = \\\"{value}\\\"\")\n"
+        "    p.write_text(\"\\n\".join(lines) + \"\\n\")\n"
+        "\n"
+        "set_top_level_key(\"/root/.mirage/node/config/config.toml\", \"db_backend\", \"pebbledb\")\n"
+        "set_top_level_key(\"/root/.mirage/node/config/app.toml\", \"app-db-backend\", \"pebbledb\")\n"
+        "print(\"OK\")\n"
+        "PY",
+    )
     # Verify config change
-    new_backend = ssh(conn, "grep '^db_backend' /root/.mirage/node/config/config.toml", capture=True)
-    print(f"  New config: {new_backend}")
+    new_backend = ssh(
+        conn,
+        "grep -E '^(db_backend|app-db-backend)[[:space:]]*=' /root/.mirage/node/config/config.toml /root/.mirage/node/config/app.toml",
+        capture=True,
+    )
+    print(f"  Updated:\n{new_backend}")
     
     # Step 8: Create fresh data directory
     status("Creating fresh data directory...")
     ssh(conn, "mkdir -p /root/.mirage/node/data")
     
-    # Copy priv_validator_state.json (important - prevents double signing!)
-    status("Preserving validator state (prevents double signing)...")
+    # Restore priv_validator_state.json (prevents double signing!)
+    status("Restoring validator state...")
     ssh(conn, 
-        f"cp /root/.mirage/node/data.backup-{timestamp}/priv_validator_state.json "
-        "/root/.mirage/node/data/ 2>/dev/null || "
+        "cp /root/.mirage/priv_validator_state.json.bak /root/.mirage/node/data/priv_validator_state.json 2>/dev/null || "
         'echo \'{"height": "0", "round": 0, "step": 0}\' > /root/.mirage/node/data/priv_validator_state.json')
     
     # Step 9: Configure state-sync for fast catch-up
@@ -145,7 +174,7 @@ def switch_to_pebbledb(target_host: str, ssh_user: str = SSH_USER):
         rpc_servers = ""
         trust_info = ""
     else:
-        rpc_servers = ",".join([f"{n}:26657" for n in rpc_nodes])
+        rpc_servers = ",".join([f"http://{n}:26657" for n in rpc_nodes])
         source_node = rpc_nodes[0]
         
         # Get a recent block for state-sync trust
@@ -169,14 +198,60 @@ def switch_to_pebbledb(target_host: str, ssh_user: str = SSH_USER):
         
         status(f"State-sync trust: height={trust_height}, hash={trust_hash[:16]}...")
         
-        # Enable state-sync in config
-        ssh(conn, f"""
-sed -i 's/^enable = false/enable = true/' /root/.mirage/node/config/config.toml
-sed -i 's|^rpc_servers = .*|rpc_servers = "{rpc_servers}"|' /root/.mirage/node/config/config.toml
-sed -i 's/^trust_height = .*/trust_height = {trust_height}/' /root/.mirage/node/config/config.toml
-sed -i 's/^trust_hash = .*/trust_hash = "{trust_hash}"/' /root/.mirage/node/config/config.toml
-""")
-        print("  State-sync enabled - will catch up in ~2-5 minutes!")
+        # Enable state-sync in config (add/update [statesync] section)
+        ssh(
+            conn,
+            f"python3 - <<'PY'\n"
+            "from pathlib import Path\n"
+            "\n"
+            f"rpc_servers = \"{rpc_servers}\"\n"
+            f"trust_height = {trust_height}\n"
+            f"trust_hash = \"{trust_hash}\"\n"
+            "trust_period = \"168h0m0s\"\n"
+            "\n"
+            "path = Path(\"/root/.mirage/node/config/config.toml\")\n"
+            "lines = path.read_text().splitlines()\n"
+            "\n"
+            "def set_statesync(lines):\n"
+            "    out = []\n"
+            "    i = 0\n"
+            "    found = False\n"
+            "    while i < len(lines):\n"
+            "        line = lines[i]\n"
+            "        if line.strip() == \"[statesync]\":\n"
+            "            found = True\n"
+            "            out.append(\"[statesync]\")\n"
+            "            i += 1\n"
+            "            while i < len(lines) and not lines[i].strip().startswith(\"[\"):\n"
+            "                i += 1\n"
+            "            out.extend([\n"
+            "                \"enable = true\",\n"
+            "                f\"rpc_servers = \\\"{rpc_servers}\\\"\",\n"
+            "                f\"trust_height = {trust_height}\",\n"
+            "                f\"trust_hash = \\\"{trust_hash}\\\"\",\n"
+            "                f\"trust_period = \\\"{trust_period}\\\"\",\n"
+            "            ])\n"
+            "            continue\n"
+            "        out.append(line)\n"
+            "        i += 1\n"
+            "    if not found:\n"
+            "        out.append(\"\")\n"
+            "        out.append(\"[statesync]\")\n"
+            "        out.extend([\n"
+            "            \"enable = true\",\n"
+            "            f\"rpc_servers = \\\"{rpc_servers}\\\"\",\n"
+            "            f\"trust_height = {trust_height}\",\n"
+            "            f\"trust_hash = \\\"{trust_hash}\\\"\",\n"
+            "            f\"trust_period = \\\"{trust_period}\\\"\",\n"
+            "        ])\n"
+            "    return out\n"
+            "\n"
+            "lines = set_statesync(lines)\n"
+            "path.write_text(\"\\n\".join(lines) + \"\\n\")\n"
+            "print(\"OK\")\n"
+            "PY",
+        )
+        print("  State-sync enabled - should catch up quickly")
     else:
         status("WARNING: Could not get state-sync info, will do full sync (slower)")
     
@@ -201,12 +276,12 @@ sed -i 's/^trust_hash = .*/trust_hash = "{trust_hash}"/' /root/.mirage/node/conf
             pass
         time.sleep(2)
     
-    # Step 11: Clean up export and old backup after a delay
-    status("Cleanup: old data will be removed after sync completes")
-    print(f"\n  Export saved at: /root/.mirage/export-{timestamp}.json")
-    print(f"  Old data at: /root/.mirage/node/data.backup-{timestamp}")
-    print("\n  To remove after sync is complete:")
-    print(f"    ssh {conn} 'rm -rf /root/.mirage/node/data.backup-{timestamp} /root/.mirage/export-{timestamp}.json'")
+    # Step 11: Export is kept as emergency backup
+    status("Export saved as emergency backup")
+    print(f"\n  Export: /root/.mirage/export-{timestamp}.json")
+    print("  (Can be used to restore if something goes wrong)")
+    print("\n  To remove after verifying everything works:")
+    print(f"    ssh {conn} 'rm /root/.mirage/export-{timestamp}.json'")
     
     # Step 12: Check new database size
     status("Checking new database size...")
@@ -220,8 +295,8 @@ sed -i 's/^trust_hash = .*/trust_hash = "{trust_hash}"/' /root/.mirage/node/conf
     print(f"     ssh {conn} 'docker exec mirage curl -s http://127.0.0.1:26657/status | jq .result.sync_info'")
     print("  2. Once caught up, verify the node is voting:")
     print(f"     ssh {conn} 'docker exec mirage tmux attach -t mirage:node'")
-    print("  3. Clean up old data:")
-    print(f"     ssh {conn} 'rm -rf /root/.mirage/node/data.backup-{timestamp}'")
+    print("  3. Once stable, remove export backup:")
+    print(f"     ssh {conn} 'rm /root/.mirage/export-{timestamp}.json'")
 
 
 def main():
