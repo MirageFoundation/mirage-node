@@ -195,19 +195,19 @@ def restore(target_host: str, backup_file: Path | None = None, ssh_user: str = S
         "docker kill mirage 2>/dev/null || true; "
         "sleep 3'")
     
-    # Step 2: Upload backup
-    status("Uploading backup (this may take a while)...")
-    run(f"scp '{backup_file}' {conn}:/tmp/restore.tgz")
-    
-    # Step 3: Clear old data and extract backup
-    status("Extracting backup on target...")
+    # Step 2: DELETE old data first to free disk space
+    status("Deleting old data to free disk space...")
     run(f"ssh {conn} '"
-        "rm -rf /root/.mirage.old 2>/dev/null || true; "
-        "mv /root/.mirage /root/.mirage.old 2>/dev/null || true; "
-        "mkdir -p /root/.mirage && "
-        "cd /root && "
-        "tar xzf /tmp/restore.tgz && "
-        "rm -f /tmp/restore.tgz'")
+        "rm -rf /root/.mirage/node/data 2>/dev/null || true; "
+        "rm -rf /root/.mirage/postgres 2>/dev/null || true; "
+        "rm -rf /root/.mirage 2>/dev/null || true; "
+        "rm -f /tmp/restore.tgz 2>/dev/null || true; "
+        "find /tmp -maxdepth 1 -type f -delete 2>/dev/null || true; "
+        "mkdir -p /root/.mirage'")
+    
+    # Step 3: Stream backup directly to tar (no temp file on target - saves disk space)
+    status("Streaming and extracting backup (this may take a while)...")
+    run(f"cat '{backup_file}' | ssh {conn} 'cd /root && tar xzf -'")
     
     # Step 4: Restore PostgreSQL
     status("Restoring PostgreSQL database...")
