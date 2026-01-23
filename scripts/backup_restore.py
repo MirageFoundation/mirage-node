@@ -313,9 +313,9 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER):
     # -------------------------------------------------------------------------
     status("Importing validator account key...")
     import_cmd = f"""docker run --rm -i \\
-        --entrypoint /bin/sh \\
+        --entrypoint /opt/mirage/blockchain/bin/miraged \\
         -v ~/.mirage:/root/.mirage \\
-        '{image}' -lc '/opt/mirage/blockchain/bin/miraged keys add validator --recover --home /root/.mirage/node --keyring-backend test'"""
+        '{image}' keys add validator --recover --home /root/.mirage/node --keyring-backend test"""
     
     subprocess.run(
         f"ssh {conn} '{import_cmd}'",
