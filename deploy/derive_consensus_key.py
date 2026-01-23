@@ -62,12 +62,13 @@ def tm_address_from_pub(pubkey32: bytes) -> str:
     return binascii.hexlify(addr).upper().decode("ascii")
 
 
-def write_priv_validator(home: str, priv_seed: bytes, pubkey: bytes) -> None:
+def write_priv_validator(home: str, priv_seed: bytes, pubkey: bytes, force: bool = False) -> bool:
+    """Write priv_validator_key.json. Returns True if written, False if skipped."""
     cfg_dir = os.path.join(home, "config")
     os.makedirs(cfg_dir, exist_ok=True)
     out_path = os.path.join(cfg_dir, "priv_validator_key.json")
-    if os.path.exists(out_path):
-        raise FileExistsError(f"{out_path} already exists")
+    if os.path.exists(out_path) and not force:
+        return False
     priv_bytes = priv_seed + pubkey  # 32 + 32
     data = {
         "address": tm_address_from_pub(pubkey),
@@ -77,6 +78,7 @@ def write_priv_validator(home: str, priv_seed: bytes, pubkey: bytes) -> None:
     with open(out_path, "w") as f:
         json.dump(data, f, indent=2)
     os.chmod(out_path, 0o600)
+    return True
 
 
 def main():
@@ -89,6 +91,7 @@ def main():
     parser = argparse.ArgumentParser(description="Derive consensus key from mnemonic")
     parser.add_argument("--passphrase", default="", help="BIP39 passphrase (optional)")
     parser.add_argument("--index", type=int, default=0, help="Derivation index (default: 0)")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing key file")
     args = parser.parse_args()
 
     passphrase = args.passphrase
@@ -98,10 +101,15 @@ def main():
         print("Derivation index must be >= 0", file=sys.stderr)
         sys.exit(1)
 
-    # Read mnemonic from stdin
-    mnemonic = sys.stdin.read().strip()
+    # Read mnemonic: from stdin if piped, otherwise prompt
+    if sys.stdin.isatty():
+        import getpass
+
+        mnemonic = getpass.getpass("Enter 12-word mnemonic: ").strip()
+    else:
+        mnemonic = sys.stdin.read().strip()
     if not mnemonic:
-        print("Empty mnemonic on stdin", file=sys.stderr)
+        print("Empty mnemonic", file=sys.stderr)
         sys.exit(1)
 
     # Path: m/44'/118'/1'/i'
@@ -110,13 +118,17 @@ def main():
     sk, _ = slip10_ed25519_derive(seed, path)
     pk = ed25519_pub_from_seed(sk)
 
-    try:
-        write_priv_validator(home, sk, pk)
-    except FileExistsError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(2)
+    # Always print the derived key
+    pk_b64 = base64.b64encode(pk).decode("ascii")
+    print(f"Path: {path}")
+    print(f"Pubkey: {pk_b64}")
 
-    print("Derived consensus key at", path)
+    # Write file (skip if exists and no --force)
+    out_path = os.path.join(home, "config", "priv_validator_key.json")
+    if write_priv_validator(home, sk, pk, force=args.force):
+        print(f"Written: {out_path}")
+    else:
+        print(f"Skipped: {out_path} already exists (use --force to overwrite)")
 
 
 if __name__ == "__main__":
