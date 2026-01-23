@@ -312,9 +312,11 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force
     pg_script = r'''#!/bin/bash
 set -e
 
-# Stop container first (might be stuck restarting)
-docker stop mirage 2>/dev/null || true
+# Disable restart policy and stop container (might be stuck restarting)
+docker update --restart=no mirage 2>/dev/null || true
+docker stop -t 5 mirage 2>/dev/null || docker kill mirage 2>/dev/null || true
 sleep 2
+docker update --restart=unless-stopped mirage 2>/dev/null || true
 docker start mirage
 sleep 10
 
