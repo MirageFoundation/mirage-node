@@ -393,8 +393,8 @@ if [ "$JAILED_PRE" = "true" ]; then
     fi
   fi
 else
-  say "✅ Validator is not jailed."
-  say ""
+  say "✅ Validator is not jailed. Nothing to do."
+  exit 0
 fi
 
 say "=== Proceeding with Unjail Transaction ==="
