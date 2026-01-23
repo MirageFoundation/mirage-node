@@ -121,7 +121,11 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
 
     status(f"Creating full backup from {source_host}")
 
-    # Step 0: Ensure container is running (needed for pg_dump)
+    # Step 0: Clean up /tmp on remote (old backups, restore files)
+    status("Cleaning up /tmp on remote...")
+    run(f"ssh {conn} 'rm -f /tmp/mirage-backup-*.tgz /tmp/restore.tgz /tmp/pg_restore.sh /tmp/node_key.json'")
+
+    # Step 0.5: Ensure container is running (needed for pg_dump)
     status("Ensuring container is running...")
     run(f"ssh {conn} 'docker start mirage 2>/dev/null || true'")
 
