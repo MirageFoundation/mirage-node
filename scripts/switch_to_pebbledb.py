@@ -58,7 +58,38 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     conn = f"{ssh_user}@{target_host}"
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     
-    status(f"Switching {target_host} to PebbleDB")
+    status(f"Gathering info from {target_host}...")
+    
+    # Check current DB backend
+    current_backend = ssh(conn, 
+        "grep '^db_backend' /root/.mirage/node/config/config.toml",
+        capture=True)
+    if not current_backend:
+        raise RuntimeError("db_backend not found in config.toml - run migration first")
+    
+    if "pebbledb" in current_backend.lower():
+        print("Already using PebbleDB! Nothing to do.")
+        sys.exit(0)
+    
+    # Get current block height
+    height = ssh(conn,
+        "docker exec mirage curl -sf http://127.0.0.1:26657/status | jq -r '.result.sync_info.latest_block_height'",
+        capture=True)
+    if not height or not height.isdigit():
+        raise RuntimeError(f"Failed to get current block height: {height}")
+    
+    # Get current data directory size (BEFORE)
+    data_size_before = ssh(conn, "du -sh /root/.mirage/node/data", capture=True)
+    if not data_size_before:
+        raise RuntimeError("Failed to get data directory size")
+    
+    # Show summary before confirmation
+    print(f"\n{'='*50}")
+    print(f"  Target:         {target_host}")
+    print(f"  Current DB:     {current_backend.split('=')[1].strip().strip('\"')}")
+    print(f"  Block height:   {height}")
+    print(f"  Data dir size:  {data_size_before.split()[0]} (BEFORE)")
+    print(f"{'='*50}")
     print("\nWARNING: This will cause ~5-10 minutes of downtime!")
     print("         The node will miss blocks but the chain will continue.")
     confirm = input("\nType 'yes' to continue: ")
@@ -66,29 +97,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
         print("Aborted.")
         sys.exit(0)
     
-    # Step 1: Check current DB backend
-    status("Checking current configuration...")
-    current_backend = ssh(conn, 
-        "grep '^db_backend' /root/.mirage/node/config/config.toml",
-        capture=True)
-    if not current_backend:
-        raise RuntimeError("db_backend not found in config.toml - run migration first")
-    print(f"  Current: {current_backend}")
-    
-    if "pebbledb" in current_backend.lower():
-        print("Already using PebbleDB! Nothing to do.")
-        sys.exit(0)
-    
-    # Step 2: Get current block height
-    status("Getting current block height...")
-    height = ssh(conn,
-        "docker exec mirage curl -sf http://127.0.0.1:26657/status | jq -r '.result.sync_info.latest_block_height'",
-        capture=True)
-    if not height or not height.isdigit():
-        raise RuntimeError(f"Failed to get current block height: {height}")
-    print(f"  Current height: {height}")
-    
-    # Step 3: Stop the node
+    # Stop the node
     status("Stopping node...")
     ssh(conn, "docker exec mirage tmux send-keys -t mirage:node C-c")
     time.sleep(3)
@@ -103,12 +112,12 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     if running:
         raise RuntimeError(f"Node still running after kill: PID {running}")
     
-    # Step 4: Check disk space for export
+    # Check disk space for export
     status("Checking disk space...")
     space = ssh(conn, "df -h /root | tail -1 | awk '{print $4}'", capture=True)
     print(f"  Available: {space}")
     
-    # Step 5: Optional export (offline analysis only)
+    # Optional export (offline analysis only)
     export_path = f"/root/.mirage/export-{timestamp}.json"
     if export_state:
         status("Exporting chain state (this takes 1-2 minutes)...")
@@ -123,7 +132,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     else:
         status("Skipping export (use --export to enable)")
     
-    # Step 6: Save priv_validator_state.json then remove old data
+    # Save priv_validator_state.json then remove old data
     # We can't keep data.backup - not enough disk space (only ~1.3GB free)
     status("Saving validator state (prevents double signing)...")
     ssh(conn, "cp /root/.mirage/node/data/priv_validator_state.json /root/.mirage/priv_validator_state.json.bak")
@@ -133,7 +142,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     status("Removing old bloated data directory...")
     ssh(conn, "rm -rf /root/.mirage/node/data")
     
-    # Step 7: Switch db backend to PebbleDB (CometBFT + app)
+    # Switch db backend to PebbleDB (CometBFT + app)
     status("Switching db backend to PebbleDB...")
     ssh(
         conn,
@@ -169,7 +178,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     )
     print(f"  Updated:\n{new_backend}")
     
-    # Step 8: Create fresh data directory
+    # Create fresh data directory
     status("Creating fresh data directory...")
     ssh(conn, "mkdir -p /root/.mirage/node/data")
     
@@ -177,7 +186,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     status("Restoring validator state...")
     ssh(conn, "cp /root/.mirage/priv_validator_state.json.bak /root/.mirage/node/data/priv_validator_state.json")
     
-    # Step 9: Configure state-sync for fast catch-up
+    # Configure state-sync for fast catch-up
     status("Configuring state-sync for fast catch-up...")
     if not rpc_servers:
         raise RuntimeError("rpc_servers is required (e.g., --rpc-servers mirage.talk:26657)")
@@ -280,7 +289,7 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
         "'/opt/mirage/blockchain/miraged start --home /root/.mirage/node 2>&1 | "
         "tee >(cronolog /root/.mirage/logs/node/miraged-%Y-%m-%d.log)' C-m")
     
-    # Step 10: Wait for node to start syncing
+    # Wait for node to start syncing
     status("Waiting for node to start...")
     started = False
     for i in range(60):
@@ -296,20 +305,27 @@ def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, s
     if not started:
         raise RuntimeError("Node failed to start within 120 seconds")
     
-    # Step 11: Optional export cleanup reminder
+    # Optional export cleanup reminder
     if export_state:
         status("Export saved")
         print(f"\n  Export: {export_path}")
         print("\n  To remove after verifying everything works:")
         print(f"    ssh {conn} 'rm {export_path}'")
     
-    # Step 12: Check new database size
+    # Check new database size and show BEFORE/AFTER comparison
     status("Checking new database size...")
     time.sleep(5)  # Wait for some data to be written
-    new_size = ssh(conn, "du -sh /root/.mirage/node/data/application.db", capture=True)
-    if not new_size:
-        raise RuntimeError("application.db not created - state-sync may have failed")
-    print(f"  New application.db: {new_size}")
+    data_size_after = ssh(conn, "du -sh /root/.mirage/node/data", capture=True)
+    if not data_size_after:
+        raise RuntimeError("data directory not created - state-sync may have failed")
+    
+    # Show BEFORE/AFTER comparison
+    before_size = data_size_before.split()[0]
+    after_size = data_size_after.split()[0]
+    print(f"\n{'='*50}")
+    print(f"  BEFORE: {before_size}")
+    print(f"  AFTER:  {after_size} (still syncing)")
+    print(f"{'='*50}")
     
     status(f"Switch complete! Node is syncing from network.")
     print("\nNext steps:")
