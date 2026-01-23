@@ -399,15 +399,81 @@ def main():
         f.write("\n")
     os.chmod(config_path, 0o600)
 
+    # ── Step 8: Start orchestrator ────────────────────────────────────────────
+    box("STARTING ORCHESTRATOR")
+    print()
+    
+    orchestrator_bin = "/opt/mirage/blockchain/bin/orchestrator"
+    if not Path(orchestrator_bin).exists():
+        warn(f"Orchestrator binary not found at {orchestrator_bin}")
+        print("  Run deploy to build the orchestrator binary.")
+        return 1
+    
+    # Kill any existing orchestrator
+    print("  Stopping existing orchestrator...")
+    subprocess.run(["pkill", "-TERM", "-f", "blockchain/bin/orchestrator"], 
+                   capture_output=True)
+    time.sleep(1)
+    
+    # Start orchestrator in tmux
+    print("  Starting orchestrator in tmux...")
+    logs_dir = "/var/log/mirage/orchestrator"
+    Path(logs_dir).mkdir(parents=True, exist_ok=True)
+    
+    result = subprocess.run(
+        ["tmux", "send-keys", "-t", "mirage:orchestrator", 
+         f"{orchestrator_bin} 2>&1 | tee >(cronolog \"{logs_dir}/orchestrator-%Y-%m-%d.log\")", "C-m"],
+        capture_output=True
+    )
+    
+    if result.returncode == 0:
+        ok("Orchestrator started")
+    else:
+        # tmux window might not exist, try creating it
+        subprocess.run(["tmux", "new-window", "-t", "mirage", "-n", "orchestrator"], capture_output=True)
+        subprocess.run(
+            ["tmux", "send-keys", "-t", "mirage:orchestrator",
+             f"{orchestrator_bin} 2>&1 | tee >(cronolog \"{logs_dir}/orchestrator-%Y-%m-%d.log\")", "C-m"],
+            capture_output=True
+        )
+        ok("Orchestrator started (new window)")
+    
+    print()
+    print("  View logs: tmux attach -t mirage:orchestrator")
+    print()
+
     # ── Done ──────────────────────────────────────────────────────────────────
     box("SETUP COMPLETE")
     print()
     print(f"  Config saved: {config_path}")
     print()
-    print("  This wallet is EXCLUSIVE to this orchestrator node.")
-    print("  Maintain at least 0.1 SOL for transaction fees.")
+    
+    # Also save to .mirage/orchestrator for convenience
+    mirage_orchestrator_dir = Path.home() / ".mirage" / "orchestrator"
+    mirage_orchestrator_dir.mkdir(parents=True, exist_ok=True)
+    mirage_config_path = mirage_orchestrator_dir / "validator-config.json"
+    with open(mirage_config_path, "w") as f:
+        f.write(config_json)
+        f.write("\n")
+    
+    box("VALIDATOR REGISTRATION")
+    print()
+    print("  Send this config to the bridge administrator:")
     print()
     print(config_json)
+    print()
+    print(f"  Also saved to: {mirage_config_path}")
+    print()
+    print(BOX_TOP)
+    print("│ NEXT STEPS                                               │")
+    print("│                                                          │")
+    print("│ 1. Copy the JSON above (or from the saved file)          │")
+    print("│ 2. Send it to the bridge administrator                   │")
+    print("│ 3. They will add it to: scripts/validators/<name>.json   │")
+    print("│ 4. They will run: bun run bridge:validators              │")
+    print("│                                                          │")
+    print("│ Your orchestrator will NOT work until registered!        │")
+    print(BOX_BOT)
     print()
 
     return 0
