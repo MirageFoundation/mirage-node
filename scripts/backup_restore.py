@@ -89,6 +89,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         "\" 2>/dev/null || true'")
     
     # Step 3: Create tarball on remote
+    # Note: Some directories (orchestrator/) may not exist on pre-1.9.0 servers - that's fine
     status("Creating backup tarball on remote (this may take several minutes)...")
     run(f"ssh {conn} '"
         "cd /root && "
