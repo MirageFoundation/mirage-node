@@ -8,9 +8,12 @@ Usage:
     # Download full backup from mirage.vote
     python3 scripts/backup_restore.py backup --source mirage.vote
 
-    # Restore to a server (requires mnemonic for key re-derivation)
+    # Restore to same server (uses keys from backup - no mnemonic needed)
     python3 scripts/backup_restore.py restore --target mirage.vote --latest
     python3 scripts/backup_restore.py restore --target mirage.vote --file ~/.mirage/backups/mirage-backup-mirage-vote-20260123-120000.tgz
+
+    # Restore to DIFFERENT server using another server's backup data (requires mnemonic)
+    python3 scripts/backup_restore.py restore --target 139.59.9.96 --latest --migrate
 
     # List available backups
     python3 scripts/backup_restore.py list
@@ -22,12 +25,24 @@ Backup naming:
 
 What gets backed up:
     - ~/.mirage/node/data/       - Full blockchain data and state
-    - ~/.mirage/node/config/     - Node configuration, genesis, validator keys
-    - ~/.mirage/node/keyring-*   - Keyring (validator signing keys)
+    - ~/.mirage/node/config/     - Node configuration, genesis, validator keys (priv_validator_key.json)
+    - ~/.mirage/node/keyring-*   - Keyring (validator account key)
     - ~/.mirage/postgres/        - PostgreSQL data directory
     - ~/.mirage/env/             - Environment files
     - ~/.mirage/orchestrator/    - Orchestrator files (Solana keypair)
     - PostgreSQL dump            - Clean SQL dump for easy restore
+
+Restore modes:
+    Default (no --migrate):
+        Restores everything from backup including identity files.
+        Use when restoring the SAME server from its own backup.
+        No mnemonic needed - keys come from backup.
+
+    --migrate:
+        Use when restoring a DIFFERENT server using another server's backup data.
+        The backup's identity files (priv_validator_key.json, keyring) are deleted
+        and new ones are derived from your mnemonic.
+        You'll still need to manually set up hermes and orchestrator afterward.
 
 WARNING: Backups are large (~5-10GB) and contain sensitive keys!
 """
@@ -233,9 +248,23 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
 
 
 def restore(
-    target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force: bool = False, debug_skip: bool = False
+    target_host: str,
+    backup_file: Path,
+    ssh_user: str = SSH_USER,
+    force: bool = False,
+    debug_skip: bool = False,
+    migrate: bool = False,
 ):
-    """Restore a backup to a remote server."""
+    """Restore a backup to a remote server.
+    
+    Args:
+        target_host: Server hostname to restore to
+        backup_file: Path to backup .tgz file
+        ssh_user: SSH username
+        force: Skip disk space check
+        debug_skip: Debug mode - skip steps 3-9 and mnemonic
+        migrate: If True, this is a cross-server restore (delete identity files, require mnemonic)
+    """
     conn = f"{ssh_user}@{target_host}"
 
     # Validate backup file exists
@@ -249,17 +278,32 @@ def restore(
     # -------------------------------------------------------------------------
     # Step 1: Warning and mnemonic prompt (fail fast before any uploads)
     # -------------------------------------------------------------------------
+    mnemonic = None
+    
     if debug_skip:
         status("DEBUG MODE: Skipping mnemonic prompt")
-        mnemonic = None
-    else:
-        print(f"\nWARNING: This will OVERWRITE all data on {target_host}!")
-        print("         The node will be stopped and all existing state replaced.")
-        print("         Validator keys will be re-derived from your mnemonic.")
+    elif migrate:
+        # Cross-server restore: need mnemonic to derive new identity
+        print(f"\nWARNING: --migrate mode: This will OVERWRITE all data on {target_host}!")
+        print("         The backup's identity files will be DELETED and new keys")
+        print("         will be derived from your mnemonic.")
+        print("\n         Use this when restoring a DIFFERENT server using another")
+        print("         server's backup data.")
         print("\nEnter your validator mnemonic to continue (Ctrl+C to abort).")
         mnemonic = getpass.getpass("12-word mnemonic: ")
         validate_mnemonic(mnemonic)
         status("Mnemonic validated (12 words)")
+    else:
+        # Same-server restore: use keys from backup
+        print(f"\nWARNING: This will OVERWRITE all data on {target_host}!")
+        print("         The node will be stopped and all existing state replaced.")
+        print("         Identity files (priv_validator_key.json, keyring) will be")
+        print("         restored from the backup.")
+        print("\n         If you're restoring to a DIFFERENT server, use --migrate instead.")
+        confirm = input("\nType 'confirm' to proceed (Ctrl+C to abort): ")
+        if confirm.lower() != "confirm":
+            print("Aborted.")
+            sys.exit(0)
 
     # -------------------------------------------------------------------------
     # Step 2: Get Docker image name BEFORE stopping (needed for key derivation later)
@@ -355,7 +399,7 @@ def restore(
         run(f"ssh {conn} 'cd /root && tar xzf /tmp/restore.tgz'")
 
         # -------------------------------------------------------------------------
-        # Step 7: Delete node_key.json (will be regenerated) and remove self from persistent_peers
+        # Step 7: Delete node_key.json (ALWAYS - will be regenerated with new P2P identity)
         # -------------------------------------------------------------------------
         status("Deleting node_key.json (will be regenerated with new P2P identity)...")
         run(f"ssh {conn} 'rm -f /root/.mirage/node/config/node_key.json'")
@@ -374,29 +418,33 @@ def restore(
         """,
         )
 
-        # -------------------------------------------------------------------------
-        # Step 8: Delete identity files (priv_validator_key.json, keyring-*)
-        # -------------------------------------------------------------------------
-        status("Deleting old identity files...")
-        run(f"ssh {conn} 'rm -f /root/.mirage/node/config/priv_validator_key.json'")
-        run(f"ssh {conn} 'rm -rf /root/.mirage/node/keyring-*'")
+        if migrate:
+            # -------------------------------------------------------------------------
+            # Step 8: Delete identity files (priv_validator_key.json, keyring-*)
+            # Only for --migrate (cross-server restore)
+            # -------------------------------------------------------------------------
+            status("Deleting identity files from backup (--migrate mode)...")
+            run(f"ssh {conn} 'rm -f /root/.mirage/node/config/priv_validator_key.json'")
+            run(f"ssh {conn} 'rm -rf /root/.mirage/node/keyring-*'")
 
-        # -------------------------------------------------------------------------
-        # Step 9: Derive consensus key (one-shot container)
-        # -------------------------------------------------------------------------
-        status("Deriving consensus key...")
-        derive_cmd = f"""docker run --rm -i \\
-            --entrypoint python3 \\
-            -v ~/.mirage:/root/.mirage \\
-            '{image}' /opt/mirage/deploy/derive_consensus_key.py"""
+            # -------------------------------------------------------------------------
+            # Step 9: Derive consensus key (one-shot container)
+            # -------------------------------------------------------------------------
+            status("Deriving consensus key from mnemonic...")
+            derive_cmd = f"""docker run --rm -i \\
+                --entrypoint python3 \\
+                -v ~/.mirage:/root/.mirage \\
+                '{image}' /opt/mirage/deploy/derive_consensus_key.py"""
 
-        result = subprocess.run(
-            f"ssh {conn} '{derive_cmd}'",
-            shell=True,
-            check=True,
-            text=True,
-            input=mnemonic,
-        )
+            subprocess.run(
+                f"ssh {conn} '{derive_cmd}'",
+                shell=True,
+                check=True,
+                text=True,
+                input=mnemonic,
+            )
+        else:
+            status("Keeping identity files from backup (same-server restore)")
 
     # -------------------------------------------------------------------------
     # Step 10: Restore PostgreSQL (temporary container, avoid full entrypoint)
@@ -466,9 +514,10 @@ echo "PostgreSQL restore complete"
         )
 
     # -------------------------------------------------------------------------
-    # Step 11: Import validator key (recreate container with SKIP_VALIDATOR_CHECK=1)
+    # Step 11: Start container (and import validator key if --migrate)
     # -------------------------------------------------------------------------
-    if mnemonic:
+    if migrate and mnemonic:
+        # Cross-server restore: need to import validator key from mnemonic
         status("Stopping and removing old container...")
         run(f"ssh {conn} 'docker rm -f mirage 2>/dev/null || true'")
 
@@ -504,7 +553,7 @@ echo "PostgreSQL restore complete"
         ).strip()
         status(f"Using miraged at: {miraged_path}")
 
-        status("Importing validator account key...")
+        status("Importing validator account key from mnemonic...")
         subprocess.run(
             f"ssh {conn} 'docker exec -i mirage {miraged_path} keys add validator --recover --home /root/.mirage/node --keyring-backend test'",
             shell=True,
@@ -528,11 +577,25 @@ echo "PostgreSQL restore complete"
                 '{image}'
         """,
         )
-    else:
-        status("DEBUG MODE: Skipping key import (no mnemonic)")
+    elif debug_skip:
+        status("DEBUG MODE: Skipping key import")
         # Just restart the existing container
         status("Restarting container...")
         run(f"ssh {conn} 'docker update --restart=unless-stopped mirage && docker restart mirage'")
+    else:
+        # Same-server restore: keys already in backup, just start container
+        status("Starting container (identity files restored from backup)...")
+        run(f"ssh {conn} 'docker rm -f mirage 2>/dev/null || true'")
+        run_ssh(
+            conn,
+            f"""
+            docker run -d --name mirage --restart unless-stopped \\
+                -v /root/.mirage:/root/.mirage \\
+                -v /root/.caddy:/root/.local/share/caddy \\
+                -p 26656:26656 -p 26657:26657 -p 1317:1317 -p 9090:9090 -p 5000:5000 -p 80:80 -p 443:443 \\
+                '{image}'
+        """,
+        )
 
     # -------------------------------------------------------------------------
     # Step 13: Wait for node to start
@@ -644,14 +707,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Create backup from production
+  # Create backup from a server
   %(prog)s backup --source mirage.vote
 
-  # Restore using latest backup
+  # Restore SAME server using its own backup (no mnemonic needed)
   %(prog)s restore --target mirage.vote --latest
 
   # Restore using specific backup file
   %(prog)s restore --target mirage.vote --file ~/.mirage/backups/mirage-backup-mirage-vote-20260123-143052.tgz
+
+  # Restore DIFFERENT server using another server's backup (requires mnemonic)
+  %(prog)s restore --target 139.59.9.96 --latest --migrate
 
   # List available backups
   %(prog)s list
@@ -671,6 +737,12 @@ Examples:
     restore_parser.add_argument("--user", default=SSH_USER, help=f"SSH user (default: {SSH_USER})")
     restore_parser.add_argument("--force", action="store_true", help="Skip disk space check")
     restore_parser.add_argument("--debug-skip", action="store_true", help="Debug mode: skip steps 3-9 and mnemonic")
+    restore_parser.add_argument(
+        "--migrate",
+        action="store_true",
+        help="Cross-server restore: delete identity files from backup and derive new keys from mnemonic. "
+        "Use when restoring a DIFFERENT server using another server's backup data.",
+    )
 
     # Mutually exclusive: --file or --latest
     backup_source = restore_parser.add_mutually_exclusive_group(required=True)
@@ -692,7 +764,7 @@ Examples:
         else:
             backup_file = args.file
 
-        restore(args.target, backup_file, args.user, args.force, args.debug_skip)
+        restore(args.target, backup_file, args.user, args.force, args.debug_skip, args.migrate)
     elif args.command == "list":
         list_backups()
 
