@@ -15,15 +15,12 @@ type RelayAccountingDecorator struct {
 }
 
 func (d RelayAccountingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	// Pass-through simulate
-	if simulate {
+	execMode := ctx.ExecMode()
+	// Only attribute on finalize or simulate (simulate for accurate gas estimation)
+	if execMode != sdk.ExecModeFinalize && execMode != sdk.ExecModeSimulate {
 		return next(ctx, tx, simulate)
 	}
-
-	// Only attribute on deliver (Finalize) phase
-	if ctx.ExecMode() != sdk.ExecModeFinalize {
-		return next(ctx, tx, simulate)
-	}
+	logFinalize := execMode == sdk.ExecModeFinalize
 
 	if ftx, ok := tx.(sdk.FeeTx); ok {
 		payer := ""
@@ -39,11 +36,19 @@ func (d RelayAccountingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulat
 				cnt++
 			}
 		}
-		ctx.Logger().Info("relay accounting: posts counted", "payer", payer, "count", cnt)
+		if logFinalize {
+			ctx.Logger().Info("relay accounting: posts counted", "payer", payer, "count", cnt)
+		} else {
+			ctx.Logger().Debug("relay accounting: simulate", "payer", payer, "count", cnt)
+		}
 		if payer != "" && cnt > 0 {
 			if valoper, err := d.Keeper.AccToValoper(payer); err == nil {
 				if err2 := d.Keeper.AddRelayCredit(ctx, valoper, sdkmath.NewInt(cnt)); err2 == nil {
-					ctx.Logger().Info("relay accounting: credit added", "valoper", valoper, "credit", cnt)
+					if logFinalize {
+						ctx.Logger().Info("relay accounting: credit added", "valoper", valoper, "credit", cnt)
+					} else {
+						ctx.Logger().Debug("relay accounting: credit simulated", "valoper", valoper, "credit", cnt)
+					}
 				}
 			}
 		}

@@ -540,7 +540,7 @@ else
       run_ssh 'docker system prune -f'
     fi
     echo "==> Pulling image on remote: $DEPLOY_IMAGE"
-    run_ssh "docker pull '$DEPLOY_IMAGE'"
+    run_ssh "docker pull -q '$DEPLOY_IMAGE'"
   fi
 fi
 

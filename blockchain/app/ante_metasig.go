@@ -627,8 +627,9 @@ func (d RelayGasFeeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bo
 		}
 	}
 
-	// Deduct fees only during Finalize (DeliverTx). Do NOT deduct during Prepare/ProcessProposal.
-	if ctx.ExecMode() == sdk.ExecModeFinalize {
+	// Deduct fees during Finalize and Simulate (simulate for accurate gas estimation).
+	// Do NOT deduct during Prepare/ProcessProposal.
+	if ctx.ExecMode() == sdk.ExecModeFinalize || ctx.ExecMode() == sdk.ExecModeSimulate {
 		payer := ""
 		if payerBz := ftx.FeePayer(); len(payerBz) > 0 {
 			payer = sdk.AccAddress(payerBz).String()
@@ -658,6 +659,9 @@ func (d RelayGasFeeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bo
 			if err := d.BankKeeper.SendCoinsFromAccountToModule(ctx, addr, authtypes.FeeCollectorName, fees); err != nil {
 				ctx.Logger().Warn("relay fee deduction failed", "payer", payer, "fees", fees.String(), "err", err.Error())
 				return ctx, fmt.Errorf("fee deduction failed: %w", err)
+			}
+			if ctx.ExecMode() == sdk.ExecModeSimulate {
+				ctx.Logger().Debug("relay fee: simulated deduction", "payer", payer, "fees", fees.String())
 			}
 		}
 	}
