@@ -201,16 +201,18 @@ def main():
         return 1
     
     # Create final Caddyfile with www redirect
+    # Note: The template contains a global config block (no key) that MUST come first
+    # So we append the www redirect after the rendered template, not before
     caddyfile = CADDY_DIR / "Caddyfile"
     with open(temp_caddy) as f:
         rendered = f.read()
     os.unlink(temp_caddy)
     
-    final_config = f"""www.{domain} {{
-\tredir https://{domain}{{uri}} permanent
-}}
+    final_config = f"""{rendered}
 
-{rendered}"""
+www.{domain} {{
+\tredir https://{domain}{{uri}} permanent
+}}"""
     
     caddyfile.write_text(final_config)
     print(f"    ✓ Caddyfile written: {caddyfile}")

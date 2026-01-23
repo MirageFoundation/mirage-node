@@ -235,6 +235,17 @@ def derive_slip10_ed25519(seed: bytes, path: list[int]) -> bytes:
     return key
 
 
+def mnemonic_to_pubkey(mnemonic: str) -> str:
+    """Derive Solana public key from mnemonic without saving."""
+    seed = mnemonic_to_seed(mnemonic.strip().lower())
+    HARDENED = 0x80000000
+    derivation_path = [44 | HARDENED, 501 | HARDENED, 0 | HARDENED, 0 | HARDENED]
+    private_key_seed = derive_slip10_ed25519(seed, derivation_path)
+    signing_key = SigningKey(private_key_seed)
+    verify_key = signing_key.verify_key
+    return base58.b58encode(bytes(verify_key)).decode()
+
+
 def create_solana_keypair(mnemonic: str, path: Path) -> str:
     """Create Solana keypair from mnemonic (Phantom-compatible BIP44)."""
     seed = mnemonic_to_seed(mnemonic.strip().lower())
@@ -304,17 +315,21 @@ def main():
     if choice == "g":
         try:
             mnemonic = generate_mnemonic()
+            pubkey = mnemonic_to_pubkey(mnemonic)
         except Exception as e:
-            err(f"Failed to generate mnemonic: {e}")
+            err(f"Failed to generate wallet: {e}")
             return 1
 
-        box("SAVE THIS SEED PHRASE")
+        box("SAVE THIS INFORMATION")
         print()
-        print(f"  {mnemonic}")
+        print(f"  Seed phrase: {mnemonic}")
+        print(f"  Public key:  {pubkey}")
+        print()
+        print(f"  Fund this wallet with at least {MIN_SOL_BALANCE} SOL to cover transaction fees.")
         print()
         print(BOX_TOP)
         print("│ WARNING                                                  │")
-        print("│   - This is the ONLY time this phrase will be shown      │")
+        print("│   - This is the ONLY time the seed phrase will be shown  │")
         print("│   - Write it down and store it securely                  │")
         print("│   - Do NOT import into Phantom or any other wallet       │")
         print("│   - Do NOT reuse for other orchestrator nodes            │")

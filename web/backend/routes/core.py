@@ -91,8 +91,9 @@ from psycopg.types.json import Jsonb
 core_bp = Blueprint("core", __name__)
 
 # Gas estimation buffer (multiplier). Simulation can underestimate due to
-# state changes between simulation and execution.
-GAS_BUFFER_MULTIPLIER = 1.25  # 25% buffer
+# state changes between simulation and execution, and storage write costs
+# (WriteFlat) that vary based on key/value sizes.
+GAS_BUFFER_MULTIPLIER = 1.30  # 30% buffer
 
 
 def _query_chain_profile_full(addr: str) -> dict | None:
