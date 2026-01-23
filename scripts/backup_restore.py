@@ -179,7 +179,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
 # =============================================================================
 
 
-def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER):
+def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER, force: bool = False):
     """Restore a backup to a remote server."""
     conn = f"{ssh_user}@{target_host}"
     
@@ -244,9 +244,14 @@ def restore(target_host: str, backup_file: Path, ssh_user: str = SSH_USER):
     avail_gb = avail_kb / (1024 * 1024)
     needed_gb = (size_gb * 2) + 1  # tarball + extracted + buffer
     if avail_gb < needed_gb:
-        print(f"ERROR: Not enough disk space. Need ~{needed_gb:.1f}GB, have {avail_gb:.1f}GB", file=sys.stderr)
-        sys.exit(1)
-    status(f"Disk space OK: {avail_gb:.1f}GB available")
+        if force:
+            status(f"WARNING: Low disk space ({avail_gb:.1f}GB available, need ~{needed_gb:.1f}GB) - continuing anyway (--force)")
+        else:
+            print(f"ERROR: Not enough disk space. Need ~{needed_gb:.1f}GB, have {avail_gb:.1f}GB", file=sys.stderr)
+            print("       Use --force to skip this check", file=sys.stderr)
+            sys.exit(1)
+    else:
+        status(f"Disk space OK: {avail_gb:.1f}GB available")
     
     # -------------------------------------------------------------------------
     # Step 6: Upload backup to /tmp/restore.tgz (skip if already exists with correct size)
@@ -484,6 +489,7 @@ Examples:
     restore_parser = subparsers.add_parser("restore", help="Restore backup to a server")
     restore_parser.add_argument("--target", required=True, help="Target server hostname")
     restore_parser.add_argument("--user", default=SSH_USER, help=f"SSH user (default: {SSH_USER})")
+    restore_parser.add_argument("--force", action="store_true", help="Skip disk space check")
     
     # Mutually exclusive: --file or --latest
     backup_source = restore_parser.add_mutually_exclusive_group(required=True)
@@ -505,7 +511,7 @@ Examples:
         else:
             backup_file = args.file
         
-        restore(args.target, backup_file, args.user)
+        restore(args.target, backup_file, args.user, args.force)
     elif args.command == "list":
         list_backups()
 
