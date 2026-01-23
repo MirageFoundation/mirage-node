@@ -50,7 +50,9 @@ def run(cmd: str, check: bool = True, capture: bool = False) -> str:
 
 def ssh(conn: str, cmd: str, check: bool = True, capture: bool = False) -> str:
     """Run command on remote host."""
-    return run(f"ssh -o StrictHostKeyChecking=accept-new {conn} '{cmd}'", check=check, capture=capture)
+    # Escape single quotes for bash: ' -> '\''
+    escaped = cmd.replace("'", "'\"'\"'")
+    return run(f"ssh -o StrictHostKeyChecking=accept-new {conn} '{escaped}'", check=check, capture=capture)
 
 
 def switch_to_pebbledb(target_host: str, rpc_servers: str, export_state: bool, ssh_user: str = SSH_USER):
