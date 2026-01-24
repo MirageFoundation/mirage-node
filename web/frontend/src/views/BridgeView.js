@@ -72,9 +72,9 @@ const BRIDGE_POLL_SCHEDULE = {
 };
 
 const MINT_POLL_SCHEDULE = {
-    initialDelayMs: 1000,
+    initialDelayMs: 10000, // Wait 10s before first poll (validators need time to detect burn and attest)
     intervalsMs: [
-        ...Array.from({ length: 30 }, () => 1000),  // 0-30s: every 1s
+        ...Array.from({ length: 30 }, () => 1000),  // 10-40s: every 1s
         ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
         ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
     ],
@@ -830,9 +830,9 @@ const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 // Mint polling schedule for Bridge In (Solana -> Mirage)
 // Same pattern: 1s for first 30s, then 2s for 30-60s, then 3s after
 const BRIDGE_IN_POLL_SCHEDULE = {
-    initialDelayMs: 3000, // Wait 3s before first poll (orchestrator needs time to detect burn)
+    initialDelayMs: 10000, // Wait 10s before first poll (orchestrators need time to detect burn and attest)
     intervalsMs: [
-        ...Array.from({ length: 27 }, () => 1000),  // 3-30s: every 1s
+        ...Array.from({ length: 20 }, () => 1000),  // 10-30s: every 1s
         ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
         ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
     ],
@@ -971,24 +971,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
             try {
                 console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
 
-                // Query attestation progress first
-                try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_sequence=${burnNonce}&chain=solana`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        console.debug('[Solana Bridge In] Attestation status:', statusData);
-                        setAttestationProgress({
-                            attestorCount: statusData.attestor_count || 0,
-                            attestedPower: Number(statusData.attested_power || 0),
-                            requiredPower: Number(statusData.required_power || 0),
-                            confirmed: statusData.confirmed || false,
-                        });
-                    }
-                } catch (e) {
-                    console.debug('[Solana Bridge In] Attestation status fetch error:', e.message);
-                }
-
-                // Query the backend for mint status using the burn nonce
+                // Query mint status (includes attestor count)
                 const res = await fetch(`/api/bridge/get_minted?burn_sequence=${burnNonce}&chain=solana`);
                 if (!res.ok) {
                     throw new Error(`mint query failed (${res.status})`);
@@ -999,7 +982,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 // Track when attestation is first found (orchestrator detected the burn)
                 if (data.found && !attestationFoundTime) {
                     attestationFoundTime = Date.now();
-                    // Freeze the "Orchestrator detection" step timer
+                    // Freeze the "Validator attestations" step timer
                     setStepElapsed(prev => {
                         const pendingStart = stepTimestamps.pending;
                         if (pendingStart) {
@@ -1010,15 +993,17 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     console.debug('[Solana Bridge In] Attestation found, starting mint timer');
                 }
 
-                if (data.confirmed) {
-                    setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
-                    // Use attestor_count from get_minted response if we don't have it from attestation_status
+                // Update attestation progress from get_minted response
+                if (data.found) {
                     setAttestationProgress(prev => ({
                         ...prev,
-                        confirmed: true,
-                        // Use get_minted's attestor_count as fallback if attestation_status didn't provide one
-                        attestorCount: prev.attestorCount > 0 ? prev.attestorCount : (data.attestor_count || prev.attestorCount),
+                        attestorCount: data.attestor_count || prev.attestorCount,
+                        confirmed: data.confirmed || prev.confirmed,
                     }));
+                }
+
+                if (data.confirmed) {
+                    setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
                     // Calculate final elapsed time for the 'complete' (mint) step
                     const now = Date.now();
                     const mintStartTime = attestationFoundTime || stepTimestamps.pending || now;
@@ -2234,26 +2219,21 @@ export default function BridgeView({ state }) {
             try {
                 console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
 
-                // Query attestation progress first
-                try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_tx_hash=${submitTxHash}`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        console.debug('[Bridge] Outbound attestation status:', statusData);
-                        setOutboundAttestationProgress({
-                            attestorCount: statusData.attestor_count || 0,
-                            attestedPower: Number(statusData.attested_power || 0),
-                            requiredPower: Number(statusData.required_power || 0),
-                            confirmed: statusData.confirmed || false,
-                        });
-                    }
-                } catch (e) {
-                    console.debug('[Bridge] Outbound attestation status fetch error:', e.message);
-                }
-
+                // Query mint status (includes attestor count)
                 const res = await fetch(`/api/bridge/get_minted?burn_tx_hash=${submitTxHash}`);
                 if (res.ok) {
                     const data = await res.json();
+                    console.debug('[Bridge] Mint poll response:', data);
+
+                    // Update attestation progress from get_minted response
+                    if (data.found) {
+                        setOutboundAttestationProgress(prev => ({
+                            ...prev,
+                            attestorCount: data.attestor_count || prev.attestorCount,
+                            confirmed: data.confirmed || prev.confirmed,
+                        }));
+                    }
+
                     if (data?.confirmed) {
                         setMintStatus({
                             state: 'minted',
@@ -2262,12 +2242,6 @@ export default function BridgeView({ state }) {
                             error: '',
                             completedAt: Date.now(),
                         });
-                        // Use attestor_count from get_minted as fallback if attestation_status didn't provide one
-                        setOutboundAttestationProgress(prev => ({
-                            ...prev,
-                            confirmed: true,
-                            attestorCount: prev.attestorCount > 0 ? prev.attestorCount : (data.attestor_count || prev.attestorCount),
-                        }));
                         return;
                     }
                 } else {
