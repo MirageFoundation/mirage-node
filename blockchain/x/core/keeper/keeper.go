@@ -1492,8 +1492,26 @@ func (k Keeper) MigrateBridgeMintAttestors(ctx sdk.Context) error {
 			return false
 		}
 
-		var bestValoper string
-		var bestPower int64
+		var (
+			bestValoper string
+			bestPower   int64
+			sumPower    int64
+		)
+		for valoperAddr, power := range attestation.Attestors {
+			if power <= 0 {
+				continue
+			}
+			sumPower += power
+			if power > bestPower {
+				bestPower = power
+				bestValoper = valoperAddr
+			}
+		}
+		if sumPower != attestation.AttestedPower {
+			migrateErr = fmt.Errorf("attested power mismatch for %s/%s: stored=%d sum=%d", destChain, burnID, attestation.AttestedPower, sumPower)
+			return true
+		}
+
 		for valoperAddr, power := range attestation.Attestors {
 			if power <= 0 {
 				continue
@@ -1501,10 +1519,6 @@ func (k Keeper) MigrateBridgeMintAttestors(ctx sdk.Context) error {
 			if err := k.SetBridgeMintAttestor(ctx, destChain, burnID, valoperAddr, power); err != nil {
 				migrateErr = err
 				return true
-			}
-			if power > bestPower {
-				bestPower = power
-				bestValoper = valoperAddr
 			}
 		}
 
@@ -1519,6 +1533,23 @@ func (k Keeper) MigrateBridgeMintAttestors(ctx sdk.Context) error {
 				return true
 			}
 			attestation.ConfirmedBy = sdk.AccAddress(valoper).String()
+		} else if strings.TrimSpace(attestation.ConfirmedBy) != "" {
+			confirmedFound := false
+			for valoperAddr := range attestation.Attestors {
+				valoper, err := sdk.ValAddressFromBech32(valoperAddr)
+				if err != nil {
+					migrateErr = fmt.Errorf("invalid confirmed_by valoper: %w", err)
+					return true
+				}
+				if sdk.AccAddress(valoper).String() == attestation.ConfirmedBy {
+					confirmedFound = true
+					break
+				}
+			}
+			if !confirmedFound {
+				migrateErr = fmt.Errorf("confirmed_by not found in attestors for %s/%s", destChain, burnID)
+				return true
+			}
 		}
 
 		attestation.Attestors = nil
@@ -1545,6 +1576,130 @@ func (k Keeper) SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID strin
 	store := k.storeService.OpenKVStore(ctx)
 	key := types.BridgeMintFeePendingKey(destChain, burnID)
 	return store.Set(key, []byte{1})
+}
+
+// GetBridgeMintFeePendingCount returns the number of pending fee distributions.
+func (k Keeper) GetBridgeMintFeePendingCount(ctx sdk.Context) (uint64, error) {
+	var count uint64
+	store := k.storeService.OpenKVStore(ctx)
+	prefix := []byte(types.BridgeMintFeePendingPrefix)
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return 0, err
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		count++
+	}
+	return count, nil
+}
+
+// GetBridgeMintFeeFailure returns a fee distribution failure record.
+func (k Keeper) GetBridgeMintFeeFailure(ctx sdk.Context, destChain, burnID string) (*types.BridgeMintFeeFailure, bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintFeeFailureKey(destChain, burnID)
+	bz, err := store.Get(key)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(bz) == 0 {
+		return nil, false, nil
+	}
+	record, err := types.UnmarshalBridgeMintFeeFailure(bz)
+	if err != nil {
+		return nil, false, err
+	}
+	return record, true, nil
+}
+
+// SetBridgeMintFeeFailure stores a fee distribution failure record.
+func (k Keeper) SetBridgeMintFeeFailure(ctx sdk.Context, record *types.BridgeMintFeeFailure) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintFeeFailureKey(record.DestinationChain, record.BurnID)
+	bz, err := record.Marshal()
+	if err != nil {
+		return err
+	}
+	return store.Set(key, bz)
+}
+
+// RemoveBridgeMintFeeFailure removes a fee distribution failure record.
+func (k Keeper) RemoveBridgeMintFeeFailure(ctx sdk.Context, destChain, burnID string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintFeeFailureKey(destChain, burnID)
+	return store.Delete(key)
+}
+
+// IterateBridgeMintFeeFailures iterates over fee distribution failure records.
+func (k Keeper) IterateBridgeMintFeeFailures(ctx sdk.Context, fn func(record *types.BridgeMintFeeFailure) bool) error {
+	store := k.storeService.OpenKVStore(ctx)
+	prefix := []byte(types.BridgeMintFeeFailurePrefix)
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		record, err := types.UnmarshalBridgeMintFeeFailure(it.Value())
+		if err != nil {
+			return err
+		}
+		if stop := fn(record); stop {
+			break
+		}
+	}
+	return nil
+}
+
+// GetBridgeMintFeeFailureCounts returns counts for failed and quarantined distributions.
+func (k Keeper) GetBridgeMintFeeFailureCounts(ctx sdk.Context) (failed uint64, quarantined uint64, err error) {
+	var failedCount uint64
+	var quarantinedCount uint64
+	err = k.IterateBridgeMintFeeFailures(ctx, func(record *types.BridgeMintFeeFailure) bool {
+		if record.Quarantined {
+			quarantinedCount++
+		} else {
+			failedCount++
+		}
+		return false
+	})
+	if err != nil {
+		return 0, 0, err
+	}
+	return failedCount, quarantinedCount, nil
+}
+
+// RecordBridgeMintFeeFailure increments failure count and updates failure metadata.
+func (k Keeper) RecordBridgeMintFeeFailure(
+	ctx sdk.Context,
+	destChain,
+	burnID,
+	errMsg string,
+	height int64,
+	maxFailures uint64,
+) (*types.BridgeMintFeeFailure, error) {
+	record, found, err := k.GetBridgeMintFeeFailure(ctx, destChain, burnID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		record = &types.BridgeMintFeeFailure{
+			DestinationChain: destChain,
+			BurnID:           burnID,
+			FailureCount:     0,
+			FirstFailedHeight: height,
+		}
+	}
+	record.FailureCount++
+	record.LastFailedHeight = height
+	record.LastError = strings.TrimSpace(errMsg)
+	if maxFailures > 0 && record.FailureCount >= maxFailures {
+		record.Quarantined = true
+	}
+	if err := k.SetBridgeMintFeeFailure(ctx, record); err != nil {
+		return nil, err
+	}
+	return record, nil
 }
 
 // RemoveBridgeMintFeePending removes a pending fee distribution marker after processing.
@@ -1632,14 +1787,23 @@ func (k Keeper) DistributeBridgeMintFee(ctx sdk.Context, destChain, burnID strin
 		return nil
 	}
 
-	var distributed uint64 = 0
-	var attestorCount int
-	var iterErr error
+	type payout struct {
+		accAddr string
+		share   uint64
+	}
+	var (
+		distributed uint64
+		attestorCount int
+		sumPower int64
+		payouts []payout
+		iterErr error
+	)
 	err = k.IterateBridgeMintAttestors(ctx, destChain, burnID, func(valoperAddr string, power int64) bool {
 		if power <= 0 {
 			return false
 		}
 		attestorCount++
+		sumPower += power
 		valoper, err := sdk.ValAddressFromBech32(valoperAddr)
 		if err != nil {
 			iterErr = fmt.Errorf("invalid attestor address: %w", err)
@@ -1654,10 +1818,7 @@ func (k Keeper) DistributeBridgeMintFee(ctx sdk.Context, destChain, burnID strin
 			Uint64()
 
 		if share > 0 {
-			if err := k.SendFromModule(ctx, accAddr, share); err != nil {
-				iterErr = fmt.Errorf("failed to pay bridge fee to %s: %w", accAddr, err)
-				return true
-			}
+			payouts = append(payouts, payout{accAddr: accAddr, share: share})
 			distributed += share
 		}
 		return false
@@ -1669,17 +1830,16 @@ func (k Keeper) DistributeBridgeMintFee(ctx sdk.Context, destChain, burnID strin
 		return iterErr
 	}
 	if attestorCount == 0 {
-		// If no attestors found (e.g. migration issue or data loss), we can't distribute.
-		// However, failing here would retry forever in EndBlock.
-		// Safe fallback: burn the fee or send to community pool?
-		// For now, let's log error but mark as distributed to unblock the queue.
-		// The fee remains in the module account (effectively burned/community pool).
-		ctx.Logger().Error("DistributeBridgeMintFee: no attestors found, skipping distribution", "dest_chain", destChain, "burn_id", burnID)
-		attestation.FeeDistributed = true
-		if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
-			return fmt.Errorf("failed to mark fee as distributed (skipped): %w", err)
+		return fmt.Errorf("no attestors available for fee distribution")
+	}
+	if sumPower != attestation.AttestedPower {
+		return fmt.Errorf("attested power mismatch: stored=%d sum=%d", attestation.AttestedPower, sumPower)
+	}
+
+	for _, p := range payouts {
+		if err := k.SendFromModule(ctx, p.accAddr, p.share); err != nil {
+			return fmt.Errorf("failed to pay bridge fee to %s: %w", p.accAddr, err)
 		}
-		return nil
 	}
 
 	if distributed < totalFee {

@@ -29,6 +29,10 @@ const (
 	// Key format: bridge_mint_fee_pending/{destination_chain}/{burn_id}
 	BridgeMintFeePendingPrefix = "bridge_mint_fee_pending/"
 
+	// BridgeMintFeeFailurePrefix stores failure records for fee distribution attempts.
+	// Key format: bridge_mint_fee_failures/{destination_chain}/{burn_id}
+	BridgeMintFeeFailurePrefix = "bridge_mint_fee_failures/"
+
 	// BridgeBurnsPrefix is the KVStore prefix for outbound bridge burn records
 	// Key format: bridge_burns/{burn_id}
 	BridgeBurnsPrefix = "bridge_burns/"
@@ -154,6 +158,24 @@ type BridgeMintAttestation struct {
 	CreatedAt int64 `json:"created_at"`
 }
 
+// BridgeMintFeeFailure tracks failed fee distribution attempts.
+type BridgeMintFeeFailure struct {
+	// DestinationChain is the external chain identifier (e.g., "solana")
+	DestinationChain string `json:"destination_chain"`
+	// BurnID is the Mirage burn sequence number (as string)
+	BurnID string `json:"burn_id"`
+	// FailureCount is the number of failed attempts
+	FailureCount uint64 `json:"failure_count"`
+	// FirstFailedHeight is the block height of the first failure
+	FirstFailedHeight int64 `json:"first_failed_height"`
+	// LastFailedHeight is the block height of the most recent failure
+	LastFailedHeight int64 `json:"last_failed_height"`
+	// LastError is the most recent failure reason
+	LastError string `json:"last_error"`
+	// Quarantined indicates the fee distribution has been quarantined
+	Quarantined bool `json:"quarantined"`
+}
+
 // NewBridgeAttestation creates a new BridgeAttestation with initialized maps
 func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount uint64, createdAt int64) *BridgeAttestation {
 	return &BridgeAttestation{
@@ -193,6 +215,11 @@ func BridgeMintAttestationKey(destChain, burnID string) []byte {
 // BridgeMintAttestorKey returns the store key for a bridge mint attestor entry.
 func BridgeMintAttestorKey(destChain, burnID, valoper string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeMintAttestorsPrefix, destChain, burnID, valoper))
+}
+
+// BridgeMintFeeFailureKey returns the store key for a fee distribution failure record.
+func BridgeMintFeeFailureKey(destChain, burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintFeeFailurePrefix, destChain, burnID))
 }
 
 // BridgeMintFeePendingKey returns the store key for pending fee distributions.
@@ -260,6 +287,20 @@ func (a *BridgeMintAttestation) AttestorList() []string {
 // GetAttestorPower returns the voting power for a specific attestor (0 if not found)
 func (a *BridgeMintAttestation) GetAttestorPower(validatorAddr string) int64 {
 	return a.Attestors[validatorAddr]
+}
+
+// Marshal serializes the mint fee failure to JSON
+func (f *BridgeMintFeeFailure) Marshal() ([]byte, error) {
+	return json.Marshal(f)
+}
+
+// UnmarshalBridgeMintFeeFailure deserializes JSON to a BridgeMintFeeFailure
+func UnmarshalBridgeMintFeeFailure(data []byte) (*BridgeMintFeeFailure, error) {
+	var f BridgeMintFeeFailure
+	if err := json.Unmarshal(data, &f); err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 // Marshal serializes the mint attestation to JSON
