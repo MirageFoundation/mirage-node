@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Verify Mirage Node Upgrade (v1.9.0-bridge) — strict + exhaustive.
+Verify Mirage Node Upgrade (v1.9.1-query-fix) — strict + exhaustive.
 
 This script is intentionally "no hand-waving":
-- It validates EVERY core param field introduced/used by v1.9.0 (including every tier field).
+- It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
 
@@ -24,9 +24,9 @@ import urllib.error
 import urllib.request
 
 
-UPGRADE_NAME = "v1.9.0-bridge"
+UPGRADE_NAME = "v1.9.1-query-fix"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION_PREFIX = "v1.9.0"
+EXPECTED_VERSION_PREFIX = "v1.9.1"
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
@@ -711,8 +711,10 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         "MsgSetAutoRenewal",
         "MsgIBCTransfer",
         "MsgBridgeBurn",
-        "MsgBridgeAttest",
-        "MsgBridgeAttestResponse",
+        "MsgBridgeAttestBurned",
+        "MsgBridgeAttestBurnedResponse",
+        "MsgBridgeAttestMinted",
+        "MsgBridgeAttestMintedResponse",
         # Config/params messages
         "TierConfig",
         "BridgeChainConfig",
@@ -804,22 +806,39 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         print(f"   [FAIL] Cannot verify BridgeChainConfig: {e}")
         failures.append(f"Cannot verify BridgeChainConfig proto: {e}")
     
-    # Check MsgBridgeAttest has required fields (used by orchestrator)
+    # Check MsgBridgeAttestBurned has required fields (used by orchestrator for inbound)
     try:
-        attest_cls = datatypes.MsgBridgeAttest
+        attest_cls = datatypes.MsgBridgeAttestBurned
         descriptor = attest_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
         
         required_attest_fields = ["validator", "source_chain", "burn_id", "mirage_recipient", "amount"]
         missing_attest = [f for f in required_attest_fields if f not in field_names]
         if missing_attest:
-            print(f"   [FAIL] MsgBridgeAttest missing: {', '.join(missing_attest)}")
-            failures.append(f"MsgBridgeAttest missing fields: {', '.join(missing_attest)}")
+            print(f"   [FAIL] MsgBridgeAttestBurned missing: {', '.join(missing_attest)}")
+            failures.append(f"MsgBridgeAttestBurned missing fields: {', '.join(missing_attest)}")
         else:
-            print(f"   [OK] MsgBridgeAttest has required fields")
+            print(f"   [OK] MsgBridgeAttestBurned has required fields")
     except Exception as e:
-        print(f"   [FAIL] Cannot verify MsgBridgeAttest: {e}")
-        failures.append(f"Cannot verify MsgBridgeAttest proto: {e}")
+        print(f"   [FAIL] Cannot verify MsgBridgeAttestBurned: {e}")
+        failures.append(f"Cannot verify MsgBridgeAttestBurned proto: {e}")
+    
+    # Check MsgBridgeAttestMinted has required fields (used by orchestrator for outbound)
+    try:
+        attest_cls = datatypes.MsgBridgeAttestMinted
+        descriptor = attest_cls.DESCRIPTOR
+        field_names = [f.name for f in descriptor.fields]
+        
+        required_attest_fields = ["validator", "burn_id", "destination_chain", "destination_tx"]
+        missing_attest = [f for f in required_attest_fields if f not in field_names]
+        if missing_attest:
+            print(f"   [FAIL] MsgBridgeAttestMinted missing: {', '.join(missing_attest)}")
+            failures.append(f"MsgBridgeAttestMinted missing fields: {', '.join(missing_attest)}")
+        else:
+            print(f"   [OK] MsgBridgeAttestMinted has required fields")
+    except Exception as e:
+        print(f"   [FAIL] Cannot verify MsgBridgeAttestMinted: {e}")
+        failures.append(f"Cannot verify MsgBridgeAttestMinted proto: {e}")
     
     # Check MsgBridgeBurn has required fields (user bridge transactions)
     try:
@@ -998,7 +1017,7 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.0-bridge upgrade")
+    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.1-query-fix upgrade")
     parser.add_argument("--node", default="http://127.0.0.1:26657", help="CometBFT RPC endpoint")
     parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory")
     parser.add_argument("--skip-config", action="store_true", help="Skip local config checks")

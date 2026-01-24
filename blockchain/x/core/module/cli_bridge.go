@@ -35,9 +35,9 @@ func GetBridgeQueryCmd() *cobra.Command {
 // GetCmdQueryBridgeMinted implements the query bridge minted command.
 func GetCmdQueryBridgeMinted() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "minted [burn_id]",
-		Short: "Query mint confirmation by burn ID",
-		Args:  cobra.ExactArgs(1),
+		Use:   "minted [destination_chain] [burn_id]",
+		Short: "Query mint confirmation by destination chain and burn ID",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			clientCtx, err := client.GetClientQueryContext(cmd)
 			if err != nil {
@@ -46,7 +46,8 @@ func GetCmdQueryBridgeMinted() *cobra.Command {
 
 			queryClient := types.NewQueryClient(clientCtx)
 			res, err := queryClient.GetBridgeMinted(cmd.Context(), &types.QueryBridgeMintedRequest{
-				BurnId: args[0],
+				DestinationChain: args[0],
+				BurnId:           args[1],
 			})
 			if err != nil {
 				return err

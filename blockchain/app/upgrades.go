@@ -729,6 +729,27 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// v1.9.1-query-fix: Bridge query endpoint fixes
+	// - Fixed CLI: `miraged q bridge minted` now requires destination_chain parameter
+	// - Fixed REST: Added GetBridgeMinted handler to REST gateway
+	// - Fixed proto: QueryBridgeMintedResponse now includes attestation progress fields
+	// - Deploy: Always prunes Docker and clears /tmp on remote deploys
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.1-query-fix",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.1-query-fix...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.1-query-fix complete - bridge query endpoints fixed")
+			return toVM, nil
+		},
+	)
+
 	// v1.10.0-bridge-refactor: Bridge attestation refactor
 	// - BridgeBurn no longer creates state records (event-only)
 	// - Unified BridgeAttestation model with direction field
