@@ -188,10 +188,18 @@ message QueryBridgeMintedRequest {
 
 // QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
 message QueryBridgeMintedResponse {
-  // minted indicates whether the mint has been confirmed
+  // minted indicates whether the mint has been confirmed (threshold crossed)
   bool minted = 1;
   // destination_chain is the external chain where mint occurred (e.g., "solana")
   string destination_chain = 2;
   // destination_tx is the tx signature/hash on the destination chain
   string destination_tx = 3;
+  // found indicates whether any attestation record exists for this burn
+  bool found = 4;
+  // attestors lists the validator addresses that have attested
+  repeated string attestors = 5;
+  // attested_power is the total voting power that has attested
+  int64 attested_power = 6;
+  // required_power is the voting power required to confirm
+  int64 required_power = 7;
 }

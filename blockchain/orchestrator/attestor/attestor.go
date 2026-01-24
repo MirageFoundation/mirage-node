@@ -157,17 +157,47 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 			continue // Skip this burn, don't return error
 		}
 
-		watcher, err := a.findWatcher(burn.DestinationChain)
-		if err != nil {
-			return err
-		}
+		// Query existing attestation to see if another validator already minted
+		// This prevents race condition where multiple validators submit different destination_tx
 		var sig string
-		if err := a.retry(ctx, func() error {
-			var execErr error
-			sig, execErr = watcher.ExecuteMint(ctx, burn)
-			return execErr
-		}); err != nil {
-			return err
+		existing, err := a.mirage.QueryBridgeMinted(ctx, burn.DestinationChain, burn.BurnID)
+		if err != nil {
+			a.logger.Printf("DEBUG query existing attestation failed (will proceed to mint): %v", err)
+		} else if existing.Found && existing.DestinationTx != "" {
+			// Another validator already attested with a destination_tx - use it
+			sig = existing.DestinationTx
+			a.logger.Printf("DEBUG using existing destination_tx from chain burn_id=%s sig=%s", burn.BurnID, sig)
+		}
+
+		// If no existing destination_tx, execute mint on destination chain
+		if sig == "" {
+			watcher, err := a.findWatcher(burn.DestinationChain)
+			if err != nil {
+				return err
+			}
+			if err := a.retry(ctx, func() error {
+				var execErr error
+				sig, execErr = watcher.ExecuteMint(ctx, burn)
+				return execErr
+			}); err != nil {
+				return err
+			}
+		}
+
+		// Handle AlreadyMinted marker - need to find actual destination_tx from chain
+		if strings.HasPrefix(sig, "already_minted:") {
+			a.logger.Printf("DEBUG got AlreadyMinted from Solana, querying chain for destination_tx burn_id=%s", burn.BurnID)
+			existing, err := a.mirage.QueryBridgeMinted(ctx, burn.DestinationChain, burn.BurnID)
+			if err != nil {
+				a.logger.Printf("WARN AlreadyMinted but failed to query chain: %v", err)
+				sig = "" // Can't recover, skip attestation
+			} else if existing.Found && existing.DestinationTx != "" {
+				sig = existing.DestinationTx
+				a.logger.Printf("DEBUG recovered destination_tx from chain burn_id=%s sig=%s", burn.BurnID, sig)
+			} else {
+				a.logger.Printf("WARN AlreadyMinted but no destination_tx on chain yet burn_id=%s", burn.BurnID)
+				sig = "" // Can't recover without the original tx signature
+			}
 		}
 
 		if sig != "" {
@@ -235,6 +265,7 @@ func isPermanentError(err error) bool {
 		"TransactionTooOld",            // Sequence too old
 		"error: 6020",                  // TransactionTooOld error code
 		"bridge mint already recorded", // Duplicate mint confirmation on Mirage
+		"destination_tx mismatch",      // Another validator already attested with different tx
 	}
 	for _, pattern := range permanentPatterns {
 		if strings.Contains(errStr, pattern) {

@@ -37,7 +37,6 @@ Options:
   --moniker VALUE      Set CometBFT node moniker (default: mirage-node, REQUIRED for --init)
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
                        Example: --proxyjump mirage.vote
-  --prune              Run docker system prune during update (slow; not recommended).
   --no-cache           Disable Docker build cache (enabled by default).
 
 Local deployment:
@@ -73,14 +72,12 @@ MODE=""
 TARBALL_FILE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
-PRUNE=0
 NO_CACHE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --build-only) BUILD_ONLY=1 ; shift ;;
     --init) MODE="init" ; shift ;;
     --update) MODE="update" ; shift ;;
-    --prune) PRUNE=1 ; shift ;;
     --no-cache) NO_CACHE=1 ; shift ;;
     --moniker=*)
       MONIKER_VALUE="${1#*=}"
@@ -507,38 +504,26 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     docker stop --timeout=60 mirage || true
     docker rm mirage || true
   fi
-  if [ "$PRUNE" -eq 1 ]; then
-    docker system prune -f
-  fi
   if [ "$USE_TARBALL" -eq 1 ]; then
     echo "==> Loading image locally..."
     gunzip -c "$TARBALL" | docker load
   fi
 else
-  if [ "$USE_TARBALL" -eq 1 ]; then
-    run_ssh '
-      set -euo pipefail
-      if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
-        docker stop --timeout=60 mirage
-        docker rm mirage
-      fi
-    '
-    if [ "$PRUNE" -eq 1 ]; then
-      run_ssh 'docker system prune -f'
+  # Remote: always prune Docker and clear /tmp
+  run_ssh '
+    set -euo pipefail
+    if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
+      docker stop --timeout=60 mirage
+      docker rm mirage
     fi
+  '
+  echo "==> Pruning Docker and clearing /tmp..."
+  run_ssh 'docker system prune -af && rm -rf /tmp/* 2>/dev/null || true'
+  
+  if [ "$USE_TARBALL" -eq 1 ]; then
     echo "==> Loading image on remote..."
     run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
   else
-    run_ssh '
-      set -euo pipefail
-      if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
-        docker stop --timeout=60 mirage
-        docker rm mirage
-      fi
-    '
-    if [ "$PRUNE" -eq 1 ]; then
-      run_ssh 'docker system prune -f'
-    fi
     echo "==> Pulling image on remote: $DEPLOY_IMAGE"
     run_ssh "docker pull -q '$DEPLOY_IMAGE'"
   fi
