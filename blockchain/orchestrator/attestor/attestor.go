@@ -138,7 +138,9 @@ func (a *Attestor) submitAttestationBatch(ctx context.Context, burns []chains.Ex
 		if err := a.retry(ctx, func() error {
 			return a.mirage.SubmitBridgeAttest(ctx, burn)
 		}); err != nil {
-			return err
+			// Log but don't exit - continue processing other burns
+			a.logger.Printf("ERROR attestation failed for burn_id=%s: %v (continuing)", burn.BurnID, err)
+			continue
 		}
 	}
 	return nil
@@ -161,7 +163,8 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 		// The Mirage chain accepts all attestations; first destination_tx becomes canonical
 		watcher, err := a.findWatcher(burn.DestinationChain)
 		if err != nil {
-			return err
+			a.logger.Printf("ERROR no watcher for chain=%s burn_id=%s: %v (skipping)", burn.DestinationChain, burn.BurnID, err)
+			continue
 		}
 		var sig string
 		if err := a.retry(ctx, func() error {
@@ -169,7 +172,9 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 			sig, execErr = watcher.ExecuteMint(ctx, burn)
 			return execErr
 		}); err != nil {
-			return err
+			// Log but don't exit - continue processing other burns
+			a.logger.Printf("ERROR mint failed for burn_id=%s chain=%s: %v (continuing)", burn.BurnID, burn.DestinationChain, err)
+			continue
 		}
 
 		if sig != "" {
