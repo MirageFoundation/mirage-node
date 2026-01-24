@@ -406,53 +406,21 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				// Paid users: require reserve and skip PoW
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgIBCTransfer", "err", err.Error())
-					return ctx, err
-				}
-				continue
-			}
-			canon := buildCanonForIBCTransfer(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgIBCTransfer", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-				}
-			}
+		if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
+			ctx.Logger().Error("PoW: MsgIBCTransfer cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
+			return ctx, fmt.Errorf("MsgIBCTransfer cannot use PoW")
+		}
+		ctx.Logger().Debug("PoW: skipped for MsgIBCTransfer", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "channel", m.SourceChannel)
 
 		case *coretypes.MsgBridgeBurn:
 			if m.Authority == govAuthority {
 				continue
 			}
-			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
-				// Paid users: require reserve and skip PoW
-				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBridgeBurn", "err", err.Error())
-					return ctx, err
-				}
-				continue
-			}
-			canon := buildCanonForBridgeBurn(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBridgeBurn", "err", err.Error())
-				return ctx, err
-			}
-			if ctx.Priority() <= 0 {
-				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
-			}
-			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
-				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
-					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
-				}
-			}
+		if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
+			ctx.Logger().Error("PoW: MsgBridgeBurn cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
+			return ctx, fmt.Errorf("MsgBridgeBurn cannot use PoW")
+		}
+		ctx.Logger().Debug("PoW: skipped for MsgBridgeBurn", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "dest_chain", m.DestinationChain)
 
 		case *coretypes.MsgFollowModerator:
 			if m.Authority == govAuthority {

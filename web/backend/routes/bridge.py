@@ -472,21 +472,11 @@ def bridge_ibc_transfer():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Check subscriber status for PoW requirement
-        user_is_sub = is_subscriber(user_addr)
-        if not user_is_sub:
-            # Non-subscriber: require PoW
-            if not (difficulty > 0 and proof):
-                return jsonify({"error": "pow_required", "details": "Non-subscriber must provide valid PoW"}), 400
-            required = get_current_pow_difficulty()
-            if difficulty < required:
-                return jsonify({"error": "insufficient pow (precheck)"}), 400
-            if not is_valid_recent_block_hash(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-        else:
-            # Subscriber: PoW not allowed
-            if difficulty > 0 or proof > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+        # IBC transfer skips PoW for all users - token transfers are self-authenticating
+        # (you can't transfer tokens you don't have)
+        # Force difficulty and proof to 0 to ensure consistent signature verification
+        difficulty = 0
+        proof = 0
 
         # Verify signature
         try:
@@ -645,21 +635,11 @@ def bridge_burn():
 
         validator_addr = require_runtime().validator_payer_addr
 
-        # Check subscriber status for PoW requirement
-        user_is_sub = is_subscriber(user_addr)
-        if not user_is_sub:
-            # Non-subscriber: require PoW
-            if not (difficulty > 0 and proof):
-                return jsonify({"error": "pow_required", "details": "Non-subscriber must provide valid PoW"}), 400
-            required = get_current_pow_difficulty()
-            if difficulty < required:
-                return jsonify({"error": "insufficient pow (precheck)"}), 400
-            if not is_valid_recent_block_hash(last_block_hash):
-                return jsonify({"error": "invalid last_block_hash"}), 400
-        else:
-            # Subscriber: PoW not allowed
-            if difficulty > 0 or proof > 0:
-                return jsonify({"error": "pow not allowed for subscribers"}), 400
+        # Bridge burn skips PoW for all users - token transfers are self-authenticating
+        # (you can't burn tokens you don't have, and bridge fee is already charged)
+        # Force difficulty and proof to 0 to ensure consistent signature verification
+        difficulty = 0
+        proof = 0
 
         # Verify signature
         try:
