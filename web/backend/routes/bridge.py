@@ -57,6 +57,7 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
     """Query inbound bridge attestation from indexer DB."""
     with connect_db() as conn:
         with conn.cursor() as cur:
+            # Get attestation details from most recent record
             cur.execute(
                 """
                 SELECT tx_hash, recipient, amount, validator, minted, created_at
@@ -73,6 +74,21 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
             row = cur.fetchone()
             if not row:
                 return {"found": False, "confirmed": False}
+
+            # Count unique attestors
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT validator)
+                FROM bridge_transactions
+                WHERE direction = 'in'
+                  AND msg_type = 'attest_burned'
+                  AND LOWER(source_chain) = LOWER(%s)
+                  AND burn_id = %s
+                """,
+                (source_chain, burn_id),
+            )
+            attestor_count = cur.fetchone()[0] or 0
+
             return {
                 "found": True,
                 "confirmed": bool(row[4]),
@@ -81,6 +97,7 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
                 "amount": row[2],
                 "validator": row[3],
                 "created_at": row[5],
+                "attestor_count": attestor_count,
             }
 
 
@@ -119,6 +136,19 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
             )
             minted_row = cur.fetchone()
 
+            # Count unique attestors for this burn
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT validator)
+                FROM bridge_transactions
+                WHERE direction = 'out'
+                  AND msg_type = 'attest_minted'
+                  AND LOWER(burn_id) = LOWER(%s)
+                """,
+                (burn_tx_hash,),
+            )
+            attestor_count = cur.fetchone()[0] or 0
+
             return {
                 "found": True,
                 "confirmed": minted_row is not None,
@@ -128,6 +158,7 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
                 "created_at": burn_row[3],
                 "destination_tx": minted_row[0] if minted_row else None,
                 "confirmed_at": minted_row[1] if minted_row else None,
+                "attestor_count": attestor_count,
             }
 
 
