@@ -63,7 +63,7 @@ HOSTS=(
   "mirage.vote"
   "146.190.108.140"
   "139.59.9.96"
-#   "mirage.talk"
+  "mirage.talk"
 )
 
 # Get image tag info
