@@ -103,13 +103,16 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([]byte, uint64, error) {
 	clientCtx := c.ClientContext()
 	fromAddr := clientCtx.GetFromAddress()
-	accNum, accSeq, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
+	accNum, _, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query account info: %w", err)
 	}
 
-	// Build ORDERED tx for simulation (no unordered flag, no timeout)
-	simTxBytes, err := c.buildSimulationTx(clientCtx, msg, accNum, accSeq, simulationGasLimit)
+	// Build UNORDERED tx for simulation - must match broadcast tx structure
+	// to get accurate gas estimation (unordered txs have different ante handler paths)
+	simTimeout := time.Now().Add(1 * time.Hour) // Far future, doesn't matter for simulation
+	simFeeCoins := sdk.NewCoins(sdk.NewCoin(c.cfg.Mirage.FeeDenom, sdkmath.NewInt(0)))
+	simTxBytes, err := c.buildUnorderedTx(clientCtx, msg, accNum, simTimeout, simulationGasLimit, simFeeCoins)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to build simulation tx: %w", err)
 	}
@@ -141,33 +144,6 @@ func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([
 		return nil, 0, err
 	}
 	return txBytes, feeAmount.Uint64(), nil
-}
-
-// buildSimulationTx builds a regular ordered tx for simulation purposes.
-func (c *Client) buildSimulationTx(
-	clientCtx client.Context,
-	msg sdk.Msg,
-	accNum, accSeq uint64,
-	gasLimit uint64,
-) ([]byte, error) {
-	txf := tx.Factory{}.
-		WithTxConfig(clientCtx.TxConfig).
-		WithChainID(c.cfg.Mirage.ChainID).
-		WithKeybase(c.keyring).
-		WithAccountNumber(accNum).
-		WithSequence(accSeq).
-		WithGas(gasLimit)
-
-	txBuilder := clientCtx.TxConfig.NewTxBuilder()
-	if err := txBuilder.SetMsgs(msg); err != nil {
-		return nil, fmt.Errorf("failed to set tx messages: %w", err)
-	}
-	txBuilder.SetGasLimit(gasLimit)
-
-	if err := tx.Sign(context.Background(), txf, c.cfg.Mirage.KeyName, txBuilder, true); err != nil {
-		return nil, err
-	}
-	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
 }
 
 // buildUnorderedTx builds an unordered tx with timeout for actual broadcast.
