@@ -24,9 +24,8 @@ const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the safety margin applied to simulated gas.
 // With inline fee burning, the variance is small (only the threshold-crossing tx
-// burns the fee). 1.5x covers the difference between a normal attestation and
-// the one that triggers the burn.
-const gasBufferMultiplier = 1.5
+// burns the fee). 1.6x covers normal variance plus the fee burn on threshold.
+const gasBufferMultiplier = 1.6
 
 // simulationGasLimit is a high gas limit used only for simulation.
 const simulationGasLimit = 1_000_000
