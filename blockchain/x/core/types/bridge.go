@@ -137,10 +137,6 @@ type BridgeMintAttestation struct {
 	// attestation crossed the confirmation threshold.
 	ConfirmedBy string `json:"confirmed_by"`
 
-	// FeeDistributed indicates whether the bridge fee has been processed.
-	// Set to true after successful fee burn in EndBlock.
-	FeeDistributed bool `json:"fee_distributed"`
-
 	// CreatedAt is the block height when this attestation was first created
 	CreatedAt int64 `json:"created_at"`
 }

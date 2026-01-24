@@ -9,7 +9,6 @@ import (
 
 	"cosmossdk.io/log"
 	"cosmossdk.io/core/store"
-	sdkmath "cosmossdk.io/math"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -334,66 +333,6 @@ func TestBridgeMintAttestationMultiValidator(t *testing.T) {
 	}
 	if power := attestation.GetAttestorPower("val3"); power != 500 {
 		t.Errorf("GetAttestorPower(val3) = %d, want 500", power)
-	}
-}
-
-// TestBridgeMintAttestationProportionalFeeDistribution tests the proportional fee math
-func TestBridgeMintAttestationProportionalFeeDistribution(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-
-	// Three validators with different powers
-	attestation.AddAttestation("val1", 300) // 40%
-	attestation.AddAttestation("val2", 250) // 33.3%
-	attestation.AddAttestation("val3", 200) // 26.7%
-	// Total: 750
-
-	if attestation.AttestedPower != 750 {
-		t.Fatalf("Expected attested power 750, got %d", attestation.AttestedPower)
-	}
-
-	// Simulate fee math with 1000 umirage fee (legacy)
-	totalFee := uint64(1000)
-	var distributed uint64 = 0
-	shares := make(map[string]uint64)
-
-	for valAddr, power := range attestation.Attestors {
-		if power <= 0 {
-			continue
-		}
-		share := sdkmath.NewIntFromUint64(totalFee).
-			MulRaw(power).
-			QuoRaw(attestation.AttestedPower).
-			Uint64()
-		shares[valAddr] = share
-		distributed += share
-	}
-
-	// Check proportional shares
-	// val1: 1000 * 300 / 750 = 400
-	// val2: 1000 * 250 / 750 = 333
-	// val3: 1000 * 200 / 750 = 266
-	// Total: 999 (1 dust)
-	expectedShares := map[string]uint64{
-		"val1": 400,
-		"val2": 333,
-		"val3": 266,
-	}
-
-	for val, expected := range expectedShares {
-		if shares[val] != expected {
-			t.Errorf("Share for %s = %d, want %d", val, shares[val], expected)
-		}
-	}
-
-	// Check dust
-	dust := totalFee - distributed
-	if dust != 1 {
-		t.Errorf("Dust = %d, want 1", dust)
-	}
-
-	// Total distributed + dust should equal total fee
-	if distributed+dust != totalFee {
-		t.Errorf("distributed(%d) + dust(%d) = %d, want %d", distributed, dust, distributed+dust, totalFee)
 	}
 }
 
@@ -1217,103 +1156,6 @@ func TestBridgeAttestationDuplicateRejectionInbound(t *testing.T) {
 	// Different validator should succeed
 	if !attestation.AddAttestation("validator2", 30) {
 		t.Error("Different validator attestation should succeed")
-	}
-}
-
-// =============================================================================
-// Fee Distribution Edge Cases
-// =============================================================================
-
-// TestFeeDistributionZeroFee tests that zero fee doesn't cause issues
-func TestFeeDistributionZeroFee(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-	attestation.AddAttestation("val1", 50)
-	attestation.AddAttestation("val2", 50)
-	attestation.AttestedPower = 100
-
-	totalFee := uint64(0)
-
-	// With zero fee, all shares should be zero
-	for _, power := range attestation.Attestors {
-		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
-		if share != 0 {
-			t.Errorf("Expected zero share for zero fee, got %d", share)
-		}
-	}
-}
-
-// TestFeeDistributionSingleValidator tests single validator gets full fee
-func TestFeeDistributionSingleValidator(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-	attestation.AddAttestation("val1", 100)
-	attestation.AttestedPower = 100
-
-	totalFee := uint64(10000)
-
-	var totalDistributed uint64
-	for _, power := range attestation.Attestors {
-		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
-		totalDistributed += share
-	}
-
-	if totalDistributed != totalFee {
-		t.Errorf("Single validator should get full fee: got %d, want %d", totalDistributed, totalFee)
-	}
-}
-
-// TestFeeDistributionDustHandling tests that rounding dust is handled correctly
-func TestFeeDistributionDustHandling(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-	attestation.AddAttestation("val1", 33)
-	attestation.AddAttestation("val2", 33)
-	attestation.AddAttestation("val3", 34)
-	attestation.AttestedPower = 100
-
-	totalFee := uint64(100) // 100 / 3 = 33.33... each
-
-	var totalDistributed uint64
-	for _, power := range attestation.Attestors {
-		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
-		totalDistributed += share
-	}
-
-	// Due to rounding, we may lose some dust
-	dust := totalFee - totalDistributed
-	if dust > 2 { // Max 2 units of dust for 3 validators
-		t.Errorf("Too much dust: %d", dust)
-	}
-
-	// In actual implementation, dust goes to threshold-crossing validator
-	// This test just verifies the math doesn't overflow or panic
-}
-
-// TestFeeDistributionLargeValues tests fee math with large values (legacy)
-func TestFeeDistributionLargeValues(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-	attestation.AddAttestation("val1", 1000000000) // 1 billion power
-	attestation.AddAttestation("val2", 2000000000) // 2 billion power
-	attestation.AttestedPower = 3000000000
-
-	totalFee := uint64(1000000000000) // 1 trillion fee
-
-	var totalDistributed uint64
-	for _, power := range attestation.Attestors {
-		share := sdkmath.NewIntFromUint64(totalFee).MulRaw(power).QuoRaw(attestation.AttestedPower).Uint64()
-		totalDistributed += share
-	}
-
-	// val1 should get ~333B, val2 should get ~666B
-	expectedVal1 := uint64(333333333333)
-	expectedVal2 := uint64(666666666666)
-
-	val1Share := sdkmath.NewIntFromUint64(totalFee).MulRaw(1000000000).QuoRaw(3000000000).Uint64()
-	val2Share := sdkmath.NewIntFromUint64(totalFee).MulRaw(2000000000).QuoRaw(3000000000).Uint64()
-
-	if val1Share != expectedVal1 {
-		t.Errorf("val1 share = %d, want %d", val1Share, expectedVal1)
-	}
-	if val2Share != expectedVal2 {
-		t.Errorf("val2 share = %d, want %d", val2Share, expectedVal2)
 	}
 }
 
