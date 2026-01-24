@@ -986,13 +986,17 @@ func TestBridgeAttestationStorage(t *testing.T) {
 		t.Error("Expected attestation to not exist initially")
 	}
 
-	// Create and store
+	// Create attestation (attestors stored separately)
 	attestation := types.NewBridgeAttestation(sourceChain, burnID, "mirage1recipient", 1000000, 100)
-	attestation.AddAttestation("validator1", 100)
 	attestation.AttestedPower = 100
 
 	if err := mk.SetBridgeAttestation(ctx, attestation); err != nil {
 		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+
+	// Store attestor separately
+	if err := mk.SetBridgeAttestor(ctx, sourceChain, burnID, "validator1", 100); err != nil {
+		t.Fatalf("SetBridgeAttestor error: %v", err)
 	}
 
 	// Retrieve and verify
@@ -1009,7 +1013,13 @@ func TestBridgeAttestationStorage(t *testing.T) {
 	if restored.AttestedPower != 100 {
 		t.Errorf("AttestedPower = %d, want 100", restored.AttestedPower)
 	}
-	if !restored.HasAttested("validator1") {
+
+	// Verify attestor stored separately
+	hasAttestor, err := mk.HasBridgeAttestor(ctx, sourceChain, burnID, "validator1")
+	if err != nil {
+		t.Fatalf("HasBridgeAttestor error: %v", err)
+	}
+	if !hasAttestor {
 		t.Error("Expected validator1 to have attested")
 	}
 }
