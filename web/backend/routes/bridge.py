@@ -6,19 +6,15 @@ Endpoints:
 - POST /api/bridge/ibc_transfer: Relay IBC transfer to Cosmos chains (e.g., Osmosis)
 - POST /api/bridge/burn: Relay burn for attested bridge to non-IBC chains (e.g., Solana)
 - GET /api/bridge/config: Get bridge configuration (enabled chains, fees)
-- GET /api/bridge/status: Get bridge status (pending transfers)
-- GET /api/bridge/get_minted: Query bridge mint status from indexer DB
+- GET /api/bridge/status: Query bridge status from indexer DB
 """
 
 import base64
-import json
 import os
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 from google.protobuf.any_pb2 import Any as AnyPB
-from google.protobuf.json_format import MessageToDict
-import grpc
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 
 from bech32 import bech32_decode, convertbits  # type: ignore
@@ -26,10 +22,6 @@ from bech32 import bech32_decode, convertbits  # type: ignore
 from shared.datatypes import (
     MsgIBCTransfer,
     MsgBridgeBurn,
-    QueryBridgeAttestationRequest,
-    QueryBridgeAttestationResponse,
-    QueryBridgeMintedRequest,
-    QueryBridgeMintedResponse,
 )
 from shared.canon import canon_signed_with_pow
 
@@ -160,190 +152,6 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
                 "confirmed_at": minted_row[1] if minted_row else None,
                 "attestor_count": attestor_count,
             }
-
-
-def _query_bridge_attestation_from_chain(source_chain: str, burn_id: str, timeout: float = 5.0) -> dict:
-    """Query inbound bridge attestation directly from chain via gRPC."""
-
-    def _deserialize(data: bytes) -> QueryBridgeAttestationResponse:
-        msg = QueryBridgeAttestationResponse()
-        msg.ParseFromString(data)
-        return msg
-
-    try:
-        target = require_runtime().grpc_target
-    except Exception as e:
-        raise RuntimeError(f"gRPC not configured: {e}")
-
-    try:
-        with grpc.insecure_channel(target) as channel:
-            method = channel.unary_unary(
-                "/mirage.core.v1.Query/GetBridgeAttestation",
-                request_serializer=lambda msg: msg.SerializeToString(),
-                response_deserializer=_deserialize,
-            )
-            req = QueryBridgeAttestationRequest(source_chain=source_chain, burn_id=burn_id)
-            resp = method(req, timeout=timeout)
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC error: {e.code()} - {e.details()}")
-
-    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
-
-
-def _query_bridge_minted_from_chain(dest_chain: str, burn_id: str, timeout: float = 5.0) -> dict:
-    """Query outbound bridge mint status (attestation progress + completion) from chain via gRPC."""
-
-    def _deserialize(data: bytes) -> QueryBridgeMintedResponse:
-        msg = QueryBridgeMintedResponse()
-        msg.ParseFromString(data)
-        return msg
-
-    try:
-        target = require_runtime().grpc_target
-    except Exception as e:
-        raise RuntimeError(f"gRPC not configured: {e}")
-
-    try:
-        with grpc.insecure_channel(target) as channel:
-            method = channel.unary_unary(
-                "/mirage.core.v1.Query/GetBridgeMinted",
-                request_serializer=lambda msg: msg.SerializeToString(),
-                response_deserializer=_deserialize,
-            )
-            req = QueryBridgeMintedRequest(destination_chain=dest_chain, burn_id=burn_id)
-            resp = method(req, timeout=timeout)
-    except grpc.RpcError as e:
-        raise RuntimeError(f"gRPC error: {e.code()} - {e.details()}")
-
-    return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
-
-
-def _decode_event_attributes(attrs: list) -> dict:
-    """Decode CometBFT event attributes (handles both base64 and plain text formats)."""
-    decoded: Dict[str, str] = {}
-    for attr in attrs:
-        if "key" not in attr or "value" not in attr:
-            raise RuntimeError("tx event attribute missing key/value")
-        raw_key = attr["key"]
-        raw_value = attr["value"]
-        # Try base64 decode first (old CometBFT format), fall back to plain text (new format)
-        try:
-            key = base64.b64decode(raw_key).decode("utf-8")
-        except Exception:
-            key = str(raw_key)
-        try:
-            value = base64.b64decode(raw_value).decode("utf-8")
-        except Exception:
-            value = str(raw_value)
-        decoded[key] = value
-    return decoded
-
-
-def _get_bridge_burn_event_from_tx_hash(tx_hash: str, timeout: float = 3.0) -> dict:
-    """Fetch bridge_burn event attributes from a Mirage tx hash via RPC."""
-    import urllib.request as _url
-    import urllib.error as _urlerr
-
-    try:
-        rpc = require_runtime().rpc_url
-    except Exception as e:
-        raise RuntimeError(f"RPC not configured: {e}")
-
-    url = f"{rpc}/tx?hash=0x{tx_hash.upper()}&prove=false"
-    try:
-        with _url.urlopen(url, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except _urlerr.HTTPError as e:
-        raise RuntimeError(f"RPC HTTP error {e.code}: {e.reason}")
-    except _urlerr.URLError as e:
-        raise RuntimeError(f"RPC connection error: {e.reason}")
-    except TimeoutError:
-        raise RuntimeError(f"RPC timeout after {timeout}s")
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"RPC invalid JSON: {e}")
-
-    # Check for RPC-level error response
-    if "error" in (data or {}):
-        err = data["error"]
-        raise RuntimeError(f"RPC error: {err.get('message', err)}")
-
-    txr = (data or {}).get("result", {})
-    if not txr:
-        raise RuntimeError("TX not found (not indexed yet?)")
-
-    events = (txr.get("tx_result", {}) or {}).get("events", []) or []
-    for ev in events:
-        if str(ev.get("type", "") or "") != "bridge_burn":
-            continue
-        attrs = _decode_event_attributes(ev.get("attributes") or [])
-        return attrs
-    raise RuntimeError("bridge_burn event not found in tx result")
-
-
-def _query_attestation_status_inbound(source_chain: str, burn_id: str) -> dict:
-    """Query inbound attestation progress from indexer DB."""
-    with connect_db() as conn:
-        with conn.cursor() as cur:
-            # Get all attestations for this burn_id
-            cur.execute(
-                """
-                SELECT validator, minted, created_at
-                FROM bridge_transactions
-                WHERE direction = 'in'
-                  AND msg_type = 'attest_burned'
-                  AND LOWER(source_chain) = LOWER(%s)
-                  AND burn_id = %s
-                ORDER BY created_at ASC
-                """,
-                (source_chain, burn_id),
-            )
-            rows = cur.fetchall()
-            if not rows:
-                return {"found": False, "confirmed": False, "attestors": [], "attestor_count": 0}
-
-            attestors = [r[0] for r in rows if r[0]]
-            confirmed = any(r[1] for r in rows)  # Any row with minted=true means threshold met
-
-            return {
-                "found": True,
-                "confirmed": confirmed,
-                "attestors": attestors,
-                "attestor_count": len(attestors),
-            }
-
-
-def _query_attestation_status_outbound(burn_id: str) -> dict:
-    """Query outbound attestation progress from indexer DB."""
-    with connect_db() as conn:
-        with conn.cursor() as cur:
-            # Get all attestations for this burn_id
-            cur.execute(
-                """
-                SELECT validator, minted, destination_tx, created_at
-                FROM bridge_transactions
-                WHERE direction = 'out'
-                  AND msg_type = 'attest_minted'
-                  AND LOWER(burn_id) = LOWER(%s)
-                ORDER BY created_at ASC
-                """,
-                (burn_id,),
-            )
-            rows = cur.fetchall()
-            if not rows:
-                return {"found": False, "confirmed": False, "attestors": [], "attestor_count": 0}
-
-            attestors = [r[0] for r in rows if r[0]]
-            confirmed = any(r[1] for r in rows)  # Any row with minted=true means threshold met
-            destination_tx = next((r[2] for r in rows if r[2]), None)
-
-            return {
-                "found": True,
-                "confirmed": confirmed,
-                "attestors": attestors,
-                "attestor_count": len(attestors),
-                "destination_tx": destination_tx,
-            }
-
 
 def _base58_decode(s: str) -> bytes:
     """Minimal base58 decode (Bitcoin alphabet). Raises ValueError on invalid input."""
@@ -502,9 +310,9 @@ def bridge_config():
         return jsonify({"error": str(e)}), 500
 
 
-@bridge_bp.route("/api/bridge/get_minted", methods=["GET"])
-def get_bridge_minted():
-    """Query bridge mint status from indexer DB.
+@bridge_bp.route("/api/bridge/status", methods=["GET"])
+def get_bridge_status():
+    """Query bridge status from indexer DB.
 
     Inbound (external -> Mirage): pass burn_sequence + chain (e.g., chain=solana)
     Outbound (Mirage -> external): pass burn_tx_hash (Mirage burn tx hash)
@@ -515,7 +323,7 @@ def get_bridge_minted():
     chain = (request.args.get("chain") or "").strip().lower()
     log_event(
         rid,
-        "get_bridge_minted.begin",
+        "bridge_status.begin",
         burn_sequence=burn_sequence,
         burn_tx_hash=burn_tx_hash,
         chain=chain,
@@ -542,7 +350,7 @@ def get_bridge_minted():
             result["burn_tx_hash"] = None
             log_event(
                 rid,
-                "get_bridge_minted.ok",
+                "bridge_status.ok",
                 burn_sequence=burn_sequence,
                 chain=chain,
                 found=result.get("found", False),
@@ -551,125 +359,23 @@ def get_bridge_minted():
         else:
             # Outbound bridge: query by burn_tx_hash (Mirage tx hash)
             tx_hash = burn_tx_hash.lower()
-            burn_attrs = _get_bridge_burn_event_from_tx_hash(tx_hash)
-            burn_seq = str(burn_attrs.get("burn_id", "") or "").strip()
-            dest_chain = str(burn_attrs.get("destination_chain", "") or "").strip().lower()
-            if not burn_seq or not dest_chain:
-                raise RuntimeError("bridge_burn event missing burn_id or destination_chain")
+            if len(tx_hash) != 64 or any(c not in "0123456789abcdef" for c in tx_hash):
+                return jsonify({"error": "invalid burn_tx_hash (expected tx hash)"}), 400
 
             result = _query_bridge_burn_from_db(tx_hash)
             result["burn_tx_hash"] = tx_hash
-            result["burn_sequence"] = burn_seq
-            if not result.get("destination_chain"):
-                result["destination_chain"] = dest_chain
+            result["burn_sequence"] = None
             log_event(
                 rid,
-                "get_bridge_minted.ok",
+                "bridge_status.ok",
                 burn_tx_hash=tx_hash,
-                burn_sequence=burn_seq,
+                burn_sequence=result.get("burn_sequence"),
                 confirmed=result.get("confirmed", False),
                 destination_chain=result.get("destination_chain"),
             )
         return jsonify(result)
     except Exception as e:
-        log_event(rid, "get_bridge_minted.err", chain=chain, error=str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-@bridge_bp.route("/api/bridge/attestation_status", methods=["GET"])
-def get_attestation_status():
-    """Query bridge attestation progress from chain (gRPC + RPC).
-
-    Inbound (external -> Mirage): pass burn_sequence + chain (e.g., chain=solana)
-    Outbound (Mirage -> external): pass burn_tx_hash (Mirage burn tx hash)
-
-    Returns:
-    - found: whether any attestations exist
-    - confirmed: whether threshold has been met
-    - attestors: list of validator addresses that have attested
-    - attestor_count: number of attestations received
-    - attested_power: total voting power that has attested
-    - required_power: voting power required to confirm
-    """
-    rid = next_request_id()
-    burn_sequence = (request.args.get("burn_sequence") or "").strip()
-    burn_tx_hash = (request.args.get("burn_tx_hash") or "").strip().lower()
-    chain = (request.args.get("chain") or "").strip().lower()
-    log_event(
-        rid,
-        "attestation_status.begin",
-        burn_sequence=burn_sequence,
-        burn_tx_hash=burn_tx_hash,
-        chain=chain,
-    )
-
-    if chain:
-        if not burn_sequence:
-            return jsonify({"error": "burn_sequence required"}), 400
-        if burn_tx_hash:
-            return jsonify({"error": "burn_tx_hash not allowed for inbound queries"}), 400
-    else:
-        if not burn_tx_hash:
-            return jsonify({"error": "burn_tx_hash required"}), 400
-        if burn_sequence:
-            return jsonify({"error": "burn_sequence not allowed for outbound queries"}), 400
-
-    # Note: No IP restriction - this is a read-only status query for public blockchain data
-
-    try:
-        if chain:
-            # Inbound bridge: query from indexer DB
-            db_data = _query_attestation_status_inbound(chain, burn_sequence)
-            result = {
-                "found": db_data.get("found", False),
-                "confirmed": db_data.get("confirmed", False),
-                "burn_sequence": burn_sequence,
-                "burn_tx_hash": None,
-                "attestors": db_data.get("attestors", []),
-                "attestor_count": db_data.get("attestor_count", 0),
-                "attested_power": 0,
-                "required_power": 0,
-            }
-        else:
-            # Outbound bridge: resolve burn sequence from tx hash, then query chain
-            tx_hash = burn_tx_hash.lower()
-            if len(tx_hash) != 64 or any(c not in "0123456789abcdef" for c in tx_hash):
-                return jsonify({"error": "invalid burn_tx_hash (expected tx hash)"}), 400
-
-            burn_attrs = _get_bridge_burn_event_from_tx_hash(tx_hash)
-            burn_seq = str(burn_attrs.get("burn_id", "") or "").strip()
-            dest_chain = str(burn_attrs.get("destination_chain", "") or "").strip().lower()
-            if not burn_seq or not dest_chain:
-                raise RuntimeError("bridge_burn event missing burn_id or destination_chain")
-
-            # Outbound bridge: query from indexer DB
-            db_data = _query_attestation_status_outbound(tx_hash)
-            result = {
-                "found": db_data.get("found", False),
-                "confirmed": db_data.get("confirmed", False),
-                "burn_tx_hash": tx_hash,
-                "burn_sequence": burn_seq,
-                "attestors": db_data.get("attestors", []),
-                "attestor_count": db_data.get("attestor_count", 0),
-                "attested_power": 0,
-                "required_power": 0,
-                "destination_chain": dest_chain,
-                "destination_tx": db_data.get("destination_tx"),
-            }
-
-        log_event(
-            rid,
-            "attestation_status.ok",
-            burn_sequence=burn_sequence,
-            burn_tx_hash=burn_tx_hash,
-            chain=chain,
-            found=result.get("found", False),
-            confirmed=result.get("confirmed", False),
-            attestor_count=result.get("attestor_count", 0),
-        )
-        return jsonify(result)
-    except Exception as e:
-        log_event(rid, "attestation_status.err", chain=chain, error=str(e))
+        log_event(rid, "bridge_status.err", chain=chain, error=str(e))
         return jsonify({"error": str(e)}), 500
 
 

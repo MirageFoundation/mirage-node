@@ -351,8 +351,7 @@ After starting, check tmux window `hermes`:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/bridge/config` | GET | Returns bridge chain configs with per-chain fees |
-| `/api/bridge/get_minted` | GET | Query mint confirmation by burn_id |
-| `/api/bridge/attestations` | GET | Query attestations for a burn |
+| `/api/bridge/status` | GET | Query bridge status by burn_id |
 
 **Query RPC Changes:**
 - All query RPCs renamed to use `Get` prefix for consistency
@@ -370,7 +369,7 @@ All bridge endpoints use `/api/bridge/` prefix.
 
 ### Breaking Changes
 
-- **API**: `/api/get_bridge_minted` renamed to `/api/bridge/get_minted`
+- **API**: `/api/get_bridge_minted` renamed to `/api/bridge/status`
 - **Query RPCs**: All renamed to use `Get` prefix
 - **Build path**: `blockchain/miraged` → `blockchain/bin/miraged`
 - **Env vars**: `MIRAGE_INDEXER_*` → `INDEXER_*`

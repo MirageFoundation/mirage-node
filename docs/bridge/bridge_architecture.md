@@ -119,7 +119,7 @@ The bridge exposes two distinct identifiers and they are **not interchangeable**
 3. Orchestrators detect event, mint MIRAGE on Solana
 4. Each orchestrator submits `MsgBridgeAttestMinted` (includes `mirage_tx_hash` for linking)
 5. When 2/3+ voting power attests → mark as confirmed
-6. Frontend polls `/api/bridge/get_minted` to show completion
+6. Frontend polls `/api/bridge/status` to show completion
 
 ### IBC Bridge (Osmosis)
 
@@ -339,13 +339,13 @@ This event-driven approach ensures the UI reflects the actual chain state.
 
 ## API Endpoints
 
-### GET /api/bridge/get_minted
+### GET /api/bridge/status
 
 Query bridge status from indexer database.
 
 **Inbound (Solana → Mirage):**
 ```http
-GET /api/bridge/get_minted?burn_sequence=<solana_burn_sequence>&chain=solana
+GET /api/bridge/status?burn_sequence=<solana_burn_sequence>&chain=solana
 ```
 
 Response:
@@ -357,13 +357,14 @@ Response:
   "burn_tx_hash": null,
   "mint_tx": "ABC123DEF456...",
   "recipient": "mirage1abc...",
-  "amount": 1000000
+  "amount": 1000000,
+  "attestor_count": 4
 }
 ```
 
 **Outbound (Mirage → Solana):**
 ```http
-GET /api/bridge/get_minted?burn_tx_hash=<mirage_tx_hash>
+GET /api/bridge/status?burn_tx_hash=<mirage_tx_hash>
 ```
 
 Response:
@@ -372,18 +373,17 @@ Response:
   "found": true,
   "confirmed": true,
   "burn_tx_hash": "f2a1...9c",
-  "burn_sequence": "42",
+  "burn_sequence": null,
   "destination_chain": "solana",
+  "destination_address": "So1...abc",
   "destination_tx": "5xYzABC...",
-  "attestors": ["miragevaloper1abc...", "miragevaloper1def..."],
+  "amount": 1000000,
   "attestor_count": 2,
-  "attested_power": 70,
-  "required_power": 67,
-  "amount": 1000000
+  "confirmed_at": 1700000000
 }
 ```
 
-**Note:** The `attested_power` and `required_power` fields allow the frontend to show attestation progress before `confirmed` becomes `true`.
+**Note:** `burn_sequence` is null for outbound responses because the indexer stores the Mirage tx hash as the burn identifier.
 
 ### GET /api/bridge/config
 
@@ -409,14 +409,14 @@ The bridge UI (`BridgeView.js`) provides:
 1. User enters amount and Solana recipient address
 2. Transaction summary shows fees and expected receive amount
 3. 3-step progress: Confirm on Mirage → Orchestrator detection → Mint on Solana
-4. Polls `/api/bridge/get_minted` until confirmed
+4. Polls `/api/bridge/status` until confirmed
 
 ### Bridge In (Solana → Mirage)
 1. User connects Phantom wallet
 2. Shows MIRAGE and SOL balances
 3. Transaction summary with estimated Solana fees
 4. 3-step progress: Confirm on Solana → Orchestrator detection → Mint on Mirage
-5. Polls `/api/bridge/get_minted?chain=solana` until confirmed
+5. Polls `/api/bridge/status?chain=solana` until confirmed
 
 ## Configuration
 
@@ -486,7 +486,7 @@ message Params {
   - `bridge_attest_minted` event now includes `attested_power`, `required_power`, and `minted` attributes
   - Indexer updated to flip `minted=true` on threshold-crossing event
   - Frontend shows attestation progress during "Validator confirmations" step
-  - Added `/api/bridge/attestation_status` endpoint for polling attestation progress
+  - Added `/api/bridge/status` endpoint for polling attestation progress
 
 - **v1.10.1**: Fee handling and indexer fixes
   - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee tracking

@@ -71,7 +71,8 @@ const BRIDGE_POLL_SCHEDULE = {
     ],
 };
 
-const MINT_POLL_SCHEDULE = {
+// Bridge status polling schedule for Bridge Out (Mirage -> external)
+const BRIDGE_OUT_STATUS_POLL_SCHEDULE = {
     initialDelayMs: 10000, // Wait 10s before first poll (validators need time to detect burn and attest)
     intervalsMs: [
         ...Array.from({ length: 30 }, () => 1000),  // 10-40s: every 1s
@@ -827,9 +828,9 @@ const DisconnectButton = styled.button`
 const SOLANA_RPC_DEVNET = 'https://api.devnet.solana.com';
 const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 
-// Mint polling schedule for Bridge In (Solana -> Mirage)
+// Bridge status polling schedule for Bridge In (Solana -> Mirage)
 // Same pattern: 1s for first 30s, then 2s for 30-60s, then 3s after
-const BRIDGE_IN_POLL_SCHEDULE = {
+const BRIDGE_IN_STATUS_POLL_SCHEDULE = {
     initialDelayMs: 10000, // Wait 10s before first poll (orchestrators need time to detect burn and attest)
     intervalsMs: [
         ...Array.from({ length: 20 }, () => 1000),  // 10-30s: every 1s
@@ -954,8 +955,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         if (bridgeStatus !== 'pending' || burnNonce === null) return;
 
         let cancelled = false;
-        const maxAttempts = BRIDGE_IN_POLL_SCHEDULE.intervalsMs.length + 1;
-        const initialDelayMs = BRIDGE_IN_POLL_SCHEDULE.initialDelayMs;
+        const maxAttempts = BRIDGE_IN_STATUS_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_IN_STATUS_POLL_SCHEDULE.initialDelayMs;
         let attestationFoundTime = null; // Track when we first see found=true
 
         setMintStatus({ state: 'pending', txHash: '', error: '' });
@@ -969,15 +970,15 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         const poll = async (attempt) => {
             if (cancelled) return;
             try {
-                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
+                console.debug('[Solana Bridge In] Status poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
 
-                // Query mint status (includes attestor count)
-                const res = await fetch(`/api/bridge/get_minted?burn_sequence=${burnNonce}&chain=solana`);
+                // Query bridge status (includes attestor count)
+                const res = await fetch(`/api/bridge/status?burn_sequence=${burnNonce}&chain=solana`);
                 if (!res.ok) {
-                    throw new Error(`mint query failed (${res.status})`);
+                    throw new Error(`status query failed (${res.status})`);
                 }
                 const data = await res.json();
-                console.debug('[Solana Bridge In] Mint poll response:', data);
+                console.debug('[Solana Bridge In] Bridge status response:', data);
 
                 // Track when attestation is first found (orchestrator detected the burn)
                 if (data.found && !attestationFoundTime) {
@@ -993,7 +994,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     console.debug('[Solana Bridge In] Attestation found, starting mint timer');
                 }
 
-                // Update attestation progress from get_minted response
+                // Update attestation progress from status response
                 if (data.found) {
                     setAttestationProgress(prev => ({
                         ...prev,
@@ -1016,7 +1017,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     return;
                 }
             } catch (e) {
-                console.debug('[Solana Bridge In] Mint poll error:', e.message);
+                console.debug('[Solana Bridge In] Status poll error:', e.message);
             }
 
             if (attempt >= maxAttempts) {
@@ -1024,8 +1025,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 return;
             }
 
-            const nextDelay = BRIDGE_IN_POLL_SCHEDULE.intervalsMs[attempt - 1] || 60000;
-            console.debug('[Solana Bridge In] Mint poll next delay (ms):', nextDelay);
+            const nextDelay = BRIDGE_IN_STATUS_POLL_SCHEDULE.intervalsMs[attempt - 1] || 60000;
+            console.debug('[Solana Bridge In] Status poll next delay (ms):', nextDelay);
             setTimeout(() => poll(attempt + 1), nextDelay);
         };
 
@@ -2193,8 +2194,8 @@ export default function BridgeView({ state }) {
         if (!submitTxHash) return;
 
         let cancelled = false;
-        const maxAttempts = MINT_POLL_SCHEDULE.intervalsMs.length + 1;
-        const initialDelayMs = MINT_POLL_SCHEDULE.initialDelayMs;
+        const maxAttempts = BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_OUT_STATUS_POLL_SCHEDULE.initialDelayMs;
 
         setMintStatus({
             state: 'pending',
@@ -2209,23 +2210,23 @@ export default function BridgeView({ state }) {
             confirmed: false,
         });
 
-        console.debug('[Bridge] Mint poll schedule (ms):', {
+        console.debug('[Bridge] Status poll schedule (ms):', {
             initialDelayMs,
-            intervalsMs: MINT_POLL_SCHEDULE.intervalsMs,
+            intervalsMs: BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs,
         });
 
         const poll = async (attempt = 1) => {
             if (cancelled) return;
             try {
-                console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
+                console.debug('[Bridge] Status poll attempt', attempt, 'of', maxAttempts);
 
-                // Query mint status (includes attestor count)
-                const res = await fetch(`/api/bridge/get_minted?burn_tx_hash=${submitTxHash}`);
+                // Query bridge status (includes attestor count)
+                const res = await fetch(`/api/bridge/status?burn_tx_hash=${submitTxHash}`);
                 if (res.ok) {
                     const data = await res.json();
-                    console.debug('[Bridge] Mint poll response:', data);
+                    console.debug('[Bridge] Bridge status response:', data);
 
-                    // Update attestation progress from get_minted response
+                    // Update attestation progress from status response
                     if (data.found) {
                         setOutboundAttestationProgress(prev => ({
                             ...prev,
@@ -2245,10 +2246,10 @@ export default function BridgeView({ state }) {
                         return;
                     }
                 } else {
-                    console.debug(`[Bridge] Mint query error (${res.status}), retrying...`);
+                    console.debug(`[Bridge] Status query error (${res.status}), retrying...`);
                 }
             } catch (e) {
-                console.debug('[Bridge] Mint poll error:', e.message);
+                console.debug('[Bridge] Status poll error:', e.message);
             }
 
             if (attempt >= maxAttempts) {
@@ -2262,7 +2263,7 @@ export default function BridgeView({ state }) {
                 return;
             }
 
-            const nextDelay = MINT_POLL_SCHEDULE.intervalsMs[attempt - 1];
+            const nextDelay = BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs[attempt - 1];
             if (!nextDelay) {
                 setMintStatus({
                     state: 'timeout',
@@ -2273,7 +2274,7 @@ export default function BridgeView({ state }) {
                 });
                 return;
             }
-            console.debug('[Bridge] Mint poll next delay (ms):', nextDelay);
+            console.debug('[Bridge] Status poll next delay (ms):', nextDelay);
             setTimeout(() => poll(attempt + 1), nextDelay);
         };
 
