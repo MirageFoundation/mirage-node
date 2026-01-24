@@ -583,6 +583,8 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	return nil
 }
 
+const bridgeMintFeeFailureQuarantineThreshold uint64 = 100
+
 // processBridgeMintFeeDistributions processes all pending outbound bridge fee distributions.
 //
 // This is called at the start of EndBlock to distribute fees for confirmed bridge mints.
@@ -601,10 +603,47 @@ func (am AppModule) processBridgeMintFeeDistributions(ctx sdk.Context) error {
 	err := am.k.IterateBridgeMintFeePending(ctx, func(destChain, burnID string) bool {
 		cacheCtx, write := ctx.CacheContext()
 		if err := am.k.DistributeBridgeMintFee(cacheCtx, destChain, burnID); err != nil {
+			record, recErr := am.k.RecordBridgeMintFeeFailure(
+				ctx,
+				destChain,
+				burnID,
+				err.Error(),
+				ctx.BlockHeight(),
+				bridgeMintFeeFailureQuarantineThreshold,
+			)
+			if recErr != nil {
+				ctx.Logger().Error("CRITICAL: BridgeMint fee distribution failed (recording failure failed)",
+					"destination_chain", destChain,
+					"burn_id", burnID,
+					"err", err,
+					"record_err", recErr,
+				)
+				return false
+			}
+			if record.Quarantined {
+				if err := am.k.RemoveBridgeMintFeePending(ctx, destChain, burnID); err != nil {
+					ctx.Logger().Error("CRITICAL: BridgeMint fee distribution quarantined (cleanup failed)",
+						"destination_chain", destChain,
+						"burn_id", burnID,
+						"failure_count", record.FailureCount,
+						"err", err,
+					)
+					return false
+				}
+				ctx.Logger().Error("CRITICAL: BridgeMint fee distribution quarantined",
+					"destination_chain", destChain,
+					"burn_id", burnID,
+					"failure_count", record.FailureCount,
+					"last_error", record.LastError,
+				)
+				return false
+			}
+
 			// Log error but DON'T remove pending marker - will retry next block
 			ctx.Logger().Error("CRITICAL: BridgeMint fee distribution failed (will retry next block)",
 				"destination_chain", destChain,
 				"burn_id", burnID,
+				"failure_count", record.FailureCount,
 				"err", err,
 			)
 			// Continue processing other pending distributions
@@ -617,6 +656,14 @@ func (am AppModule) processBridgeMintFeeDistributions(ctx sdk.Context) error {
 			// Worst case: we'll try to distribute again next block (which will fail
 			// gracefully since funds already moved, or succeed as a no-op)
 			ctx.Logger().Error("BridgeMint fee pending cleanup failed (distribution succeeded)",
+				"destination_chain", destChain,
+				"burn_id", burnID,
+				"err", err,
+			)
+		}
+
+		if err := am.k.RemoveBridgeMintFeeFailure(cacheCtx, destChain, burnID); err != nil {
+			ctx.Logger().Error("BridgeMint fee failure cleanup failed",
 				"destination_chain", destChain,
 				"burn_id", burnID,
 				"err", err,
@@ -2786,12 +2833,23 @@ func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeSta
 	enabledChains := am.k.GetEnabledBridgeChains(sdkCtx)
 	pendingCount, err := am.k.GetBridgePendingCount(sdkCtx)
 	if err != nil {
-		pendingCount = 0
+		return nil, err
+	}
+	pendingFeeCount, err := am.k.GetBridgeMintFeePendingCount(sdkCtx)
+	if err != nil {
+		return nil, err
+	}
+	failedFeeCount, quarantinedFeeCount, err := am.k.GetBridgeMintFeeFailureCounts(sdkCtx)
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.QueryBridgeStatusResponse{
 		EnabledChains:            enabledChains,
 		PendingAttestationsCount: pendingCount,
+		PendingMintFeeCount:      pendingFeeCount,
+		FailedMintFeeCount:       failedFeeCount,
+		QuarantinedMintFeeCount:  quarantinedFeeCount,
 	}, nil
 }
 

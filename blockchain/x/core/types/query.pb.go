@@ -611,6 +611,12 @@ type QueryBridgeStatusResponse struct {
 	EnabledChains []*BridgeChainConfig `protobuf:"bytes,1,rep,name=enabled_chains,json=enabledChains,proto3" json:"enabled_chains,omitempty"`
 	// pending_attestations_count is the number of attestations awaiting threshold
 	PendingAttestationsCount uint64 `protobuf:"varint,2,opt,name=pending_attestations_count,json=pendingAttestationsCount,proto3" json:"pending_attestations_count,omitempty"`
+	// pending_mint_fee_count is the number of pending mint fee distributions
+	PendingMintFeeCount uint64 `protobuf:"varint,3,opt,name=pending_mint_fee_count,json=pendingMintFeeCount,proto3" json:"pending_mint_fee_count,omitempty"`
+	// failed_mint_fee_count is the number of mint fee distributions with recorded failures
+	FailedMintFeeCount uint64 `protobuf:"varint,4,opt,name=failed_mint_fee_count,json=failedMintFeeCount,proto3" json:"failed_mint_fee_count,omitempty"`
+	// quarantined_mint_fee_count is the number of quarantined mint fee distributions
+	QuarantinedMintFeeCount uint64 `protobuf:"varint,5,opt,name=quarantined_mint_fee_count,json=quarantinedMintFeeCount,proto3" json:"quarantined_mint_fee_count,omitempty"`
 }
 
 func (m *QueryBridgeStatusResponse) Reset()         { *m = QueryBridgeStatusResponse{} }
@@ -656,6 +662,27 @@ func (m *QueryBridgeStatusResponse) GetEnabledChains() []*BridgeChainConfig {
 func (m *QueryBridgeStatusResponse) GetPendingAttestationsCount() uint64 {
 	if m != nil {
 		return m.PendingAttestationsCount
+	}
+	return 0
+}
+
+func (m *QueryBridgeStatusResponse) GetPendingMintFeeCount() uint64 {
+	if m != nil {
+		return m.PendingMintFeeCount
+	}
+	return 0
+}
+
+func (m *QueryBridgeStatusResponse) GetFailedMintFeeCount() uint64 {
+	if m != nil {
+		return m.FailedMintFeeCount
+	}
+	return 0
+}
+
+func (m *QueryBridgeStatusResponse) GetQuarantinedMintFeeCount() uint64 {
+	if m != nil {
+		return m.QuarantinedMintFeeCount
 	}
 	return 0
 }
@@ -2009,6 +2036,21 @@ func (m *QueryBridgeStatusResponse) MarshalToSizedBuffer(dAtA []byte) (int, erro
 	_ = i
 	var l int
 	_ = l
+	if m.QuarantinedMintFeeCount != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.QuarantinedMintFeeCount))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.FailedMintFeeCount != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.FailedMintFeeCount))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.PendingMintFeeCount != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.PendingMintFeeCount))
+		i--
+		dAtA[i] = 0x18
+	}
 	if m.PendingAttestationsCount != 0 {
 		i = encodeVarintQuery(dAtA, i, uint64(m.PendingAttestationsCount))
 		i--
@@ -2561,6 +2603,15 @@ func (m *QueryBridgeStatusResponse) Size() (n int) {
 	}
 	if m.PendingAttestationsCount != 0 {
 		n += 1 + sovQuery(uint64(m.PendingAttestationsCount))
+	}
+	if m.PendingMintFeeCount != 0 {
+		n += 1 + sovQuery(uint64(m.PendingMintFeeCount))
+	}
+	if m.FailedMintFeeCount != 0 {
+		n += 1 + sovQuery(uint64(m.FailedMintFeeCount))
+	}
+	if m.QuarantinedMintFeeCount != 0 {
+		n += 1 + sovQuery(uint64(m.QuarantinedMintFeeCount))
 	}
 	return n
 }
@@ -4025,6 +4076,63 @@ func (m *QueryBridgeStatusResponse) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.PendingAttestationsCount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PendingMintFeeCount", wireType)
+			}
+			m.PendingMintFeeCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.PendingMintFeeCount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field FailedMintFeeCount", wireType)
+			}
+			m.FailedMintFeeCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.FailedMintFeeCount |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field QuarantinedMintFeeCount", wireType)
+			}
+			m.QuarantinedMintFeeCount = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowQuery
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.QuarantinedMintFeeCount |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

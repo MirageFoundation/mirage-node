@@ -172,6 +172,7 @@ NODE_LAST_BLOCK_WARN_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_WARN_SECS
 NODE_LAST_BLOCK_ERROR_SECS = int(os.environ.get("MIRAGE_NODE_LAST_BLOCK_ERROR_SECS", "60"))
 
 MIRAGE_GRPC_ADDR = os.environ.get("MIRAGE_GRPC_ADDR", "127.0.0.1:9090").strip()
+MIRAGE_RPC_ADDR = os.environ.get("MIRAGE_RPC_ADDR", "http://127.0.0.1:26657").strip()
 
 
 def debug_log(msg: str) -> None:
@@ -1655,6 +1656,66 @@ def check_orchestrator() -> ServiceStatus:
 
 
 # ============================================================================
+# Bridge Fee Checks
+# ============================================================================
+
+
+def check_bridge_fees() -> ServiceStatus:
+    """Check pending/failed/quarantined bridge fee distributions."""
+    try:
+        result = subprocess.run(
+            [
+                get_miraged_bin(),
+                "query",
+                "bridge",
+                "status",
+                "--node",
+                MIRAGE_RPC_ADDR,
+                "-o",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            msg = truncate((result.stderr or result.stdout).strip(), 32)
+            return ServiceStatus(name="Bridge Fees", status=Status.ERROR, message="Query failed", details={"error": msg})
+
+        data = json.loads(result.stdout)
+        required = ["pending_mint_fee_count", "failed_mint_fee_count", "quarantined_mint_fee_count"]
+        for key in required:
+            if key not in data:
+                return ServiceStatus(
+                    name="Bridge Fees",
+                    status=Status.ERROR,
+                    message="Missing fields",
+                    details={"missing": key},
+                )
+
+        pending = int(data.get("pending_mint_fee_count", 0))
+        failed = int(data.get("failed_mint_fee_count", 0))
+        quarantined = int(data.get("quarantined_mint_fee_count", 0))
+
+        details = {
+            "pending": pending,
+            "failed": failed,
+            "quarantined": quarantined,
+        }
+
+        if quarantined > 0:
+            return ServiceStatus(name="Bridge Fees", status=Status.ERROR, message="Quarantined", details=details)
+        if failed > 0:
+            return ServiceStatus(name="Bridge Fees", status=Status.WARN, message="Failures", details=details)
+        if pending > 0:
+            return ServiceStatus(name="Bridge Fees", status=Status.WARN, message="Pending", details=details)
+        return ServiceStatus(name="Bridge Fees", status=Status.OK, message="OK", details=details)
+
+    except Exception as e:
+        return ServiceStatus(name="Bridge Fees", status=Status.ERROR, message=str(e)[:30], details={})
+
+
+# ============================================================================
 # Dashboard Rendering
 # ============================================================================
 
@@ -1896,6 +1957,13 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET}")
         elif details.get("enabled"):
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_RED}Missing{Colors.RESET}")
+    elif status.name == "Bridge Fees":
+        if details.get("pending") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Pending:{Colors.RESET} {details['pending']}")
+        if details.get("failed") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Failed:{Colors.RESET} {details['failed']}")
+        if details.get("quarantined") is not None:
+            lines.append(f"{bullet}{Colors.DIM}Quarantined:{Colors.RESET} {details['quarantined']}")
 
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
@@ -1920,6 +1988,7 @@ def render_dashboard(refresh_secs: int):
         check_endpoints(),
         check_hermes(),
         check_orchestrator(),
+        check_bridge_fees(),
     ]
 
     # Filter out unconfigured services for cleaner display
