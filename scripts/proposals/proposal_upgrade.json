@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.4-bridge-attestor-fix",
+                "name": "v1.9.5-bridge-no-pow",
                 "height": "T+50",
-                "info": "Store all attestors separately to fix gas variance"
+                "info": "Remove PoW requirement for bridge operations"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.4-bridge-attestor-fix",
-    "summary": "This upgrade stores all bridge attestors in separate KV entries so attestation records remain fixed-size.\n\nProblem:\n- Attestors were stored as growing maps inside attestation records\n- When multiple validators attest in the same block, the map grows between simulation and execution\n- This caused unpredictable gas usage and out-of-gas failures\n\nChanges:\n- New store prefix: bridge_mint_attestors/{chain}/{burn_id}/{valoper} (outbound)\n- New store prefix: bridge_attestors/{chain}/{burn_id}/{valoper} (inbound)\n- Attestation records now fixed-size regardless of attestor count\n- Orchestrator retry ladder: 1.5x → 2x → 2.5x → 3x → 5x\n\nNote: This replaces v1.9.3-bridge-fee-burn which passed governance but didn't execute.\n\nBINARY REQUIREMENT: All validators must update to v1.9.4 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.9.5-bridge-no-pow",
+    "summary": "This upgrade removes the Proof-of-Work requirement for bridge operations (MsgBridgeBurn and MsgIBCTransfer).\n\nRationale:\n- Token transfers are self-authenticating: you cannot burn or transfer tokens you don't have\n- PoW for bridge operations adds unnecessary friction for free-tier users\n- Bridge operations already charge fees which provide spam protection\n\nChanges:\n- MsgBridgeBurn: PoW validation skipped, EnvelopePow and EnvelopeDifficulty must be 0\n- MsgIBCTransfer: PoW validation skipped, EnvelopePow and EnvelopeDifficulty must be 0\n- Backend updated to send difficulty=0 for these operations\n\nBINARY REQUIREMENT: All validators must update to v1.9.5 binary BEFORE the upgrade height.",
     "expedited": true
 }

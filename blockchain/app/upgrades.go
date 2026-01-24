@@ -863,4 +863,28 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.9.5-bridge-no-pow: Remove PoW requirement for bridge operations
+	// - MsgBridgeBurn and MsgIBCTransfer no longer require PoW
+	// - Token transfers are self-authenticating (can't burn/transfer what you don't have)
+	// - Simplifies bridge UX for free-tier users
+	// - No data migration needed, just binary change in ante handler
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.5-bridge-no-pow",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.5-bridge-no-pow...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// No data migration needed - this is a binary-only change
+			// The ante handler now skips PoW validation for MsgBridgeBurn and MsgIBCTransfer
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.5-bridge-no-pow complete - bridge operations no longer require PoW")
+			return toVM, nil
+		},
+	)
 }
