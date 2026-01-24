@@ -830,4 +830,29 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.9.4-bridge-attestor-fix: Store inbound attestors separately
+	// - Keeps inbound attestation record size stable (separate attestor keys)
+	// - Prevents gas variance from growing attestor maps on inbound burns
+	// - Orchestrator gas retry: 1.5x → 2x → 2.5x → 3x → 5x
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.4-bridge-attestor-fix",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.4-bridge-attestor-fix...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Migrate existing inbound attestors from attestation records to separate keys
+			if err := app.CoreKeeper.MigrateBridgeAttestors(sdkCtx); err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.4-bridge-attestor-fix complete - inbound attestors migrated")
+			return toVM, nil
+		},
+	)
 }

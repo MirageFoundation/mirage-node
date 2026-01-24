@@ -270,7 +270,62 @@ func UnmarshalBridgeAttestation(data []byte) (*BridgeAttestation, error) {
 	if err := json.Unmarshal(data, &a); err != nil {
 		return nil, err
 	}
+	// Ensure map is initialized for testing convenience
+	if a.Attestors == nil {
+		a.Attestors = make(map[string]int64)
+	}
 	return &a, nil
+}
+
+// HasAttested returns true if the validator has already attested to this burn.
+// NOTE: In production, attestors are stored separately via keeper methods.
+// This method is for testing and backward compatibility only.
+func (a *BridgeAttestation) HasAttested(validatorAddr string) bool {
+	if a.Attestors == nil {
+		return false
+	}
+	_, exists := a.Attestors[validatorAddr]
+	return exists
+}
+
+// AddAttestation records a validator's attestation in the in-memory map.
+// NOTE: In production, attestors are stored separately via keeper methods.
+// This method is for testing and backward compatibility only.
+func (a *BridgeAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
+	if votingPower <= 0 {
+		return false
+	}
+	if a.Attestors == nil {
+		a.Attestors = make(map[string]int64)
+	}
+	if _, exists := a.Attestors[validatorAddr]; exists {
+		return false
+	}
+	a.Attestors[validatorAddr] = votingPower
+	a.AttestedPower += votingPower
+	return true
+}
+
+// AttestorList returns a slice of validator addresses that have attested.
+// NOTE: In production, use keeper.GetBridgeAttestorList instead.
+func (a *BridgeAttestation) AttestorList() []string {
+	if a.Attestors == nil {
+		return nil
+	}
+	result := make([]string, 0, len(a.Attestors))
+	for addr := range a.Attestors {
+		result = append(result, addr)
+	}
+	return result
+}
+
+// GetAttestorPower returns the voting power for a specific attestor (0 if not found).
+// NOTE: In production, attestor power is stored separately.
+func (a *BridgeAttestation) GetAttestorPower(validatorAddr string) int64 {
+	if a.Attestors == nil {
+		return 0
+	}
+	return a.Attestors[validatorAddr]
 }
 
 // Marshal serializes a bridge burn record to JSON
