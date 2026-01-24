@@ -1778,7 +1778,8 @@ func (k Keeper) GetCurrentBridgeSequence(ctx sdk.Context, destChain string) (uin
 	return binary.BigEndian.Uint64(bz), nil
 }
 
-// SetBridgeSequence sets the sequence number for a destination chain (HACK for state recovery)
+// SetBridgeSequence sets the sequence number for a destination chain.
+// Used by upgrade handlers to advance sequence past stale external chain state.
 func (k Keeper) SetBridgeSequence(ctx sdk.Context, destChain string, seq uint64) error {
 	store := k.storeService.OpenKVStore(ctx)
 	key := []byte(types.BridgeSequencePrefix + destChain)

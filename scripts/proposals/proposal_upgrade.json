@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.5-bridge-no-pow",
+                "name": "v1.9.6-bridge-attest-events",
                 "height": "T+50",
-                "info": "Remove PoW requirement for bridge operations"
+                "info": "Emit bridge attestation events for all submissions"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.5-bridge-no-pow",
-    "summary": "This upgrade removes the Proof-of-Work requirement for bridge operations (MsgBridgeBurn and MsgIBCTransfer).\n\nRationale:\n- Token transfers are self-authenticating: you cannot burn or transfer tokens you don't have\n- PoW for bridge operations adds unnecessary friction for free-tier users\n- Bridge operations already charge fees which provide spam protection\n\nChanges:\n- MsgBridgeBurn: PoW validation skipped, EnvelopePow and EnvelopeDifficulty must be 0\n- MsgIBCTransfer: PoW validation skipped, EnvelopePow and EnvelopeDifficulty must be 0\n- Backend updated to send difficulty=0 for these operations\n\nBINARY REQUIREMENT: All validators must update to v1.9.5 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.9.6-bridge-attest-events",
+    "summary": "This upgrade ensures all bridge attestation submissions emit events, not just those that contribute to threshold.\n\nProblem:\n- When a validator submits an attestation after threshold is already met, no event was emitted\n- The indexer recorded the attestation but couldn't get the power from the (missing) event\n- Result: UI showed '4 validators but 75%' because the late validator had power=0\n\nChanges:\n- Late attestations (after threshold met) now emit bridge_attest with late=true attribute\n- Duplicate attestations (validator re-submits) now emit bridge_attest with duplicate=true attribute\n- Same fix applied to both inbound (bridgeAttestBurned) and outbound (bridgeAttestMinted) flows\n- Indexers can now track all validator participation accurately\n\nBINARY REQUIREMENT: All validators must update to v1.9.6 binary BEFORE the upgrade height.",
     "expedited": true
 }

@@ -245,10 +245,28 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 
 	// Check if already confirmed (minted)
 	if attestation.Minted {
+		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
+		requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+		// Emit event even for late attestations so indexers can track all participants
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"bridge_attest",
+				sdk.NewAttribute("validator", valoper),
+				sdk.NewAttribute("source_chain", sourceChain),
+				sdk.NewAttribute("burn_id", burnID),
+				sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+				sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+				sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+				sdk.NewAttribute("minted", "true"),
+				sdk.NewAttribute("late", "true"),
+			),
+		)
+
 		return &types.MsgBridgeAttestBurnedResponse{
 			Confirmed:     true,
 			AttestedPower: attestation.AttestedPower,
-			RequiredPower: types.RequiredPower(0, params.BridgeAttestationThreshold),
+			RequiredPower: requiredPower,
 		}, nil
 	}
 
@@ -259,10 +277,27 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 	}
 	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
+		requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+		// Emit event for duplicate attestation (idempotent - validator already recorded)
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"bridge_attest",
+				sdk.NewAttribute("validator", valoper),
+				sdk.NewAttribute("source_chain", sourceChain),
+				sdk.NewAttribute("burn_id", burnID),
+				sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+				sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+				sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+				sdk.NewAttribute("minted", fmt.Sprintf("%t", attestation.Minted)),
+				sdk.NewAttribute("duplicate", "true"),
+			),
+		)
+
 		return &types.MsgBridgeAttestBurnedResponse{
 			Confirmed:     attestation.Minted,
 			AttestedPower: attestation.AttestedPower,
-			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+			RequiredPower: requiredPower,
 		}, nil
 	}
 
@@ -438,10 +473,28 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	// Check if already confirmed
 	if attestation.Confirmed {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
+		requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+		// Emit event even for late attestations so indexers can track all participants
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"bridge_attest_minted",
+				sdk.NewAttribute("burn_id", burnIDStr),
+				sdk.NewAttribute("destination_chain", destChain),
+				sdk.NewAttribute("destination_tx", attestation.DestinationTx),
+				sdk.NewAttribute("validator", valoper),
+				sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+				sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+				sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+				sdk.NewAttribute("minted", "true"),
+				sdk.NewAttribute("late", "true"),
+			),
+		)
+
 		return &types.MsgBridgeAttestMintedResponse{
 			Confirmed:     true,
 			AttestedPower: attestation.AttestedPower,
-			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+			RequiredPower: requiredPower,
 		}, nil
 	}
 
@@ -466,14 +519,33 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	}
 	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
+		requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
 		ctx.Logger().Debug("BridgeAttestMinted validator already attested",
 			"burn_id", burnIDStr,
 			"validator", valoper,
 		)
+
+		// Emit event for duplicate attestation (idempotent - validator already recorded)
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"bridge_attest_minted",
+				sdk.NewAttribute("burn_id", burnIDStr),
+				sdk.NewAttribute("destination_chain", destChain),
+				sdk.NewAttribute("destination_tx", attestation.DestinationTx),
+				sdk.NewAttribute("validator", valoper),
+				sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
+				sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
+				sdk.NewAttribute("required_power", fmt.Sprintf("%d", requiredPower)),
+				sdk.NewAttribute("minted", fmt.Sprintf("%t", attestation.Confirmed)),
+				sdk.NewAttribute("duplicate", "true"),
+			),
+		)
+
 		return &types.MsgBridgeAttestMintedResponse{
 			Confirmed:     attestation.Confirmed,
 			AttestedPower: attestation.AttestedPower,
-			RequiredPower: types.RequiredPower(totalPower, params.BridgeAttestationThreshold),
+			RequiredPower: requiredPower,
 		}, nil
 	}
 

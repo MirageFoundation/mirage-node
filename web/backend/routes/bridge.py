@@ -50,6 +50,7 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
     with connect_db() as conn:
         with conn.cursor() as cur:
             # Get aggregated attestation data including power info
+            # Only count validators with power > 0 (power=0 means duplicate/failed attestation)
             cur.execute(
                 """
                 SELECT 
@@ -59,7 +60,7 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
                     MAX(validator) as validator,
                     BOOL_OR(minted) as minted,
                     MAX(created_at) as created_at,
-                    COUNT(DISTINCT validator) as attestor_count,
+                    COUNT(DISTINCT CASE WHEN power > 0 THEN validator END) as attestor_count,
                     COALESCE(SUM(power), 0) as attested_power,
                     MAX(required_power) as required_power
                 FROM bridge_transactions
@@ -109,12 +110,13 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
                 return {"found": False, "confirmed": False}
 
             # Get aggregated attestation data including power info
+            # Only count validators with power > 0 (power=0 means duplicate/failed attestation)
             cur.execute(
                 """
                 SELECT 
                     MAX(destination_tx) as destination_tx,
                     MAX(created_at) as confirmed_at,
-                    COUNT(DISTINCT validator) as attestor_count,
+                    COUNT(DISTINCT CASE WHEN power > 0 THEN validator END) as attestor_count,
                     COALESCE(SUM(power), 0) as attested_power,
                     MAX(required_power) as required_power,
                     BOOL_OR(minted) as minted
@@ -142,6 +144,7 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
                 "attested_power": attest_row[3] if has_attestations else 0,
                 "required_power": attest_row[4] or 0 if has_attestations else 0,
             }
+
 
 def _base58_decode(s: str) -> bytes:
     """Minimal base58 decode (Bitcoin alphabet). Raises ValueError on invalid input."""
