@@ -96,8 +96,7 @@ func TestBridgeMintedRecordUnmarshalInvalid(t *testing.T) {
 
 func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	original := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-	original.AddAttestation("val1", 1000)
-	original.AddAttestation("val2", 2000)
+	original.AttestedPower = 3000
 	original.Confirmed = true
 	original.ConfirmedBy = "mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqp5h6t2"
 
@@ -129,27 +128,12 @@ func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	if restored.ConfirmedBy != original.ConfirmedBy {
 		t.Errorf("ConfirmedBy mismatch: got %s, want %s", restored.ConfirmedBy, original.ConfirmedBy)
 	}
-	if len(restored.Attestors) != 2 {
-		t.Errorf("Attestors count mismatch: got %d, want 2", len(restored.Attestors))
-	}
 }
 
 func TestBridgeMintAttestationUnmarshalInvalid(t *testing.T) {
 	_, err := UnmarshalBridgeMintAttestation([]byte("not valid json"))
 	if err == nil {
 		t.Error("Expected error for invalid JSON, got nil")
-	}
-}
-
-func TestBridgeMintAttestationUnmarshalNilAttestors(t *testing.T) {
-	// Test that Attestors map is initialized even if JSON has null
-	data := []byte(`{"burn_id":"1","destination_chain":"solana","attestors":null}`)
-	restored, err := UnmarshalBridgeMintAttestation(data)
-	if err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-	if restored.Attestors == nil {
-		t.Error("Expected Attestors map to be initialized, got nil")
 	}
 }
 
@@ -569,35 +553,6 @@ func TestBridgeAttestationGetAttestorPower(t *testing.T) {
 	// Unknown validator should return 0
 	if power := a.GetAttestorPower("unknown"); power != 0 {
 		t.Errorf("GetAttestorPower(unknown) = %d, want 0", power)
-	}
-}
-
-func TestBridgeMintAttestationGetAttestorPower(t *testing.T) {
-	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-
-	// Before attestation, power should be 0
-	if power := a.GetAttestorPower("validator1"); power != 0 {
-		t.Errorf("GetAttestorPower before attestation = %d, want 0", power)
-	}
-
-	a.AddAttestation("validator1", 300)
-	a.AddAttestation("validator2", 250)
-	a.AddAttestation("validator3", 200)
-
-	// Verify each validator's stored power
-	if power := a.GetAttestorPower("validator1"); power != 300 {
-		t.Errorf("GetAttestorPower(validator1) = %d, want 300", power)
-	}
-	if power := a.GetAttestorPower("validator2"); power != 250 {
-		t.Errorf("GetAttestorPower(validator2) = %d, want 250", power)
-	}
-	if power := a.GetAttestorPower("validator3"); power != 200 {
-		t.Errorf("GetAttestorPower(validator3) = %d, want 200", power)
-	}
-
-	// Verify total attested power
-	if a.AttestedPower != 750 {
-		t.Errorf("AttestedPower = %d, want 750", a.AttestedPower)
 	}
 }
 

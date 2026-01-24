@@ -74,7 +74,7 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 	return nil
 }
 
-func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, bridgeFeeUmirage uint64, mirageTxHash string) error {
+func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, mirageTxHash string) error {
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
 	msg := &coretypes.MsgBridgeAttestMinted{
 		Validator:        c.FromAddress(),
@@ -112,9 +112,8 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		return fmt.Errorf("bridge_minted tx failed: %w", err)
 	}
 
-	netProfit := float64(int64(bridgeFeeUmirage)-int64(gasFeeUmirage)) / 1_000_000
-	c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE bridge_fee_received=%.2f MIRAGE net_profit=%.2f MIRAGE burn_id=%s txhash=%s",
-		float64(gasFeeUmirage)/1_000_000, float64(bridgeFeeUmirage)/1_000_000, netProfit, burnID, txHash)
+	c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
+		float64(gasFeeUmirage)/1_000_000, burnID, txHash)
 	return nil
 }
 

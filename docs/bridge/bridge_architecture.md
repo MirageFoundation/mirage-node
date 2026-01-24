@@ -157,7 +157,7 @@ type BridgeAttestation struct {
 
 ### BridgeBurnRecord (Outbound)
 
-Tracks outbound burns for fee payout and auditing.
+Tracks outbound burns for fee burning and auditing.
 
 ```go
 type BridgeBurnRecord struct {
@@ -166,7 +166,7 @@ type BridgeBurnRecord struct {
     DestinationChain   string // "solana"
     DestinationAddress string // Recipient on external chain
     Amount             uint64 // Gross amount (includes fee)
-    BridgeFee          uint64 // Fee escrowed for validator
+    BridgeFee          uint64 // Fee escrowed (burned on confirmation)
     Sequence           uint64 // Per-chain sequence number
     CreatedAt          int64  // Block height
 }
@@ -180,17 +180,19 @@ Tracks validator attestations for outbound mint confirmations (before threshold 
 
 ```go
 type BridgeMintAttestation struct {
-    BurnID           string            // Sequence number (as string)
-    DestinationChain string            // "solana"
-    DestinationTx    string            // tx signature on Solana (from first attestor)
-    Attestors        map[string]int64  // validator operator address -> voting power at attestation
-    AttestedPower    int64             // accumulated voting power
-    Confirmed        bool              // threshold met
-    CreatedAt        int64             // block height
+    BurnID           string  // Sequence number (as string)
+    DestinationChain string  // "solana"
+    DestinationTx    string  // tx signature on Solana (from first attestor)
+    AttestedPower    int64   // accumulated voting power
+    Confirmed        bool    // threshold met
+    ConfirmedBy      string  // validator who crossed threshold
+    CreatedAt        int64   // block height
 }
 ```
 
 **Key:** `destination_chain + burn_id`
+
+**Note (v1.9.3+):** Attestors are stored separately in KV keys (`bridge_mint_attestors/{dest_chain}/{burn_id}/{validator}`) to keep the attestation record fixed-size.
 
 ### BridgeMintedRecord (Outbound)
 
@@ -230,9 +232,9 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - **Fee Handling:**
   - `amount` is the gross amount (what user enters)
   - `burn_amount = amount - bridge_fee` is burned from user
-  - `bridge_fee` is escrowed in the core module account (paid to validator on confirmation)
+  - `bridge_fee` is escrowed in the core module account (burned on confirmation)
 - **Actions:** Burn net amount, escrow fee, store `BridgeBurnRecord`, emit event, increment sequence
-- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee payout on confirmation
+- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee burning on confirmation
 
 ### MsgBridgeAttestBurned (inbound)
 - Signer must be active validator with voting power
@@ -248,10 +250,8 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - destination_chain must match the original burn record
 - destination_tx from the first attestor becomes canonical; later attestations may differ
 - **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
-- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, distribute bridge fee proportionally
-- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is distributed ONCE when threshold is met:
-  - Each attestor receives `fee * their_power / total_attested_power`
-  - Rounding dust (if any) goes to the validator that crossed the threshold
+- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, burn bridge fee
+- **Fee Burning:** The `bridge_fee` from `BridgeBurnRecord` is burned ONCE when threshold is met (v1.9.3+)
 
 ## Orchestrator Architecture
 
@@ -475,11 +475,10 @@ message Params {
   - `QueryBridgeMintedRequest` now requires `destination_chain` parameter
   - Prevents key collisions when bridging to multiple destination chains (e.g., Solana and Ethereum)
 
-- **v1.10.3**: Proportional fee distribution
-  - `Attestors` map changed from `map[string]bool` to `map[string]int64` to store voting power
-  - Bridge fee is now distributed proportionally among all attestors based on their voting power
-  - Added `GetAttestorPower()` method to retrieve individual attestor's power contribution
-  - Rounding dust from integer division goes to the threshold-crossing validator
+- **v1.9.3**: Bridge fee burning (replaces proportional distribution)
+  - Bridge fees are now burned when mint threshold is reached, not distributed to attestors
+  - Mint attestors stored in separate KV keys for fixed-size attestation records
+  - Simpler, more gas-predictable attestation transactions
 
 - **v1.10.2**: Outbound 2/3 threshold enforcement
   - Added `BridgeMintAttestation` state record to accumulate validator attestations for outbound bridges
@@ -490,8 +489,8 @@ message Params {
   - Added `/api/bridge/attestation_status` endpoint for polling attestation progress
 
 - **v1.10.1**: Fee handling and indexer fixes
-  - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee payout
-  - Bridge fee is escrowed (not burned) and paid to attesting validator on confirmation
+  - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee tracking
+  - Bridge fee is escrowed in module account until confirmation
   - Indexer processes tx events to update `minted=true` from `bridge_attest` events
   - Fixed "Orchestrator detection" UI getting stuck on inbound bridges
 

@@ -119,14 +119,14 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 		return nil, fmt.Errorf("failed to burn tokens: %w", err)
 	}
 
-	// Escrow the bridge fee in the core module account (paid to validator on BridgeMinted)
+	// Escrow the bridge fee in the core module account (burned when mint is confirmed)
 	if bridgeFee > 0 {
 		if err := k.SendToModule(ctx, owner, bridgeFee); err != nil {
 			return nil, fmt.Errorf("failed to escrow bridge fee: %w", err)
 		}
 	}
 
-	// Persist burn record for fee payout and auditing
+	// Persist burn record for fee burning and auditing
 	burnIDStr := fmt.Sprintf("%d", sequence)
 	record := &types.BridgeBurnRecord{
 		BurnID:             burnIDStr,
@@ -148,7 +148,7 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 	}
 
 	// Emit event for orchestrators to pick up
-	// NOTE: We persist a burn record for fee payout; attestations track confirmation.
+	// NOTE: We persist a burn record for fee burning; attestations track confirmation.
 	ctx.EventManager().EmitEvent(
 		buildBridgeBurnEvent(owner, destChain, destAddr, amount, bridgeFee, sequence),
 	)

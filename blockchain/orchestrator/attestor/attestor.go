@@ -182,7 +182,7 @@ func (a *Attestor) executeMintBatch(ctx context.Context, burns []chains.MirageBu
 			a.lastSeqMu.Unlock()
 
 			if err := a.retry(ctx, func() error {
-				return a.mirage.SubmitBridgeMinted(ctx, burn.BurnID, burn.DestinationChain, sig, burn.BridgeFee, burn.TxHash)
+				return a.mirage.SubmitBridgeMinted(ctx, burn.BurnID, burn.DestinationChain, sig, burn.TxHash)
 			}); err != nil {
 				a.logger.Printf("WARN failed to submit bridge minted burn_id=%s: %v", burn.BurnID, err)
 			}

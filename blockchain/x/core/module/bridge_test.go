@@ -250,9 +250,7 @@ func TestBridgeMintAttestationStorage(t *testing.T) {
 
 	// Store an attestation
 	attestation := types.NewBridgeMintAttestation(burnID, destChain, "SolanaSignature123", 100)
-	attestation.AddAttestation("miragevaloper1abc", 1000)
 	attestation.AttestedPower = 1000
-	attestation.Attestors = nil
 
 	err = mk.SetBridgeMintAttestation(ctx, attestation)
 	if err != nil {
@@ -279,95 +277,6 @@ func TestBridgeMintAttestationStorage(t *testing.T) {
 	}
 }
 
-// TestBridgeMintAttestationMultiValidator tests multi-validator accumulation
-func TestBridgeMintAttestationMultiValidator(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-
-	// First validator attests
-	added := attestation.AddAttestation("val1", 1000)
-	if !added {
-		t.Error("Expected first attestation to be added")
-	}
-	if attestation.AttestedPower != 1000 {
-		t.Errorf("Expected attested power 1000, got %d", attestation.AttestedPower)
-	}
-
-	// Second validator attests
-	added = attestation.AddAttestation("val2", 2000)
-	if !added {
-		t.Error("Expected second attestation to be added")
-	}
-	if attestation.AttestedPower != 3000 {
-		t.Errorf("Expected attested power 3000, got %d", attestation.AttestedPower)
-	}
-
-	// Third validator attests
-	added = attestation.AddAttestation("val3", 500)
-	if !added {
-		t.Error("Expected third attestation to be added")
-	}
-	if attestation.AttestedPower != 3500 {
-		t.Errorf("Expected attested power 3500, got %d", attestation.AttestedPower)
-	}
-
-	// Test zero or negative power should be rejected
-	if attestation.AddAttestation("valZero", 0) {
-		t.Error("Expected zero power attestation to be rejected")
-	}
-	if attestation.AddAttestation("valNeg", -100) {
-		t.Error("Expected negative power attestation to be rejected")
-	}
-
-	// Verify attestor list
-	attestors := attestation.AttestorList()
-	if len(attestors) != 3 {
-		t.Errorf("Expected 3 attestors, got %d", len(attestors))
-	}
-
-	// Verify individual attestor powers are stored correctly (legacy fee math)
-	if power := attestation.GetAttestorPower("val1"); power != 1000 {
-		t.Errorf("GetAttestorPower(val1) = %d, want 1000", power)
-	}
-	if power := attestation.GetAttestorPower("val2"); power != 2000 {
-		t.Errorf("GetAttestorPower(val2) = %d, want 2000", power)
-	}
-	if power := attestation.GetAttestorPower("val3"); power != 500 {
-		t.Errorf("GetAttestorPower(val3) = %d, want 500", power)
-	}
-}
-
-// TestBridgeMintAttestationDuplicateRejection tests duplicate attestation rejection
-func TestBridgeMintAttestationDuplicateRejection(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-
-	// First attestation from validator
-	added := attestation.AddAttestation("val1", 1000)
-	if !added {
-		t.Error("Expected first attestation to be added")
-	}
-	if attestation.AttestedPower != 1000 {
-		t.Errorf("Expected attested power 1000, got %d", attestation.AttestedPower)
-	}
-
-	// Duplicate attestation from same validator
-	added = attestation.AddAttestation("val1", 1000)
-	if added {
-		t.Error("Expected duplicate attestation to be rejected")
-	}
-	if attestation.AttestedPower != 1000 {
-		t.Errorf("Expected attested power to remain 1000, got %d", attestation.AttestedPower)
-	}
-
-	// HasAttested should return true for val1
-	if !attestation.HasAttested("val1") {
-		t.Error("Expected HasAttested to return true for val1")
-	}
-	// HasAttested should return false for val2
-	if attestation.HasAttested("val2") {
-		t.Error("Expected HasAttested to return false for val2")
-	}
-}
-
 // TestBridgeMintAttestationThreshold tests threshold logic
 func TestBridgeMintAttestationThreshold(t *testing.T) {
 	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
@@ -376,13 +285,13 @@ func TestBridgeMintAttestationThreshold(t *testing.T) {
 	threshold := uint64(6667) // 66.67%
 
 	// Add 50% power - should not meet threshold
-	attestation.AddAttestation("val1", 5000)
+	attestation.AttestedPower = 5000
 	if attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("Expected threshold NOT to be met with 50% power")
 	}
 
 	// Add 17% more power (total 67%) - should meet threshold
-	attestation.AddAttestation("val2", 1700)
+	attestation.AttestedPower = 6700
 	if !attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("Expected threshold to be met with 67% power")
 	}
@@ -416,8 +325,7 @@ func TestBridgeMintAttestationGetOrCreate(t *testing.T) {
 	}
 
 	// Modify and save
-	attestation1.AddAttestation("val1", 1000)
-	attestation1.Attestors = nil
+	attestation1.AttestedPower = 1000
 	if err := mk.SetBridgeMintAttestation(ctx, attestation1); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
 	}
@@ -1222,9 +1130,7 @@ func TestMintAttestationDestinationTxConsistency(t *testing.T) {
 
 	// Create attestation with first destination_tx
 	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-	attestation.AddAttestation("val1", 50)
 	attestation.AttestedPower = 50
-	attestation.Attestors = nil
 
 	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
@@ -1263,9 +1169,7 @@ func TestGetOrCreateMintAttestationNew(t *testing.T) {
 	}
 
 	// Add an attestation and save
-	attestation.AddAttestation("val1", 50)
 	attestation.AttestedPower = 50
-	attestation.Attestors = nil
 	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
 	}
@@ -1320,19 +1224,6 @@ func TestZeroPowerAttestation(t *testing.T) {
 	}
 
 	// Negative power should be rejected
-	if attestation.AddAttestation("val1", -10) {
-		t.Error("Negative power attestation should be rejected")
-	}
-}
-
-// TestZeroPowerMintAttestation tests that zero power attestations are rejected for outbound
-func TestZeroPowerMintAttestation(t *testing.T) {
-	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
-
-	if attestation.AddAttestation("val1", 0) {
-		t.Error("Zero power attestation should be rejected")
-	}
-
 	if attestation.AddAttestation("val1", -10) {
 		t.Error("Negative power attestation should be rejected")
 	}

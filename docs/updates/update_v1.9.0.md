@@ -6,7 +6,7 @@ Mirage goes multi-chain. v1.9.0 delivers **native bridge support for Solana and 
 
 **Solana** gets a custom validator-attested bridge with an on-chain Anchor program. Validators run orchestrators that watch for burns on either chain and submit cryptographic attestations. When supermajority consensus is reached, tokens mint automatically. **Osmosis** connects via native IBC—the battle-tested Inter-Blockchain Communication protocol that powers the Cosmos ecosystem. The Hermes relayer handles packet forwarding with light client verification, no attestation needed.
 
-The architecture is built for expansion. Adding new chains—whether EVM-compatible like Ethereum and Arbitrum, or entirely different architectures—requires only a new orchestrator module and chain-specific program. The core attestation logic, fee distribution, and replay protection are chain-agnostic by design. Solana and Osmosis are just the beginning.
+The architecture is built for expansion. Adding new chains—whether EVM-compatible like Ethereum and Arbitrum, or entirely different architectures—requires only a new orchestrator module and chain-specific program. The core attestation logic, fee handling, and replay protection are chain-agnostic by design. Solana and Osmosis are just the beginning.
 
 This release also ships **enterprise-grade disaster recovery** for validators. Full node backups stream directly to your local machine, and restores work with or without the original mnemonic depending on your recovery scenario. One command to backup, one command to restore.
 
@@ -19,7 +19,7 @@ This release also ships **enterprise-grade disaster recovery** for validators. F
 - **Attested Bridge** for non-IBC chains (Solana, future Ethereum support)
   - Validators run orchestrators that watch external chains for burns
   - Attestations require 66.67% of voting power to mint tokens
-  - Per-chain bridge fee (500 MIRAGE) distributed proportionally among attestors
+  - Per-chain bridge fee (500 MIRAGE) burned when threshold is met
 
 - **IBC Bridge** for Cosmos ecosystem chains (Osmosis)
   - Uses native IBC transfer protocol with MsgIBCTransfer
@@ -30,7 +30,7 @@ This release also ships **enterprise-grade disaster recovery** for validators. F
   - Inbound: burn on external chain → attestations → mint on Mirage
   - Outbound: burn on Mirage → attestations from external chain → confirmation
 
-- **Fee distribution**: bridge fees split proportionally among all validators who attested
+- **Fee burning**: bridge fees are burned when mint threshold is reached
 
 ---
 
@@ -212,7 +212,7 @@ python3 scripts/switch_to_pebbledb.py --target mirage.vote
 
 - Orchestrator queries Solana bridge state on startup to initialize sequence tracking
 - Prevents processing of stale/malicious burn events
-- Integer overflow protection in fee distribution calculations
+- Integer overflow protection in bridge fee calculations
 
 ---
 
