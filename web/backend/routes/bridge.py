@@ -53,32 +53,6 @@ _MAX_CHANNEL_LEN = 64
 _MAX_BLOCKHASH_HEX_LEN = 128
 
 
-def _client_ip() -> str:
-    ip_raw = request.headers.get("X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr or ""))
-    return (ip_raw.split(",")[0].strip() if ip_raw else "").strip()
-
-
-def _is_private_ip(ip: str) -> bool:
-    if not ip:
-        return False
-    if ip in ("127.0.0.1", "::1", "localhost"):
-        return True
-    # Basic RFC1918 checks for IPv4
-    try:
-        parts = [int(p) for p in ip.split(".")]
-        if len(parts) != 4:
-            return False
-    except ValueError:
-        return False
-    if parts[0] == 10:
-        return True
-    if parts[0] == 192 and parts[1] == 168:
-        return True
-    if parts[0] == 172 and 16 <= parts[1] <= 31:
-        return True
-    return False
-
-
 def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
     """Query inbound bridge attestation from indexer DB."""
     with connect_db() as conn:
@@ -527,10 +501,7 @@ def get_bridge_minted():
         if burn_sequence:
             return jsonify({"error": "burn_sequence not allowed for outbound queries"}), 400
 
-    client_ip = _client_ip()
-    if not _is_private_ip(client_ip):
-        log_event(rid, "get_bridge_minted.forbidden", ip=client_ip)
-        return jsonify({"error": "forbidden"}), 403
+    # Note: No IP restriction - this is a read-only status query for public blockchain data
 
     try:
         if chain:
@@ -612,10 +583,7 @@ def get_attestation_status():
         if burn_sequence:
             return jsonify({"error": "burn_sequence not allowed for outbound queries"}), 400
 
-    client_ip = _client_ip()
-    if not _is_private_ip(client_ip):
-        log_event(rid, "attestation_status.forbidden", ip=client_ip)
-        return jsonify({"error": "forbidden"}), 403
+    # Note: No IP restriction - this is a read-only status query for public blockchain data
 
     try:
         if chain:
