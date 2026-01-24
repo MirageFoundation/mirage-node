@@ -1012,7 +1012,13 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 
                 if (data.confirmed) {
                     setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
-                    setAttestationProgress(prev => ({ ...prev, confirmed: true }));
+                    // Use attestor_count from get_minted response if we don't have it from attestation_status
+                    setAttestationProgress(prev => ({
+                        ...prev,
+                        confirmed: true,
+                        // Use get_minted's attestor_count as fallback if attestation_status didn't provide one
+                        attestorCount: prev.attestorCount > 0 ? prev.attestorCount : (data.attestor_count || prev.attestorCount),
+                    }));
                     // Calculate final elapsed time for the 'complete' (mint) step
                     const now = Date.now();
                     const mintStartTime = attestationFoundTime || stepTimestamps.pending || now;
@@ -2256,7 +2262,12 @@ export default function BridgeView({ state }) {
                             error: '',
                             completedAt: Date.now(),
                         });
-                        setOutboundAttestationProgress(prev => ({ ...prev, confirmed: true }));
+                        // Use attestor_count from get_minted as fallback if attestation_status didn't provide one
+                        setOutboundAttestationProgress(prev => ({
+                            ...prev,
+                            confirmed: true,
+                            attestorCount: prev.attestorCount > 0 ? prev.attestorCount : (data.attestor_count || prev.attestorCount),
+                        }));
                         return;
                     }
                 } else {
