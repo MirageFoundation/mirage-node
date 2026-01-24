@@ -618,31 +618,18 @@ def get_attestation_status():
 
     try:
         if chain:
-            # Inbound bridge: query attestations by source chain and burn_sequence
-            data = _query_bridge_attestation_from_chain(chain, burn_sequence)
-            if not data.get("found", False):
-                result = {
-                    "found": False,
-                    "confirmed": False,
-                    "burn_sequence": burn_sequence,
-                    "burn_tx_hash": None,
-                    "attestors": [],
-                    "attestor_count": 0,
-                    "attested_power": 0,
-                    "required_power": 0,
-                }
-            else:
-                attestors = data.get("attestors") or []
-                result = {
-                    "found": True,
-                    "confirmed": bool(data.get("minted", False)),
-                    "burn_sequence": burn_sequence,
-                    "burn_tx_hash": None,
-                    "attestors": attestors,
-                    "attestor_count": len(attestors),
-                    "attested_power": int(data.get("attested_power", 0) or 0),
-                    "required_power": int(data.get("required_power", 0) or 0),
-                }
+            # Inbound bridge: query from indexer DB
+            db_data = _query_attestation_status_inbound(chain, burn_sequence)
+            result = {
+                "found": db_data.get("found", False),
+                "confirmed": db_data.get("confirmed", False),
+                "burn_sequence": burn_sequence,
+                "burn_tx_hash": None,
+                "attestors": db_data.get("attestors", []),
+                "attestor_count": db_data.get("attestor_count", 0),
+                "attested_power": 0,
+                "required_power": 0,
+            }
         else:
             # Outbound bridge: resolve burn sequence from tx hash, then query chain
             tx_hash = burn_tx_hash.lower()
@@ -655,33 +642,20 @@ def get_attestation_status():
             if not burn_seq or not dest_chain:
                 raise RuntimeError("bridge_burn event missing burn_id or destination_chain")
 
-            data = _query_bridge_minted_from_chain(dest_chain, burn_seq)
-            if not data.get("found", False):
-                result = {
-                    "found": False,
-                    "confirmed": False,
-                    "burn_tx_hash": tx_hash,
-                    "burn_sequence": burn_seq,
-                    "attestors": [],
-                    "attestor_count": 0,
-                    "attested_power": 0,
-                    "required_power": int(data.get("required_power", 0) or 0),
-                    "destination_chain": dest_chain,
-                }
-            else:
-                attestors = data.get("attestors") or []
-                result = {
-                    "found": True,
-                    "confirmed": bool(data.get("minted", False)),
-                    "burn_tx_hash": tx_hash,
-                    "burn_sequence": burn_seq,
-                    "attestors": attestors,
-                    "attestor_count": len(attestors),
-                    "attested_power": int(data.get("attested_power", 0) or 0),
-                    "required_power": int(data.get("required_power", 0) or 0),
-                    "destination_chain": data.get("destination_chain") or dest_chain,
-                    "destination_tx": data.get("destination_tx") or None,
-                }
+            # Outbound bridge: query from indexer DB
+            db_data = _query_attestation_status_outbound(tx_hash)
+            result = {
+                "found": db_data.get("found", False),
+                "confirmed": db_data.get("confirmed", False),
+                "burn_tx_hash": tx_hash,
+                "burn_sequence": burn_seq,
+                "attestors": db_data.get("attestors", []),
+                "attestor_count": db_data.get("attestor_count", 0),
+                "attested_power": 0,
+                "required_power": 0,
+                "destination_chain": dest_chain,
+                "destination_tx": db_data.get("destination_tx"),
+            }
 
         log_event(
             rid,
