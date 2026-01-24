@@ -1386,6 +1386,166 @@ func (k Keeper) SetBridgeMintAttestation(ctx sdk.Context, attestation *types.Bri
 	return store.Set(key, bz)
 }
 
+// SetBridgeMintFeePending marks a confirmed outbound bridge mint for deferred fee distribution.
+//
+// When MsgBridgeAttestMinted crosses the attestation threshold, the fee distribution is not
+// performed inline (to keep gas usage stable). Instead, this function queues the mint for
+// fee distribution in the next EndBlock.
+//
+// Key format: bridge_mint_fee_pending/{dest_chain}/{burn_id}
+func (k Keeper) SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintFeePendingKey(destChain, burnID)
+	return store.Set(key, []byte{1})
+}
+
+// RemoveBridgeMintFeePending removes a pending fee distribution marker after processing.
+//
+// Called by EndBlock after successfully distributing fees to attestors.
+func (k Keeper) RemoveBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeMintFeePendingKey(destChain, burnID)
+	return store.Delete(key)
+}
+
+// IterateBridgeMintFeePending iterates over all pending fee distributions.
+//
+// Called by EndBlock to process queued fee distributions. The callback receives
+// (destChain, burnID) for each pending distribution. Return true from the callback
+// to stop iteration early.
+func (k Keeper) IterateBridgeMintFeePending(ctx sdk.Context, fn func(destChain, burnID string) bool) error {
+	store := k.storeService.OpenKVStore(ctx)
+	prefix := []byte(types.BridgeMintFeePendingPrefix)
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for ; it.Valid(); it.Next() {
+		key := string(it.Key())
+		suffix := strings.TrimPrefix(key, types.BridgeMintFeePendingPrefix)
+		parts := strings.SplitN(suffix, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		if stop := fn(parts[0], parts[1]); stop {
+			break
+		}
+	}
+	return nil
+}
+
+// DistributeBridgeMintFee distributes the bridge fee to attestors proportionally by voting power.
+//
+// Called from EndBlock for each pending fee distribution. The fee from the original burn
+// is split among all validators who attested to the mint, weighted by their voting power
+// at attestation time.
+//
+// Idempotency: This function is safe to call multiple times. It checks the FeeDistributed
+// flag and returns nil if fees were already paid. This prevents double-payment if EndBlock
+// retries or pending marker cleanup fails.
+//
+// Dust handling: Any remainder from integer division goes to the validator whose attestation
+// crossed the threshold (stored in ConfirmedBy). If ConfirmedBy is empty (pre-upgrade
+// attestations), dust goes to the highest-power attestor.
+//
+// Returns error if attestation or burn record is missing, or if fund transfers fail.
+func (k Keeper) DistributeBridgeMintFee(ctx sdk.Context, destChain, burnID string) error {
+	attestation, found, err := k.GetBridgeMintAttestation(ctx, destChain, burnID)
+	if err != nil {
+		return fmt.Errorf("failed to load mint attestation: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("mint attestation not found for %s/%s", destChain, burnID)
+	}
+	if !attestation.Confirmed {
+		return fmt.Errorf("mint attestation not confirmed for %s/%s", destChain, burnID)
+	}
+
+	// Idempotency check: skip if already distributed
+	if attestation.FeeDistributed {
+		return nil
+	}
+
+	burnRecord, found, err := k.GetBridgeBurnRecord(ctx, destChain, burnID)
+	if err != nil {
+		return fmt.Errorf("failed to load bridge burn record: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("bridge burn record not found for %s/%s", destChain, burnID)
+	}
+
+	totalFee := burnRecord.BridgeFee
+	if totalFee == 0 || attestation.AttestedPower <= 0 {
+		// No fee to distribute - mark as done and return
+		attestation.FeeDistributed = true
+		if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
+			return fmt.Errorf("failed to mark fee as distributed: %w", err)
+		}
+		return nil
+	}
+
+	var distributed uint64 = 0
+	for valoperAddr, power := range attestation.Attestors {
+		if power <= 0 {
+			continue
+		}
+		valoper, err := sdk.ValAddressFromBech32(valoperAddr)
+		if err != nil {
+			return fmt.Errorf("invalid attestor address: %w", err)
+		}
+		accAddr := sdk.AccAddress(valoper).String()
+
+		// Use sdkmath.Int for safe arithmetic to avoid overflow
+		share := sdkmath.NewIntFromUint64(totalFee).
+			MulRaw(power).
+			QuoRaw(attestation.AttestedPower).
+			Uint64()
+
+		if share > 0 {
+			if err := k.SendFromModule(ctx, accAddr, share); err != nil {
+				return fmt.Errorf("failed to pay bridge fee to %s: %w", accAddr, err)
+			}
+			distributed += share
+		}
+	}
+
+	if distributed < totalFee {
+		dust := totalFee - distributed
+		dustRecipient := strings.TrimSpace(attestation.ConfirmedBy)
+		if dustRecipient == "" {
+			var bestValoper string
+			var bestPower int64
+			for valoperAddr, power := range attestation.Attestors {
+				if power > bestPower {
+					bestPower = power
+					bestValoper = valoperAddr
+				}
+			}
+			if bestValoper == "" {
+				return fmt.Errorf("no attestors available for dust payout")
+			}
+			valoper, err := sdk.ValAddressFromBech32(bestValoper)
+			if err != nil {
+				return fmt.Errorf("invalid dust recipient valoper: %w", err)
+			}
+			dustRecipient = sdk.AccAddress(valoper).String()
+		}
+
+		if err := k.SendFromModule(ctx, dustRecipient, dust); err != nil {
+			return fmt.Errorf("failed to pay bridge fee dust: %w", err)
+		}
+	}
+
+	// Mark as distributed to prevent double-payment on retry
+	attestation.FeeDistributed = true
+	if err := k.SetBridgeMintAttestation(ctx, attestation); err != nil {
+		return fmt.Errorf("failed to mark fee as distributed: %w", err)
+	}
+
+	return nil
+}
+
 // GetOrCreateBridgeMintAttestation retrieves or creates a new bridge mint attestation
 func (k Keeper) GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error) {
 	attestation, found, err := k.GetBridgeMintAttestation(ctx, destChain, burnID)

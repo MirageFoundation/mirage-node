@@ -2,6 +2,7 @@ package mirage
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -22,8 +23,9 @@ import (
 const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the safety margin applied to simulated gas.
-// Unordered tx gas can vary slightly with ante path and state reads.
-const gasBufferMultiplier = 1.5
+// Fee distribution is handled outside the attestation tx, so variance is small.
+// Using 1.2 (20% buffer) to cover minor state changes.
+const gasBufferMultiplier = 1.2
 
 // simulationGasLimit is a high gas limit used only for simulation.
 const simulationGasLimit = 1_000_000
@@ -54,11 +56,20 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 		return fmt.Errorf("broadcast tx response missing")
 	}
 	if resp.TxResponse.Code != 0 {
-		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		return fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+	}
+
+	txHash := resp.TxResponse.TxHash
+	c.logger.Printf("DEBUG attestation broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", burnID, txHash)
+
+	// Wait for tx to be included in a block and verify execution succeeded
+	if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
+		c.logger.Printf("ERROR attestation tx FAILED burn_id=%s txhash=%s error=%v", burnID, txHash, err)
+		return fmt.Errorf("attestation tx failed: %w", err)
 	}
 
 	c.logger.Printf("INFO  [FEES] attestation gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
-		float64(feeUmirage)/1_000_000, burnID, resp.TxResponse.TxHash)
+		float64(feeUmirage)/1_000_000, burnID, txHash)
 	return nil
 }
 
@@ -88,12 +99,21 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		return fmt.Errorf("broadcast tx response missing")
 	}
 	if resp.TxResponse.Code != 0 {
-		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		return fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+	}
+
+	txHash := resp.TxResponse.TxHash
+	c.logger.Printf("DEBUG bridge_minted broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", burnID, txHash)
+
+	// Wait for tx to be included in a block and verify execution succeeded
+	if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
+		c.logger.Printf("ERROR bridge_minted tx FAILED burn_id=%s txhash=%s error=%v", burnID, txHash, err)
+		return fmt.Errorf("bridge_minted tx failed: %w", err)
 	}
 
 	netProfit := float64(int64(bridgeFeeUmirage)-int64(gasFeeUmirage)) / 1_000_000
 	c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE bridge_fee_received=%.2f MIRAGE net_profit=%.2f MIRAGE burn_id=%s txhash=%s",
-		float64(gasFeeUmirage)/1_000_000, float64(bridgeFeeUmirage)/1_000_000, netProfit, burnID, resp.TxResponse.TxHash)
+		float64(gasFeeUmirage)/1_000_000, float64(bridgeFeeUmirage)/1_000_000, netProfit, burnID, txHash)
 	return nil
 }
 
@@ -205,4 +225,59 @@ func parseUint64(raw string, field string) (uint64, error) {
 		return 0, fmt.Errorf("invalid %s: %w", field, err)
 	}
 	return value, nil
+}
+
+// waitForTx waits for a transaction to be included in a block and verifies execution success.
+//
+// This is critical because BROADCAST_MODE_SYNC only confirms CheckTx passed (tx accepted into
+// mempool), not that DeliverTx succeeded (tx executed in block). Without this verification,
+// a tx that passes CheckTx but fails during block execution (e.g., out of gas) would
+// appear successful in logs but actually fail silently.
+//
+// Returns nil if tx executed successfully (TxResponse.Code == 0).
+// Returns error if:
+//   - tx is not found within maxWait (not included in any block)
+//   - tx execution failed (TxResponse.Code != 0, e.g., out of gas)
+//   - context is cancelled
+func (c *Client) waitForTx(ctx context.Context, txHash string, maxWait time.Duration) error {
+	txClient := txtypes.NewServiceClient(c.grpcConn)
+
+	// Convert hex string to bytes for the query
+	hashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.ToUpper(txHash), "0X"))
+	if err != nil {
+		return fmt.Errorf("invalid tx hash: %w", err)
+	}
+
+	deadline := time.Now().Add(maxWait)
+	pollInterval := 500 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		resp, err := txClient.GetTx(ctx, &txtypes.GetTxRequest{Hash: fmt.Sprintf("%X", hashBytes)})
+		if err != nil {
+			// Tx not found yet, keep polling
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		if resp.TxResponse == nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Tx found - check result
+		if resp.TxResponse.Code != 0 {
+			return fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		}
+
+		// Success
+		return nil
+	}
+
+	return fmt.Errorf("tx not confirmed within %v", maxWait)
 }
