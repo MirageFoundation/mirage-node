@@ -1653,8 +1653,25 @@ class MessageProcessor:
         if not events:
             return
         for ev_type, attrs in self.decode_events(events):
+            # Handle inbound bridge mint completion (bridge_mint event)
+            # This is emitted when threshold is reached and tokens are minted on Mirage
+            if ev_type == "bridge_mint":
+                source_chain = str(attrs.get("source_chain", "") or "").strip()
+                burn_id = str(attrs.get("burn_id", "") or "").strip()
+                recipient = str(attrs.get("recipient", "") or "").strip()
+                amount = str(attrs.get("amount", "") or "").strip()
+                attested_power = str(attrs.get("attested_power", "") or "").strip()
+                required_power = str(attrs.get("required_power", "") or "").strip()
+                if not source_chain or not burn_id:
+                    logger.warning("bridge_mint event missing identifiers: %s", attrs)
+                    continue
+                updated = self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
+                logger.info(
+                    "Bridge mint event (inbound complete): %s:%s -> %s amount=%s power=%s/%s updated=%s",
+                    source_chain, burn_id, recipient, amount, attested_power, required_power, updated
+                )
+
             # Handle inbound bridge attestations (bridge_attest event)
-            if ev_type == "bridge_attest":
                 source_chain = str(attrs.get("source_chain", "") or "").strip()
                 burn_id = str(attrs.get("burn_id", "") or "").strip()
                 minted_raw = str(attrs.get("minted", "") or "").strip().lower()
@@ -1753,7 +1770,7 @@ class MessageProcessor:
                 minted=False,  # Only set true when chain confirms mint via BridgeConfirmed event
             )
 
-            logger.debug(f"Indexed bridge attest burned: {source_chain}:{burn_id} -> {mirage_recipient} amount={amount}")
+            logger.info(f"Indexed bridge attest burned: {source_chain}:{burn_id} validator={validator} -> {mirage_recipient} amount={amount}")
         except Exception as e:
             logger.error(f"Failed to index bridge attest burned {tx_hash}: {e}")
 
@@ -1794,6 +1811,6 @@ class MessageProcessor:
                 minted=False,  # Only set true via BridgeConfirmed event
             )
 
-            logger.debug(f"Indexed bridge attest minted: burn_id={effective_burn_id} (seq={burn_id_seq}) -> {destination_chain} tx={destination_tx}")
+            logger.info(f"Indexed bridge attest minted: burn_id={effective_burn_id} (seq={burn_id_seq}) validator={validator} -> {destination_chain} tx={destination_tx}")
         except Exception as e:
             logger.error(f"Failed to index bridge attest minted {tx_hash}: {e}")
