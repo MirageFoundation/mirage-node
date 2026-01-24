@@ -531,8 +531,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `GET /api/bridge/config` | Enabled chains, fees |
 | `POST /api/bridge/ibc_transfer` | IBC transfer to Cosmos chains |
 | `POST /api/bridge/burn` | Burn for attested bridge (Solana) |
-| `GET /api/bridge/get_minted` | Query mint status |
-| `GET /api/bridge/attestation_status` | Query attestation progress |
+| `GET /api/bridge/status` | Query bridge status and attestation progress |
 
 ---
 
