@@ -20,6 +20,7 @@ type bridgeMockKeeper struct {
 	mintedRecords     map[string]*types.BridgeMintedRecord
 	attestations      map[string]*types.BridgeAttestation
 	mintAttestations  map[string]*types.BridgeMintAttestation
+	mintAttestors     map[string]int64
 	pendingMintFees   map[string]bool
 	bondedValidators  map[string]bool
 	validatorPowers   map[string]int64
@@ -36,6 +37,7 @@ func newBridgeMockKeeper(params types.Params) *bridgeMockKeeper {
 		mintedRecords:    make(map[string]*types.BridgeMintedRecord),
 		attestations:     make(map[string]*types.BridgeAttestation),
 		mintAttestations: make(map[string]*types.BridgeMintAttestation),
+		mintAttestors:    make(map[string]int64),
 		pendingMintFees:  make(map[string]bool),
 		bondedValidators: make(map[string]bool),
 		validatorPowers:  make(map[string]int64),
@@ -133,6 +135,21 @@ func (mk *bridgeMockKeeper) GetOrCreateBridgeMintAttestation(ctx sdk.Context, bu
 func (mk *bridgeMockKeeper) SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error {
 	key := fmt.Sprintf("%s/%s", attestation.DestinationChain, attestation.BurnID)
 	mk.mintAttestations[key] = attestation
+	return nil
+}
+
+func (mk *bridgeMockKeeper) HasBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string) (bool, error) {
+	key := fmt.Sprintf("%s/%s/%s", destChain, burnID, valoper)
+	_, ok := mk.mintAttestors[key]
+	return ok, nil
+}
+
+func (mk *bridgeMockKeeper) SetBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string, power int64) error {
+	if power <= 0 {
+		return fmt.Errorf("attestor power must be positive")
+	}
+	key := fmt.Sprintf("%s/%s/%s", destChain, burnID, valoper)
+	mk.mintAttestors[key] = power
 	return nil
 }
 

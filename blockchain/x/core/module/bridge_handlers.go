@@ -40,6 +40,8 @@ type bridgeAttestMintedKeeper interface {
 	GetCurrentBridgeSequence(ctx sdk.Context, destChain string) (uint64, error)
 	GetBridgeBurnRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeBurnRecord, bool, error)
 	GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error)
+	HasBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string) (bool, error)
+	SetBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string, power int64) error
 	SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error
 	SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error
 	SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error
@@ -449,7 +451,11 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	}
 
 	// Check if already attested by this validator
-	if attestation.HasAttested(valoper) {
+	alreadyAttested, err := k.HasBridgeMintAttestor(ctx, destChain, burnIDStr, valoper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check mint attestor: %w", err)
+	}
+	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
 		ctx.Logger().Debug("BridgeAttestMinted validator already attested",
 			"burn_id", burnIDStr,
@@ -462,8 +468,18 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		}, nil
 	}
 
-	// Add attestation
-	attestation.AddAttestation(valoper, valPower)
+	// Add attestation (stored separately to avoid variable-size writes)
+	if err := k.SetBridgeMintAttestor(ctx, destChain, burnIDStr, valoper, valPower); err != nil {
+		return nil, fmt.Errorf("failed to store mint attestor: %w", err)
+	}
+	attestation.AttestedPower += valPower
+	ctx.Logger().Debug("BridgeAttestMinted attestor recorded",
+		"burn_id", burnIDStr,
+		"destination_chain", destChain,
+		"validator", valoper,
+		"power", valPower,
+		"attested_power", attestation.AttestedPower,
+	)
 
 	// Get total voting power
 	totalPower, err := k.GetTotalBondedValidatorPower(ctx)

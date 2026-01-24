@@ -2875,7 +2875,11 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 
 	// Add attestation details if found
 	if attFound {
-		resp.Attestors = attestation.AttestorList()
+		attestors, err := am.k.GetBridgeMintAttestorList(sdkCtx, destChain, burnID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mint attestors: %w", err)
+		}
+		resp.Attestors = attestors
 		resp.AttestedPower = attestation.AttestedPower
 		resp.DestinationTx = attestation.DestinationTx
 	}

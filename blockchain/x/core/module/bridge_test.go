@@ -253,6 +253,7 @@ func TestBridgeMintAttestationStorage(t *testing.T) {
 	attestation := types.NewBridgeMintAttestation(burnID, destChain, "SolanaSignature123", 100)
 	attestation.AddAttestation("miragevaloper1abc", 1000)
 	attestation.AttestedPower = 1000
+	attestation.Attestors = nil
 
 	err = mk.SetBridgeMintAttestation(ctx, attestation)
 	if err != nil {
@@ -477,6 +478,7 @@ func TestBridgeMintAttestationGetOrCreate(t *testing.T) {
 
 	// Modify and save
 	attestation1.AddAttestation("val1", 1000)
+	attestation1.Attestors = nil
 	if err := mk.SetBridgeMintAttestation(ctx, attestation1); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
 	}
@@ -1380,6 +1382,7 @@ func TestMintAttestationDestinationTxConsistency(t *testing.T) {
 	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
 	attestation.AddAttestation("val1", 50)
 	attestation.AttestedPower = 50
+	attestation.Attestors = nil
 
 	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
@@ -1420,6 +1423,7 @@ func TestGetOrCreateMintAttestationNew(t *testing.T) {
 	// Add an attestation and save
 	attestation.AddAttestation("val1", 50)
 	attestation.AttestedPower = 50
+	attestation.Attestors = nil
 	if err := mk.SetBridgeMintAttestation(ctx, attestation); err != nil {
 		t.Fatalf("SetBridgeMintAttestation error: %v", err)
 	}
