@@ -356,7 +356,22 @@ def main():
     address = create_solana_keypair(mnemonic, KEYPAIR_PATH)
     ok(f"Keypair saved: {KEYPAIR_PATH}")
 
-    # ── Step 6: Check balance ─────────────────────────────────────────────────
+    # ── Step 6: Save config ───────────────────────────────────────────────────
+    ORCHESTRATOR_REGISTRY.mkdir(parents=True, exist_ok=True)
+    config_path = ORCHESTRATOR_REGISTRY / f"{validator}.json"
+    config = {
+        "orchestratorPubkey": address,
+        "mirageValidator": validator,
+        "stake": stake,
+    }
+    config_json = json.dumps(config, indent=2)
+    with open(config_path, "w") as f:
+        f.write(config_json)
+        f.write("\n")
+    os.chmod(config_path, 0o600)
+    ok(f"Config saved: {config_path}")
+
+    # ── Step 7: Check balance ─────────────────────────────────────────────────
     rpc_url = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.mainnet-beta.solana.com")
     print()
     print("  Checking Solana balance...")
@@ -385,21 +400,7 @@ def main():
     else:
         warn("Could not check balance")
 
-    # ── Step 7: Save config ───────────────────────────────────────────────────
-    ORCHESTRATOR_REGISTRY.mkdir(parents=True, exist_ok=True)
-    config_path = ORCHESTRATOR_REGISTRY / f"{validator}.json"
-    config = {
-        "orchestratorPubkey": address,
-        "mirageValidator": validator,
-        "stake": stake,
-    }
-    config_json = json.dumps(config, indent=2)
-    with open(config_path, "w") as f:
-        f.write(config_json)
-        f.write("\n")
-    os.chmod(config_path, 0o600)
-
-    # ── Step 8: Start orchestrator ────────────────────────────────────────────
+    # ── Step 8: Start orchestrator ─────────────────────────────────────────────
     box("STARTING ORCHESTRATOR")
     print()
     
