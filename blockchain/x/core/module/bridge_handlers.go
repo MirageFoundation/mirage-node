@@ -27,6 +27,8 @@ type bridgeAttestBurnedKeeper interface {
 	IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 	GetValidatorPower(ctx sdk.Context, valoper string) (int64, error)
 	GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error)
+	HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error)
+	SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
 	SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error
 	MintToAccount(ctx sdk.Context, recipient string, amount uint64) error
@@ -251,7 +253,11 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 	}
 
 	// Check if validator already attested
-	if attestation.HasAttested(valoper) {
+	alreadyAttested, err := k.HasBridgeAttestor(ctx, sourceChain, burnID, valoper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check attestor: %w", err)
+	}
+	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
 		return &types.MsgBridgeAttestBurnedResponse{
 			Confirmed:     attestation.Minted,
@@ -260,8 +266,11 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 		}, nil
 	}
 
-	// Add attestation
-	attestation.AddAttestation(valoper, valPower)
+	// Add attestation (stored separately to avoid variable-size writes)
+	if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, valoper, valPower); err != nil {
+		return nil, fmt.Errorf("failed to store attestor: %w", err)
+	}
+	attestation.AttestedPower += valPower
 
 	// Check if threshold is met
 	totalPower, err := k.GetTotalBondedValidatorPower(ctx)

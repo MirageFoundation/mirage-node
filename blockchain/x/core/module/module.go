@@ -2759,13 +2759,18 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
 	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
 
+	attestors, err := am.k.GetBridgeAttestorList(sdkCtx, sourceChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load attestors: %w", err)
+	}
+
 	return &types.QueryBridgeAttestationResponse{
 		Found:           true,
 		SourceChain:     attestation.SourceChain,
 		BurnId:          attestation.BurnID,
 		MirageRecipient: attestation.MirageRecipient,
 		Amount:          attestation.Amount,
-		Attestors:       attestation.AttestorList(),
+		Attestors:       attestors,
 		AttestedPower:   attestation.AttestedPower,
 		RequiredPower:   requiredPower,
 		Minted:          attestation.Minted,
