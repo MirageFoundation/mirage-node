@@ -27,6 +27,8 @@ type bridgeAttestBurnedKeeper interface {
 	IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 	GetValidatorPower(ctx sdk.Context, valoper string) (int64, error)
 	GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error)
+	HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error)
+	SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
 	SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error
 	MintToAccount(ctx sdk.Context, recipient string, amount uint64) error
@@ -40,10 +42,12 @@ type bridgeAttestMintedKeeper interface {
 	GetCurrentBridgeSequence(ctx sdk.Context, destChain string) (uint64, error)
 	GetBridgeBurnRecord(ctx sdk.Context, destChain, burnID string) (*types.BridgeBurnRecord, bool, error)
 	GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error)
+	HasBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string) (bool, error)
+	SetBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string, power int64) error
 	SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error
 	SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error
+	BurnFromModuleExact(ctx sdk.Context, amount uint64) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
-	SendFromModule(ctx sdk.Context, to string, amount uint64) error
 }
 
 func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, deductRelayGasFee func(ctx sdk.Context, owner string, userLevel int) error) (*types.MsgBridgeBurnResponse, error) {
@@ -117,14 +121,14 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 		return nil, fmt.Errorf("failed to burn tokens: %w", err)
 	}
 
-	// Escrow the bridge fee in the core module account (paid to validator on BridgeMinted)
+	// Escrow the bridge fee in the core module account (burned when mint is confirmed)
 	if bridgeFee > 0 {
 		if err := k.SendToModule(ctx, owner, bridgeFee); err != nil {
 			return nil, fmt.Errorf("failed to escrow bridge fee: %w", err)
 		}
 	}
 
-	// Persist burn record for fee payout and auditing
+	// Persist burn record for fee burning and auditing
 	burnIDStr := fmt.Sprintf("%d", sequence)
 	record := &types.BridgeBurnRecord{
 		BurnID:             burnIDStr,
@@ -146,7 +150,7 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 	}
 
 	// Emit event for orchestrators to pick up
-	// NOTE: We persist a burn record for fee payout; attestations track confirmation.
+	// NOTE: We persist a burn record for fee burning; attestations track confirmation.
 	ctx.EventManager().EmitEvent(
 		buildBridgeBurnEvent(owner, destChain, destAddr, amount, bridgeFee, sequence),
 	)
@@ -249,7 +253,11 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 	}
 
 	// Check if validator already attested
-	if attestation.HasAttested(valoper) {
+	alreadyAttested, err := k.HasBridgeAttestor(ctx, sourceChain, burnID, valoper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check attestor: %w", err)
+	}
+	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
 		return &types.MsgBridgeAttestBurnedResponse{
 			Confirmed:     attestation.Minted,
@@ -258,8 +266,11 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 		}, nil
 	}
 
-	// Add attestation
-	attestation.AddAttestation(valoper, valPower)
+	// Add attestation (stored separately to avoid variable-size writes)
+	if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, valoper, valPower); err != nil {
+		return nil, fmt.Errorf("failed to store attestor: %w", err)
+	}
+	attestation.AttestedPower += valPower
 
 	// Check if threshold is met
 	totalPower, err := k.GetTotalBondedValidatorPower(ctx)
@@ -434,13 +445,26 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		}, nil
 	}
 
-	// Ensure destination tx consistency
-	if attestation.DestinationTx != destTx {
-		return nil, fmt.Errorf("destination_tx mismatch: existing %s, provided %s", attestation.DestinationTx, destTx)
+	canonicalDestTx := attestation.DestinationTx
+	if canonicalDestTx == "" {
+		return nil, fmt.Errorf("mint attestation missing canonical destination_tx")
+	}
+	if canonicalDestTx != destTx {
+		ctx.Logger().Debug("BridgeAttestMinted destination_tx differs; using canonical",
+			"burn_id", burnIDStr,
+			"destination_chain", destChain,
+			"canonical_destination_tx", canonicalDestTx,
+			"provided_destination_tx", destTx,
+			"validator", valoper,
+		)
 	}
 
 	// Check if already attested by this validator
-	if attestation.HasAttested(valoper) {
+	alreadyAttested, err := k.HasBridgeMintAttestor(ctx, destChain, burnIDStr, valoper)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check mint attestor: %w", err)
+	}
+	if alreadyAttested {
 		totalPower, _ := k.GetTotalBondedValidatorPower(ctx)
 		ctx.Logger().Debug("BridgeAttestMinted validator already attested",
 			"burn_id", burnIDStr,
@@ -453,8 +477,18 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		}, nil
 	}
 
-	// Add attestation
-	attestation.AddAttestation(valoper, valPower)
+	// Add attestation (stored separately to avoid variable-size writes)
+	if err := k.SetBridgeMintAttestor(ctx, destChain, burnIDStr, valoper, valPower); err != nil {
+		return nil, fmt.Errorf("failed to store mint attestor: %w", err)
+	}
+	attestation.AttestedPower += valPower
+	ctx.Logger().Debug("BridgeAttestMinted attestor recorded",
+		"burn_id", burnIDStr,
+		"destination_chain", destChain,
+		"validator", valoper,
+		"power", valPower,
+		"attested_power", attestation.AttestedPower,
+	)
 
 	// Get total voting power
 	totalPower, err := k.GetTotalBondedValidatorPower(ctx)
@@ -469,81 +503,36 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	if attestation.MeetsThreshold(totalPower, params.BridgeAttestationThreshold) {
 		// Threshold met - confirm the mint
 		attestation.Confirmed = true
+		attestation.ConfirmedBy = validator
 		confirmed = true
 
 		// Store final mint record
 		record := &types.BridgeMintedRecord{
 			BurnID:           burnIDStr,
 			DestinationChain: destChain,
-			DestinationTx:    destTx,
+			DestinationTx:    canonicalDestTx,
 			CreatedAt:        ctx.BlockHeight(),
 		}
 		if err := k.SetBridgeMintedRecord(ctx, record); err != nil {
 			return nil, fmt.Errorf("failed to store mint record: %w", err)
 		}
 
-		// Distribute bridge fee proportionally among all attestors based on their voting power
-		if burnRecord.BridgeFee > 0 && attestation.AttestedPower > 0 {
-			totalFee := burnRecord.BridgeFee
-			var distributed uint64 = 0
-
-			for valoperAddr, power := range attestation.Attestors {
-				if power <= 0 {
-					continue
-				}
-
-				valoper, err := sdk.ValAddressFromBech32(valoperAddr)
-				if err != nil {
-					return nil, fmt.Errorf("invalid attestor address: %w", err)
-				}
-				accAddr := sdk.AccAddress(valoper).String()
-
-				// Use sdkmath.Int for safe arithmetic to avoid overflow
-				share := sdkmath.NewIntFromUint64(totalFee).
-					MulRaw(power).
-					QuoRaw(attestation.AttestedPower).
-					Uint64()
-
-				if share > 0 {
-					if err := k.SendFromModule(ctx, accAddr, share); err != nil {
-						return nil, fmt.Errorf("failed to pay bridge fee to %s: %w", accAddr, err)
-					}
-					distributed += share
-					ctx.Logger().Debug("BridgeAttestMinted fee share paid",
-						"burn_id", burnIDStr,
-						"validator", valoperAddr,
-						"recipient", accAddr,
-						"power", power,
-						"share", share,
-					)
-				}
+		// Burn bridge fee immediately when threshold is reached
+		if burnRecord.BridgeFee > 0 {
+			if err := k.BurnFromModuleExact(ctx, burnRecord.BridgeFee); err != nil {
+				return nil, fmt.Errorf("failed to burn bridge fee: %w", err)
 			}
-
-			// Handle rounding dust - give to the validator that crossed the threshold
-			if distributed < totalFee {
-				dust := totalFee - distributed
-				if err := k.SendFromModule(ctx, validator, dust); err != nil {
-					return nil, fmt.Errorf("failed to pay bridge fee dust: %w", err)
-				}
-				ctx.Logger().Debug("BridgeAttestMinted fee dust paid",
-					"burn_id", burnIDStr,
-					"validator", validator,
-					"dust", dust,
-				)
-			}
-
-			ctx.Logger().Info("BridgeAttestMinted fee distributed proportionally",
-				"burn_id", burnIDStr,
-				"total_fee", totalFee,
-				"attestor_count", len(attestation.Attestors),
-				"distributed", distributed,
-			)
 		}
+		ctx.Logger().Debug("BridgeAttestMinted fee burned",
+			"destination_chain", destChain,
+			"burn_id", burnIDStr,
+			"fee", burnRecord.BridgeFee,
+		)
 
 		ctx.Logger().Info("BridgeAttestMinted threshold met",
 			"burn_id", burnIDStr,
 			"destination_chain", destChain,
-			"destination_tx", destTx,
+			"destination_tx", canonicalDestTx,
 			"attested_power", attestation.AttestedPower,
 			"required_power", requiredPower,
 		)
@@ -560,7 +549,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 			"bridge_attest_minted",
 			sdk.NewAttribute("burn_id", burnIDStr),
 			sdk.NewAttribute("destination_chain", destChain),
-			sdk.NewAttribute("destination_tx", destTx),
+			sdk.NewAttribute("destination_tx", canonicalDestTx),
 			sdk.NewAttribute("validator", valoper),
 			sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
 			sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
@@ -573,7 +562,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	ctx.Logger().Info("BridgeAttestMinted",
 		"burn_id", burnIDStr,
 		"destination_chain", destChain,
-		"destination_tx", destTx,
+		"destination_tx", canonicalDestTx,
 		"validator", valoper,
 		"power", valPower,
 		"attested_power", attestation.AttestedPower,

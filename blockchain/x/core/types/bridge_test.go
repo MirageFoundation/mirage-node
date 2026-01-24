@@ -96,9 +96,9 @@ func TestBridgeMintedRecordUnmarshalInvalid(t *testing.T) {
 
 func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	original := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-	original.AddAttestation("val1", 1000)
-	original.AddAttestation("val2", 2000)
+	original.AttestedPower = 3000
 	original.Confirmed = true
+	original.ConfirmedBy = "mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqp5h6t2"
 
 	data, err := original.Marshal()
 	if err != nil {
@@ -125,8 +125,8 @@ func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	if restored.Confirmed != original.Confirmed {
 		t.Errorf("Confirmed mismatch: got %v, want %v", restored.Confirmed, original.Confirmed)
 	}
-	if len(restored.Attestors) != 2 {
-		t.Errorf("Attestors count mismatch: got %d, want 2", len(restored.Attestors))
+	if restored.ConfirmedBy != original.ConfirmedBy {
+		t.Errorf("ConfirmedBy mismatch: got %s, want %s", restored.ConfirmedBy, original.ConfirmedBy)
 	}
 }
 
@@ -134,18 +134,6 @@ func TestBridgeMintAttestationUnmarshalInvalid(t *testing.T) {
 	_, err := UnmarshalBridgeMintAttestation([]byte("not valid json"))
 	if err == nil {
 		t.Error("Expected error for invalid JSON, got nil")
-	}
-}
-
-func TestBridgeMintAttestationUnmarshalNilAttestors(t *testing.T) {
-	// Test that Attestors map is initialized even if JSON has null
-	data := []byte(`{"burn_id":"1","destination_chain":"solana","attestors":null}`)
-	restored, err := UnmarshalBridgeMintAttestation(data)
-	if err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-	if restored.Attestors == nil {
-		t.Error("Expected Attestors map to be initialized, got nil")
 	}
 }
 
@@ -165,6 +153,14 @@ func TestBridgeMintAttestationKey(t *testing.T) {
 		if string(key) != tc.expected {
 			t.Errorf("BridgeMintAttestationKey(%s, %s) = %s, want %s", tc.destChain, tc.burnID, string(key), tc.expected)
 		}
+	}
+}
+
+func TestBridgeMintAttestorKey(t *testing.T) {
+	key := BridgeMintAttestorKey("solana", "42", "miragevaloper1abc")
+	expected := "bridge_mint_attestors/solana/42/miragevaloper1abc"
+	if string(key) != expected {
+		t.Errorf("BridgeMintAttestorKey = %s, want %s", string(key), expected)
 	}
 }
 
@@ -557,67 +553,6 @@ func TestBridgeAttestationGetAttestorPower(t *testing.T) {
 	// Unknown validator should return 0
 	if power := a.GetAttestorPower("unknown"); power != 0 {
 		t.Errorf("GetAttestorPower(unknown) = %d, want 0", power)
-	}
-}
-
-func TestBridgeMintAttestationGetAttestorPower(t *testing.T) {
-	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-
-	// Before attestation, power should be 0
-	if power := a.GetAttestorPower("validator1"); power != 0 {
-		t.Errorf("GetAttestorPower before attestation = %d, want 0", power)
-	}
-
-	a.AddAttestation("validator1", 300)
-	a.AddAttestation("validator2", 250)
-	a.AddAttestation("validator3", 200)
-
-	// Verify each validator's stored power
-	if power := a.GetAttestorPower("validator1"); power != 300 {
-		t.Errorf("GetAttestorPower(validator1) = %d, want 300", power)
-	}
-	if power := a.GetAttestorPower("validator2"); power != 250 {
-		t.Errorf("GetAttestorPower(validator2) = %d, want 250", power)
-	}
-	if power := a.GetAttestorPower("validator3"); power != 200 {
-		t.Errorf("GetAttestorPower(validator3) = %d, want 200", power)
-	}
-
-	// Verify total attested power
-	if a.AttestedPower != 750 {
-		t.Errorf("AttestedPower = %d, want 750", a.AttestedPower)
-	}
-}
-
-func TestProportionalFeeDistribution(t *testing.T) {
-	// Test the math for proportional fee distribution
-	// Simulates: 3 validators with powers 300, 250, 200 = 750 total
-	// Fee of 1000 should be split as: 400, 333, 266 = 999 (1 dust)
-	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-	a.AddAttestation("validator1", 300)
-	a.AddAttestation("validator2", 250)
-	a.AddAttestation("validator3", 200)
-
-	totalFee := uint64(1000)
-	var distributed uint64 = 0
-	expectedShares := map[string]uint64{
-		"validator1": 400, // 1000 * 300 / 750 = 400
-		"validator2": 333, // 1000 * 250 / 750 = 333
-		"validator3": 266, // 1000 * 200 / 750 = 266
-	}
-
-	for valAddr, power := range a.Attestors {
-		share := totalFee * uint64(power) / uint64(a.AttestedPower)
-		if share != expectedShares[valAddr] {
-			t.Errorf("Share for %s = %d, want %d", valAddr, share, expectedShares[valAddr])
-		}
-		distributed += share
-	}
-
-	// Should have 1 dust remaining (1000 - 999 = 1)
-	dust := totalFee - distributed
-	if dust != 1 {
-		t.Errorf("Dust = %d, want 1", dust)
 	}
 }
 

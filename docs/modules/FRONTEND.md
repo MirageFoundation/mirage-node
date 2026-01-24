@@ -468,6 +468,9 @@ async function post(path, body, options) {
 | `/api/core/vote` | POST | Submit vote |
 | `/api/core/set_username` | POST | Set username |
 | `/api/bridge/burn` | POST | Bridge burn transaction |
+| `/api/bridge/config` | GET | Bridge configuration (chains, fees) |
+| `/api/bridge/status` | GET | Query bridge status and attestation progress |
+| `/api/bridge/ibc_transfer` | POST | IBC transfer to Cosmos chains |
 
 ---
 

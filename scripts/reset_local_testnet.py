@@ -116,6 +116,36 @@ def run(cmd, check=True, capture=False):
     return ""
 
 
+# Cached miraged path inside container
+_container_miraged_path: str | None = None
+
+
+def get_container_miraged_path() -> str:
+    """Get the miraged binary path inside the Docker container.
+    
+    Handles both old (/opt/mirage/blockchain/bin/miraged) and
+    new (/opt/mirage/blockchain/miraged) directory structures.
+    """
+    global _container_miraged_path
+    if _container_miraged_path is not None:
+        return _container_miraged_path
+    
+    # Check new path first, then fall back to old path
+    new_path = "/opt/mirage/blockchain/miraged"
+    old_path = "/opt/mirage/blockchain/bin/miraged"
+    
+    result = subprocess.run(
+        ["docker", "exec", "mirage", "test", "-f", new_path],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        _container_miraged_path = new_path
+    else:
+        _container_miraged_path = old_path
+    
+    return _container_miraged_path
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -452,6 +482,8 @@ def ensure_test_keys():
     # Ensure the node home directory exists
     run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/node"])
 
+    miraged = get_container_miraged_path()
+
     def _create_key(name: str):
         m = generate_random_mnemonic()
         # Use a temp file to pass the mnemonic (avoids shell quoting issues)
@@ -459,7 +491,7 @@ def ensure_test_keys():
             [
                 "bash",
                 "-lc",
-                f"echo '{m}' | docker exec -i mirage /opt/mirage/blockchain/miraged keys add {name} --recover --home /root/.mirage/node --keyring-backend test",
+                f"echo '{m}' | docker exec -i mirage {miraged} keys add {name} --recover --home /root/.mirage/node --keyring-backend test",
             ]
         )
 
@@ -473,7 +505,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator -a --home /root/.mirage/node --keyring-backend test",
+            f"docker exec mirage {miraged} keys show validator -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -481,7 +513,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show validator --bech val -a --home /root/.mirage/node --keyring-backend test",
+            f"docker exec mirage {miraged} keys show validator --bech val -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -489,7 +521,7 @@ def ensure_test_keys():
         [
             "bash",
             "-lc",
-            "docker exec mirage /opt/mirage/blockchain/miraged keys show faucet -a --home /root/.mirage/node --keyring-backend test",
+            f"docker exec mirage {miraged} keys show faucet -a --home /root/.mirage/node --keyring-backend test",
         ],
         capture=True,
     ).strip()
@@ -998,8 +1030,24 @@ def write_working_genesis(genesis_json: str):
     # Note: We use the binary from the pulled image (same version as source chain)
     # No need to copy binary from snapshot
 
+    # Helper to ensure tmux window exists (tmux session may not have all windows)
+    def ensure_tmux_window(window_name: str):
+        window_exists = run(
+            [
+                "bash",
+                "-lc",
+                f"docker exec mirage tmux list-windows -t mirage -F '#{{window_name}}' 2>/dev/null | grep -q '^{window_name}$' && echo yes || echo no",
+            ],
+            capture=True,
+        ).strip()
+        if window_exists != "yes":
+            run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
+            time.sleep(0.3)
+
     status("Starting node in tmux ...")
-    start_cmd = '/opt/mirage/blockchain/miraged start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
+    ensure_tmux_window("node")
+    miraged = get_container_miraged_path()
+    start_cmd = f'{miraged} start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
 
     status("Waiting for RPC ...")
@@ -1032,6 +1080,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting indexer ...")
+    ensure_tmux_window("indexer")
     run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true"])
     time.sleep(2)  # Wait for node to stabilize
     initial_height = run(
@@ -1047,6 +1096,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting backend ...")
+    ensure_tmux_window("backend")
     run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true"])
     time.sleep(0.5)
     run(
@@ -1068,18 +1118,7 @@ def write_working_genesis(genesis_json: str):
         try:
             status("Starting orchestrator ...")
             run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
-            # Check if orchestrator window exists, create if not
-            window_exists = run(
-                [
-                    "bash",
-                    "-lc",
-                    "docker exec mirage tmux list-windows -t mirage -F '#{window_name}' 2>/dev/null | grep -q '^orchestrator$' && echo yes || echo no",
-                ],
-                capture=True,
-            ).strip()
-            if window_exists != "yes":
-                run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator -c /opt/mirage"])
-                time.sleep(0.3)
+            ensure_tmux_window("orchestrator")
             run(
                 [
                     "bash",
