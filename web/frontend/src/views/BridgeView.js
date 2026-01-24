@@ -32,7 +32,7 @@ const NETWORKS = {
         id: 'osmosis',
         name: 'Osmosis',
         symbol: 'OSMO',
-        icon: '/bridges/osmosis.svg',
+        icon: '/images/bridges/osmosis.svg',
         color: '#5E12A0',
         colorLight: 'rgba(94, 18, 160, 0.15)',
         addressPrefix: 'osmo',
@@ -48,7 +48,7 @@ const NETWORKS = {
         id: 'solana',
         name: 'Solana',
         symbol: 'SOL',
-        icon: '/bridges/solana.svg',
+        icon: '/images/bridges/solana.svg',
         color: '#14F195',
         colorLight: 'rgba(20, 241, 149, 0.15)',
         addressPrefix: null, // Solana uses base58, not bech32
@@ -72,12 +72,12 @@ const BRIDGE_POLL_SCHEDULE = {
 };
 
 // Bridge status polling schedule for Bridge Out (Mirage -> external)
+// First poll at 10s, then every 2.5s until 60s, then every 5s. Timeout at 120s.
 const BRIDGE_OUT_STATUS_POLL_SCHEDULE = {
     initialDelayMs: 10000, // Wait 10s before first poll (validators need time to detect burn and attest)
     intervalsMs: [
-        ...Array.from({ length: 30 }, () => 1000),  // 10-40s: every 1s
-        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
-        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
+        ...Array.from({ length: 20 }, () => 2500),  // 10-60s: every 2.5s (20 * 2.5s = 50s)
+        ...Array.from({ length: 12 }, () => 5000),  // 60-120s: every 5s (12 * 5s = 60s)
     ],
 };
 
@@ -88,6 +88,25 @@ const formatAttestationPower = (attestedPower, requiredPower, thresholdBps) => {
     const thresholdPercent = threshold / 100;
     const percentOfTotal = Math.min(100, (Number(attestedPower) || 0) / required * thresholdPercent);
     return `${percentOfTotal.toFixed(1)}% power, need ${thresholdPercent.toFixed(1)}%`;
+};
+
+// Truncate long addresses for mobile display
+const truncateAddress = (addr, startChars = 10, endChars = 6) => {
+    if (!addr) return '';
+    if (addr.length <= startChars + endChars + 3) return addr;
+    return `${addr.slice(0, startChars)}...${addr.slice(-endChars)}`;
+};
+
+// Responsive address component - shows truncated on mobile, full on desktop
+const ResponsiveAddress = ({ address, startChars = 16, endChars = 6 }) => {
+    if (!address) return null;
+    const truncated = truncateAddress(address, startChars, endChars);
+    return (
+        <>
+            <span className="address-full">{address}</span>
+            <span className="address-truncated">{truncated}</span>
+        </>
+    );
 };
 
 
@@ -597,6 +616,23 @@ const StepMeta = styled.span`
     a {
         color: ${({ theme }) => theme?.colors?.link || '#667eea'};
     }
+    
+    /* Responsive address display */
+    .address-full {
+        display: inline;
+    }
+    .address-truncated {
+        display: none;
+    }
+    
+    @media (max-width: 768px) {
+        .address-full {
+            display: none;
+        }
+        .address-truncated {
+            display: inline;
+        }
+    }
 `;
 
 // Progress Screen Components (full-screen progress view after submit)
@@ -624,6 +660,9 @@ const ProgressScreenNetworkIcon = styled.img`
     width: 2rem;
     height: 2rem;
     border-radius: 50%;
+    ${({ $isMirage, theme }) => $isMirage && `
+        filter: ${theme?.isDark !== false ? 'brightness(0) invert(1)' : 'none'};
+    `}
 `;
 
 const ProgressScreenTitleText = styled.div`
@@ -709,6 +748,9 @@ const BalanceComparisonNetworkIcon = styled.img`
     width: 1rem;
     height: 1rem;
     border-radius: 50%;
+    ${({ $isMirage, theme }) => $isMirage && `
+        filter: ${theme?.isDark !== false ? 'brightness(0) invert(1)' : 'none'};
+    `}
 `;
 
 const BalanceComparisonRow = styled.div`
@@ -731,10 +773,10 @@ const BalanceComparisonLabel = styled.span`
 const BalanceComparisonValue = styled.span`
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
     font-weight: 500;
-    color: ${({ theme, $highlight, $dim }) => 
-        $highlight ? '#48bb78' : 
-        $dim ? (theme?.colors?.subtleText || '#888') : 
-        (theme?.colors?.text || '#fff')};
+    color: ${({ theme, $highlight, $dim }) =>
+        $highlight ? '#48bb78' :
+            $dim ? (theme?.colors?.subtleText || '#888') :
+                (theme?.colors?.text || '#fff')};
 `;
 
 // Derived address display
@@ -819,7 +861,7 @@ const SOURCE_NETWORKS = {
         id: 'osmosis',
         name: 'Osmosis',
         symbol: 'OSMO',
-        icon: '/bridges/osmosis.svg',
+        icon: '/images/bridges/osmosis.svg',
         color: '#5E12A0',
         colorLight: 'rgba(94, 18, 160, 0.15)',
         addressPrefix: 'osmo',
@@ -832,7 +874,7 @@ const SOURCE_NETWORKS = {
         id: 'solana',
         name: 'Solana',
         symbol: 'SOL',
-        icon: '/bridges/solana.svg',
+        icon: '/images/bridges/solana.svg',
         color: '#14F195',
         colorLight: 'rgba(20, 241, 149, 0.15)',
         estimatedTime: '~2-5 minutes',
@@ -967,18 +1009,17 @@ const SOLANA_RPC_DEVNET = 'https://api.devnet.solana.com';
 const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 
 // Bridge status polling schedule for Bridge In (Solana -> Mirage)
-// Same pattern: 1s for first 30s, then 2s for 30-60s, then 3s after
+// First poll at 10s, then every 2.5s until 60s, then every 5s. Timeout at 120s.
 const BRIDGE_IN_STATUS_POLL_SCHEDULE = {
     initialDelayMs: 10000, // Wait 10s before first poll (orchestrators need time to detect burn and attest)
     intervalsMs: [
-        ...Array.from({ length: 20 }, () => 1000),  // 10-30s: every 1s
-        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
-        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
+        ...Array.from({ length: 20 }, () => 2500),  // 10-60s: every 2.5s (20 * 2.5s = 50s)
+        ...Array.from({ length: 12 }, () => 5000),  // 60-120s: every 5s (12 * 5s = 60s)
     ],
 };
 
 // Solana Bridge In Flow Component
-function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThresholdBps }) {
+function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThresholdBps, onBridgingChange }) {
     const [solanaWallet, setSolanaWallet] = useState(null); // { address, mirageBalance, solBalance }
     const [isConnecting, setIsConnecting] = useState(false);
     const [amount, setAmount] = useState('');
@@ -1053,6 +1094,13 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
             buttonRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
         } catch (_) { }
     }, [bridgeStatus]);
+
+    // Notify parent when bridging status changes
+    useEffect(() => {
+        if (onBridgingChange) {
+            onBridgingChange(bridgeStatus !== 'idle');
+        }
+    }, [bridgeStatus, onBridgingChange]);
 
     // Get Solana config from chainConfigs
     const solanaConfig = chainConfigs?.solana || {};
@@ -1479,7 +1527,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
             <ProgressScreenContainer>
                 <ProgressScreenHeader>
                     <ProgressScreenTitle>
-                        <ProgressScreenNetworkIcon src="/bridges/solana.svg" alt="Solana" />
+                        <ProgressScreenNetworkIcon src="/images/bridges/solana.svg" alt="" />
                         <ProgressScreenTitleText>
                             <ProgressScreenMainTitle>Bridge In</ProgressScreenMainTitle>
                             <ProgressScreenSubtitle>Solana → Mirage</ProgressScreenSubtitle>
@@ -1514,7 +1562,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                             >
-                                                {bridgeTxHash.slice(0, 16)}...
+                                                {bridgeTxHash}
                                             </a>
                                         </>
                                     ) : (
@@ -1593,8 +1641,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     )}
                 </StepsCard>
 
-                {/* Balance Comparison - show when complete or error */}
-                {(bridgeStatus === 'complete' || bridgeStatus === 'error') && (
+                {/* Balance Comparison - only show when mint is fully complete (or error/timeout) */}
+                {(mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout' || bridgeStatus === 'error') && (
                     <BalanceComparisonCard>
                         <BalanceComparisonTitle>
                             Balance Summary
@@ -1602,7 +1650,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                         <BalanceComparisonGrid>
                             <BalanceComparisonColumn>
                                 <BalanceComparisonNetwork>
-                                    <BalanceComparisonNetworkIcon src="/bridges/solana.svg" alt="Solana" />
+                                    <BalanceComparisonNetworkIcon src="/images/bridges/solana.svg" alt="" />
                                     Solana
                                 </BalanceComparisonNetwork>
                                 <BalanceComparisonRow>
@@ -1620,19 +1668,13 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                             </BalanceComparisonColumn>
                             <BalanceComparisonColumn>
                                 <BalanceComparisonNetwork>
-                                    <BalanceComparisonNetworkIcon src="/icon-192.png" alt="Mirage" />
+                                    <BalanceComparisonNetworkIcon src="/favicon.svg" alt="" $isMirage />
                                     Mirage
                                 </BalanceComparisonNetwork>
                                 <BalanceComparisonRow>
-                                    <BalanceComparisonLabel>Before</BalanceComparisonLabel>
-                                    <BalanceComparisonValue $dim>
-                                        {preBridgeMirageBalance !== null ? formatBalanceDisplay(preBridgeMirageBalance) : '...'} MIRAGE
-                                    </BalanceComparisonValue>
-                                </BalanceComparisonRow>
-                                <BalanceComparisonRow>
-                                    <BalanceComparisonLabel>After</BalanceComparisonLabel>
-                                    <BalanceComparisonValue $highlight={bridgeStatus === 'complete'}>
-                                        {mirageBalance !== null ? formatBalanceDisplay(mirageBalance) : '...'} MIRAGE
+                                    <BalanceComparisonLabel>Received</BalanceComparisonLabel>
+                                    <BalanceComparisonValue $highlight={mintStatus.state === 'minted'}>
+                                        +{bridgeAmount ? parseFloat(bridgeAmount).toLocaleString() : '...'} MIRAGE
                                     </BalanceComparisonValue>
                                 </BalanceComparisonRow>
                             </BalanceComparisonColumn>
@@ -1641,17 +1683,17 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 )}
 
                 {/* Action Button */}
-                <div ref={buttonRef} style={{ paddingTop: '1rem', paddingBottom: '1rem' }}>
+                <div ref={buttonRef} style={{ paddingTop: '0.5rem', paddingBottom: '2rem' }}>
                     <Button
                         variant="primary"
                         fullWidth
-                        disabled={bridgeStatus !== 'complete' && bridgeStatus !== 'error'}
+                        disabled={mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout' && bridgeStatus !== 'error'}
                         onClick={handleNewBridge}
                         style={{
                             background: 'linear-gradient(135deg, #14F195 0%, #0ea66e 100%)',
                         }}
                     >
-                        {bridgeStatus === 'complete' || bridgeStatus === 'error'
+                        {mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout' || bridgeStatus === 'error'
                             ? 'Start New Bridge'
                             : 'Bridging...'}
                     </Button>
@@ -1696,7 +1738,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                             onClick={connectPhantom}
                             disabled={isConnecting}
                         >
-                            <img src="/bridges/solana.svg" alt="Solana" />
+                            <img src="/images/bridges/solana.svg" alt="Solana" />
                             {isConnecting ? 'Connecting...' : 'Connect Phantom'}
                         </SolanaWalletButton>
                         {bridgeError && bridgeStatus === 'idle' && (
@@ -1707,7 +1749,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     <ConnectedWalletBox>
                         <WalletRow>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0, flex: 1 }}>
-                                <img src="/bridges/solana.svg" alt="Solana" style={{ width: '1.25rem', height: '1.25rem', flexShrink: 0 }} />
+                                <img src="/images/bridges/solana.svg" alt="Solana" style={{ width: '1.25rem', height: '1.25rem', flexShrink: 0 }} />
                                 <WalletAddress style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{solanaWallet.address}</WalletAddress>
                             </div>
                             <DisconnectButton type="button" onClick={disconnectWallet} style={{ flexShrink: 0 }}>
@@ -1833,62 +1875,31 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                         </div>
                     </InputSection>
 
-                    {/* Transaction Summary */}
+                    {/* Preview Card - matches Bridge Out style */}
                     {amount && parseFloat(amount.replace(/,/g, '')) > 0 && (
-                        <InputSection style={{ marginTop: '0.5rem', marginBottom: '0.75rem' }}>
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                fontSize: '0.8rem',
-                                color: theme?.colors?.subtleText || '#888',
-                                padding: '0.5rem 0',
-                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
-                            }}>
-                                <span>Solana Network Fee</span>
-                                <span style={{ color: theme?.colors?.text || '#fff' }}>~0.0001 SOL</span>
-                            </div>
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                fontSize: '0.8rem',
-                                color: theme?.colors?.subtleText || '#888',
-                                padding: '0.5rem 0',
-                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
-                            }}>
-                                <span>You will receive</span>
-                                <span style={{ color: '#14F195', fontWeight: 600 }}>{amount} MIRAGE</span>
-                            </div>
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                fontSize: '0.8rem',
-                                color: theme?.colors?.subtleText || '#888',
-                                padding: '0.5rem 0',
-                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
-                            }}>
-                                <span>Mirage balance before</span>
-                                <span style={{ color: theme?.colors?.text || '#fff' }}>
-                                    {Number.isFinite(mirageBalance)
-                                        ? `~${Math.round(mirageBalance / 1_000_000).toLocaleString()} MIRAGE`
-                                        : '...'}
-                                </span>
-                            </div>
-                            <div style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                fontSize: '0.8rem',
-                                color: theme?.colors?.subtleText || '#888',
-                                padding: '0.5rem 0',
-                                borderTop: `1px solid ${theme?.colors?.border || '#333'}`,
-                            }}>
-                                <span>Mirage balance after</span>
-                                <span style={{ color: '#14F195', fontWeight: 600 }}>
-                                    {Number.isFinite(mirageBalance)
-                                        ? `~${Math.round((mirageBalance / 1_000_000) + parseFloat(amount.replace(/,/g, ''))).toLocaleString()} MIRAGE`
-                                        : '...'}
-                                </span>
-                            </div>
-                        </InputSection>
+                        <PreviewCard>
+                            <PreviewHeader>
+                                <PreviewTitle>Summary</PreviewTitle>
+                                <PreviewNetwork $color="#14F195">
+                                    <img src="/images/bridges/solana.svg" alt="" style={{ width: '1.25rem', height: '1.25rem' }} /> Solana
+                                </PreviewNetwork>
+                            </PreviewHeader>
+                            <PreviewRow>
+                                <PreviewLabel>Send Amount</PreviewLabel>
+                                <PreviewValue>{parseFloat(amount.replace(/,/g, '')).toLocaleString()} MIRAGE</PreviewValue>
+                            </PreviewRow>
+                            <PreviewRow>
+                                <PreviewLabel>Network Fee</PreviewLabel>
+                                <PreviewValue>~0.0001 SOL</PreviewValue>
+                            </PreviewRow>
+                            <Divider />
+                            <PreviewRow>
+                                <PreviewLabel>Receive on Mirage</PreviewLabel>
+                                <PreviewValue $highlight>
+                                    {parseFloat(amount.replace(/,/g, '')).toLocaleString()} MIRAGE
+                                </PreviewValue>
+                            </PreviewRow>
+                        </PreviewCard>
                     )}
 
                     {/* Bridge Button */}
@@ -1919,6 +1930,7 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
     const [selectedSource, setSelectedSource] = useState(null);
     const [addressConfirmed, setAddressConfirmed] = useState(null); // null = not answered, true = yes, false = no
     const [copiedAddress, setCopiedAddress] = useState(null); // Track which address was copied
+    const [isSolanaBridging, setIsSolanaBridging] = useState(false); // Track when Solana bridge is in progress
 
     // Derive Osmosis address from Mirage address (same key)
     const derivedOsmoAddress = useMemo(() => {
@@ -1931,6 +1943,10 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
         setAddressConfirmed(null); // Reset when changing source
         console.debug('[Bridge In] Selected source:', networkId);
     };
+
+    const handleSolanaBridgingChange = useCallback((isBridging) => {
+        setIsSolanaBridging(isBridging);
+    }, []);
 
     const handleCopy = async (addr) => {
         if (!addr) return;
@@ -1961,53 +1977,58 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
     return (
         <BridgeContainer>
             <BridgeLayout>
-                {/* Balance Banner */}
-                <BalanceBanner>
-                    <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
-                    {balanceError ? (
-                        <BalanceBannerError onClick={() => refreshBalance('retry')}>
-                            Failed to load - click to retry
-                        </BalanceBannerError>
-                    ) : (
-                        <BalanceBannerValue>
-                            {balanceLoading ? 'Loading...' : formatBalance(balance)}
-                            {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
-                        </BalanceBannerValue>
-                    )}
-                </BalanceBanner>
-
-                {/* Step 1: Source Network Selection */}
-                <SectionTitle>
-                    <StepNumber>1</StepNumber>
-                    Select Source Chain
-                </SectionTitle>
-                <NetworkGrid>
-                    {Object.values(SOURCE_NETWORKS).map((network) => (
-                        <NetworkCard
-                            key={network.id}
-                            type="button"
-                            $selected={selectedSource?.id === network.id}
-                            $color={network.color}
-                            onClick={() => handleSourceSelect(network.id)}
-                            disabled={!network.enabled}
-                        >
-                            <NetworkCardContent>
-                                <NetworkName>{network.name}</NetworkName>
-                                <NetworkMeta>
-                                    <NetworkBadge $color={network.color}>
-                                        {network.estimatedTime}
-                                    </NetworkBadge>
-                                </NetworkMeta>
-                            </NetworkCardContent>
-                            <NetworkIcon src={network.icon} alt={network.name} />
-                            {selectedSource?.id === network.id && (
-                                <SelectedIndicator $color={network.color}>
-                                    ✓
-                                </SelectedIndicator>
+                {/* Hide form elements when Solana bridging is in progress */}
+                {!isSolanaBridging && (
+                    <>
+                        {/* Balance Banner */}
+                        <BalanceBanner>
+                            <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
+                            {balanceError ? (
+                                <BalanceBannerError onClick={() => refreshBalance('retry')}>
+                                    Failed to load - click to retry
+                                </BalanceBannerError>
+                            ) : (
+                                <BalanceBannerValue>
+                                    {balanceLoading ? 'Loading...' : formatBalance(balance)}
+                                    {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
+                                </BalanceBannerValue>
                             )}
-                        </NetworkCard>
-                    ))}
-                </NetworkGrid>
+                        </BalanceBanner>
+
+                        {/* Step 1: Source Network Selection */}
+                        <SectionTitle>
+                            <StepNumber>1</StepNumber>
+                            Select Source Chain
+                        </SectionTitle>
+                        <NetworkGrid>
+                            {Object.values(SOURCE_NETWORKS).map((network) => (
+                                <NetworkCard
+                                    key={network.id}
+                                    type="button"
+                                    $selected={selectedSource?.id === network.id}
+                                    $color={network.color}
+                                    onClick={() => handleSourceSelect(network.id)}
+                                    disabled={!network.enabled}
+                                >
+                                    <NetworkCardContent>
+                                        <NetworkName>{network.name}</NetworkName>
+                                        <NetworkMeta>
+                                            <NetworkBadge $color={network.color}>
+                                                {network.estimatedTime}
+                                            </NetworkBadge>
+                                        </NetworkMeta>
+                                    </NetworkCardContent>
+                                    <NetworkIcon src={network.icon} alt={network.name} />
+                                    {selectedSource?.id === network.id && (
+                                        <SelectedIndicator $color={network.color}>
+                                            ✓
+                                        </SelectedIndicator>
+                                    )}
+                                </NetworkCard>
+                            ))}
+                        </NetworkGrid>
+                    </>
+                )}
 
                 {/* Osmosis Bridge In Flow */}
                 {selectedSource?.id === 'osmosis' && (
@@ -2142,6 +2163,7 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
                         theme={theme}
                         chainConfigs={chainConfigs}
                         attestationThresholdBps={attestationThresholdBps}
+                        onBridgingChange={handleSolanaBridgingChange}
                     />
                 )}
 
@@ -2551,6 +2573,8 @@ export default function BridgeView({ state }) {
         setSearchParams({ tab }); // Update URL
         resetSubmitState();
         setErrors(prev => ({ ...prev, submit: null }));
+        // Always refresh balance when switching tabs
+        refreshBalance('tab_switch');
         console.debug('[Bridge] Tab changed:', tab);
     };
 
@@ -2873,9 +2897,9 @@ export default function BridgeView({ state }) {
                                     <ProgressScreenContainer>
                                         <ProgressScreenHeader>
                                             <ProgressScreenTitle>
-                                                <ProgressScreenNetworkIcon 
-                                                    src={bridgeOutNetwork?.icon || selectedNetwork?.icon || '/bridges/solana.svg'} 
-                                                    alt={bridgeOutNetwork?.name || selectedNetwork?.name || 'Network'} 
+                                                <ProgressScreenNetworkIcon
+                                                    src={bridgeOutNetwork?.icon || selectedNetwork?.icon || '/images/bridges/solana.svg'}
+                                                    alt=""
                                                 />
                                                 <ProgressScreenTitleText>
                                                     <ProgressScreenMainTitle>Bridge Out</ProgressScreenMainTitle>
@@ -2901,7 +2925,7 @@ export default function BridgeView({ state }) {
                                                         <StepTitle>Submitting bridge request{formatStepTime('submitting')}</StepTitle>
                                                         <StepMeta>
                                                             {getStepState('submitting') === 'complete'
-                                                                ? `Relayed by ${valoperAddress}`
+                                                                ? <>Relayed by <ResponsiveAddress address={valoperAddress} startChars={16} endChars={6} /></>
                                                                 : (submitStage === 'error' && errorStage === 'submitting')
                                                                     ? `Failure: ${submitError || 'submission failed'}`
                                                                     : 'Broadcasting to network...'}
@@ -2994,64 +3018,76 @@ export default function BridgeView({ state }) {
                                             )}
                                         </StepsCard>
 
-                                        {/* Balance Comparison - show when complete or error */}
-                                        {(submitStage === 'confirmed' || submitStage === 'error' || (isSolanaBridge && mintStatus.state === 'minted')) && (
-                                            <BalanceComparisonCard>
-                                                <BalanceComparisonTitle>
-                                                    Balance Summary
-                                                </BalanceComparisonTitle>
-                                                <BalanceComparisonGrid>
-                                                    <BalanceComparisonColumn>
-                                                        <BalanceComparisonNetwork>
-                                                            <BalanceComparisonNetworkIcon src="/icon-192.png" alt="Mirage" />
-                                                            Mirage
-                                                        </BalanceComparisonNetwork>
-                                                        <BalanceComparisonRow>
-                                                            <BalanceComparisonLabel>Before</BalanceComparisonLabel>
-                                                            <BalanceComparisonValue $dim>
-                                                                {preBridgeMirageBalance !== null ? formatBalance(preBridgeMirageBalance) : '...'} MIRAGE
-                                                            </BalanceComparisonValue>
-                                                        </BalanceComparisonRow>
-                                                        <BalanceComparisonRow>
-                                                            <BalanceComparisonLabel>After</BalanceComparisonLabel>
-                                                            <BalanceComparisonValue>
-                                                                {balance !== null ? formatBalance(balance) : '...'} MIRAGE
-                                                            </BalanceComparisonValue>
-                                                        </BalanceComparisonRow>
-                                                    </BalanceComparisonColumn>
-                                                    <BalanceComparisonColumn>
-                                                        <BalanceComparisonNetwork>
-                                                            <BalanceComparisonNetworkIcon 
-                                                                src={bridgeOutNetwork?.icon || selectedNetwork?.icon || '/bridges/solana.svg'} 
-                                                                alt={bridgeOutNetwork?.name || selectedNetwork?.name || 'Destination'} 
-                                                            />
-                                                            {bridgeOutNetwork?.name || selectedNetwork?.name || 'Destination'}
-                                                        </BalanceComparisonNetwork>
-                                                        <BalanceComparisonRow>
-                                                            <BalanceComparisonLabel>Received</BalanceComparisonLabel>
-                                                            <BalanceComparisonValue $highlight={submitStage === 'confirmed' || mintStatus.state === 'minted'}>
-                                                                +{bridgeOutAmount && bridgeFee !== null 
-                                                                    ? (parseFloat(bridgeOutAmount) - bridgeFee).toLocaleString() 
-                                                                    : '...'} MIRAGE
-                                                            </BalanceComparisonValue>
-                                                        </BalanceComparisonRow>
-                                                    </BalanceComparisonColumn>
-                                                </BalanceComparisonGrid>
-                                            </BalanceComparisonCard>
-                                        )}
+                                        {/* Balance Comparison - only show when fully complete or error */}
+                                        {/* For Solana: wait for mintStatus.state === 'minted', for IBC: wait for submitStage === 'confirmed' */}
+                                        {(submitStage === 'error' ||
+                                            (isSolanaBridge && (mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout')) ||
+                                            (!isSolanaBridge && submitStage === 'confirmed')
+                                        ) && (
+                                                <BalanceComparisonCard>
+                                                    <BalanceComparisonTitle>
+                                                        Balance Summary
+                                                    </BalanceComparisonTitle>
+                                                    <BalanceComparisonGrid>
+                                                        <BalanceComparisonColumn>
+                                                            <BalanceComparisonNetwork>
+                                                                <BalanceComparisonNetworkIcon src="/favicon.svg" alt="" $isMirage />
+                                                                Mirage
+                                                            </BalanceComparisonNetwork>
+                                                            <BalanceComparisonRow>
+                                                                <BalanceComparisonLabel>Before</BalanceComparisonLabel>
+                                                                <BalanceComparisonValue $dim>
+                                                                    {preBridgeMirageBalance !== null ? formatBalance(preBridgeMirageBalance) : '...'} MIRAGE
+                                                                </BalanceComparisonValue>
+                                                            </BalanceComparisonRow>
+                                                            <BalanceComparisonRow>
+                                                                <BalanceComparisonLabel>After</BalanceComparisonLabel>
+                                                                <BalanceComparisonValue>
+                                                                    {balance !== null ? formatBalance(balance) : '...'} MIRAGE
+                                                                </BalanceComparisonValue>
+                                                            </BalanceComparisonRow>
+                                                        </BalanceComparisonColumn>
+                                                        <BalanceComparisonColumn>
+                                                            <BalanceComparisonNetwork>
+                                                                <BalanceComparisonNetworkIcon
+                                                                    src={bridgeOutNetwork?.icon || selectedNetwork?.icon || '/images/bridges/solana.svg'}
+                                                                    alt=""
+                                                                />
+                                                                {bridgeOutNetwork?.name || selectedNetwork?.name || 'Destination'}
+                                                            </BalanceComparisonNetwork>
+                                                            <BalanceComparisonRow>
+                                                                <BalanceComparisonLabel>Received</BalanceComparisonLabel>
+                                                                <BalanceComparisonValue $highlight={mintStatus.state === 'minted' || (!isSolanaBridge && submitStage === 'confirmed')}>
+                                                                    +{bridgeOutAmount && bridgeFee !== null
+                                                                        ? (parseFloat(bridgeOutAmount) - bridgeFee).toLocaleString()
+                                                                        : '...'} MIRAGE
+                                                                </BalanceComparisonValue>
+                                                            </BalanceComparisonRow>
+                                                        </BalanceComparisonColumn>
+                                                    </BalanceComparisonGrid>
+                                                </BalanceComparisonCard>
+                                            )}
 
                                         {/* Action Button */}
-                                        <div style={{ paddingTop: '1rem', paddingBottom: '1rem' }}>
+                                        <div style={{ paddingTop: '0.5rem', paddingBottom: '2rem' }}>
                                             <Button
                                                 variant="primary"
                                                 fullWidth
-                                                disabled={submitStage !== 'confirmed' && submitStage !== 'error' && mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout'}
+                                                disabled={
+                                                    // For Solana: wait for mint to complete (or error/timeout)
+                                                    // For IBC: wait for submitStage confirmed (or error)
+                                                    isSolanaBridge
+                                                        ? (mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout')
+                                                        : (submitStage !== 'confirmed' && submitStage !== 'error')
+                                                }
                                                 onClick={handleNewBridge}
                                                 style={bridgeOutNetwork || selectedNetwork ? {
                                                     background: `linear-gradient(135deg, ${(bridgeOutNetwork || selectedNetwork).color} 0%, ${(bridgeOutNetwork || selectedNetwork).color}CC 100%)`,
                                                 } : {}}
                                             >
-                                                {(submitStage === 'confirmed' || submitStage === 'error' || mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout')
+                                                {(isSolanaBridge
+                                                    ? (mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout')
+                                                    : (submitStage === 'confirmed' || submitStage === 'error'))
                                                     ? 'Start New Bridge'
                                                     : 'Bridging...'}
                                             </Button>
