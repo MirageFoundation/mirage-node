@@ -205,6 +205,20 @@ func (c *Client) buildUnorderedTx(
 	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
 }
 
+// QueryBridgeMinted queries existing mint attestation for a burn.
+// Used to find the destination_tx that should be used for attestation.
+func (c *Client) QueryBridgeMinted(ctx context.Context, destChain, burnID string) (*coretypes.QueryBridgeMintedResponse, error) {
+	queryClient := coretypes.NewQueryClient(c.grpcConn)
+	resp, err := queryClient.GetBridgeMinted(ctx, &coretypes.QueryBridgeMintedRequest{
+		DestinationChain: strings.TrimSpace(destChain),
+		BurnId:           strings.ToLower(strings.TrimSpace(burnID)),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query bridge minted failed: %w", err)
+	}
+	return resp, nil
+}
+
 func parseUint64(raw string, field string) (uint64, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
