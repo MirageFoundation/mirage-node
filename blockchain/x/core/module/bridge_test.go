@@ -1371,7 +1371,7 @@ func TestThresholdWithOddTotalPower(t *testing.T) {
 // MintAttestation Consistency Tests  
 // =============================================================================
 
-// TestMintAttestationDestinationTxConsistency tests that destination_tx must match
+// TestMintAttestationDestinationTxConsistency tests that the first destination_tx is preserved
 func TestMintAttestationDestinationTxConsistency(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -1394,8 +1394,7 @@ func TestMintAttestationDestinationTxConsistency(t *testing.T) {
 		t.Errorf("DestinationTx = %s, want sig123", restored.DestinationTx)
 	}
 
-	// In the actual handler, second attestor with different dest_tx would be rejected
-	// This test just verifies storage works correctly
+	// This test only verifies storage; handler logic accepts different destination_tx values
 }
 
 // TestGetOrCreateMintAttestation tests the GetOrCreate helper

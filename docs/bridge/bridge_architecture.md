@@ -246,7 +246,7 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - Validator cannot double-attest same burn_id
 - burn_id must be a valid sequence number (≤ current sequence)
 - destination_chain must match the original burn record
-- destination_tx must match the first attestor's value (consistency check)
+- destination_tx from the first attestor becomes canonical; later attestations may differ
 - **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
 - **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, distribute bridge fee proportionally
 - **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is distributed ONCE when threshold is met:

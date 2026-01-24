@@ -151,9 +151,13 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		// Check if this is an "AlreadyMinted" error - means Solana mint succeeded previously
 		errStr := err.Error()
 		if strings.Contains(errStr, "AlreadyMinted") || strings.Contains(errStr, "6021") {
-			w.logger.Printf("INFO  [ALREADY_MINTED] burn_id=%s was already minted on Solana (replay protection)", burn.BurnID)
-			// Return special marker so attestor can still submit MsgBridgeMinted
-			return "already_minted:" + burn.BurnID, nil
+			w.logger.Printf("WARN  [ALREADY_MINTED] burn_id=%s was already minted on Solana; recovering signature", burn.BurnID)
+			recoveredSig, sigErr := w.findMintRecordSignature(ctx, mintRecordPDA)
+			if sigErr != nil {
+				return "", fmt.Errorf("mint already exists but failed to recover signature: %w", sigErr)
+			}
+			w.logger.Printf("INFO  [ALREADY_MINTED] recovered signature burn_id=%s signature=%s", burn.BurnID, recoveredSig)
+			return recoveredSig, nil
 		}
 		return "", fmt.Errorf("failed to send transaction: %w", err)
 	}
@@ -170,6 +174,51 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		float64(mintAmount)/1_000_000, burn.BurnID, sig.String())
 
 	return sig.String(), nil
+}
+
+func (w *Watcher) findMintRecordSignature(ctx context.Context, mintRecordPDA solana.PublicKey) (string, error) {
+	const pageLimit = 100
+	const maxPages = 5
+
+	var beforeSig solana.Signature
+	var oldestSig *rpc.TransactionSignature
+
+	for page := 0; page < maxPages; page++ {
+		opts := &rpc.GetSignaturesForAddressOpts{
+			Limit: ptr(pageLimit),
+		}
+		if !beforeSig.IsZero() {
+			opts.Before = beforeSig
+		}
+
+		sigs, err := w.rpcClient.GetSignaturesForAddressWithOpts(ctx, mintRecordPDA, opts)
+		if err != nil {
+			return "", fmt.Errorf("failed to fetch mint_record signatures: %w", err)
+		}
+		if len(sigs) == 0 {
+			break
+		}
+
+		for _, sig := range sigs {
+			if sig.Err != nil {
+				continue
+			}
+			oldestSig = sig
+		}
+
+		if len(sigs) < pageLimit {
+			break
+		}
+		if page == maxPages-1 {
+			return "", fmt.Errorf("mint_record signature history too long (> %d)", pageLimit*maxPages)
+		}
+		beforeSig = sigs[len(sigs)-1].Signature
+	}
+
+	if oldestSig == nil {
+		return "", fmt.Errorf("no successful mint_record signatures found")
+	}
+	return oldestSig.Signature.String(), nil
 }
 
 func (w *Watcher) accountExists(ctx context.Context, pubkey solana.PublicKey) (bool, error) {

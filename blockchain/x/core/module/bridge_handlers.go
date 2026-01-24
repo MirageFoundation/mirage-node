@@ -434,9 +434,18 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		}, nil
 	}
 
-	// Ensure destination tx consistency
-	if attestation.DestinationTx != destTx {
-		return nil, fmt.Errorf("destination_tx mismatch: existing %s, provided %s", attestation.DestinationTx, destTx)
+	canonicalDestTx := attestation.DestinationTx
+	if canonicalDestTx == "" {
+		return nil, fmt.Errorf("mint attestation missing canonical destination_tx")
+	}
+	if canonicalDestTx != destTx {
+		ctx.Logger().Debug("BridgeAttestMinted destination_tx differs; using canonical",
+			"burn_id", burnIDStr,
+			"destination_chain", destChain,
+			"canonical_destination_tx", canonicalDestTx,
+			"provided_destination_tx", destTx,
+			"validator", valoper,
+		)
 	}
 
 	// Check if already attested by this validator
@@ -475,7 +484,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		record := &types.BridgeMintedRecord{
 			BurnID:           burnIDStr,
 			DestinationChain: destChain,
-			DestinationTx:    destTx,
+			DestinationTx:    canonicalDestTx,
 			CreatedAt:        ctx.BlockHeight(),
 		}
 		if err := k.SetBridgeMintedRecord(ctx, record); err != nil {
@@ -543,7 +552,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 		ctx.Logger().Info("BridgeAttestMinted threshold met",
 			"burn_id", burnIDStr,
 			"destination_chain", destChain,
-			"destination_tx", destTx,
+			"destination_tx", canonicalDestTx,
 			"attested_power", attestation.AttestedPower,
 			"required_power", requiredPower,
 		)
@@ -560,7 +569,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 			"bridge_attest_minted",
 			sdk.NewAttribute("burn_id", burnIDStr),
 			sdk.NewAttribute("destination_chain", destChain),
-			sdk.NewAttribute("destination_tx", destTx),
+			sdk.NewAttribute("destination_tx", canonicalDestTx),
 			sdk.NewAttribute("validator", valoper),
 			sdk.NewAttribute("power", fmt.Sprintf("%d", valPower)),
 			sdk.NewAttribute("attested_power", fmt.Sprintf("%d", attestation.AttestedPower)),
@@ -573,7 +582,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	ctx.Logger().Info("BridgeAttestMinted",
 		"burn_id", burnIDStr,
 		"destination_chain", destChain,
-		"destination_tx", destTx,
+		"destination_tx", canonicalDestTx,
 		"validator", valoper,
 		"power", valPower,
 		"attested_power", attestation.AttestedPower,

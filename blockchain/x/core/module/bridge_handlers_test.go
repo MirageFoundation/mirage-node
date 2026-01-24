@@ -352,3 +352,66 @@ func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 		t.Fatalf("validator balance = %d, want 100", mk.balances[validator])
 	}
 }
+
+func TestBridgeAttestMintedCanonicalDestinationTx(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	mk.sequences["solana"] = 1
+	mk.burnRecords["solana/1"] = &types.BridgeBurnRecord{
+		BurnID:           "1",
+		DestinationChain: "solana",
+		BridgeFee:        0,
+	}
+
+	validator1 := testAccAddressString()
+	valoper1 := testValoperAddressString()
+
+	validator2 := sdk.AccAddress(bytes.Repeat([]byte{0x02}, 20)).String()
+	valoper2 := sdk.ValAddress(bytes.Repeat([]byte{0x02}, 20)).String()
+
+	mk.bondedValidators[valoper1] = true
+	mk.bondedValidators[valoper2] = true
+	mk.validatorPowers[valoper1] = 40
+	mk.validatorPowers[valoper2] = 40
+	mk.totalPower = 100
+
+	req1 := &types.MsgBridgeAttestMinted{
+		Validator:        validator1,
+		BurnId:           "1",
+		DestinationChain: "solana",
+		DestinationTx:    "sig-first",
+		MirageTxHash:     "miragehash",
+	}
+	resp, err := bridgeAttestMinted(ctx, mk, req1)
+	if err != nil {
+		t.Fatalf("bridgeAttestMinted first error: %v", err)
+	}
+	if resp.Confirmed {
+		t.Fatal("expected first attestation to be unconfirmed")
+	}
+
+	req2 := &types.MsgBridgeAttestMinted{
+		Validator:        validator2,
+		BurnId:           "1",
+		DestinationChain: "solana",
+		DestinationTx:    "sig-second",
+		MirageTxHash:     "miragehash",
+	}
+	resp, err = bridgeAttestMinted(ctx, mk, req2)
+	if err != nil {
+		t.Fatalf("bridgeAttestMinted second error: %v", err)
+	}
+	if !resp.Confirmed {
+		t.Fatal("expected second attestation to confirm mint")
+	}
+
+	record, found := mk.mintedRecords["solana/1"]
+	if !found {
+		t.Fatal("expected mint record to be stored")
+	}
+	if record.DestinationTx != "sig-first" {
+		t.Fatalf("DestinationTx = %s, want sig-first", record.DestinationTx)
+	}
+}
