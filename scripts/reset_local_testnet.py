@@ -1030,7 +1030,22 @@ def write_working_genesis(genesis_json: str):
     # Note: We use the binary from the pulled image (same version as source chain)
     # No need to copy binary from snapshot
 
+    # Helper to ensure tmux window exists (tmux session may not have all windows)
+    def ensure_tmux_window(window_name: str):
+        window_exists = run(
+            [
+                "bash",
+                "-lc",
+                f"docker exec mirage tmux list-windows -t mirage -F '#{{window_name}}' 2>/dev/null | grep -q '^{window_name}$' && echo yes || echo no",
+            ],
+            capture=True,
+        ).strip()
+        if window_exists != "yes":
+            run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
+            time.sleep(0.3)
+
     status("Starting node in tmux ...")
+    ensure_tmux_window("node")
     miraged = get_container_miraged_path()
     start_cmd = f'{miraged} start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
     run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
@@ -1065,6 +1080,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting indexer ...")
+    ensure_tmux_window("indexer")
     run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true"])
     time.sleep(2)  # Wait for node to stabilize
     initial_height = run(
@@ -1080,6 +1096,7 @@ def write_working_genesis(genesis_json: str):
     )
 
     status("Starting backend ...")
+    ensure_tmux_window("backend")
     run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true"])
     time.sleep(0.5)
     run(
@@ -1101,18 +1118,7 @@ def write_working_genesis(genesis_json: str):
         try:
             status("Starting orchestrator ...")
             run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
-            # Check if orchestrator window exists, create if not
-            window_exists = run(
-                [
-                    "bash",
-                    "-lc",
-                    "docker exec mirage tmux list-windows -t mirage -F '#{window_name}' 2>/dev/null | grep -q '^orchestrator$' && echo yes || echo no",
-                ],
-                capture=True,
-            ).strip()
-            if window_exists != "yes":
-                run(["bash", "-lc", "docker exec mirage tmux new-window -t mirage -n orchestrator -c /opt/mirage"])
-                time.sleep(0.3)
+            ensure_tmux_window("orchestrator")
             run(
                 [
                     "bash",
