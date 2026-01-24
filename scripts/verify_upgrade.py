@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Verify Mirage Node Upgrade (v1.9.3-bridge-fee-burn) — strict + exhaustive.
+Verify Mirage Node Upgrade — strict + exhaustive.
 
 This script is intentionally "no hand-waving":
 - It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
+- It shows status of ALL registered upgrades.
 
 NOTE: This does NOT submit transactions or mutate chain state.
 """
@@ -24,9 +25,31 @@ import urllib.error
 import urllib.request
 
 
-UPGRADE_NAME = "v1.9.3-bridge-fee-burn"
+# Current upgrade being verified (set via --upgrade or defaults to latest)
+UPGRADE_NAME = "v1.9.4-bridge-attestor-fix"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION_PREFIX = "v1.9.3"
+EXPECTED_VERSION_PREFIX = "v1.9"
+
+# All registered upgrade names in chronological order
+ALL_UPGRADES = [
+    "v1.2.0-follow-mods",
+    "v1.3.0-tiers",
+    "v1.3.1",
+    "v1.4.0-profile-core",
+    "v1.5.0-social-graph",
+    "v1.5.1",
+    "v1.6.0-personalized-feeds",
+    "v1.7.7-tier-pricing",
+    "v1.7.9-node-home",
+    "v1.8.0-economics",
+    "v1.9.0-bridge",
+    "v1.9.1-seq-fix",
+    "v1.9.1-query-fix",
+    "v1.9.2-bridge-fee-endblock",
+    "v1.10.0-bridge-refactor",
+    "v1.9.3-bridge-fee-burn",
+    "v1.9.4-bridge-attestor-fix",
+]
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
@@ -350,11 +373,44 @@ def check_node_health(rpc: str, failures: list[str], warnings: list[str]) -> tup
     return None, None
 
 
-def check_upgrade_state(miraged: str, rpc: str, phase: str, failures: list[str]) -> None:
-    print("\n-> Checking upgrade state...")
+def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str, int]:
+    """Check status of all registered upgrades. Returns dict of upgrade_name -> applied_height (0 if not applied)."""
+    print("\n-> Checking all upgrade statuses...")
+    results = {}
+    
+    for upgrade_name in ALL_UPGRADES:
+        try:
+            applied = _run_json([miraged, "q", "upgrade", "applied", upgrade_name, "--node", rpc, "-o", "json"])
+            h = applied.get("height", "0")
+            height = _as_int(h)
+            results[upgrade_name] = height
+            if height > 0:
+                print(f"   [OK] {upgrade_name}: applied @ height {height}")
+            else:
+                print(f"   [--] {upgrade_name}: not applied")
+        except Exception:
+            results[upgrade_name] = 0
+            print(f"   [--] {upgrade_name}: not applied")
+    
+    # Check current plan
+    try:
+        plan = _run_json([miraged, "q", "upgrade", "plan", "--node", rpc, "-o", "json"])
+        p = plan.get("plan")
+        if p and isinstance(p, dict) and p.get("name"):
+            plan_name = p.get("name", "")
+            plan_height = p.get("height", "?")
+            print(f"\n   [PENDING] Current plan: {plan_name} @ height {plan_height}")
+    except Exception:
+        pass
+    
+    return results
+
+
+def check_upgrade_state(miraged: str, rpc: str, phase: str, upgrade_name: str, failures: list[str]) -> None:
+    print(f"\n-> Checking upgrade state for {upgrade_name}...")
     applied_height: int | None = None
     try:
-        applied = _run_json([miraged, "q", "upgrade", "applied", UPGRADE_NAME, "--node", rpc, "-o", "json"])
+        applied = _run_json([miraged, "q", "upgrade", "applied", upgrade_name, "--node", rpc, "-o", "json"])
         h = applied.get("height", "0")
         applied_height = _as_int(h)
     except Exception:
@@ -369,10 +425,10 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, failures: list[str])
 
     if phase == "post":
         if applied_height is None or applied_height <= 0:
-            print(f"   [FAIL] upgrade {UPGRADE_NAME} not applied")
-            failures.append(f"upgrade {UPGRADE_NAME} is not applied (or cannot be queried)")
+            print(f"   [FAIL] upgrade {upgrade_name} not applied")
+            failures.append(f"upgrade {upgrade_name} is not applied (or cannot be queried)")
         else:
-            print(f"   [OK] upgrade applied: {UPGRADE_NAME} @ height {applied_height}")
+            print(f"   [OK] upgrade applied: {upgrade_name} @ height {applied_height}")
         if plan is not None and plan.get("plan") not in (None, {}):
             failures.append(f"upgrade plan still present after upgrade: {plan.get('plan')!r}")
     else:
@@ -382,9 +438,9 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, failures: list[str])
             return
         p = plan.get("plan", plan)
         name = p.get("name", "")
-        if name != UPGRADE_NAME:
-            print(f"   [FAIL] upgrade plan name: expected {UPGRADE_NAME}, got {name}")
-            failures.append(f"upgrade plan name expected {UPGRADE_NAME!r}, got {name!r}")
+        if name != upgrade_name:
+            print(f"   [FAIL] upgrade plan name: expected {upgrade_name}, got {name}")
+            failures.append(f"upgrade plan name expected {upgrade_name!r}, got {name!r}")
         else:
             print(f"   [OK] upgrade plan: {name}")
 
@@ -1017,27 +1073,31 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.3-bridge-fee-burn upgrade")
+    parser = argparse.ArgumentParser(description="Verify Mirage node upgrade status")
     parser.add_argument("--node", default="http://127.0.0.1:26657", help="CometBFT RPC endpoint")
     parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory")
     parser.add_argument("--skip-config", action="store_true", help="Skip local config checks")
     parser.add_argument("--phase", choices=["pre", "post"], default="post", help="pre=plan exists, post=applied")
+    parser.add_argument("--upgrade", default=UPGRADE_NAME, help=f"Upgrade name to verify (default: {UPGRADE_NAME})")
+    parser.add_argument("--list-all", action="store_true", help="List status of all registered upgrades")
     args = parser.parse_args()
 
     rpc = args.node.rstrip("/")
     miraged = _find_miraged()
     home_dir = Path(args.home)
+    upgrade_name = args.upgrade
 
     failures: list[str] = []
     warnings: list[str] = []
 
     print("=" * 72)
-    print(f"Verify {UPGRADE_NAME} ({datetime.now().isoformat()})")
+    print(f"Verify Mirage Node Upgrade ({datetime.now().isoformat()})")
     print("=" * 72)
     print(f"RPC:     {rpc}")
     print(f"HOME:    {home_dir}")
     print(f"miraged: {miraged}")
     print(f"phase:   {args.phase}")
+    print(f"upgrade: {upgrade_name}")
     print()
 
     # Check binary version first
@@ -1047,7 +1107,13 @@ def main() -> int:
     check_bridge_commands(miraged, failures, warnings)
 
     rpc_chain_id, _ = check_node_health(rpc, failures, warnings)
-    check_upgrade_state(miraged, rpc, args.phase, failures)
+    
+    # Show all upgrade statuses if requested
+    if args.list_all:
+        check_all_upgrades(miraged, rpc, warnings)
+    
+    # Check specific upgrade
+    check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
 
     try:
         core = fetch_core_params(miraged, rpc)
