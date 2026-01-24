@@ -16,6 +16,12 @@ const (
 	// Key format: bridge_mint_attestations/{destination_chain}/{burn_id}
 	BridgeMintAttestationsPrefix = "bridge_mint_attestations/"
 
+	// BridgeMintAttestorsPrefix stores per-validator attestations for outbound mints.
+	// Attestors are stored separately to keep the attestation record size stable and
+	// avoid gas variance from growing attestor maps.
+	// Key format: bridge_mint_attestors/{destination_chain}/{burn_id}/{valoper}
+	BridgeMintAttestorsPrefix = "bridge_mint_attestors/"
+
 	// BridgeMintFeePendingPrefix is the KVStore prefix for pending fee distributions.
 	// When an outbound bridge mint reaches the attestation threshold, fee distribution
 	// is deferred to EndBlock (rather than inline) to stabilize gas usage. This prefix
@@ -124,7 +130,7 @@ type BridgeMintAttestation struct {
 	DestinationTx string `json:"destination_tx"`
 
 	// Attestors maps validator operator address to their voting power at attestation time.
-	// This allows proportional fee distribution when threshold is met.
+	// Attestors are stored under BridgeMintAttestorsPrefix; this map is kept empty in state.
 	Attestors map[string]int64 `json:"attestors"`
 
 	// AttestedPower is the total voting power that has attested
@@ -135,8 +141,7 @@ type BridgeMintAttestation struct {
 
 	// ConfirmedBy is the account address (sdk.AccAddress bech32) of the validator whose
 	// attestation crossed the confirmation threshold. This validator receives any dust
-	// (remainder from integer division) during fee distribution. May be empty for
-	// attestations created before the v1.10.1 upgrade (fallback uses highest-power attestor).
+	// (remainder from integer division) during fee distribution.
 	ConfirmedBy string `json:"confirmed_by"`
 
 	// FeeDistributed indicates whether bridge fees have been paid out to attestors.
@@ -183,6 +188,11 @@ func BridgeMintedKey(destChain, burnID string) []byte {
 // BridgeMintAttestationKey returns the store key for a bridge mint attestation
 func BridgeMintAttestationKey(destChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintAttestationsPrefix, destChain, burnID))
+}
+
+// BridgeMintAttestorKey returns the store key for a bridge mint attestor entry.
+func BridgeMintAttestorKey(destChain, burnID, valoper string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeMintAttestorsPrefix, destChain, burnID, valoper))
 }
 
 // BridgeMintFeePendingKey returns the store key for pending fee distributions.

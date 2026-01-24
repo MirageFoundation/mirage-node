@@ -184,6 +184,14 @@ func TestBridgeMintFeePendingKey(t *testing.T) {
 	}
 }
 
+func TestBridgeMintAttestorKey(t *testing.T) {
+	key := BridgeMintAttestorKey("solana", "42", "miragevaloper1abc")
+	expected := "bridge_mint_attestors/solana/42/miragevaloper1abc"
+	if string(key) != expected {
+		t.Errorf("BridgeMintAttestorKey = %s, want %s", string(key), expected)
+	}
+}
+
 func TestMsgBridgeAttestMintedMirageTxHashTag(t *testing.T) {
 	field, ok := reflect.TypeOf(MsgBridgeAttestMinted{}).FieldByName("MirageTxHash")
 	if !ok {
