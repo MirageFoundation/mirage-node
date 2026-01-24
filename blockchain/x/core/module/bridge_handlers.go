@@ -44,7 +44,7 @@ type bridgeAttestMintedKeeper interface {
 	SetBridgeMintAttestor(ctx sdk.Context, destChain, burnID, valoper string, power int64) error
 	SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error
 	SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error
-	SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error
+	BurnFromModuleExact(ctx sdk.Context, amount uint64) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
 }
 
@@ -412,7 +412,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	}
 
 	// Load burn record to verify it exists for this destination chain
-	_, found, err := k.GetBridgeBurnRecord(ctx, destChain, burnIDStr)
+	burnRecord, found, err := k.GetBridgeBurnRecord(ctx, destChain, burnIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load bridge burn record: %w", err)
 	}
@@ -508,10 +508,18 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 			return nil, fmt.Errorf("failed to store mint record: %w", err)
 		}
 
-		// Queue fee distribution for EndBlock to stabilize gas usage
-		if err := k.SetBridgeMintFeePending(ctx, destChain, burnIDStr); err != nil {
-			return nil, fmt.Errorf("failed to queue mint fee distribution: %w", err)
+		// Burn bridge fee immediately when threshold is reached
+		if burnRecord.BridgeFee > 0 {
+			if err := k.BurnFromModuleExact(ctx, burnRecord.BridgeFee); err != nil {
+				return nil, fmt.Errorf("failed to burn bridge fee: %w", err)
+			}
 		}
+		attestation.FeeDistributed = true
+		ctx.Logger().Debug("BridgeAttestMinted fee burned",
+			"destination_chain", destChain,
+			"burn_id", burnIDStr,
+			"fee", burnRecord.BridgeFee,
+		)
 
 		ctx.Logger().Info("BridgeAttestMinted threshold met",
 			"burn_id", burnIDStr,

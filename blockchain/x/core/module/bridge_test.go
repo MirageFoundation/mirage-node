@@ -325,7 +325,7 @@ func TestBridgeMintAttestationMultiValidator(t *testing.T) {
 		t.Errorf("Expected 3 attestors, got %d", len(attestors))
 	}
 
-	// Verify individual attestor powers are stored correctly (for proportional fee distribution)
+	// Verify individual attestor powers are stored correctly (legacy fee math)
 	if power := attestation.GetAttestorPower("val1"); power != 1000 {
 		t.Errorf("GetAttestorPower(val1) = %d, want 1000", power)
 	}
@@ -351,7 +351,7 @@ func TestBridgeMintAttestationProportionalFeeDistribution(t *testing.T) {
 		t.Fatalf("Expected attested power 750, got %d", attestation.AttestedPower)
 	}
 
-	// Simulate fee distribution with 1000 umirage fee
+	// Simulate fee math with 1000 umirage fee (legacy)
 	totalFee := uint64(1000)
 	var distributed uint64 = 0
 	shares := make(map[string]uint64)
@@ -1287,7 +1287,7 @@ func TestFeeDistributionDustHandling(t *testing.T) {
 	// This test just verifies the math doesn't overflow or panic
 }
 
-// TestFeeDistributionLargeValues tests fee distribution with large values
+// TestFeeDistributionLargeValues tests fee math with large values (legacy)
 func TestFeeDistributionLargeValues(t *testing.T) {
 	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
 	attestation.AddAttestation("val1", 1000000000) // 1 billion power

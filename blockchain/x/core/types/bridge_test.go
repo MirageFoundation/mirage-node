@@ -176,14 +176,6 @@ func TestBridgeMintAttestationKey(t *testing.T) {
 	}
 }
 
-func TestBridgeMintFeePendingKey(t *testing.T) {
-	key := BridgeMintFeePendingKey("solana", "42")
-	expected := "bridge_mint_fee_pending/solana/42"
-	if string(key) != expected {
-		t.Errorf("BridgeMintFeePendingKey = %s, want %s", string(key), expected)
-	}
-}
-
 func TestBridgeMintAttestorKey(t *testing.T) {
 	key := BridgeMintAttestorKey("solana", "42", "miragevaloper1abc")
 	expected := "bridge_mint_attestors/solana/42/miragevaloper1abc"
@@ -614,7 +606,7 @@ func TestBridgeMintAttestationGetAttestorPower(t *testing.T) {
 }
 
 func TestProportionalFeeDistribution(t *testing.T) {
-	// Test the math for proportional fee distribution
+	// Test the math for proportional fee distribution (legacy)
 	// Simulates: 3 validators with powers 300, 250, 200 = 750 total
 	// Fee of 1000 should be split as: 400, 333, 266 = 999 (1 dust)
 	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)

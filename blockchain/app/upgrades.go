@@ -807,14 +807,15 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.9.3-bridge-attestor-store: Store mint attestors in separate keys
-	// - Keeps mint attestation record size stable
+	// v1.9.3-bridge-fee-burn: Store mint attestors separately and burn bridge fees
+	// - Keeps mint attestation record size stable (separate attestor keys)
 	// - Prevents gas variance from growing attestor maps
+	// - Burns bridge fees inline when threshold is reached (no attestor payouts)
 	app.UpgradeKeeper.SetUpgradeHandler(
-		"v1.9.3-bridge-attestor-store",
+		"v1.9.3-bridge-fee-burn",
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.9.3-bridge-attestor-store...")
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.3-bridge-fee-burn...")
 
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
@@ -825,7 +826,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				return nil, err
 			}
 
-			sdkCtx.Logger().Info("Upgrade to v1.9.3-bridge-attestor-store complete - attestors moved to separate keys")
+			sdkCtx.Logger().Info("Upgrade to v1.9.3-bridge-fee-burn complete - attestors moved and fees burned")
 			return toVM, nil
 		},
 	)
