@@ -510,9 +510,7 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
-	if err := am.processBridgeMintFeeDistributions(sdkCtx); err != nil {
-		return err
-	}
+	// Bridge fees are burned inline when threshold is reached.
 
 	// Process subscription renewals/expirations
 	if err := am.processSubscriptions(sdkCtx, params); err != nil {
@@ -583,111 +581,6 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	return nil
 }
 
-const bridgeMintFeeFailureQuarantineThreshold uint64 = 100
-
-// processBridgeMintFeeDistributions processes all pending outbound bridge fee distributions.
-//
-// This is called at the start of EndBlock to distribute fees for confirmed bridge mints.
-// Fee distribution is deferred to EndBlock (rather than inline in MsgBridgeAttestMinted)
-// to stabilize gas usage for attestation transactions. Without this, the attestation that
-// crosses the threshold would use significantly more gas than earlier attestations due to
-// the expensive fee distribution loop.
-//
-// Error handling: This function NEVER returns an error to avoid halting the chain.
-// If distribution fails, the pending marker is kept so it will be retried next block.
-// Errors are logged prominently for operator investigation.
-//
-// Atomicity: Each distribution runs in a cached context and is only committed if
-// distribution succeeds. This prevents partial payouts if any transfer fails.
-func (am AppModule) processBridgeMintFeeDistributions(ctx sdk.Context) error {
-	err := am.k.IterateBridgeMintFeePending(ctx, func(destChain, burnID string) bool {
-		cacheCtx, write := ctx.CacheContext()
-		if err := am.k.DistributeBridgeMintFee(cacheCtx, destChain, burnID); err != nil {
-			record, recErr := am.k.RecordBridgeMintFeeFailure(
-				ctx,
-				destChain,
-				burnID,
-				err.Error(),
-				ctx.BlockHeight(),
-				bridgeMintFeeFailureQuarantineThreshold,
-			)
-			if recErr != nil {
-				ctx.Logger().Error("CRITICAL: BridgeMint fee distribution failed (recording failure failed)",
-					"destination_chain", destChain,
-					"burn_id", burnID,
-					"err", err,
-					"record_err", recErr,
-				)
-				return false
-			}
-			if record.Quarantined {
-				if err := am.k.RemoveBridgeMintFeePending(ctx, destChain, burnID); err != nil {
-					ctx.Logger().Error("CRITICAL: BridgeMint fee distribution quarantined (cleanup failed)",
-						"destination_chain", destChain,
-						"burn_id", burnID,
-						"failure_count", record.FailureCount,
-						"err", err,
-					)
-					return false
-				}
-				ctx.Logger().Error("CRITICAL: BridgeMint fee distribution quarantined",
-					"destination_chain", destChain,
-					"burn_id", burnID,
-					"failure_count", record.FailureCount,
-					"last_error", record.LastError,
-				)
-				return false
-			}
-
-			// Log error but DON'T remove pending marker - will retry next block
-			ctx.Logger().Error("CRITICAL: BridgeMint fee distribution failed (will retry next block)",
-				"destination_chain", destChain,
-				"burn_id", burnID,
-				"failure_count", record.FailureCount,
-				"err", err,
-			)
-			// Continue processing other pending distributions
-			return false
-		}
-
-		// Distribution succeeded - remove the pending marker
-		if err := am.k.RemoveBridgeMintFeePending(cacheCtx, destChain, burnID); err != nil {
-			// This is unexpected but not fatal - distribution already happened
-			// Worst case: we'll try to distribute again next block (which will fail
-			// gracefully since funds already moved, or succeed as a no-op)
-			ctx.Logger().Error("BridgeMint fee pending cleanup failed (distribution succeeded)",
-				"destination_chain", destChain,
-				"burn_id", burnID,
-				"err", err,
-			)
-		}
-
-		if err := am.k.RemoveBridgeMintFeeFailure(cacheCtx, destChain, burnID); err != nil {
-			ctx.Logger().Error("BridgeMint fee failure cleanup failed",
-				"destination_chain", destChain,
-				"burn_id", burnID,
-				"err", err,
-			)
-		}
-
-		// Commit distribution (and cleanup if it succeeded) atomically
-		write()
-
-		ctx.Logger().Info("BridgeMint fee distributed",
-			"destination_chain", destChain,
-			"burn_id", burnID,
-		)
-		return false
-	})
-	if err != nil {
-		// Iterator error - log but don't halt chain
-		ctx.Logger().Error("CRITICAL: BridgeMint fee pending iteration failed",
-			"err", err,
-		)
-	}
-	// Never return error - we don't want to halt the chain over fee distribution
-	return nil
-}
 
 // processSubscriptions handles subscription renewals and expirations
 func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params) error {
@@ -2817,7 +2710,7 @@ func (am AppModule) BridgeAttestBurned(ctx context.Context, req *types.MsgBridge
 }
 
 // BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
-// When 2/3 threshold is met, the mint is confirmed and the bridge fee is paid.
+// When 2/3 threshold is met, the mint is confirmed and the bridge fee is burned.
 func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
 	return bridgeAttestMinted(sdk.UnwrapSDKContext(ctx), am.k, req)
 }
@@ -2835,21 +2728,10 @@ func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeSta
 	if err != nil {
 		return nil, err
 	}
-	pendingFeeCount, err := am.k.GetBridgeMintFeePendingCount(sdkCtx)
-	if err != nil {
-		return nil, err
-	}
-	failedFeeCount, quarantinedFeeCount, err := am.k.GetBridgeMintFeeFailureCounts(sdkCtx)
-	if err != nil {
-		return nil, err
-	}
 
 	return &types.QueryBridgeStatusResponse{
 		EnabledChains:            enabledChains,
 		PendingAttestationsCount: pendingCount,
-		PendingMintFeeCount:      pendingFeeCount,
-		FailedMintFeeCount:       failedFeeCount,
-		QuarantinedMintFeeCount:  quarantinedFeeCount,
 	}, nil
 }
 

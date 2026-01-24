@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Verify Mirage Node Upgrade (v1.9.3-bridge-attestor-store) — strict + exhaustive.
+Verify Mirage Node Upgrade (v1.9.3-bridge-fee-burn) — strict + exhaustive.
 
 This script is intentionally "no hand-waving":
 - It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 
-UPGRADE_NAME = "v1.9.3-bridge-attestor-store"
+UPGRADE_NAME = "v1.9.3-bridge-fee-burn"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.9.3"
 
@@ -1017,7 +1017,7 @@ def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.3-bridge-attestor-store upgrade")
+    parser = argparse.ArgumentParser(description="Verify Mirage v1.9.3-bridge-fee-burn upgrade")
     parser.add_argument("--node", default="http://127.0.0.1:26657", help="CometBFT RPC endpoint")
     parser.add_argument("--home", default=str(Path.home() / ".mirage"), help="Mirage home directory")
     parser.add_argument("--skip-config", action="store_true", help="Skip local config checks")

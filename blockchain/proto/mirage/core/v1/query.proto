@@ -131,12 +131,6 @@ message QueryBridgeStatusResponse {
   repeated BridgeChainConfig enabled_chains = 1;
   // pending_attestations_count is the number of attestations awaiting threshold
   uint64 pending_attestations_count = 2;
-  // pending_mint_fee_count is the number of pending mint fee distributions
-  uint64 pending_mint_fee_count = 3;
-  // failed_mint_fee_count is the number of mint fee distributions with recorded failures
-  uint64 failed_mint_fee_count = 4;
-  // quarantined_mint_fee_count is the number of quarantined mint fee distributions
-  uint64 quarantined_mint_fee_count = 5;
 }
 
 // QueryBridgeAttestationRequest is the request type for the Query/BridgeAttestation RPC method.

@@ -22,16 +22,6 @@ const (
 	// Key format: bridge_mint_attestors/{destination_chain}/{burn_id}/{valoper}
 	BridgeMintAttestorsPrefix = "bridge_mint_attestors/"
 
-	// BridgeMintFeePendingPrefix is the KVStore prefix for pending fee distributions.
-	// When an outbound bridge mint reaches the attestation threshold, fee distribution
-	// is deferred to EndBlock (rather than inline) to stabilize gas usage. This prefix
-	// stores markers for confirmed mints awaiting fee distribution.
-	// Key format: bridge_mint_fee_pending/{destination_chain}/{burn_id}
-	BridgeMintFeePendingPrefix = "bridge_mint_fee_pending/"
-
-	// BridgeMintFeeFailurePrefix stores failure records for fee distribution attempts.
-	// Key format: bridge_mint_fee_failures/{destination_chain}/{burn_id}
-	BridgeMintFeeFailurePrefix = "bridge_mint_fee_failures/"
 
 	// BridgeBurnsPrefix is the KVStore prefix for outbound bridge burn records
 	// Key format: bridge_burns/{burn_id}
@@ -65,7 +55,7 @@ type BridgeAttestation struct {
 	Amount uint64 `json:"amount"`
 
 	// Attestors maps validator operator address to their voting power at attestation time.
-	// This allows proportional fee distribution when threshold is met.
+	// Used for threshold tracking and reporting.
 	Attestors map[string]int64 `json:"attestors"`
 
 	// AttestedPower is the total voting power that has attested
@@ -144,37 +134,17 @@ type BridgeMintAttestation struct {
 	Confirmed bool `json:"confirmed"`
 
 	// ConfirmedBy is the account address (sdk.AccAddress bech32) of the validator whose
-	// attestation crossed the confirmation threshold. This validator receives any dust
-	// (remainder from integer division) during fee distribution.
+	// attestation crossed the confirmation threshold.
 	ConfirmedBy string `json:"confirmed_by"`
 
-	// FeeDistributed indicates whether bridge fees have been paid out to attestors.
-	// Set to true after successful fee distribution in EndBlock. This makes fee
-	// distribution idempotent - if EndBlock is retried or pending marker cleanup fails,
-	// we won't double-pay validators.
+	// FeeDistributed indicates whether the bridge fee has been processed.
+	// Set to true after successful fee burn in EndBlock.
 	FeeDistributed bool `json:"fee_distributed"`
 
 	// CreatedAt is the block height when this attestation was first created
 	CreatedAt int64 `json:"created_at"`
 }
 
-// BridgeMintFeeFailure tracks failed fee distribution attempts.
-type BridgeMintFeeFailure struct {
-	// DestinationChain is the external chain identifier (e.g., "solana")
-	DestinationChain string `json:"destination_chain"`
-	// BurnID is the Mirage burn sequence number (as string)
-	BurnID string `json:"burn_id"`
-	// FailureCount is the number of failed attempts
-	FailureCount uint64 `json:"failure_count"`
-	// FirstFailedHeight is the block height of the first failure
-	FirstFailedHeight int64 `json:"first_failed_height"`
-	// LastFailedHeight is the block height of the most recent failure
-	LastFailedHeight int64 `json:"last_failed_height"`
-	// LastError is the most recent failure reason
-	LastError string `json:"last_error"`
-	// Quarantined indicates the fee distribution has been quarantined
-	Quarantined bool `json:"quarantined"`
-}
 
 // NewBridgeAttestation creates a new BridgeAttestation with initialized maps
 func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount uint64, createdAt int64) *BridgeAttestation {
@@ -217,17 +187,6 @@ func BridgeMintAttestorKey(destChain, burnID, valoper string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeMintAttestorsPrefix, destChain, burnID, valoper))
 }
 
-// BridgeMintFeeFailureKey returns the store key for a fee distribution failure record.
-func BridgeMintFeeFailureKey(destChain, burnID string) []byte {
-	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintFeeFailurePrefix, destChain, burnID))
-}
-
-// BridgeMintFeePendingKey returns the store key for pending fee distributions.
-// Used by SetBridgeMintFeePending (when threshold is crossed) and
-// IterateBridgeMintFeePending (during EndBlock processing).
-func BridgeMintFeePendingKey(destChain, burnID string) []byte {
-	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintFeePendingPrefix, destChain, burnID))
-}
 
 // NewBridgeMintAttestation creates a new BridgeMintAttestation with initialized maps
 func NewBridgeMintAttestation(burnID, destChain, destTx string, createdAt int64) *BridgeMintAttestation {
@@ -249,7 +208,7 @@ func (a *BridgeMintAttestation) HasAttested(validatorAddr string) bool {
 }
 
 // AddAttestation records a validator's attestation and adds their voting power.
-// Stores the validator's power for proportional fee distribution.
+// Stores the validator's power for threshold tracking and reporting.
 // Returns true if the attestation is new (validator hadn't attested before)
 func (a *BridgeMintAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
 	if votingPower <= 0 {
@@ -289,19 +248,6 @@ func (a *BridgeMintAttestation) GetAttestorPower(validatorAddr string) int64 {
 	return a.Attestors[validatorAddr]
 }
 
-// Marshal serializes the mint fee failure to JSON
-func (f *BridgeMintFeeFailure) Marshal() ([]byte, error) {
-	return json.Marshal(f)
-}
-
-// UnmarshalBridgeMintFeeFailure deserializes JSON to a BridgeMintFeeFailure
-func UnmarshalBridgeMintFeeFailure(data []byte) (*BridgeMintFeeFailure, error) {
-	var f BridgeMintFeeFailure
-	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, err
-	}
-	return &f, nil
-}
 
 // Marshal serializes the mint attestation to JSON
 func (a *BridgeMintAttestation) Marshal() ([]byte, error) {
@@ -328,7 +274,7 @@ func (a *BridgeAttestation) HasAttested(validatorAddr string) bool {
 }
 
 // AddAttestation records a validator's attestation and adds their voting power.
-// Stores the validator's power for proportional fee distribution.
+// Stores the validator's power for threshold tracking and reporting.
 // Returns true if the attestation is new (validator hadn't attested before)
 func (a *BridgeAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
 	if votingPower <= 0 {
