@@ -661,7 +661,7 @@ const ProgressScreenNetworkIcon = styled.img`
     height: 2rem;
     border-radius: 50%;
     ${({ $isMirage, theme }) => $isMirage && `
-        filter: ${theme?.isDark !== false ? 'brightness(0) invert(1)' : 'none'};
+        filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
     `}
 `;
 
@@ -749,7 +749,7 @@ const BalanceComparisonNetworkIcon = styled.img`
     height: 1rem;
     border-radius: 50%;
     ${({ $isMirage, theme }) => $isMirage && `
-        filter: ${theme?.isDark !== false ? 'brightness(0) invert(1)' : 'none'};
+        filter: brightness(0) ${theme?.isDark === false ? 'invert(0)' : 'invert(1)'};
     `}
 `;
 
