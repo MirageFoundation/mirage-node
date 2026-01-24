@@ -158,14 +158,18 @@ hash_tree() {
 }
 
 maybe_proto_gen_and_go_build() {
-  echo "==> Checking whether proto/go rebuild is needed..."
+  echo "==> Regenerating protobuf files..."
   local cdir
   cdir="$(cache_dir)"
 
   local proto_hash_file="$cdir/proto.${GIT_BRANCH}.sha256"
   local go_hash_file="$cdir/go.${GIT_BRANCH}.sha256"
 
-  # Step 1: Check if proto-gen is needed (based on .proto source files)
+  # ALWAYS run proto-gen to ensure generated files match proto sources
+  # This prevents issues where local .pb.go files diverge from .proto definitions
+  ( cd "$REPO_ROOT/blockchain" && make proto-gen )
+
+  # Update hash file for reference
   local new_proto_hash
   new_proto_hash="$(hash_tree \
     "$REPO_ROOT/blockchain/proto" \
@@ -177,18 +181,7 @@ maybe_proto_gen_and_go_build() {
     "$REPO_ROOT/blockchain/proto/buf.gen.ts.yaml" \
     "$REPO_ROOT/blockchain/Makefile" \
   )"
-
-  local old_proto_hash=""
-  if [ -f "$proto_hash_file" ]; then
-    old_proto_hash="$(cat "$proto_hash_file" 2>/dev/null || echo "")"
-  fi
-  if [ -z "$old_proto_hash" ] || [ "$old_proto_hash" != "$new_proto_hash" ]; then
-    echo "==> Protobuf inputs changed; running proto-gen..."
-    ( cd "$REPO_ROOT/blockchain" && make proto-gen )
-    echo "$new_proto_hash" > "$proto_hash_file"
-  else
-    echo "==> Protobuf inputs unchanged; skipping proto-gen."
-  fi
+  echo "$new_proto_hash" > "$proto_hash_file"
 
   # Step 2: Compute Go hash AFTER proto-gen (so it includes fresh .pb.go files)
   # This is critical: if proto-gen updated any .pb.go files, the hash will change
