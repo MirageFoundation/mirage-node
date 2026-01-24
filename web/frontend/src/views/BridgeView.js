@@ -999,6 +999,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     setAttestationProgress(prev => ({
                         ...prev,
                         attestorCount: data.attestor_count || prev.attestorCount,
+                        attestedPower: data.attested_power ?? prev.attestedPower,
+                        requiredPower: data.required_power ?? prev.requiredPower,
                         confirmed: data.confirmed || prev.confirmed,
                     }));
                 }
@@ -2231,6 +2233,8 @@ export default function BridgeView({ state }) {
                         setOutboundAttestationProgress(prev => ({
                             ...prev,
                             attestorCount: data.attestor_count || prev.attestorCount,
+                            attestedPower: data.attested_power ?? prev.attestedPower,
+                            requiredPower: data.required_power ?? prev.requiredPower,
                             confirmed: data.confirmed || prev.confirmed,
                         }));
                     }

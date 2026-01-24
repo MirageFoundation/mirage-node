@@ -358,7 +358,9 @@ Response:
   "mint_tx": "ABC123DEF456...",
   "recipient": "mirage1abc...",
   "amount": 1000000,
-  "attestor_count": 4
+  "attestor_count": 4,
+  "attested_power": 750000,
+  "required_power": 666667
 }
 ```
 
@@ -379,6 +381,8 @@ Response:
   "destination_tx": "5xYzABC...",
   "amount": 1000000,
   "attestor_count": 2,
+  "attested_power": 750000,
+  "required_power": 666667,
   "confirmed_at": 1700000000
 }
 ```

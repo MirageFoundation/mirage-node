@@ -1648,8 +1648,13 @@ class MessageProcessor:
 
         return sorted(ids)
 
-    def process_tx_events(self, events: list) -> None:
-        """Process per-tx events for bridge confirmation updates."""
+    def process_tx_events(self, events: list, tx_hash: str = "") -> None:
+        """Process per-tx events for bridge confirmation updates and power info.
+        
+        Args:
+            events: List of events from the transaction
+            tx_hash: The transaction hash (used to update power on attestation records)
+        """
         if not events:
             return
         for ev_type, attrs in self.decode_events(events):
@@ -1672,39 +1677,75 @@ class MessageProcessor:
                 )
 
             # Handle inbound bridge attestations (bridge_attest event)
+            # This event is emitted for every attestation with power info
+            elif ev_type == "bridge_attest":
                 source_chain = str(attrs.get("source_chain", "") or "").strip()
                 burn_id = str(attrs.get("burn_id", "") or "").strip()
+                validator = str(attrs.get("validator", "") or "").strip()
+                power = int(attrs.get("power", 0) or 0)
+                attested_power = int(attrs.get("attested_power", 0) or 0)
+                required_power = int(attrs.get("required_power", 0) or 0)
                 minted_raw = str(attrs.get("minted", "") or "").strip().lower()
                 minted = minted_raw in ("true", "1", "t", "yes")
-                if not minted:
-                    continue
+
                 if not source_chain or not burn_id:
                     logger.warning("bridge_attest event missing identifiers: %s", attrs)
                     continue
-                updated = self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
-                if updated:
-                    logger.debug("Bridge attestation minted updated (inbound): %s:%s", source_chain, burn_id)
-                else:
-                    logger.debug("Bridge attestation minted not updated (inbound, missing record): %s:%s", source_chain, burn_id)
+
+                # Update power info on the attestation record by tx_hash
+                updated = False
+                if tx_hash:
+                    updated = self.db.update_bridge_attestation_power_by_tx(
+                        tx_hash=tx_hash,
+                        msg_type="attest_burned",
+                        power=power,
+                        attested_power=attested_power,
+                        required_power=required_power,
+                    )
+                logger.info(
+                    "Bridge attest event (inbound): %s:%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
+                    source_chain, burn_id, tx_hash[:16] if tx_hash else "?", validator, power, attested_power, required_power, minted, updated
+                )
+
+                # If threshold reached, also update minted status
+                if minted:
+                    self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
 
             # Handle outbound bridge attestations (bridge_attest_minted event)
             elif ev_type == "bridge_attest_minted":
                 burn_id = str(attrs.get("burn_id", "") or "").strip()
                 mirage_tx_hash = str(attrs.get("mirage_tx_hash", "") or "").strip().lower()
+                validator = str(attrs.get("validator", "") or "").strip()
+                power = int(attrs.get("power", 0) or 0)
+                attested_power = int(attrs.get("attested_power", 0) or 0)
+                required_power = int(attrs.get("required_power", 0) or 0)
                 minted_raw = str(attrs.get("minted", "") or "").strip().lower()
                 minted = minted_raw in ("true", "1", "t", "yes")
-                if not minted:
-                    continue
+
                 # Use mirage_tx_hash for DB linking (matches burn record's tx_hash)
                 effective_burn_id = mirage_tx_hash if mirage_tx_hash else burn_id
                 if not effective_burn_id:
-                    logger.warning("bridge_attest_minted event missing burn_id: %s", attrs)
+                    logger.warning("bridge_attest_minted event missing identifiers: %s", attrs)
                     continue
-                updated = self.db.update_bridge_mint_attestation_confirmed(effective_burn_id, True)
-                if updated:
-                    logger.debug("Bridge attestation minted updated (outbound): %s", effective_burn_id)
-                else:
-                    logger.debug("Bridge attestation minted not updated (outbound, missing record): %s", effective_burn_id)
+
+                # Update power info on the attestation record by tx_hash
+                updated = False
+                if tx_hash:
+                    updated = self.db.update_bridge_attestation_power_by_tx(
+                        tx_hash=tx_hash,
+                        msg_type="attest_minted",
+                        power=power,
+                        attested_power=attested_power,
+                        required_power=required_power,
+                    )
+                logger.info(
+                    "Bridge attest minted event (outbound): burn_id=%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
+                    effective_burn_id, tx_hash[:16] if tx_hash else "?", validator, power, attested_power, required_power, minted, updated
+                )
+
+                # If threshold reached, also update minted status
+                if minted:
+                    self.db.update_bridge_mint_attestation_confirmed(effective_burn_id, True)
 
     # ========== Bridge Message Handlers ==========
 
