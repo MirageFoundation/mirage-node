@@ -699,10 +699,22 @@ class DatabaseManager:
                         destination_tx TEXT,
                         minted BOOLEAN DEFAULT FALSE,
                         created_at BIGINT NOT NULL,
-                        height BIGINT NOT NULL
+                        height BIGINT NOT NULL,
+                        power BIGINT DEFAULT 0,
+                        attested_power BIGINT DEFAULT 0,
+                        required_power BIGINT DEFAULT 0
                     )
                     """
                 )
+                # Migration: add power columns if missing (for existing databases)
+                for col in ["power", "attested_power", "required_power"]:
+                    cur.execute(f"""
+                        DO $$ BEGIN
+                            ALTER TABLE bridge_transactions ADD COLUMN {col} BIGINT DEFAULT 0;
+                        EXCEPTION
+                            WHEN duplicate_column THEN NULL;
+                        END $$;
+                    """)
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_bridge_burn_id ON bridge_transactions(burn_id, source_chain)"
                 )
@@ -1882,25 +1894,34 @@ class DatabaseManager:
     def get_bridge_attestation(self, source_chain: str, burn_id: str) -> dict:
         """Get inbound bridge attestation by source_chain and burn_id.
         
-        Returns dict with: found, minted, tx_hash, recipient, amount, validator, created_at
+        Returns dict with: found, minted, tx_hash, recipient, amount, validator, created_at,
+                          attestor_count, attested_power, required_power
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # Get attestation details with aggregated power info
                 cur.execute(
                     """
-                    SELECT tx_hash, recipient, amount, validator, minted, created_at
+                    SELECT 
+                        MAX(tx_hash) as tx_hash,
+                        MAX(recipient) as recipient,
+                        MAX(amount) as amount,
+                        MAX(validator) as validator,
+                        BOOL_OR(minted) as minted,
+                        MAX(created_at) as created_at,
+                        COUNT(DISTINCT validator) as attestor_count,
+                        COALESCE(SUM(power), 0) as attested_power,
+                        MAX(required_power) as required_power
                     FROM bridge_transactions
                     WHERE direction = 'in'
                       AND msg_type = 'attest_burned'
                       AND LOWER(source_chain) = LOWER(%s)
                       AND burn_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT 1
                     """,
                     (source_chain, burn_id),
                 )
                 row = cur.fetchone()
-                if not row:
+                if not row or row[6] == 0:  # attestor_count == 0 means no records
                     return {"found": False, "minted": False}
                 return {
                     "found": True,
@@ -1910,13 +1931,17 @@ class DatabaseManager:
                     "amount": row[2],
                     "validator": row[3],
                     "created_at": row[5],
+                    "attestor_count": row[6],
+                    "attested_power": row[7],
+                    "required_power": row[8],
                 }
 
     def get_bridge_burn(self, burn_id: str) -> dict:
         """Get outbound bridge burn by burn_id (tx_hash).
         
         Returns dict with: found, minted, destination_chain, destination_address, 
-                          destination_tx, amount, created_at
+                          destination_tx, amount, created_at, attestor_count,
+                          attested_power, required_power
         """
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1936,29 +1961,39 @@ class DatabaseManager:
                 if not burn_row:
                     return {"found": False, "minted": False}
 
-                # Check if there's a minted confirmation for this burn
+                # Get attestation info with aggregated power
                 cur.execute(
                     """
-                    SELECT destination_tx, created_at
+                    SELECT 
+                        MAX(destination_tx) as destination_tx,
+                        MAX(created_at) as minted_at,
+                        COUNT(DISTINCT validator) as attestor_count,
+                        COALESCE(SUM(power), 0) as attested_power,
+                        MAX(required_power) as required_power,
+                        BOOL_OR(minted) as minted
                     FROM bridge_transactions
                     WHERE direction = 'out'
                       AND msg_type = 'attest_minted'
                       AND LOWER(burn_id) = LOWER(%s)
-                    LIMIT 1
                     """,
                     (burn_id,),
                 )
-                minted_row = cur.fetchone()
+                attest_row = cur.fetchone()
+                # attest_row will always return a row, check attestor_count for records
+                has_attestations = attest_row and attest_row[2] > 0
 
                 return {
                     "found": True,
-                    "minted": minted_row is not None,
+                    "minted": bool(attest_row[5]) if has_attestations else False,
                     "destination_chain": burn_row[0],
                     "destination_address": burn_row[1],
                     "amount": burn_row[2],
                     "created_at": burn_row[3],
-                    "destination_tx": minted_row[0] if minted_row else None,
-                    "minted_at": minted_row[1] if minted_row else None,
+                    "destination_tx": attest_row[0] if has_attestations else None,
+                    "minted_at": attest_row[1] if has_attestations else None,
+                    "attestor_count": attest_row[2] if has_attestations else 0,
+                    "attested_power": attest_row[3] if has_attestations else 0,
+                    "required_power": attest_row[4] if has_attestations else 0,
                 }
 
     def update_bridge_attestation_minted(self, source_chain: str, burn_id: str, minted: bool) -> bool:
@@ -1991,5 +2026,31 @@ class DatabaseManager:
                       AND LOWER(burn_id) = LOWER(%s)
                     """,
                     (minted, burn_id),
+                )
+                return cur.rowcount > 0
+
+    def update_bridge_attestation_power_by_tx(
+        self,
+        tx_hash: str,
+        msg_type: str,
+        power: int,
+        attested_power: int,
+        required_power: int,
+    ) -> bool:
+        """Update power fields for a bridge attestation record by tx_hash + msg_type.
+        
+        Each attestation message has a unique tx_hash for its msg_type.
+        Called when processing bridge_attest or bridge_attest_minted events.
+        """
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE bridge_transactions
+                    SET power = %s, attested_power = %s, required_power = %s
+                    WHERE LOWER(tx_hash) = LOWER(%s)
+                      AND msg_type = %s
+                    """,
+                    (power, attested_power, required_power, tx_hash, msg_type),
                 )
                 return cur.rowcount > 0

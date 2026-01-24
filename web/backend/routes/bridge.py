@@ -49,37 +49,30 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
     """Query inbound bridge attestation from indexer DB."""
     with connect_db() as conn:
         with conn.cursor() as cur:
-            # Get attestation details from most recent record
+            # Get aggregated attestation data including power info
             cur.execute(
                 """
-                SELECT tx_hash, recipient, amount, validator, minted, created_at
+                SELECT 
+                    MAX(tx_hash) as tx_hash,
+                    MAX(recipient) as recipient,
+                    MAX(amount) as amount,
+                    MAX(validator) as validator,
+                    BOOL_OR(minted) as minted,
+                    MAX(created_at) as created_at,
+                    COUNT(DISTINCT validator) as attestor_count,
+                    COALESCE(SUM(power), 0) as attested_power,
+                    MAX(required_power) as required_power
                 FROM bridge_transactions
                 WHERE direction = 'in'
                   AND msg_type = 'attest_burned'
                   AND LOWER(source_chain) = LOWER(%s)
                   AND burn_id = %s
-                ORDER BY created_at DESC
-                LIMIT 1
                 """,
                 (source_chain, burn_id),
             )
             row = cur.fetchone()
-            if not row:
+            if not row or row[6] == 0:  # attestor_count == 0 means no records
                 return {"found": False, "confirmed": False}
-
-            # Count unique attestors
-            cur.execute(
-                """
-                SELECT COUNT(DISTINCT validator)
-                FROM bridge_transactions
-                WHERE direction = 'in'
-                  AND msg_type = 'attest_burned'
-                  AND LOWER(source_chain) = LOWER(%s)
-                  AND burn_id = %s
-                """,
-                (source_chain, burn_id),
-            )
-            attestor_count = cur.fetchone()[0] or 0
 
             return {
                 "found": True,
@@ -89,7 +82,9 @@ def _query_bridge_attestation_from_db(source_chain: str, burn_id: str) -> dict:
                 "amount": row[2],
                 "validator": row[3],
                 "created_at": row[5],
-                "attestor_count": attestor_count,
+                "attestor_count": row[6],
+                "attested_power": row[7],
+                "required_power": row[8] or 0,
             }
 
 
@@ -113,25 +108,16 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
             if not burn_row:
                 return {"found": False, "confirmed": False}
 
-            # Check if there's a CONFIRMED attest_minted (minted=true means threshold met)
+            # Get aggregated attestation data including power info
             cur.execute(
                 """
-                SELECT destination_tx, created_at
-                FROM bridge_transactions
-                WHERE direction = 'out'
-                  AND msg_type = 'attest_minted'
-                  AND LOWER(burn_id) = LOWER(%s)
-                  AND minted = TRUE
-                LIMIT 1
-                """,
-                (burn_tx_hash,),
-            )
-            minted_row = cur.fetchone()
-
-            # Count unique attestors for this burn
-            cur.execute(
-                """
-                SELECT COUNT(DISTINCT validator)
+                SELECT 
+                    MAX(destination_tx) as destination_tx,
+                    MAX(created_at) as confirmed_at,
+                    COUNT(DISTINCT validator) as attestor_count,
+                    COALESCE(SUM(power), 0) as attested_power,
+                    MAX(required_power) as required_power,
+                    BOOL_OR(minted) as minted
                 FROM bridge_transactions
                 WHERE direction = 'out'
                   AND msg_type = 'attest_minted'
@@ -139,18 +125,22 @@ def _query_bridge_burn_from_db(burn_tx_hash: str) -> dict:
                 """,
                 (burn_tx_hash,),
             )
-            attestor_count = cur.fetchone()[0] or 0
+            attest_row = cur.fetchone()
+            # attest_row will always return a row, check attestor_count for records
+            has_attestations = attest_row and attest_row[2] > 0
 
             return {
                 "found": True,
-                "confirmed": minted_row is not None,
+                "confirmed": bool(attest_row[5]) if has_attestations else False,
                 "destination_chain": burn_row[0],
                 "destination_address": burn_row[1],
                 "amount": burn_row[2],
                 "created_at": burn_row[3],
-                "destination_tx": minted_row[0] if minted_row else None,
-                "confirmed_at": minted_row[1] if minted_row else None,
-                "attestor_count": attestor_count,
+                "destination_tx": attest_row[0] if has_attestations else None,
+                "confirmed_at": attest_row[1] if has_attestations else None,
+                "attestor_count": attest_row[2] if has_attestations else 0,
+                "attested_power": attest_row[3] if has_attestations else 0,
+                "required_power": attest_row[4] or 0 if has_attestations else 0,
             }
 
 def _base58_decode(s: str) -> bytes:
