@@ -1553,12 +1553,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     {bridgeStatus !== 'idle' && (
                         <StepsCard>
                             <StepsList>
-                                {/* Step 1: Confirm transfer on Solana */}
+                                {/* Step 1: Lock tokens on Solana */}
                                 <StepItem>
                                     <StepDot $state={getStepState('confirming')} />
                                     <StepText>
                                         <StepTitle>
-                                            Confirm transfer on Solana{formatStepTime('confirming')}
+                                            Locking tokens on Solana{formatStepTime('confirming')}
                                         </StepTitle>
                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                             {bridgeStatus === 'confirming' ? (
@@ -1583,39 +1583,35 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                                     </StepText>
                                 </StepItem>
 
-                                {/* Step 2: Orchestrator detection */}
+                                {/* Step 2: Validator attestations */}
                                 <StepItem>
                                     <StepDot $state={getStepState('pending')} />
                                     <StepText>
                                         <StepTitle>
-                                            Validator confirmations{formatStepTime('pending')}
+                                            Validator attestations{formatStepTime('pending')}
                                         </StepTitle>
                                         <StepMeta>
                                             {bridgeStatus === 'confirming' ? (
-                                                'Waiting for transfer confirmation'
-                                            ) : bridgeStatus === 'pending' && mintStatus.state !== 'minted' ? (
-                                                attestationProgress.attestorCount > 0 ? (
-                                                    attestationPowerText
-                                                        ? `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested (${attestationPowerText})`
-                                                        : `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested`
-                                                ) : (
-                                                    'Waiting for validator attestations...'
-                                                )
+                                                'Waiting for token lock confirmation'
+                                            ) : attestationProgress.attestorCount > 0 ? (
+                                                attestationPowerText
+                                                    ? `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested (${attestationPowerText})${attestationProgress.confirmed ? ' - threshold reached' : ''}`
+                                                    : `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested${attestationProgress.confirmed ? ' - threshold reached' : ''}`
                                             ) : mintStatus.state === 'minted' || bridgeStatus === 'complete' ? (
-                                                'Threshold reached - confirmed'
+                                                'Threshold reached'
                                             ) : (
-                                                'Waiting'
+                                                'Waiting for validator attestations...'
                                             )}
                                         </StepMeta>
                                     </StepText>
                                 </StepItem>
 
-                                {/* Step 3: Mint on Mirage */}
+                                {/* Step 3: Mint tokens on Mirage */}
                                 <StepItem>
                                     <StepDot $state={getStepState('complete')} />
                                     <StepText>
                                         <StepTitle>
-                                            Mint on Mirage{bridgeStatus === 'complete' ? formatStepTime('complete') : ''}
+                                            Minting tokens on Mirage{bridgeStatus === 'complete' ? formatStepTime('complete') : ''}
                                         </StepTitle>
                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                             {bridgeStatus === 'complete' && mintStatus.txHash ? (
@@ -2851,7 +2847,7 @@ export default function BridgeView({ state }) {
                                                             <StepItem>
                                                                 <StepDot $state={getStepState('submitting')} />
                                                                 <StepText>
-                                                                    <StepTitle>Submitting bridge transaction{formatStepTime('submitting')}</StepTitle>
+                                                                    <StepTitle>Submitting bridge request{formatStepTime('submitting')}</StepTitle>
                                                                     <StepMeta>
                                                                         {getStepState('submitting') === 'complete'
                                                                             ? `Relayed by ${valoperAddress}`
@@ -2866,7 +2862,7 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>
                                                                         {isSolanaBridge
-                                                                            ? 'Confirming transfer on Mirage'
+                                                                            ? 'Burning tokens on Mirage'
                                                                             : 'Confirming transaction on Mirage'}
                                                                         {formatStepTime('verifying')}
                                                                     </StepTitle>
@@ -2893,7 +2889,7 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>
                                                                         {isSolanaBridge
-                                                                            ? 'Confirming token mint on Solana'
+                                                                            ? 'Minting tokens on Solana'
                                                                             : `IBC transfer to ${selectedNetwork?.name || 'destination'}`}
                                                                         {showMintTimer ? formatStepTime('confirmed') : ''}
                                                                     </StepTitle>
@@ -2916,8 +2912,8 @@ export default function BridgeView({ state }) {
                                                                                 'Pending: confirmation taking longer than expected.'
                                                                             ) : outboundAttestationProgress.attestorCount > 0 ? (
                                                                                 outboundAttestationPowerText
-                                                                                    ? `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested (${outboundAttestationPowerText})`
-                                                                                    : `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested`
+                                                                                    ? `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested (${outboundAttestationPowerText})${outboundAttestationProgress.confirmed ? ' - minting' : ''}`
+                                                                                    : `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested${outboundAttestationProgress.confirmed ? ' - minting' : ''}`
                                                                             ) : (
                                                                                 'Waiting for validator attestations...'
                                                                             )
