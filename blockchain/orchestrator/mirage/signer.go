@@ -23,12 +23,12 @@ import (
 const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the initial safety margin applied to simulated gas.
-// If "out of gas" occurs, we retry with progressively higher multipliers.
+// If "out of gas" occurs, we retry with higher multipliers.
 const gasBufferMultiplier = 1.5
 
 // gasRetryMultipliers are the multipliers to try on "out of gas" errors.
 // First attempt uses gasBufferMultiplier (1.5x), then these on retry.
-var gasRetryMultipliers = []float64{2.0, 2.5}
+var gasRetryMultipliers = []float64{2.0, 2.5, 3.0, 5.0}
 
 // simulationGasLimit is a high gas limit used only for simulation.
 const simulationGasLimit = 1_000_000
@@ -52,56 +52,7 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 		Amount:          burn.Amount,
 	}
 
-	// Try with increasing gas multipliers on "out of gas" errors
-	multipliers := append([]float64{gasBufferMultiplier}, gasRetryMultipliers...)
-	var lastErr error
-
-	for attempt, multiplier := range multipliers {
-		txBytes, feeUmirage, err := c.buildTxBytesWithSimulationMultiplier(ctx, msg, multiplier)
-		if err != nil {
-			return err
-		}
-
-		txClient := txtypes.NewServiceClient(c.grpcConn)
-		resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
-			TxBytes: txBytes,
-			Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
-		})
-		if err != nil {
-			return fmt.Errorf("broadcast tx failed: %w", err)
-		}
-		if resp.TxResponse == nil {
-			return fmt.Errorf("broadcast tx response missing")
-		}
-		if resp.TxResponse.Code != 0 {
-			lastErr = fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
-			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
-				c.logger.Printf("DEBUG out of gas at %.1fx, retrying with %.1fx", multiplier, multipliers[attempt+1])
-				continue
-			}
-			return lastErr
-		}
-
-		txHash := resp.TxResponse.TxHash
-		c.logger.Printf("DEBUG attestation broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", burnID, txHash)
-
-		// Wait for tx to be included in a block and verify execution succeeded
-		if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
-			c.logger.Printf("ERROR attestation tx FAILED burn_id=%s txhash=%s error=%v", burnID, txHash, err)
-			lastErr = fmt.Errorf("attestation tx failed: %w", err)
-			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
-				c.logger.Printf("DEBUG out of gas at %.1fx, retrying with %.1fx", multiplier, multipliers[attempt+1])
-				continue
-			}
-			return lastErr
-		}
-
-		c.logger.Printf("INFO  [FEES] attestation gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
-			float64(feeUmirage)/1_000_000, burnID, txHash)
-		return nil
-	}
-
-	return lastErr
+	return c.submitWithGasRetry(ctx, msg, "attestation", burnID)
 }
 
 func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, mirageTxHash string) error {
@@ -114,17 +65,21 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		MirageTxHash:     strings.ToUpper(strings.TrimSpace(mirageTxHash)),
 	}
 
+	return c.submitWithGasRetry(ctx, msg, "bridge_minted", burnID)
+}
+
+func (c *Client) submitWithGasRetry(ctx context.Context, msg sdk.Msg, action, burnID string) error {
 	// Try with increasing gas multipliers on "out of gas" errors
 	multipliers := append([]float64{gasBufferMultiplier}, gasRetryMultipliers...)
 	var lastErr error
+	txClient := txtypes.NewServiceClient(c.grpcConn)
 
 	for attempt, multiplier := range multipliers {
-		txBytes, gasFeeUmirage, err := c.buildTxBytesWithSimulationMultiplier(ctx, msg, multiplier)
+		txBytes, feeUmirage, err := c.buildTxBytesWithSimulationMultiplier(ctx, msg, multiplier)
 		if err != nil {
 			return err
 		}
 
-		txClient := txtypes.NewServiceClient(c.grpcConn)
 		resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
 			TxBytes: txBytes,
 			Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
@@ -138,28 +93,28 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		if resp.TxResponse.Code != 0 {
 			lastErr = fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
 			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
-				c.logger.Printf("DEBUG out of gas at %.1fx, retrying with %.1fx", multiplier, multipliers[attempt+1])
+				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
 				continue
 			}
 			return lastErr
 		}
 
 		txHash := resp.TxResponse.TxHash
-		c.logger.Printf("DEBUG bridge_minted broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", burnID, txHash)
+		c.logger.Printf("DEBUG %s broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", action, burnID, txHash)
 
 		// Wait for tx to be included in a block and verify execution succeeded
 		if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
-			c.logger.Printf("ERROR bridge_minted tx FAILED burn_id=%s txhash=%s error=%v", burnID, txHash, err)
-			lastErr = fmt.Errorf("bridge_minted tx failed: %w", err)
+			c.logger.Printf("ERROR %s tx FAILED burn_id=%s txhash=%s error=%v", action, burnID, txHash, err)
+			lastErr = fmt.Errorf("%s tx failed: %w", action, err)
 			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
-				c.logger.Printf("DEBUG out of gas at %.1fx, retrying with %.1fx", multiplier, multipliers[attempt+1])
+				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
 				continue
 			}
 			return lastErr
 		}
 
-		c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
-			float64(gasFeeUmirage)/1_000_000, burnID, txHash)
+		c.logger.Printf("INFO  [FEES] %s gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
+			action, float64(feeUmirage)/1_000_000, burnID, txHash)
 		return nil
 	}
 

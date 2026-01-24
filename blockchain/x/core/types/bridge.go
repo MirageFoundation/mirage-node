@@ -12,6 +12,12 @@ const (
 	// Key format: bridge_attestations/{source_chain}/{burn_id}
 	BridgeAttestationsPrefix = "bridge_attestations/"
 
+	// BridgeAttestorsPrefix stores per-validator attestations for inbound burns.
+	// Attestors are stored separately to keep the attestation record size stable and
+	// avoid gas variance from growing attestor maps.
+	// Key format: bridge_attestors/{source_chain}/{burn_id}/{valoper}
+	BridgeAttestorsPrefix = "bridge_attestors/"
+
 	// BridgeMintAttestationsPrefix is the KVStore prefix for outbound mint attestation records
 	// Key format: bridge_mint_attestations/{destination_chain}/{burn_id}
 	BridgeMintAttestationsPrefix = "bridge_mint_attestations/"
@@ -55,7 +61,7 @@ type BridgeAttestation struct {
 	Amount uint64 `json:"amount"`
 
 	// Attestors maps validator operator address to their voting power at attestation time.
-	// Used for threshold tracking and reporting.
+	// Attestors are stored under BridgeAttestorsPrefix; this map is kept empty in state.
 	Attestors map[string]int64 `json:"attestors"`
 
 	// AttestedPower is the total voting power that has attested
@@ -142,14 +148,13 @@ type BridgeMintAttestation struct {
 }
 
 
-// NewBridgeAttestation creates a new BridgeAttestation with initialized maps
+// NewBridgeAttestation creates a new BridgeAttestation
 func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount uint64, createdAt int64) *BridgeAttestation {
 	return &BridgeAttestation{
 		SourceChain:     sourceChain,
 		BurnID:          burnID,
 		MirageRecipient: mirageRecipient,
 		Amount:          amount,
-		Attestors:       make(map[string]int64),
 		AttestedPower:   0,
 		Minted:          false,
 		CreatedAt:       createdAt,
@@ -159,6 +164,11 @@ func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount ui
 // BridgeAttestationKey returns the store key for a bridge attestation
 func BridgeAttestationKey(sourceChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeAttestationsPrefix, sourceChain, burnID))
+}
+
+// BridgeAttestorKey returns the store key for a bridge attestor entry.
+func BridgeAttestorKey(sourceChain, burnID, valoper string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeAttestorsPrefix, sourceChain, burnID, valoper))
 }
 
 // BridgeBurnKey returns the store key for a bridge burn record.
@@ -222,27 +232,6 @@ func UnmarshalBridgeMintAttestation(data []byte) (*BridgeMintAttestation, error)
 	return &a, nil
 }
 
-// HasAttested returns true if the validator has already attested to this burn
-func (a *BridgeAttestation) HasAttested(validatorAddr string) bool {
-	_, exists := a.Attestors[validatorAddr]
-	return exists
-}
-
-// AddAttestation records a validator's attestation and adds their voting power.
-// Stores the validator's power for threshold tracking and reporting.
-// Returns true if the attestation is new (validator hadn't attested before)
-func (a *BridgeAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
-	if votingPower <= 0 {
-		return false
-	}
-	if _, exists := a.Attestors[validatorAddr]; exists {
-		return false
-	}
-	a.Attestors[validatorAddr] = votingPower
-	a.AttestedPower += votingPower
-	return true
-}
-
 // MeetsThreshold returns true if the attested power meets or exceeds the threshold
 // threshold is in basis points (e.g., 6667 = 66.67%)
 func (a *BridgeAttestation) MeetsThreshold(totalPower int64, thresholdBasisPoints uint64) bool {
@@ -281,10 +270,6 @@ func UnmarshalBridgeAttestation(data []byte) (*BridgeAttestation, error) {
 	if err := json.Unmarshal(data, &a); err != nil {
 		return nil, err
 	}
-	// Ensure map is initialized
-	if a.Attestors == nil {
-		a.Attestors = make(map[string]int64)
-	}
 	return &a, nil
 }
 
@@ -314,20 +299,6 @@ func UnmarshalBridgeMintedRecord(data []byte) (*BridgeMintedRecord, error) {
 		return nil, err
 	}
 	return &m, nil
-}
-
-// AttestorList returns a slice of validator addresses that have attested
-func (a *BridgeAttestation) AttestorList() []string {
-	result := make([]string, 0, len(a.Attestors))
-	for addr := range a.Attestors {
-		result = append(result, addr)
-	}
-	return result
-}
-
-// GetAttestorPower returns the voting power for a specific attestor (0 if not found)
-func (a *BridgeAttestation) GetAttestorPower(validatorAddr string) int64 {
-	return a.Attestors[validatorAddr]
 }
 
 // ValidateBridgeChain checks if a chain_id is valid for bridging
