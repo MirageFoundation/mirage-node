@@ -514,7 +514,6 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 				return nil, fmt.Errorf("failed to burn bridge fee: %w", err)
 			}
 		}
-		attestation.FeeDistributed = true
 		ctx.Logger().Debug("BridgeAttestMinted fee burned",
 			"destination_chain", destChain,
 			"burn_id", burnIDStr,
