@@ -20,6 +20,7 @@ type bridgeMockKeeper struct {
 	mintedRecords     map[string]*types.BridgeMintedRecord
 	attestations      map[string]*types.BridgeAttestation
 	mintAttestations  map[string]*types.BridgeMintAttestation
+	pendingMintFees   map[string]bool
 	bondedValidators  map[string]bool
 	validatorPowers   map[string]int64
 	totalPower        int64
@@ -35,6 +36,7 @@ func newBridgeMockKeeper(params types.Params) *bridgeMockKeeper {
 		mintedRecords:    make(map[string]*types.BridgeMintedRecord),
 		attestations:     make(map[string]*types.BridgeAttestation),
 		mintAttestations: make(map[string]*types.BridgeMintAttestation),
+		pendingMintFees:  make(map[string]bool),
 		bondedValidators: make(map[string]bool),
 		validatorPowers:  make(map[string]int64),
 	}
@@ -137,6 +139,12 @@ func (mk *bridgeMockKeeper) SetBridgeMintAttestation(ctx sdk.Context, attestatio
 func (mk *bridgeMockKeeper) SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error {
 	key := fmt.Sprintf("%s/%s", record.DestinationChain, record.BurnID)
 	mk.mintedRecords[key] = record
+	return nil
+}
+
+func (mk *bridgeMockKeeper) SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error {
+	key := fmt.Sprintf("%s/%s", destChain, burnID)
+	mk.pendingMintFees[key] = true
 	return nil
 }
 
@@ -345,11 +353,11 @@ func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 	if _, found := mk.mintedRecords["solana/1"]; !found {
 		t.Fatal("expected mint record to be stored")
 	}
-	if mk.moduleBalance != 0 {
-		t.Fatalf("module balance = %d, want 0", mk.moduleBalance)
+	if !mk.pendingMintFees["solana/1"] {
+		t.Fatal("expected mint fee distribution to be queued")
 	}
-	if mk.balances[validator] != 100 {
-		t.Fatalf("validator balance = %d, want 100", mk.balances[validator])
+	if mk.moduleBalance != 100 {
+		t.Fatalf("module balance = %d, want 100", mk.moduleBalance)
 	}
 }
 

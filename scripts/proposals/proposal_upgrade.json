@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.1-query-fix",
+                "name": "v1.9.2-bridge-fee-endblock",
                 "height": "T+50",
-                "info": "Bridge query endpoint fixes and orchestrator improvements"
+                "info": "Bridge fee distribution moved to EndBlock for stable gas usage"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.1-query-fix",
-    "summary": "This upgrade fixes bridge query endpoints and improves orchestrator reliability.\n\nBridge Query Fixes:\n- CLI: `miraged q bridge minted` now correctly requires destination_chain parameter\n- REST: Added GetBridgeMinted handler to REST gateway (was returning 'Not Implemented')\n- Proto: QueryBridgeMintedResponse now includes attestation progress fields (found, attestors, attested_power, required_power)\n\nOrchestrator Fixes:\n- Query existing destination_tx before minting to prevent race conditions between validators\n- Handle AlreadyMinted marker from Solana by recovering destination_tx from chain\n- Added destination_tx mismatch to permanent errors list to prevent infinite retries\n\nThese fixes enable the frontend to properly display attestation progress during bridging.\n\nBINARY REQUIREMENT: All validators must update to the v1.9.1 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.9.2-bridge-fee-endblock",
+    "summary": "This upgrade moves bridge fee distribution from inline (in MsgBridgeAttestMinted) to EndBlock processing.\n\nProblem Solved:\n- MsgBridgeAttestMinted gas usage was unpredictable: the attestation that crosses the threshold triggered expensive fee distribution, while earlier attestations used minimal gas\n- This caused out-of-gas failures when simulation couldn't predict which attestation would cross the threshold\n\nChanges:\n- Fee distribution now happens in EndBlock, making attestation gas stable and predictable\n- Added FeeDistributed flag to BridgeMintAttestation for idempotent retries\n- Added ConfirmedBy field to track which validator crossed the threshold (receives dust)\n- EndBlock fee processing never halts the chain - errors are logged and retried next block\n- Orchestrator gas buffer reduced from 1.6x to 1.2x (now safe)\n- Orchestrator now verifies tx execution after broadcast (catches DeliverTx failures)\n\nBackward Compatibility:\n- Pre-upgrade attestations without ConfirmedBy use fallback (highest-power attestor gets dust)\n- No state migration required - new keys are created on first use\n\nBINARY REQUIREMENT: All validators must update to the v1.9.2 binary BEFORE the upgrade height.",
     "expedited": true
 }

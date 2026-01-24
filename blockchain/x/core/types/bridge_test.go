@@ -99,6 +99,8 @@ func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	original.AddAttestation("val1", 1000)
 	original.AddAttestation("val2", 2000)
 	original.Confirmed = true
+	original.ConfirmedBy = "mirage1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqp5h6t2"
+	original.FeeDistributed = true
 
 	data, err := original.Marshal()
 	if err != nil {
@@ -124,6 +126,12 @@ func TestBridgeMintAttestationMarshalUnmarshal(t *testing.T) {
 	}
 	if restored.Confirmed != original.Confirmed {
 		t.Errorf("Confirmed mismatch: got %v, want %v", restored.Confirmed, original.Confirmed)
+	}
+	if restored.ConfirmedBy != original.ConfirmedBy {
+		t.Errorf("ConfirmedBy mismatch: got %s, want %s", restored.ConfirmedBy, original.ConfirmedBy)
+	}
+	if restored.FeeDistributed != original.FeeDistributed {
+		t.Errorf("FeeDistributed mismatch: got %v, want %v", restored.FeeDistributed, original.FeeDistributed)
 	}
 	if len(restored.Attestors) != 2 {
 		t.Errorf("Attestors count mismatch: got %d, want 2", len(restored.Attestors))
@@ -165,6 +173,14 @@ func TestBridgeMintAttestationKey(t *testing.T) {
 		if string(key) != tc.expected {
 			t.Errorf("BridgeMintAttestationKey(%s, %s) = %s, want %s", tc.destChain, tc.burnID, string(key), tc.expected)
 		}
+	}
+}
+
+func TestBridgeMintFeePendingKey(t *testing.T) {
+	key := BridgeMintFeePendingKey("solana", "42")
+	expected := "bridge_mint_fee_pending/solana/42"
+	if string(key) != expected {
+		t.Errorf("BridgeMintFeePendingKey = %s, want %s", string(key), expected)
 	}
 }
 

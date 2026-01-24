@@ -782,4 +782,34 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.9.2-bridge-fee-endblock: Move bridge fee distribution to EndBlock
+	// - MsgBridgeAttestMinted no longer distributes fees inline (stabilizes gas)
+	// - Fee distribution queued and processed in EndBlock
+	// - New ConfirmedBy field on BridgeMintAttestation tracks threshold-crossing validator
+	// - Orchestrator gas buffer reduced from 1.6x to 1.2x
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.2-bridge-fee-endblock",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.2-bridge-fee-endblock...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// No state migration needed:
+			// - New BridgeMintFeePending keys don't exist yet (fine - no pending distributions)
+			// - Existing BridgeMintAttestations don't have ConfirmedBy field (fine - fallback logic handles)
+			// - In-flight attestations will work: next attestation crossing threshold queues fee distribution
+			//
+			// Behavior change:
+			// - Fee distribution now happens in EndBlock instead of inline in MsgBridgeAttestMinted
+			// - This stabilizes gas usage for attestation txs (removes variance from concurrent attestations)
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.2-bridge-fee-endblock complete - fee distribution moved to EndBlock")
+			return toVM, nil
+		},
+	)
 }

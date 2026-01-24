@@ -16,6 +16,13 @@ const (
 	// Key format: bridge_mint_attestations/{destination_chain}/{burn_id}
 	BridgeMintAttestationsPrefix = "bridge_mint_attestations/"
 
+	// BridgeMintFeePendingPrefix is the KVStore prefix for pending fee distributions.
+	// When an outbound bridge mint reaches the attestation threshold, fee distribution
+	// is deferred to EndBlock (rather than inline) to stabilize gas usage. This prefix
+	// stores markers for confirmed mints awaiting fee distribution.
+	// Key format: bridge_mint_fee_pending/{destination_chain}/{burn_id}
+	BridgeMintFeePendingPrefix = "bridge_mint_fee_pending/"
+
 	// BridgeBurnsPrefix is the KVStore prefix for outbound bridge burn records
 	// Key format: bridge_burns/{burn_id}
 	BridgeBurnsPrefix = "bridge_burns/"
@@ -126,6 +133,18 @@ type BridgeMintAttestation struct {
 	// Confirmed indicates whether threshold has been met and mint is confirmed
 	Confirmed bool `json:"confirmed"`
 
+	// ConfirmedBy is the account address (sdk.AccAddress bech32) of the validator whose
+	// attestation crossed the confirmation threshold. This validator receives any dust
+	// (remainder from integer division) during fee distribution. May be empty for
+	// attestations created before the v1.10.1 upgrade (fallback uses highest-power attestor).
+	ConfirmedBy string `json:"confirmed_by"`
+
+	// FeeDistributed indicates whether bridge fees have been paid out to attestors.
+	// Set to true after successful fee distribution in EndBlock. This makes fee
+	// distribution idempotent - if EndBlock is retried or pending marker cleanup fails,
+	// we won't double-pay validators.
+	FeeDistributed bool `json:"fee_distributed"`
+
 	// CreatedAt is the block height when this attestation was first created
 	CreatedAt int64 `json:"created_at"`
 }
@@ -164,6 +183,13 @@ func BridgeMintedKey(destChain, burnID string) []byte {
 // BridgeMintAttestationKey returns the store key for a bridge mint attestation
 func BridgeMintAttestationKey(destChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintAttestationsPrefix, destChain, burnID))
+}
+
+// BridgeMintFeePendingKey returns the store key for pending fee distributions.
+// Used by SetBridgeMintFeePending (when threshold is crossed) and
+// IterateBridgeMintFeePending (during EndBlock processing).
+func BridgeMintFeePendingKey(destChain, burnID string) []byte {
+	return []byte(fmt.Sprintf("%s%s/%s", BridgeMintFeePendingPrefix, destChain, burnID))
 }
 
 // NewBridgeMintAttestation creates a new BridgeMintAttestation with initialized maps

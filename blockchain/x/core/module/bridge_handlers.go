@@ -42,8 +42,8 @@ type bridgeAttestMintedKeeper interface {
 	GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error)
 	SetBridgeMintAttestation(ctx sdk.Context, attestation *types.BridgeMintAttestation) error
 	SetBridgeMintedRecord(ctx sdk.Context, record *types.BridgeMintedRecord) error
+	SetBridgeMintFeePending(ctx sdk.Context, destChain, burnID string) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
-	SendFromModule(ctx sdk.Context, to string, amount uint64) error
 }
 
 func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, deductRelayGasFee func(ctx sdk.Context, owner string, userLevel int) error) (*types.MsgBridgeBurnResponse, error) {
@@ -410,7 +410,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	}
 
 	// Load burn record to verify it exists for this destination chain
-	burnRecord, found, err := k.GetBridgeBurnRecord(ctx, destChain, burnIDStr)
+	_, found, err := k.GetBridgeBurnRecord(ctx, destChain, burnIDStr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load bridge burn record: %w", err)
 	}
@@ -478,6 +478,7 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	if attestation.MeetsThreshold(totalPower, params.BridgeAttestationThreshold) {
 		// Threshold met - confirm the mint
 		attestation.Confirmed = true
+		attestation.ConfirmedBy = validator
 		confirmed = true
 
 		// Store final mint record
@@ -491,62 +492,9 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 			return nil, fmt.Errorf("failed to store mint record: %w", err)
 		}
 
-		// Distribute bridge fee proportionally among all attestors based on their voting power
-		if burnRecord.BridgeFee > 0 && attestation.AttestedPower > 0 {
-			totalFee := burnRecord.BridgeFee
-			var distributed uint64 = 0
-
-			for valoperAddr, power := range attestation.Attestors {
-				if power <= 0 {
-					continue
-				}
-
-				valoper, err := sdk.ValAddressFromBech32(valoperAddr)
-				if err != nil {
-					return nil, fmt.Errorf("invalid attestor address: %w", err)
-				}
-				accAddr := sdk.AccAddress(valoper).String()
-
-				// Use sdkmath.Int for safe arithmetic to avoid overflow
-				share := sdkmath.NewIntFromUint64(totalFee).
-					MulRaw(power).
-					QuoRaw(attestation.AttestedPower).
-					Uint64()
-
-				if share > 0 {
-					if err := k.SendFromModule(ctx, accAddr, share); err != nil {
-						return nil, fmt.Errorf("failed to pay bridge fee to %s: %w", accAddr, err)
-					}
-					distributed += share
-					ctx.Logger().Debug("BridgeAttestMinted fee share paid",
-						"burn_id", burnIDStr,
-						"validator", valoperAddr,
-						"recipient", accAddr,
-						"power", power,
-						"share", share,
-					)
-				}
-			}
-
-			// Handle rounding dust - give to the validator that crossed the threshold
-			if distributed < totalFee {
-				dust := totalFee - distributed
-				if err := k.SendFromModule(ctx, validator, dust); err != nil {
-					return nil, fmt.Errorf("failed to pay bridge fee dust: %w", err)
-				}
-				ctx.Logger().Debug("BridgeAttestMinted fee dust paid",
-					"burn_id", burnIDStr,
-					"validator", validator,
-					"dust", dust,
-				)
-			}
-
-			ctx.Logger().Info("BridgeAttestMinted fee distributed proportionally",
-				"burn_id", burnIDStr,
-				"total_fee", totalFee,
-				"attestor_count", len(attestation.Attestors),
-				"distributed", distributed,
-			)
+		// Queue fee distribution for EndBlock to stabilize gas usage
+		if err := k.SetBridgeMintFeePending(ctx, destChain, burnIDStr); err != nil {
+			return nil, fmt.Errorf("failed to queue mint fee distribution: %w", err)
 		}
 
 		ctx.Logger().Info("BridgeAttestMinted threshold met",
