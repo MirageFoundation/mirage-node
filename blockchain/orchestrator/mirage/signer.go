@@ -22,8 +22,7 @@ import (
 const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the safety margin applied to simulated gas.
-// Using 1.5x because we simulate ordered tx but broadcast unordered tx,
-// which has additional overhead for timeout validation and hash storage.
+// Unordered tx gas can vary slightly with ante path and state reads.
 const gasBufferMultiplier = 1.5
 
 // simulationGasLimit is a high gas limit used only for simulation.
@@ -110,7 +109,8 @@ func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([
 
 	// Build UNORDERED tx for simulation - must match broadcast tx structure
 	// to get accurate gas estimation (unordered txs have different ante handler paths)
-	simTimeout := time.Now().Add(1 * time.Hour) // Far future, doesn't matter for simulation
+	// Timeout must be under the chain TTL limit (10m).
+	simTimeout := time.Now().Add(unorderedTxTimeout)
 	simFeeCoins := sdk.NewCoins(sdk.NewCoin(c.cfg.Mirage.FeeDenom, sdkmath.NewInt(0)))
 	simTxBytes, err := c.buildUnorderedTx(clientCtx, msg, accNum, simTimeout, simulationGasLimit, simFeeCoins)
 	if err != nil {
