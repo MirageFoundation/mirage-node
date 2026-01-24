@@ -2770,9 +2770,11 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	}, nil
 }
 
-// GetBridgeMinted queries outbound mint status.
+// GetBridgeMinted queries outbound mint status including attestation progress and completion.
+// Returns both attestation progress (attested_power, required_power) and completion status (minted).
 func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
 
 	burnID := strings.TrimSpace(req.GetBurnId())
 	if burnID == "" {
@@ -2796,14 +2798,22 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 		return nil, fmt.Errorf("failed to load mint record: %w", err)
 	}
 
-	// Build response
+	// Calculate required power for threshold
+	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
+	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
+
+	// Build response with all info
 	resp := &types.QueryBridgeMintedResponse{
+		Found:            attFound || recFound,
 		Minted:           recFound,
 		DestinationChain: destChain,
+		RequiredPower:    requiredPower,
 	}
 
-	// Add destination_tx from attestation if available
+	// Add attestation details if found
 	if attFound {
+		resp.Attestors = attestation.AttestorList()
+		resp.AttestedPower = attestation.AttestedPower
 		resp.DestinationTx = attestation.DestinationTx
 	}
 
