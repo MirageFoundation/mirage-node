@@ -2932,12 +2932,12 @@ export default function BridgeView({ state }) {
                                                         )}
                                                         {isSolanaBridge && mintStatus.state === 'minted' && (
                                                             <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
+                                                                ✓ Bridge complete! {rawAmount && bridgeFee !== null ? `${(parseFloat(rawAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
                                                             </StatusBanner>
                                                         )}
                                                         {!isSolanaBridge && submitStage === 'confirmed' && (
                                                             <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {selectedNetwork?.name || 'destination'}.
+                                                                ✓ Bridge complete! {rawAmount && bridgeFee !== null ? `${(parseFloat(rawAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {selectedNetwork?.name || 'destination'}.
                                                             </StatusBanner>
                                                         )}
                                                     </StepsCard>
@@ -2953,7 +2953,7 @@ export default function BridgeView({ state }) {
                                                     } : {}}
                                                 >
                                                     {submitStage === 'confirmed'
-                                                        ? 'Clear'
+                                                        ? 'New Bridge'
                                                         : isSubmitting
                                                             ? 'Processing...'
                                                             : !selectedNetwork

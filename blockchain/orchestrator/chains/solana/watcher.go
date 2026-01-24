@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -22,6 +23,14 @@ import (
 
 	"mirage/orchestrator/chains"
 	"mirage/orchestrator/config"
+)
+
+const (
+	// Rate limiting for Solana RPC calls
+	rpcMinDelay     = 100 * time.Millisecond // Minimum delay between RPC calls
+	rpcMaxRetries   = 3                      // Max retries for rate-limited requests
+	rpcRetryBaseMs  = 1000                   // Base retry delay in milliseconds
+	rpcRetryJitter  = 500                    // Random jitter added to retry delay
 )
 
 const (
@@ -43,6 +52,10 @@ type Watcher struct {
 	discBurn   [8]byte
 	discMint   [8]byte
 	ready      bool
+
+	// Rate limiting
+	rpcMu       sync.Mutex
+	lastRPCCall time.Time
 }
 
 func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
@@ -85,6 +98,68 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 
 func (w *Watcher) ChainID() string {
 	return "solana"
+}
+
+// rpcThrottle enforces minimum delay between RPC calls to avoid rate limiting
+func (w *Watcher) rpcThrottle() {
+	w.rpcMu.Lock()
+	defer w.rpcMu.Unlock()
+
+	elapsed := time.Since(w.lastRPCCall)
+	if elapsed < rpcMinDelay {
+		time.Sleep(rpcMinDelay - elapsed)
+	}
+	w.lastRPCCall = time.Now()
+}
+
+// isRateLimitError checks if an error is a 429 rate limit error
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "429") || strings.Contains(errStr, "Too many requests")
+}
+
+// getTransactionWithRetry fetches a transaction with rate limiting and retry logic
+func (w *Watcher) getTransactionWithRetry(ctx context.Context, sig solana.Signature) (*rpc.GetTransactionResult, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= rpcMaxRetries; attempt++ {
+		// Apply rate limiting
+		w.rpcThrottle()
+
+		tx, err := w.rpcClient.GetTransaction(ctx, sig, &rpc.GetTransactionOpts{
+			Encoding:   solana.EncodingBase64,
+			Commitment: w.commitment(),
+		})
+
+		if err == nil {
+			return tx, nil
+		}
+
+		lastErr = err
+
+		// Check if it's a rate limit error
+		if isRateLimitError(err) {
+			if attempt < rpcMaxRetries {
+				// Exponential backoff with jitter
+				delay := time.Duration(rpcRetryBaseMs*(1<<attempt)+rand.Intn(rpcRetryJitter)) * time.Millisecond
+				w.logger.Printf("DEBUG rate limited on GetTransaction, retry %d/%d after %v", attempt+1, rpcMaxRetries, delay)
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(delay):
+					continue
+				}
+			}
+		} else {
+			// Non-rate-limit error, don't retry
+			return nil, err
+		}
+	}
+
+	return nil, fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
 // Close closes the WebSocket connection to Solana
@@ -134,9 +209,26 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 			opts.Before = beforeSig
 		}
 
+		// Apply rate limiting
+		w.rpcThrottle()
+
 		sigs, err := w.rpcClient.GetSignaturesForAddressWithOpts(ctx, w.programID, opts)
 		if err != nil {
-			return fmt.Errorf("failed to fetch signatures: %w", err)
+			// Check for rate limiting and retry once after delay
+			if isRateLimitError(err) {
+				delay := time.Duration(rpcRetryBaseMs+rand.Intn(rpcRetryJitter)) * time.Millisecond
+				w.logger.Printf("DEBUG rate limited on GetSignatures, retrying after %v", delay)
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(delay):
+				}
+				w.rpcThrottle()
+				sigs, err = w.rpcClient.GetSignaturesForAddressWithOpts(ctx, w.programID, opts)
+			}
+			if err != nil {
+				return fmt.Errorf("failed to fetch signatures: %w", err)
+			}
 		}
 		if len(sigs) == 0 {
 			break
@@ -281,10 +373,7 @@ func (w *Watcher) parseBurnsFromSignature(ctx context.Context, signature string)
 	if err != nil {
 		return nil, fmt.Errorf("invalid signature %s: %w", signature, err)
 	}
-	tx, err := w.rpcClient.GetTransaction(ctx, sig, &rpc.GetTransactionOpts{
-		Encoding:   solana.EncodingBase64,
-		Commitment: w.commitment(),
-	})
+	tx, err := w.getTransactionWithRetry(ctx, sig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch transaction %s: %w", signature, err)
 	}
@@ -443,10 +532,26 @@ func (w *Watcher) GetLastSequence(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("failed to derive bridge state PDA: %w", err)
 	}
 
-	// Fetch account data
+	// Apply rate limiting
+	w.rpcThrottle()
+
+	// Fetch account data with retry on rate limit
 	info, err := w.rpcClient.GetAccountInfo(ctx, bridgeStatePDA)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch bridge state account: %w", err)
+		if isRateLimitError(err) {
+			delay := time.Duration(rpcRetryBaseMs+rand.Intn(rpcRetryJitter)) * time.Millisecond
+			w.logger.Printf("DEBUG rate limited on GetAccountInfo, retrying after %v", delay)
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(delay):
+			}
+			w.rpcThrottle()
+			info, err = w.rpcClient.GetAccountInfo(ctx, bridgeStatePDA)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("failed to fetch bridge state account: %w", err)
+		}
 	}
 	if info == nil || info.Value == nil || info.Value.Data == nil {
 		return 0, fmt.Errorf("bridge state account not found")
