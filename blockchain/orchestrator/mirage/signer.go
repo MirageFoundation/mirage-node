@@ -23,9 +23,9 @@ import (
 const unorderedTxTimeout = 5 * time.Minute
 
 // gasBufferMultiplier is the safety margin applied to simulated gas.
-// Even with fee distribution in EndBlock, there's ~36% variance between simulation
-// and execution due to validator power iteration and concurrent tx state changes.
-// Using 1.5 (50% buffer) based on observed actual/simulated ratios.
+// With inline fee burning, the variance is small (only the threshold-crossing tx
+// burns the fee). 1.5x covers the difference between a normal attestation and
+// the one that triggers the burn.
 const gasBufferMultiplier = 1.5
 
 // simulationGasLimit is a high gas limit used only for simulation.

@@ -605,38 +605,6 @@ func TestBridgeMintAttestationGetAttestorPower(t *testing.T) {
 	}
 }
 
-func TestProportionalFeeDistribution(t *testing.T) {
-	// Test the math for proportional fee distribution (legacy)
-	// Simulates: 3 validators with powers 300, 250, 200 = 750 total
-	// Fee of 1000 should be split as: 400, 333, 266 = 999 (1 dust)
-	a := NewBridgeMintAttestation("1", "solana", "SolanaSignature123", 12345)
-	a.AddAttestation("validator1", 300)
-	a.AddAttestation("validator2", 250)
-	a.AddAttestation("validator3", 200)
-
-	totalFee := uint64(1000)
-	var distributed uint64 = 0
-	expectedShares := map[string]uint64{
-		"validator1": 400, // 1000 * 300 / 750 = 400
-		"validator2": 333, // 1000 * 250 / 750 = 333
-		"validator3": 266, // 1000 * 200 / 750 = 266
-	}
-
-	for valAddr, power := range a.Attestors {
-		share := totalFee * uint64(power) / uint64(a.AttestedPower)
-		if share != expectedShares[valAddr] {
-			t.Errorf("Share for %s = %d, want %d", valAddr, share, expectedShares[valAddr])
-		}
-		distributed += share
-	}
-
-	// Should have 1 dust remaining (1000 - 999 = 1)
-	dust := totalFee - distributed
-	if dust != 1 {
-		t.Errorf("Dust = %d, want 1", dust)
-	}
-}
-
 func TestValidateBridgeChain(t *testing.T) {
 	chains := []*BridgeChainConfig{
 		{ChainId: "solana", Enabled: true, Fee: 100000},
