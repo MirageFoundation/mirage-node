@@ -2815,7 +2815,7 @@ export default function BridgeView({ state }) {
                                                     <PreviewRow>
                                                         <PreviewLabel>
                                                             Fee
-                                                            <HelpIconWrapper data-tooltip="Bridge fee paid to validator">?</HelpIconWrapper>
+                                                            <HelpIconWrapper data-tooltip="Bridge fee (burned)">?</HelpIconWrapper>
                                                         </PreviewLabel>
                                                         <PreviewValue>−{bridgeFee !== null ? bridgeFee : '?'} MIRAGE</PreviewValue>
                                                     </PreviewRow>

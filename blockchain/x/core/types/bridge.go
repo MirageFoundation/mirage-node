@@ -184,38 +184,16 @@ func BridgeMintAttestorKey(destChain, burnID, valoper string) []byte {
 }
 
 
-// NewBridgeMintAttestation creates a new BridgeMintAttestation with initialized maps
+// NewBridgeMintAttestation creates a new BridgeMintAttestation.
 func NewBridgeMintAttestation(burnID, destChain, destTx string, createdAt int64) *BridgeMintAttestation {
 	return &BridgeMintAttestation{
 		BurnID:           burnID,
 		DestinationChain: destChain,
 		DestinationTx:    destTx,
-		Attestors:        make(map[string]int64),
 		AttestedPower:    0,
 		Confirmed:        false,
 		CreatedAt:        createdAt,
 	}
-}
-
-// HasAttested returns true if the validator has already attested to this mint
-func (a *BridgeMintAttestation) HasAttested(validatorAddr string) bool {
-	_, exists := a.Attestors[validatorAddr]
-	return exists
-}
-
-// AddAttestation records a validator's attestation and adds their voting power.
-// Stores the validator's power for threshold tracking and reporting.
-// Returns true if the attestation is new (validator hadn't attested before)
-func (a *BridgeMintAttestation) AddAttestation(validatorAddr string, votingPower int64) bool {
-	if votingPower <= 0 {
-		return false
-	}
-	if _, exists := a.Attestors[validatorAddr]; exists {
-		return false
-	}
-	a.Attestors[validatorAddr] = votingPower
-	a.AttestedPower += votingPower
-	return true
 }
 
 // MeetsThreshold returns true if the attested power meets or exceeds the threshold
@@ -230,21 +208,6 @@ func (a *BridgeMintAttestation) MeetsThreshold(totalPower int64, thresholdBasisP
 	return sdkmath.NewInt(a.AttestedPower).GTE(required)
 }
 
-// AttestorList returns a slice of validator addresses that have attested
-func (a *BridgeMintAttestation) AttestorList() []string {
-	result := make([]string, 0, len(a.Attestors))
-	for addr := range a.Attestors {
-		result = append(result, addr)
-	}
-	return result
-}
-
-// GetAttestorPower returns the voting power for a specific attestor (0 if not found)
-func (a *BridgeMintAttestation) GetAttestorPower(validatorAddr string) int64 {
-	return a.Attestors[validatorAddr]
-}
-
-
 // Marshal serializes the mint attestation to JSON
 func (a *BridgeMintAttestation) Marshal() ([]byte, error) {
 	return json.Marshal(a)
@@ -255,10 +218,6 @@ func UnmarshalBridgeMintAttestation(data []byte) (*BridgeMintAttestation, error)
 	var a BridgeMintAttestation
 	if err := json.Unmarshal(data, &a); err != nil {
 		return nil, err
-	}
-	// Ensure map is initialized
-	if a.Attestors == nil {
-		a.Attestors = make(map[string]int64)
 	}
 	return &a, nil
 }
