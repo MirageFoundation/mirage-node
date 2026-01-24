@@ -61,22 +61,22 @@ const NETWORKS = {
     },
 };
 
+// Polling schedule: 1s for first 30s, then 2s for 30-60s, then 3s after
 const BRIDGE_POLL_SCHEDULE = {
     initialDelayMs: 1000,
     intervalsMs: [
-        ...Array.from({ length: 9 }, () => 1000),
-        ...Array.from({ length: 5 }, () => 2000),
-        5000,
-        5000,
+        ...Array.from({ length: 30 }, () => 1000),  // 0-30s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 20 }, () => 3000),  // 60-120s: every 3s
     ],
 };
 
 const MINT_POLL_SCHEDULE = {
     initialDelayMs: 1000,
     intervalsMs: [
-        ...Array.from({ length: 9 }, () => 1000),
-        ...Array.from({ length: 5 }, () => 2000),
-        ...Array.from({ length: 18 }, () => 5000),
+        ...Array.from({ length: 30 }, () => 1000),  // 0-30s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
     ],
 };
 
@@ -828,9 +828,14 @@ const SOLANA_RPC_DEVNET = 'https://api.devnet.solana.com';
 const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 
 // Mint polling schedule for Bridge In (Solana -> Mirage)
+// Same pattern: 1s for first 30s, then 2s for 30-60s, then 3s after
 const BRIDGE_IN_POLL_SCHEDULE = {
-    initialDelayMs: 10000, // Wait 10s before first poll (orchestrator needs time)
-    intervalsMs: [5000, 5000, 5000, 10000, 10000, 10000, 15000, 15000, 30000, 30000, 30000, 60000], // Then poll at these intervals
+    initialDelayMs: 3000, // Wait 3s before first poll (orchestrator needs time to detect burn)
+    intervalsMs: [
+        ...Array.from({ length: 27 }, () => 1000),  // 3-30s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
+    ],
 };
 
 // Solana Bridge In Flow Component
