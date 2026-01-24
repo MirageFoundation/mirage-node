@@ -411,15 +411,19 @@ func buildMintAttestationPayload(burnHash [32]byte, mirageSender string, amount 
 
 **Idempotency:**
 
-If a mint was already executed (e.g., orchestrator restarted mid-operation), the Solana program returns `AlreadyMinted` (error code 6021). The orchestrator handles this gracefully:
+If a mint was already executed (e.g., orchestrator restarted mid-operation), the Solana program returns `AlreadyMinted` (error code 6021). The orchestrator recovers the canonical signature from the `mint_record` account history:
 
 ```go
 if strings.Contains(errStr, "AlreadyMinted") || strings.Contains(errStr, "6021") {
-    return "already_minted:" + burn.BurnID, nil  // Not an error
+    recoveredSig, err := w.findMintRecordSignature(ctx, mintRecordPDA)
+    if err != nil {
+        return "", fmt.Errorf("mint already exists but failed to recover signature: %w", err)
+    }
+    return recoveredSig, nil
 }
 ```
 
-This allows the orchestrator to still submit `MsgBridgeAttestMinted` to Mirage.
+This keeps attestation idempotent without submitting a placeholder destination_tx.
 
 ---
 

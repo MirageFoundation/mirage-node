@@ -782,4 +782,85 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.9.2-bridge-fee-endblock: Move bridge fee distribution to EndBlock
+	// - MsgBridgeAttestMinted no longer distributes fees inline (stabilizes gas)
+	// - Fee distribution queued and processed in EndBlock
+	// - New ConfirmedBy field on BridgeMintAttestation tracks threshold-crossing validator
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.2-bridge-fee-endblock",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.2-bridge-fee-endblock...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Behavior change:
+			// - Fee distribution now happens in EndBlock instead of inline in MsgBridgeAttestMinted
+			// - This stabilizes gas usage for attestation txs (removes variance from concurrent attestations)
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.2-bridge-fee-endblock complete - fee distribution moved to EndBlock")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.3-bridge-fee-burn: Store mint attestors separately and burn bridge fees
+	// - Keeps mint attestation record size stable (separate attestor keys)
+	// - Prevents gas variance from growing attestor maps
+	// - Burns bridge fees inline when threshold is reached (no attestor payouts)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.3-bridge-fee-burn",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.3-bridge-fee-burn...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			if err := app.CoreKeeper.MigrateBridgeMintAttestors(sdkCtx); err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.3-bridge-fee-burn complete - attestors moved and fees burned")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.4-bridge-attestor-fix: Store all attestors separately (replaces v1.9.3 which passed but didn't execute)
+	// - Migrates OUTBOUND mint attestors (was v1.9.3-bridge-fee-burn)
+	// - Migrates INBOUND attestors
+	// - Keeps attestation records fixed-size to prevent gas variance
+	// - Orchestrator gas retry: 1.5x → 2x → 2.5x → 3x → 5x
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.4-bridge-attestor-fix",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.4-bridge-attestor-fix...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Migrate OUTBOUND mint attestors (was v1.9.3-bridge-fee-burn which passed but didn't execute)
+			if err := app.CoreKeeper.MigrateBridgeMintAttestors(sdkCtx); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.9.4: outbound mint attestors migrated")
+
+			// Migrate INBOUND attestors
+			if err := app.CoreKeeper.MigrateBridgeAttestors(sdkCtx); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.9.4: inbound attestors migrated")
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.4-bridge-attestor-fix complete - all attestors migrated")
+			return toVM, nil
+		},
+	)
 }

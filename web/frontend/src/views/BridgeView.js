@@ -61,22 +61,23 @@ const NETWORKS = {
     },
 };
 
+// Polling schedule: 1s for first 30s, then 2s for 30-60s, then 3s after
 const BRIDGE_POLL_SCHEDULE = {
     initialDelayMs: 1000,
     intervalsMs: [
-        ...Array.from({ length: 9 }, () => 1000),
-        ...Array.from({ length: 5 }, () => 2000),
-        5000,
-        5000,
+        ...Array.from({ length: 30 }, () => 1000),  // 0-30s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 20 }, () => 3000),  // 60-120s: every 3s
     ],
 };
 
-const MINT_POLL_SCHEDULE = {
-    initialDelayMs: 1000,
+// Bridge status polling schedule for Bridge Out (Mirage -> external)
+const BRIDGE_OUT_STATUS_POLL_SCHEDULE = {
+    initialDelayMs: 10000, // Wait 10s before first poll (validators need time to detect burn and attest)
     intervalsMs: [
-        ...Array.from({ length: 9 }, () => 1000),
-        ...Array.from({ length: 5 }, () => 2000),
-        ...Array.from({ length: 18 }, () => 5000),
+        ...Array.from({ length: 30 }, () => 1000),  // 10-40s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
     ],
 };
 
@@ -827,10 +828,15 @@ const DisconnectButton = styled.button`
 const SOLANA_RPC_DEVNET = 'https://api.devnet.solana.com';
 const SOLANA_RPC_MAINNET = 'https://api.mainnet-beta.solana.com';
 
-// Mint polling schedule for Bridge In (Solana -> Mirage)
-const BRIDGE_IN_POLL_SCHEDULE = {
-    initialDelayMs: 10000, // Wait 10s before first poll (orchestrator needs time)
-    intervalsMs: [5000, 5000, 5000, 10000, 10000, 10000, 15000, 15000, 30000, 30000, 30000, 60000], // Then poll at these intervals
+// Bridge status polling schedule for Bridge In (Solana -> Mirage)
+// Same pattern: 1s for first 30s, then 2s for 30-60s, then 3s after
+const BRIDGE_IN_STATUS_POLL_SCHEDULE = {
+    initialDelayMs: 10000, // Wait 10s before first poll (orchestrators need time to detect burn and attest)
+    intervalsMs: [
+        ...Array.from({ length: 20 }, () => 1000),  // 10-30s: every 1s
+        ...Array.from({ length: 15 }, () => 2000),  // 30-60s: every 2s
+        ...Array.from({ length: 40 }, () => 3000),  // 60-180s: every 3s
+    ],
 };
 
 // Solana Bridge In Flow Component
@@ -949,8 +955,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         if (bridgeStatus !== 'pending' || burnNonce === null) return;
 
         let cancelled = false;
-        const maxAttempts = BRIDGE_IN_POLL_SCHEDULE.intervalsMs.length + 1;
-        const initialDelayMs = BRIDGE_IN_POLL_SCHEDULE.initialDelayMs;
+        const maxAttempts = BRIDGE_IN_STATUS_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_IN_STATUS_POLL_SCHEDULE.initialDelayMs;
         let attestationFoundTime = null; // Track when we first see found=true
 
         setMintStatus({ state: 'pending', txHash: '', error: '' });
@@ -964,37 +970,20 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         const poll = async (attempt) => {
             if (cancelled) return;
             try {
-                console.debug('[Solana Bridge In] Mint poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
+                console.debug('[Solana Bridge In] Status poll attempt', attempt, 'of', maxAttempts, 'burn_sequence:', burnNonce);
 
-                // Query attestation progress first
-                try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_sequence=${burnNonce}&chain=solana`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        console.debug('[Solana Bridge In] Attestation status:', statusData);
-                        setAttestationProgress({
-                            attestorCount: statusData.attestor_count || 0,
-                            attestedPower: Number(statusData.attested_power || 0),
-                            requiredPower: Number(statusData.required_power || 0),
-                            confirmed: statusData.confirmed || false,
-                        });
-                    }
-                } catch (e) {
-                    console.debug('[Solana Bridge In] Attestation status fetch error:', e.message);
-                }
-
-                // Query the backend for mint status using the burn nonce
-                const res = await fetch(`/api/bridge/get_minted?burn_sequence=${burnNonce}&chain=solana`);
+                // Query bridge status (includes attestor count)
+                const res = await fetch(`/api/bridge/status?burn_sequence=${burnNonce}&chain=solana`);
                 if (!res.ok) {
-                    throw new Error(`mint query failed (${res.status})`);
+                    throw new Error(`status query failed (${res.status})`);
                 }
                 const data = await res.json();
-                console.debug('[Solana Bridge In] Mint poll response:', data);
+                console.debug('[Solana Bridge In] Bridge status response:', data);
 
                 // Track when attestation is first found (orchestrator detected the burn)
                 if (data.found && !attestationFoundTime) {
                     attestationFoundTime = Date.now();
-                    // Freeze the "Orchestrator detection" step timer
+                    // Freeze the "Validator attestations" step timer
                     setStepElapsed(prev => {
                         const pendingStart = stepTimestamps.pending;
                         if (pendingStart) {
@@ -1005,9 +994,19 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     console.debug('[Solana Bridge In] Attestation found, starting mint timer');
                 }
 
+                // Update attestation progress from status response
+                if (data.found) {
+                    setAttestationProgress(prev => ({
+                        ...prev,
+                        attestorCount: data.attestor_count || prev.attestorCount,
+                        attestedPower: data.attested_power ?? prev.attestedPower,
+                        requiredPower: data.required_power ?? prev.requiredPower,
+                        confirmed: data.confirmed || prev.confirmed,
+                    }));
+                }
+
                 if (data.confirmed) {
                     setMintStatus({ state: 'minted', txHash: data.mint_tx || '', error: '' });
-                    setAttestationProgress(prev => ({ ...prev, confirmed: true }));
                     // Calculate final elapsed time for the 'complete' (mint) step
                     const now = Date.now();
                     const mintStartTime = attestationFoundTime || stepTimestamps.pending || now;
@@ -1020,7 +1019,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     return;
                 }
             } catch (e) {
-                console.debug('[Solana Bridge In] Mint poll error:', e.message);
+                console.debug('[Solana Bridge In] Status poll error:', e.message);
             }
 
             if (attempt >= maxAttempts) {
@@ -1028,8 +1027,8 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 return;
             }
 
-            const nextDelay = BRIDGE_IN_POLL_SCHEDULE.intervalsMs[attempt - 1] || 60000;
-            console.debug('[Solana Bridge In] Mint poll next delay (ms):', nextDelay);
+            const nextDelay = BRIDGE_IN_STATUS_POLL_SCHEDULE.intervalsMs[attempt - 1] || 60000;
+            console.debug('[Solana Bridge In] Status poll next delay (ms):', nextDelay);
             setTimeout(() => poll(attempt + 1), nextDelay);
         };
 
@@ -1548,12 +1547,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     {bridgeStatus !== 'idle' && (
                         <StepsCard>
                             <StepsList>
-                                {/* Step 1: Confirm transfer on Solana */}
+                                {/* Step 1: Lock tokens on Solana */}
                                 <StepItem>
                                     <StepDot $state={getStepState('confirming')} />
                                     <StepText>
                                         <StepTitle>
-                                            Confirm transfer on Solana{formatStepTime('confirming')}
+                                            Locking tokens on Solana{formatStepTime('confirming')}
                                         </StepTitle>
                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                             {bridgeStatus === 'confirming' ? (
@@ -1578,39 +1577,35 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                                     </StepText>
                                 </StepItem>
 
-                                {/* Step 2: Orchestrator detection */}
+                                {/* Step 2: Validator attestations */}
                                 <StepItem>
                                     <StepDot $state={getStepState('pending')} />
                                     <StepText>
                                         <StepTitle>
-                                            Validator confirmations{formatStepTime('pending')}
+                                            Validator attestations{formatStepTime('pending')}
                                         </StepTitle>
                                         <StepMeta>
                                             {bridgeStatus === 'confirming' ? (
-                                                'Waiting for transfer confirmation'
-                                            ) : bridgeStatus === 'pending' && mintStatus.state !== 'minted' ? (
-                                                attestationProgress.attestorCount > 0 ? (
-                                                    attestationPowerText
-                                                        ? `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested (${attestationPowerText})`
-                                                        : `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested`
-                                                ) : (
-                                                    'Waiting for validator attestations...'
-                                                )
+                                                'Waiting for token lock confirmation'
+                                            ) : attestationProgress.attestorCount > 0 ? (
+                                                attestationPowerText
+                                                    ? `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested (${attestationPowerText})${attestationProgress.confirmed ? ' - threshold reached' : ''}`
+                                                    : `${attestationProgress.attestorCount} validator${attestationProgress.attestorCount !== 1 ? 's' : ''} attested${attestationProgress.confirmed ? ' - threshold reached' : ''}`
                                             ) : mintStatus.state === 'minted' || bridgeStatus === 'complete' ? (
-                                                'Threshold reached - confirmed'
+                                                'Threshold reached'
                                             ) : (
-                                                'Waiting'
+                                                'Waiting for validator attestations...'
                                             )}
                                         </StepMeta>
                                     </StepText>
                                 </StepItem>
 
-                                {/* Step 3: Mint on Mirage */}
+                                {/* Step 3: Mint tokens on Mirage */}
                                 <StepItem>
                                     <StepDot $state={getStepState('complete')} />
                                     <StepText>
                                         <StepTitle>
-                                            Mint on Mirage{bridgeStatus === 'complete' ? formatStepTime('complete') : ''}
+                                            Minting tokens on Mirage{bridgeStatus === 'complete' ? formatStepTime('complete') : ''}
                                         </StepTitle>
                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
                                             {bridgeStatus === 'complete' && mintStatus.txHash ? (
@@ -2201,8 +2196,8 @@ export default function BridgeView({ state }) {
         if (!submitTxHash) return;
 
         let cancelled = false;
-        const maxAttempts = MINT_POLL_SCHEDULE.intervalsMs.length + 1;
-        const initialDelayMs = MINT_POLL_SCHEDULE.initialDelayMs;
+        const maxAttempts = BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs.length + 1;
+        const initialDelayMs = BRIDGE_OUT_STATUS_POLL_SCHEDULE.initialDelayMs;
 
         setMintStatus({
             state: 'pending',
@@ -2217,36 +2212,33 @@ export default function BridgeView({ state }) {
             confirmed: false,
         });
 
-        console.debug('[Bridge] Mint poll schedule (ms):', {
+        console.debug('[Bridge] Status poll schedule (ms):', {
             initialDelayMs,
-            intervalsMs: MINT_POLL_SCHEDULE.intervalsMs,
+            intervalsMs: BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs,
         });
 
         const poll = async (attempt = 1) => {
             if (cancelled) return;
             try {
-                console.debug('[Bridge] Mint poll attempt', attempt, 'of', maxAttempts);
+                console.debug('[Bridge] Status poll attempt', attempt, 'of', maxAttempts);
 
-                // Query attestation progress first
-                try {
-                    const statusRes = await fetch(`/api/bridge/attestation_status?burn_tx_hash=${submitTxHash}`);
-                    if (statusRes.ok) {
-                        const statusData = await statusRes.json();
-                        console.debug('[Bridge] Outbound attestation status:', statusData);
-                        setOutboundAttestationProgress({
-                            attestorCount: statusData.attestor_count || 0,
-                            attestedPower: Number(statusData.attested_power || 0),
-                            requiredPower: Number(statusData.required_power || 0),
-                            confirmed: statusData.confirmed || false,
-                        });
-                    }
-                } catch (e) {
-                    console.debug('[Bridge] Outbound attestation status fetch error:', e.message);
-                }
-
-                const res = await fetch(`/api/bridge/get_minted?burn_tx_hash=${submitTxHash}`);
+                // Query bridge status (includes attestor count)
+                const res = await fetch(`/api/bridge/status?burn_tx_hash=${submitTxHash}`);
                 if (res.ok) {
                     const data = await res.json();
+                    console.debug('[Bridge] Bridge status response:', data);
+
+                    // Update attestation progress from status response
+                    if (data.found) {
+                        setOutboundAttestationProgress(prev => ({
+                            ...prev,
+                            attestorCount: data.attestor_count || prev.attestorCount,
+                            attestedPower: data.attested_power ?? prev.attestedPower,
+                            requiredPower: data.required_power ?? prev.requiredPower,
+                            confirmed: data.confirmed || prev.confirmed,
+                        }));
+                    }
+
                     if (data?.confirmed) {
                         setMintStatus({
                             state: 'minted',
@@ -2255,14 +2247,13 @@ export default function BridgeView({ state }) {
                             error: '',
                             completedAt: Date.now(),
                         });
-                        setOutboundAttestationProgress(prev => ({ ...prev, confirmed: true }));
                         return;
                     }
                 } else {
-                    console.debug(`[Bridge] Mint query error (${res.status}), retrying...`);
+                    console.debug(`[Bridge] Status query error (${res.status}), retrying...`);
                 }
             } catch (e) {
-                console.debug('[Bridge] Mint poll error:', e.message);
+                console.debug('[Bridge] Status poll error:', e.message);
             }
 
             if (attempt >= maxAttempts) {
@@ -2276,7 +2267,7 @@ export default function BridgeView({ state }) {
                 return;
             }
 
-            const nextDelay = MINT_POLL_SCHEDULE.intervalsMs[attempt - 1];
+            const nextDelay = BRIDGE_OUT_STATUS_POLL_SCHEDULE.intervalsMs[attempt - 1];
             if (!nextDelay) {
                 setMintStatus({
                     state: 'timeout',
@@ -2287,7 +2278,7 @@ export default function BridgeView({ state }) {
                 });
                 return;
             }
-            console.debug('[Bridge] Mint poll next delay (ms):', nextDelay);
+            console.debug('[Bridge] Status poll next delay (ms):', nextDelay);
             setTimeout(() => poll(attempt + 1), nextDelay);
         };
 
@@ -2815,7 +2806,7 @@ export default function BridgeView({ state }) {
                                                     <PreviewRow>
                                                         <PreviewLabel>
                                                             Fee
-                                                            <HelpIconWrapper data-tooltip="Bridge fee paid to validator">?</HelpIconWrapper>
+                                                            <HelpIconWrapper data-tooltip="Bridge fee (burned)">?</HelpIconWrapper>
                                                         </PreviewLabel>
                                                         <PreviewValue>−{bridgeFee !== null ? bridgeFee : '?'} MIRAGE</PreviewValue>
                                                     </PreviewRow>
@@ -2846,7 +2837,7 @@ export default function BridgeView({ state }) {
                                                             <StepItem>
                                                                 <StepDot $state={getStepState('submitting')} />
                                                                 <StepText>
-                                                                    <StepTitle>Submitting bridge transaction{formatStepTime('submitting')}</StepTitle>
+                                                                    <StepTitle>Submitting bridge request{formatStepTime('submitting')}</StepTitle>
                                                                     <StepMeta>
                                                                         {getStepState('submitting') === 'complete'
                                                                             ? `Relayed by ${valoperAddress}`
@@ -2861,7 +2852,7 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>
                                                                         {isSolanaBridge
-                                                                            ? 'Confirming transfer on Mirage'
+                                                                            ? 'Burning tokens on Mirage'
                                                                             : 'Confirming transaction on Mirage'}
                                                                         {formatStepTime('verifying')}
                                                                     </StepTitle>
@@ -2888,7 +2879,7 @@ export default function BridgeView({ state }) {
                                                                 <StepText>
                                                                     <StepTitle>
                                                                         {isSolanaBridge
-                                                                            ? 'Confirming token mint on Solana'
+                                                                            ? 'Minting tokens on Solana'
                                                                             : `IBC transfer to ${selectedNetwork?.name || 'destination'}`}
                                                                         {showMintTimer ? formatStepTime('confirmed') : ''}
                                                                     </StepTitle>
@@ -2911,8 +2902,8 @@ export default function BridgeView({ state }) {
                                                                                 'Pending: confirmation taking longer than expected.'
                                                                             ) : outboundAttestationProgress.attestorCount > 0 ? (
                                                                                 outboundAttestationPowerText
-                                                                                    ? `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested (${outboundAttestationPowerText})`
-                                                                                    : `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested`
+                                                                                    ? `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested (${outboundAttestationPowerText})${outboundAttestationProgress.confirmed ? ' - minting' : ''}`
+                                                                                    : `${outboundAttestationProgress.attestorCount} validator${outboundAttestationProgress.attestorCount !== 1 ? 's' : ''} attested${outboundAttestationProgress.confirmed ? ' - minting' : ''}`
                                                                             ) : (
                                                                                 'Waiting for validator attestations...'
                                                                             )
@@ -2932,12 +2923,12 @@ export default function BridgeView({ state }) {
                                                         )}
                                                         {isSolanaBridge && mintStatus.state === 'minted' && (
                                                             <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
+                                                                ✓ Bridge complete! {rawAmount && bridgeFee !== null ? `${(parseFloat(rawAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE minted on Solana.
                                                             </StatusBanner>
                                                         )}
                                                         {!isSolanaBridge && submitStage === 'confirmed' && (
                                                             <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                                                ✓ Bridge complete! {amount && bridgeFee !== null ? `${(parseFloat(amount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {selectedNetwork?.name || 'destination'}.
+                                                                ✓ Bridge complete! {rawAmount && bridgeFee !== null ? `${(parseFloat(rawAmount) - bridgeFee).toFixed(6).replace(/\.?0+$/, '')} ` : ''}MIRAGE bridged to {selectedNetwork?.name || 'destination'}.
                                                             </StatusBanner>
                                                         )}
                                                     </StepsCard>
@@ -2953,7 +2944,7 @@ export default function BridgeView({ state }) {
                                                     } : {}}
                                                 >
                                                     {submitStage === 'confirmed'
-                                                        ? 'Clear'
+                                                        ? 'New Bridge'
                                                         : isSubmitting
                                                             ? 'Processing...'
                                                             : !selectedNetwork

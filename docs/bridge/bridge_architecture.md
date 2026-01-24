@@ -119,7 +119,7 @@ The bridge exposes two distinct identifiers and they are **not interchangeable**
 3. Orchestrators detect event, mint MIRAGE on Solana
 4. Each orchestrator submits `MsgBridgeAttestMinted` (includes `mirage_tx_hash` for linking)
 5. When 2/3+ voting power attests → mark as confirmed
-6. Frontend polls `/api/bridge/get_minted` to show completion
+6. Frontend polls `/api/bridge/status` to show completion
 
 ### IBC Bridge (Osmosis)
 
@@ -157,7 +157,7 @@ type BridgeAttestation struct {
 
 ### BridgeBurnRecord (Outbound)
 
-Tracks outbound burns for fee payout and auditing.
+Tracks outbound burns for fee burning and auditing.
 
 ```go
 type BridgeBurnRecord struct {
@@ -166,7 +166,7 @@ type BridgeBurnRecord struct {
     DestinationChain   string // "solana"
     DestinationAddress string // Recipient on external chain
     Amount             uint64 // Gross amount (includes fee)
-    BridgeFee          uint64 // Fee escrowed for validator
+    BridgeFee          uint64 // Fee escrowed (burned on confirmation)
     Sequence           uint64 // Per-chain sequence number
     CreatedAt          int64  // Block height
 }
@@ -180,17 +180,19 @@ Tracks validator attestations for outbound mint confirmations (before threshold 
 
 ```go
 type BridgeMintAttestation struct {
-    BurnID           string            // Sequence number (as string)
-    DestinationChain string            // "solana"
-    DestinationTx    string            // tx signature on Solana (from first attestor)
-    Attestors        map[string]int64  // validator operator address -> voting power at attestation
-    AttestedPower    int64             // accumulated voting power
-    Confirmed        bool              // threshold met
-    CreatedAt        int64             // block height
+    BurnID           string  // Sequence number (as string)
+    DestinationChain string  // "solana"
+    DestinationTx    string  // tx signature on Solana (from first attestor)
+    AttestedPower    int64   // accumulated voting power
+    Confirmed        bool    // threshold met
+    ConfirmedBy      string  // validator who crossed threshold
+    CreatedAt        int64   // block height
 }
 ```
 
 **Key:** `destination_chain + burn_id`
+
+**Note (v1.9.3+):** Attestors are stored separately in KV keys (`bridge_mint_attestors/{dest_chain}/{burn_id}/{validator}`) to keep the attestation record fixed-size.
 
 ### BridgeMintedRecord (Outbound)
 
@@ -230,9 +232,9 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - **Fee Handling:**
   - `amount` is the gross amount (what user enters)
   - `burn_amount = amount - bridge_fee` is burned from user
-  - `bridge_fee` is escrowed in the core module account (paid to validator on confirmation)
+  - `bridge_fee` is escrowed in the core module account (burned on confirmation)
 - **Actions:** Burn net amount, escrow fee, store `BridgeBurnRecord`, emit event, increment sequence
-- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee payout on confirmation
+- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee burning on confirmation
 
 ### MsgBridgeAttestBurned (inbound)
 - Signer must be active validator with voting power
@@ -246,12 +248,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - Validator cannot double-attest same burn_id
 - burn_id must be a valid sequence number (≤ current sequence)
 - destination_chain must match the original burn record
-- destination_tx must match the first attestor's value (consistency check)
+- destination_tx from the first attestor becomes canonical; later attestations may differ
 - **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
-- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, distribute bridge fee proportionally
-- **Fee Payout:** The `bridge_fee` from `BridgeBurnRecord` is distributed ONCE when threshold is met:
-  - Each attestor receives `fee * their_power / total_attested_power`
-  - Rounding dust (if any) goes to the validator that crossed the threshold
+- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, burn bridge fee
+- **Fee Burning:** The `bridge_fee` from `BridgeBurnRecord` is burned ONCE when threshold is met (v1.9.3+)
 
 ## Orchestrator Architecture
 
@@ -339,13 +339,13 @@ This event-driven approach ensures the UI reflects the actual chain state.
 
 ## API Endpoints
 
-### GET /api/bridge/get_minted
+### GET /api/bridge/status
 
 Query bridge status from indexer database.
 
 **Inbound (Solana → Mirage):**
 ```http
-GET /api/bridge/get_minted?burn_sequence=<solana_burn_sequence>&chain=solana
+GET /api/bridge/status?burn_sequence=<solana_burn_sequence>&chain=solana
 ```
 
 Response:
@@ -357,13 +357,16 @@ Response:
   "burn_tx_hash": null,
   "mint_tx": "ABC123DEF456...",
   "recipient": "mirage1abc...",
-  "amount": 1000000
+  "amount": 1000000,
+  "attestor_count": 4,
+  "attested_power": 750000,
+  "required_power": 666667
 }
 ```
 
 **Outbound (Mirage → Solana):**
 ```http
-GET /api/bridge/get_minted?burn_tx_hash=<mirage_tx_hash>
+GET /api/bridge/status?burn_tx_hash=<mirage_tx_hash>
 ```
 
 Response:
@@ -372,18 +375,19 @@ Response:
   "found": true,
   "confirmed": true,
   "burn_tx_hash": "f2a1...9c",
-  "burn_sequence": "42",
+  "burn_sequence": null,
   "destination_chain": "solana",
+  "destination_address": "So1...abc",
   "destination_tx": "5xYzABC...",
-  "attestors": ["miragevaloper1abc...", "miragevaloper1def..."],
+  "amount": 1000000,
   "attestor_count": 2,
-  "attested_power": 70,
-  "required_power": 67,
-  "amount": 1000000
+  "attested_power": 750000,
+  "required_power": 666667,
+  "confirmed_at": 1700000000
 }
 ```
 
-**Note:** The `attested_power` and `required_power` fields allow the frontend to show attestation progress before `confirmed` becomes `true`.
+**Note:** `burn_sequence` is null for outbound responses because the indexer stores the Mirage tx hash as the burn identifier.
 
 ### GET /api/bridge/config
 
@@ -409,14 +413,14 @@ The bridge UI (`BridgeView.js`) provides:
 1. User enters amount and Solana recipient address
 2. Transaction summary shows fees and expected receive amount
 3. 3-step progress: Confirm on Mirage → Orchestrator detection → Mint on Solana
-4. Polls `/api/bridge/get_minted` until confirmed
+4. Polls `/api/bridge/status` until confirmed
 
 ### Bridge In (Solana → Mirage)
 1. User connects Phantom wallet
 2. Shows MIRAGE and SOL balances
 3. Transaction summary with estimated Solana fees
 4. 3-step progress: Confirm on Solana → Orchestrator detection → Mint on Mirage
-5. Polls `/api/bridge/get_minted?chain=solana` until confirmed
+5. Polls `/api/bridge/status?chain=solana` until confirmed
 
 ## Configuration
 
@@ -475,11 +479,10 @@ message Params {
   - `QueryBridgeMintedRequest` now requires `destination_chain` parameter
   - Prevents key collisions when bridging to multiple destination chains (e.g., Solana and Ethereum)
 
-- **v1.10.3**: Proportional fee distribution
-  - `Attestors` map changed from `map[string]bool` to `map[string]int64` to store voting power
-  - Bridge fee is now distributed proportionally among all attestors based on their voting power
-  - Added `GetAttestorPower()` method to retrieve individual attestor's power contribution
-  - Rounding dust from integer division goes to the threshold-crossing validator
+- **v1.9.3**: Bridge fee burning (replaces proportional distribution)
+  - Bridge fees are now burned when mint threshold is reached, not distributed to attestors
+  - Mint attestors stored in separate KV keys for fixed-size attestation records
+  - Simpler, more gas-predictable attestation transactions
 
 - **v1.10.2**: Outbound 2/3 threshold enforcement
   - Added `BridgeMintAttestation` state record to accumulate validator attestations for outbound bridges
@@ -487,11 +490,11 @@ message Params {
   - `bridge_attest_minted` event now includes `attested_power`, `required_power`, and `minted` attributes
   - Indexer updated to flip `minted=true` on threshold-crossing event
   - Frontend shows attestation progress during "Validator confirmations" step
-  - Added `/api/bridge/attestation_status` endpoint for polling attestation progress
+  - Added `/api/bridge/status` endpoint for polling attestation progress
 
 - **v1.10.1**: Fee handling and indexer fixes
-  - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee payout
-  - Bridge fee is escrowed (not burned) and paid to attesting validator on confirmation
+  - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee tracking
+  - Bridge fee is escrowed in module account until confirmation
   - Indexer processes tx events to update `minted=true` from `bridge_attest` events
   - Fixed "Orchestrator detection" UI getting stuck on inbound bridges
 

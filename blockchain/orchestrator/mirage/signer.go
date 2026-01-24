@@ -2,6 +2,7 @@ package mirage
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -21,13 +22,25 @@ import (
 // Must be under the chain's max TTL (10m). Using 5m for safety margin.
 const unorderedTxTimeout = 5 * time.Minute
 
-// gasBufferMultiplier is the safety margin applied to simulated gas.
-// Using 1.5x because we simulate ordered tx but broadcast unordered tx,
-// which has additional overhead for timeout validation and hash storage.
+// gasBufferMultiplier is the initial safety margin applied to simulated gas.
+// If "out of gas" occurs, we retry with higher multipliers.
 const gasBufferMultiplier = 1.5
+
+// gasRetryMultipliers are the multipliers to try on "out of gas" errors.
+// First attempt uses gasBufferMultiplier (1.5x), then these on retry.
+var gasRetryMultipliers = []float64{2.0, 2.5, 3.0, 5.0}
 
 // simulationGasLimit is a high gas limit used only for simulation.
 const simulationGasLimit = 1_000_000
+
+// isOutOfGasError checks if an error is an "out of gas" error
+func isOutOfGasError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "out of gas") || strings.Contains(errStr, "code=11")
+}
 
 func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBurnEvent) error {
 	burnID := strings.ToLower(strings.TrimSpace(burn.BurnID))
@@ -39,31 +52,10 @@ func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBur
 		Amount:          burn.Amount,
 	}
 
-	txBytes, feeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)
-	if err != nil {
-		return err
-	}
-	txClient := txtypes.NewServiceClient(c.grpcConn)
-	resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
-		TxBytes: txBytes,
-		Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
-	})
-	if err != nil {
-		return fmt.Errorf("broadcast tx failed: %w", err)
-	}
-	if resp.TxResponse == nil {
-		return fmt.Errorf("broadcast tx response missing")
-	}
-	if resp.TxResponse.Code != 0 {
-		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
-	}
-
-	c.logger.Printf("INFO  [FEES] attestation gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
-		float64(feeUmirage)/1_000_000, burnID, resp.TxResponse.TxHash)
-	return nil
+	return c.submitWithGasRetry(ctx, msg, "attestation", burnID)
 }
 
-func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, bridgeFeeUmirage uint64, mirageTxHash string) error {
+func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx string, mirageTxHash string) error {
 	burnID = strings.ToLower(strings.TrimSpace(burnID))
 	msg := &coretypes.MsgBridgeAttestMinted{
 		Validator:        c.FromAddress(),
@@ -73,43 +65,78 @@ func (c *Client) SubmitBridgeMinted(ctx context.Context, burnID, destChain, dest
 		MirageTxHash:     strings.ToUpper(strings.TrimSpace(mirageTxHash)),
 	}
 
-	txBytes, gasFeeUmirage, err := c.buildTxBytesWithSimulation(ctx, msg)
-	if err != nil {
-		return err
-	}
-	txClient := txtypes.NewServiceClient(c.grpcConn)
-	resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
-		TxBytes: txBytes,
-		Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
-	})
-	if err != nil {
-		return fmt.Errorf("broadcast tx failed: %w", err)
-	}
-	if resp.TxResponse == nil {
-		return fmt.Errorf("broadcast tx response missing")
-	}
-	if resp.TxResponse.Code != 0 {
-		return fmt.Errorf("broadcast tx failed code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
-	}
-
-	netProfit := float64(int64(bridgeFeeUmirage)-int64(gasFeeUmirage)) / 1_000_000
-	c.logger.Printf("INFO  [FEES] bridge_minted gas_fee=%.2f MIRAGE bridge_fee_received=%.2f MIRAGE net_profit=%.2f MIRAGE burn_id=%s txhash=%s",
-		float64(gasFeeUmirage)/1_000_000, float64(bridgeFeeUmirage)/1_000_000, netProfit, burnID, resp.TxResponse.TxHash)
-	return nil
+	return c.submitWithGasRetry(ctx, msg, "bridge_minted", burnID)
 }
 
-// buildTxBytesWithSimulation builds tx bytes using simulation to determine gas.
+func (c *Client) submitWithGasRetry(ctx context.Context, msg sdk.Msg, action, burnID string) error {
+	// Try with increasing gas multipliers on "out of gas" errors
+	multipliers := append([]float64{gasBufferMultiplier}, gasRetryMultipliers...)
+	var lastErr error
+	txClient := txtypes.NewServiceClient(c.grpcConn)
+
+	for attempt, multiplier := range multipliers {
+		txBytes, feeUmirage, err := c.buildTxBytesWithSimulationMultiplier(ctx, msg, multiplier)
+		if err != nil {
+			return err
+		}
+
+		resp, err := txClient.BroadcastTx(ctx, &txtypes.BroadcastTxRequest{
+			TxBytes: txBytes,
+			Mode:    txtypes.BroadcastMode_BROADCAST_MODE_SYNC,
+		})
+		if err != nil {
+			return fmt.Errorf("broadcast tx failed: %w", err)
+		}
+		if resp.TxResponse == nil {
+			return fmt.Errorf("broadcast tx response missing")
+		}
+		if resp.TxResponse.Code != 0 {
+			lastErr = fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
+				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
+				continue
+			}
+			return lastErr
+		}
+
+		txHash := resp.TxResponse.TxHash
+		c.logger.Printf("DEBUG %s broadcast accepted burn_id=%s txhash=%s (waiting for confirmation...)", action, burnID, txHash)
+
+		// Wait for tx to be included in a block and verify execution succeeded
+		if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
+			c.logger.Printf("ERROR %s tx FAILED burn_id=%s txhash=%s error=%v", action, burnID, txHash, err)
+			lastErr = fmt.Errorf("%s tx failed: %w", action, err)
+			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
+				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
+				continue
+			}
+			return lastErr
+		}
+
+		c.logger.Printf("INFO  [FEES] %s gas_fee=%.2f MIRAGE burn_id=%s txhash=%s",
+			action, float64(feeUmirage)/1_000_000, burnID, txHash)
+		return nil
+	}
+
+	return lastErr
+}
+
+// buildTxBytesWithSimulationMultiplier builds tx bytes using simulation with a custom gas multiplier.
 // Returns the tx bytes and the fee amount in umirage.
-func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([]byte, uint64, error) {
+func (c *Client) buildTxBytesWithSimulationMultiplier(ctx context.Context, msg sdk.Msg, multiplier float64) ([]byte, uint64, error) {
 	clientCtx := c.ClientContext()
 	fromAddr := clientCtx.GetFromAddress()
-	accNum, accSeq, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
+	accNum, _, err := c.accountRetriever.GetAccountNumberSequence(clientCtx, fromAddr)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query account info: %w", err)
 	}
 
-	// Build ORDERED tx for simulation (no unordered flag, no timeout)
-	simTxBytes, err := c.buildSimulationTx(clientCtx, msg, accNum, accSeq, simulationGasLimit)
+	// Build UNORDERED tx for simulation - must match broadcast tx structure
+	// to get accurate gas estimation (unordered txs have different ante handler paths)
+	// Timeout must be under the chain TTL limit (10m).
+	simTimeout := time.Now().Add(unorderedTxTimeout)
+	simFeeCoins := sdk.NewCoins(sdk.NewCoin(c.cfg.Mirage.FeeDenom, sdkmath.NewInt(0)))
+	simTxBytes, err := c.buildUnorderedTx(clientCtx, msg, accNum, simTimeout, simulationGasLimit, simFeeCoins)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to build simulation tx: %w", err)
 	}
@@ -125,8 +152,8 @@ func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([
 	}
 
 	gasUsed := simResp.GasInfo.GasUsed
-	gasLimit := uint64(float64(gasUsed) * gasBufferMultiplier)
-	c.logger.Printf("DEBUG simulation gas_used=%d gas_limit=%d", gasUsed, gasLimit)
+	gasLimit := uint64(float64(gasUsed) * multiplier)
+	c.logger.Printf("DEBUG simulation gas_used=%d gas_limit=%d (%.1fx)", gasUsed, gasLimit, multiplier)
 
 	// Calculate fee: gas_limit * min_gas_price
 	// min_gas_price is 5000umirage per cursor.md
@@ -141,33 +168,6 @@ func (c *Client) buildTxBytesWithSimulation(ctx context.Context, msg sdk.Msg) ([
 		return nil, 0, err
 	}
 	return txBytes, feeAmount.Uint64(), nil
-}
-
-// buildSimulationTx builds a regular ordered tx for simulation purposes.
-func (c *Client) buildSimulationTx(
-	clientCtx client.Context,
-	msg sdk.Msg,
-	accNum, accSeq uint64,
-	gasLimit uint64,
-) ([]byte, error) {
-	txf := tx.Factory{}.
-		WithTxConfig(clientCtx.TxConfig).
-		WithChainID(c.cfg.Mirage.ChainID).
-		WithKeybase(c.keyring).
-		WithAccountNumber(accNum).
-		WithSequence(accSeq).
-		WithGas(gasLimit)
-
-	txBuilder := clientCtx.TxConfig.NewTxBuilder()
-	if err := txBuilder.SetMsgs(msg); err != nil {
-		return nil, fmt.Errorf("failed to set tx messages: %w", err)
-	}
-	txBuilder.SetGasLimit(gasLimit)
-
-	if err := tx.Sign(context.Background(), txf, c.cfg.Mirage.KeyName, txBuilder, true); err != nil {
-		return nil, err
-	}
-	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
 }
 
 // buildUnorderedTx builds an unordered tx with timeout for actual broadcast.
@@ -229,4 +229,59 @@ func parseUint64(raw string, field string) (uint64, error) {
 		return 0, fmt.Errorf("invalid %s: %w", field, err)
 	}
 	return value, nil
+}
+
+// waitForTx waits for a transaction to be included in a block and verifies execution success.
+//
+// This is critical because BROADCAST_MODE_SYNC only confirms CheckTx passed (tx accepted into
+// mempool), not that DeliverTx succeeded (tx executed in block). Without this verification,
+// a tx that passes CheckTx but fails during block execution (e.g., out of gas) would
+// appear successful in logs but actually fail silently.
+//
+// Returns nil if tx executed successfully (TxResponse.Code == 0).
+// Returns error if:
+//   - tx is not found within maxWait (not included in any block)
+//   - tx execution failed (TxResponse.Code != 0, e.g., out of gas)
+//   - context is cancelled
+func (c *Client) waitForTx(ctx context.Context, txHash string, maxWait time.Duration) error {
+	txClient := txtypes.NewServiceClient(c.grpcConn)
+
+	// Convert hex string to bytes for the query
+	hashBytes, err := hex.DecodeString(strings.TrimPrefix(strings.ToUpper(txHash), "0X"))
+	if err != nil {
+		return fmt.Errorf("invalid tx hash: %w", err)
+	}
+
+	deadline := time.Now().Add(maxWait)
+	pollInterval := 500 * time.Millisecond
+
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		resp, err := txClient.GetTx(ctx, &txtypes.GetTxRequest{Hash: fmt.Sprintf("%X", hashBytes)})
+		if err != nil {
+			// Tx not found yet, keep polling
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		if resp.TxResponse == nil {
+			time.Sleep(pollInterval)
+			continue
+		}
+
+		// Tx found - check result
+		if resp.TxResponse.Code != 0 {
+			return fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		}
+
+		// Success
+		return nil
+	}
+
+	return fmt.Errorf("tx not confirmed within %v", maxWait)
 }

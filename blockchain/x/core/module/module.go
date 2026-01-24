@@ -510,6 +510,8 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
+	// Bridge fees are burned inline when threshold is reached.
+
 	// Process subscription renewals/expirations
 	if err := am.processSubscriptions(sdkCtx, params); err != nil {
 		sdkCtx.Logger().Error("EndBlock: failed to process subscriptions", "err", err)
@@ -578,6 +580,7 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	}
 	return nil
 }
+
 
 // processSubscriptions handles subscription renewals and expirations
 func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params) error {
@@ -2707,7 +2710,7 @@ func (am AppModule) BridgeAttestBurned(ctx context.Context, req *types.MsgBridge
 }
 
 // BridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
-// When 2/3 threshold is met, the mint is confirmed and the bridge fee is paid.
+// When 2/3 threshold is met, the mint is confirmed and the bridge fee is burned.
 func (am AppModule) BridgeAttestMinted(ctx context.Context, req *types.MsgBridgeAttestMinted) (*types.MsgBridgeAttestMintedResponse, error) {
 	return bridgeAttestMinted(sdk.UnwrapSDKContext(ctx), am.k, req)
 }
@@ -2723,7 +2726,7 @@ func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeSta
 	enabledChains := am.k.GetEnabledBridgeChains(sdkCtx)
 	pendingCount, err := am.k.GetBridgePendingCount(sdkCtx)
 	if err != nil {
-		pendingCount = 0
+		return nil, err
 	}
 
 	return &types.QueryBridgeStatusResponse{
@@ -2756,13 +2759,18 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
 	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
 
+	attestors, err := am.k.GetBridgeAttestorList(sdkCtx, sourceChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load attestors: %w", err)
+	}
+
 	return &types.QueryBridgeAttestationResponse{
 		Found:           true,
 		SourceChain:     attestation.SourceChain,
 		BurnId:          attestation.BurnID,
 		MirageRecipient: attestation.MirageRecipient,
 		Amount:          attestation.Amount,
-		Attestors:       attestation.AttestorList(),
+		Attestors:       attestors,
 		AttestedPower:   attestation.AttestedPower,
 		RequiredPower:   requiredPower,
 		Minted:          attestation.Minted,
@@ -2812,7 +2820,11 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 
 	// Add attestation details if found
 	if attFound {
-		resp.Attestors = attestation.AttestorList()
+		attestors, err := am.k.GetBridgeMintAttestorList(sdkCtx, destChain, burnID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load mint attestors: %w", err)
+		}
+		resp.Attestors = attestors
 		resp.AttestedPower = attestation.AttestedPower
 		resp.DestinationTx = attestation.DestinationTx
 	}
