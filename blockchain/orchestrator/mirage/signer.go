@@ -205,18 +205,74 @@ func (c *Client) buildUnorderedTx(
 	return clientCtx.TxConfig.TxEncoder()(txBuilder.GetTx())
 }
 
-// QueryBridgeMinted queries existing mint attestation for a burn.
+// QueryBridgeMint queries existing mint attestation for a burn.
 // Used to find the destination_tx that should be used for attestation.
-func (c *Client) QueryBridgeMinted(ctx context.Context, destChain, burnID string) (*coretypes.QueryBridgeMintedResponse, error) {
+func (c *Client) QueryBridgeMint(ctx context.Context, destChain, burnID string) (*coretypes.QueryBridgeMintResponse, error) {
 	queryClient := coretypes.NewQueryClient(c.grpcConn)
-	resp, err := queryClient.GetBridgeMinted(ctx, &coretypes.QueryBridgeMintedRequest{
+	resp, err := queryClient.GetBridgeMint(ctx, &coretypes.QueryBridgeMintRequest{
 		DestinationChain: strings.TrimSpace(destChain),
 		BurnId:           strings.ToLower(strings.TrimSpace(burnID)),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("query bridge minted failed: %w", err)
+		return nil, fmt.Errorf("query bridge mint failed: %w", err)
 	}
 	return resp, nil
+}
+
+// QueryBridgeStatus queries the current bridge status including per-chain sequences.
+func (c *Client) QueryBridgeStatus(ctx context.Context) (*coretypes.QueryBridgeStatusResponse, error) {
+	queryClient := coretypes.NewQueryClient(c.grpcConn)
+	resp, err := queryClient.GetBridgeStatus(ctx, &coretypes.QueryBridgeStatusRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("query bridge status failed: %w", err)
+	}
+	return resp, nil
+}
+
+// QueryBridgeBurn queries a specific burn record by destination chain and burn_id.
+func (c *Client) QueryBridgeBurn(ctx context.Context, destChain, burnID string) (*coretypes.QueryBridgeBurnResponse, error) {
+	queryClient := coretypes.NewQueryClient(c.grpcConn)
+	resp, err := queryClient.GetBridgeBurn(ctx, &coretypes.QueryBridgeBurnRequest{
+		DestinationChain: strings.TrimSpace(destChain),
+		BurnId:           strings.TrimSpace(burnID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("query bridge burn failed: %w", err)
+	}
+	return resp, nil
+}
+
+// SearchBurnTxHash searches for the transaction hash of a bridge burn by sequence.
+// Returns the tx hash (uppercase hex) or error if not found.
+func (c *Client) SearchBurnTxHash(ctx context.Context, destChain string, sequence uint64) (string, error) {
+	query := fmt.Sprintf("bridge_burn.sequence='%d' AND bridge_burn.destination_chain='%s'", sequence, destChain)
+	result, err := c.rpcClient.TxSearch(ctx, query, false, nil, nil, "")
+	if err != nil {
+		return "", fmt.Errorf("tx search failed: %w", err)
+	}
+	if len(result.Txs) == 0 {
+		return "", fmt.Errorf("no transaction found for sequence %d on %s", sequence, destChain)
+	}
+	// Return the hash of the first matching transaction
+	return strings.ToUpper(hex.EncodeToString(result.Txs[0].Hash)), nil
+}
+
+// RequireTxIndex ensures CometBFT tx indexing is enabled (required for replay).
+func (c *Client) RequireTxIndex(ctx context.Context) error {
+	status, err := c.rpcClient.Status(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to query rpc status: %w", err)
+	}
+	txIndex := status.NodeInfo.Other.TxIndex
+	txIndex = strings.ToLower(strings.TrimSpace(txIndex))
+	c.logger.Printf("DEBUG rpc tx_index=%s", txIndex)
+	if txIndex != "on" {
+		if txIndex == "" {
+			txIndex = "unknown"
+		}
+		return fmt.Errorf("tx_index must be on for replay (got %s)", txIndex)
+	}
+	return nil
 }
 
 func parseUint64(raw string, field string) (uint64, error) {

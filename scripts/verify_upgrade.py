@@ -26,7 +26,7 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.9.4-bridge-attestor-fix"
+UPGRADE_NAME = "v1.9.7-bridge-replay"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.9"
 
@@ -49,6 +49,9 @@ ALL_UPGRADES = [
     "v1.10.0-bridge-refactor",
     "v1.9.3-bridge-fee-burn",
     "v1.9.4-bridge-attestor-fix",
+    "v1.9.5-bridge-no-pow",
+    "v1.9.6-bridge-attest-events",
+    "v1.9.7-bridge-replay",
 ]
 
 

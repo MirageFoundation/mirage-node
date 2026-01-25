@@ -157,7 +157,7 @@ type BridgeAttestation struct {
 
 ### BridgeBurnRecord (Outbound)
 
-Tracks outbound burns for fee burning and auditing.
+Tracks outbound burns for replay and auditing.
 
 ```go
 type BridgeBurnRecord struct {
@@ -166,7 +166,7 @@ type BridgeBurnRecord struct {
     DestinationChain   string // "solana"
     DestinationAddress string // Recipient on external chain
     Amount             uint64 // Gross amount (includes fee)
-    BridgeFee          uint64 // Fee escrowed (burned on confirmation)
+    BridgeFee          uint64 // Fee charged at burn time (for net mint calc)
     Sequence           uint64 // Per-chain sequence number
     CreatedAt          int64  // Block height
 }
@@ -231,10 +231,10 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - Amount must be > bridge fee
 - **Fee Handling:**
   - `amount` is the gross amount (what user enters)
-  - `burn_amount = amount - bridge_fee` is burned from user
-  - `bridge_fee` is escrowed in the core module account (burned on confirmation)
-- **Actions:** Burn net amount, escrow fee, store `BridgeBurnRecord`, emit event, increment sequence
-- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for fee burning on confirmation
+  - `net_amount = amount - bridge_fee` is minted on the destination chain
+  - `bridge_fee` is burned immediately as part of the burn
+- **Actions:** Burn full amount, store `BridgeBurnRecord`, emit event, increment sequence
+- **State:** `BridgeBurnRecord` stored (keyed by `{destination_chain}/{sequence}`) for replay/audit
 
 ### MsgBridgeAttestBurned (inbound)
 - Signer must be active validator with voting power
@@ -250,8 +250,7 @@ Per-chain counter for replay protection. Incremented by each `MsgBridgeBurn`.
 - destination_chain must match the original burn record
 - destination_tx from the first attestor becomes canonical; later attestations may differ
 - **Actions:** Accumulate attestation in `BridgeMintAttestation`, emit `bridge_attest_minted` event
-- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`, burn bridge fee
-- **Fee Burning:** The `bridge_fee` from `BridgeBurnRecord` is burned ONCE when threshold is met (v1.9.3+)
+- **Threshold met →** Set `confirmed=true`, store `BridgeMintedRecord`
 
 ## Orchestrator Architecture
 
@@ -458,9 +457,9 @@ message Params {
 
 ## Version History
 
-- **v1.10.7**: Enhanced `GetBridgeMinted` query and attestation payload security
-  - `GetBridgeMinted` now returns attestation progress (found, attestors, attested_power, required_power) in addition to completion status
-  - Removed separate `GetBridgeMintAttestation` endpoint - `GetBridgeMinted` now serves both purposes
+- **v1.10.7**: Enhanced `GetBridgeMint` query and attestation payload security
+  - `GetBridgeMint` now returns attestation progress (found, attestors, attested_power, required_power) in addition to completion status
+  - Removed separate `GetBridgeMintAttestation` endpoint - `GetBridgeMint` now serves both purposes
   - Orchestrator attestation payload now includes `destination_chain` to prevent cross-chain replay attacks
   - Solana program requires matching update to `build_attestation_payload` (see `CONSIDER_FIXING.md`)
 
@@ -476,11 +475,11 @@ message Params {
 - **v1.10.4**: Fix outbound key collision for multi-chain support
   - `BridgeBurnRecord` key changed from `bridge_burns/{burn_id}` to `bridge_burns/{dest_chain}/{burn_id}`
   - `BridgeMintedRecord` key changed from `bridge_mints/{burn_id}` to `bridge_mints/{dest_chain}/{burn_id}`
-  - `QueryBridgeMintedRequest` now requires `destination_chain` parameter
+  - `QueryBridgeMintRequest` now requires `destination_chain` parameter
   - Prevents key collisions when bridging to multiple destination chains (e.g., Solana and Ethereum)
 
 - **v1.9.3**: Bridge fee burning (replaces proportional distribution)
-  - Bridge fees are now burned when mint threshold is reached, not distributed to attestors
+  - Bridge fees are now burned immediately during `MsgBridgeBurn`, not distributed to attestors
   - Mint attestors stored in separate KV keys for fixed-size attestation records
   - Simpler, more gas-predictable attestation transactions
 
@@ -494,7 +493,7 @@ message Params {
 
 - **v1.10.1**: Fee handling and indexer fixes
   - `MsgBridgeBurn` now stores `BridgeBurnRecord` for fee tracking
-  - Bridge fee is escrowed in module account until confirmation
+  - Bridge fee is burned at burn time (no escrow)
   - Indexer processes tx events to update `minted=true` from `bridge_attest` events
   - Fixed "Orchestrator detection" UI getting stuck on inbound bridges
 

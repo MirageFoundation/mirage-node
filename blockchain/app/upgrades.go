@@ -730,9 +730,9 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.9.1-query-fix: Bridge query endpoint fixes
-	// - Fixed CLI: `miraged q bridge minted` now requires destination_chain parameter
-	// - Fixed REST: Added GetBridgeMinted handler to REST gateway
-	// - Fixed proto: QueryBridgeMintedResponse now includes attestation progress fields
+	// - Fixed CLI: `miraged q bridge mint` now requires destination_chain parameter
+	// - Fixed REST: Added GetBridgeMint handler to REST gateway
+	// - Fixed proto: QueryBridgeMintResponse now includes attestation progress fields
 	// - Deploy: Always prunes Docker and clears /tmp on remote deploys
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.1-query-fix",
@@ -909,6 +909,28 @@ func (app *App) RegisterUpgradeHandlers() {
 			// Bridge handlers now emit events even for late/duplicate attestations
 
 			sdkCtx.Logger().Info("Upgrade to v1.9.6-bridge-attest-events complete - all attestations now emit events")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.7-bridge-replay: Outbound replay + fee burn simplification
+	// - Orchestrator replays pending outbound burns on startup
+	// - Requires CometBFT tx_index=on for TxSearch
+	// - Bridge fees burned at MsgBridgeBurn (no escrow/burn-on-confirm)
+	// - Bridge mint query renamed to GetBridgeMint
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.7-bridge-replay",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.7-bridge-replay...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// No data migration needed - binary-only changes
+			sdkCtx.Logger().Info("Upgrade to v1.9.7-bridge-replay complete - replay + fee burn simplification enabled")
 			return toVM, nil
 		},
 	)
