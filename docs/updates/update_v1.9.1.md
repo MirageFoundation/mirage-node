@@ -12,15 +12,15 @@ v1.9.1 is a maintenance release that fixes bridge query endpoints and improves d
 
 #### Bridge Query Endpoints
 
-1. **CLI Fix**: `miraged q bridge minted` now correctly accepts both required parameters
-   - **Before**: `miraged q bridge minted [burn_id]` (broken - missing destination_chain)
-   - **After**: `miraged q bridge minted [destination_chain] [burn_id]`
+1. **CLI Fix**: `miraged q bridge mint` now correctly accepts both required parameters
+   - **Before**: `miraged q bridge mint [burn_id]` (broken - missing destination_chain)
+   - **After**: `miraged q bridge mint [destination_chain] [burn_id]`
    
-2. **REST Gateway Fix**: Added missing `GetBridgeMinted` handler to REST gateway
-   - Endpoint: `GET /mirage/core/v1/bridge/minted/{destination_chain}/{burn_id}`
+2. **REST Gateway Fix**: Added missing `GetBridgeMint` handler to REST gateway
+   - Endpoint: `GET /mirage/core/v1/bridge/mint/{destination_chain}/{burn_id}`
    - Previously returned "Not Implemented" error
    
-3. **Proto Response Fix**: `QueryBridgeMintedResponse` now includes all attestation progress fields
+3. **Proto Response Fix**: `QueryBridgeMintResponse` now includes all attestation progress fields
    - `found` - whether attestation record exists
    - `attestors` - list of validators who have attested
    - `attested_power` - total voting power attested
@@ -52,7 +52,7 @@ These fixes enable the frontend to properly poll and display attestation progres
 
 **Modified:**
 - `blockchain/x/core/module/cli_bridge.go` - CLI fix for destination_chain parameter
-- `blockchain/x/core/types/query.pb.gw.go` - REST gateway handler for GetBridgeMinted
+- `blockchain/x/core/types/query.pb.gw.go` - REST gateway handler for GetBridgeMint
 - `blockchain/proto/mirage/core/v1/query.proto` - Added attestation fields to response
 - `blockchain/app/upgrades.go` - Added v1.9.1-query-fix upgrade handler
 - `deploy/deploy.sh` - Always prune on remote deploys
@@ -91,9 +91,9 @@ No additional setup required beyond deploying the new binary. The upgrade handle
 
 ### Breaking Changes
 
-- `miraged q bridge minted` CLI command now requires two arguments instead of one
-  - **Before**: `miraged q bridge minted 104`
-  - **After**: `miraged q bridge minted solana 104`
+- `miraged q bridge mint` CLI command now requires two arguments instead of one
+  - **Before**: `miraged q bridge mint 104`
+  - **After**: `miraged q bridge mint solana 104`
 
 ---
 
@@ -103,7 +103,7 @@ No additional setup required beyond deploying the new binary. The upgrade handle
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/mirage/core/v1/bridge/minted/{destination_chain}/{burn_id}` | GET | Query mint attestation status |
+| `/mirage/core/v1/bridge/mint/{destination_chain}/{burn_id}` | GET | Query mint attestation status |
 
 **Response Fields (Added):**
 ```json

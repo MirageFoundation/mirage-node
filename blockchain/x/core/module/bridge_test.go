@@ -622,10 +622,10 @@ func TestBurnIDNormalization(t *testing.T) {
 	}
 }
 
-// TestGetBridgeMintedQueryResponse tests the query response structure
-func TestGetBridgeMintedQueryResponse(t *testing.T) {
+// TestGetBridgeMintQueryResponse tests the query response structure
+func TestGetBridgeMintQueryResponse(t *testing.T) {
 	// Test response when minted (threshold crossed)
-	mintedResp := &types.QueryBridgeMintedResponse{
+	mintedResp := &types.QueryBridgeMintResponse{
 		Found:            true,
 		Minted:           true,
 		DestinationChain: "solana",
@@ -658,7 +658,7 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 	}
 
 	// Test response when attestation in progress (not yet confirmed)
-	inProgressResp := &types.QueryBridgeMintedResponse{
+	inProgressResp := &types.QueryBridgeMintResponse{
 		Found:            true,
 		Minted:           false,
 		DestinationChain: "solana",
@@ -679,7 +679,7 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 	}
 
 	// Test response when no attestation found
-	notFoundResp := &types.QueryBridgeMintedResponse{
+	notFoundResp := &types.QueryBridgeMintResponse{
 		Found:         false,
 		Minted:        false,
 		RequiredPower: 67,
@@ -696,9 +696,9 @@ func TestGetBridgeMintedQueryResponse(t *testing.T) {
 	}
 }
 
-// TestQueryBridgeMintedResponseMarshalRoundTrip ensures new fields serialize correctly.
-func TestQueryBridgeMintedResponseMarshalRoundTrip(t *testing.T) {
-	original := &types.QueryBridgeMintedResponse{
+// TestQueryBridgeMintResponseMarshalRoundTrip ensures new fields serialize correctly.
+func TestQueryBridgeMintResponseMarshalRoundTrip(t *testing.T) {
+	original := &types.QueryBridgeMintResponse{
 		Found:            true,
 		Minted:           true,
 		DestinationChain: "solana",
@@ -713,7 +713,7 @@ func TestQueryBridgeMintedResponseMarshalRoundTrip(t *testing.T) {
 		t.Fatalf("marshal failed: %v", err)
 	}
 
-	var decoded types.QueryBridgeMintedResponse
+	var decoded types.QueryBridgeMintResponse
 	if err := proto.Unmarshal(bz, &decoded); err != nil {
 		t.Fatalf("unmarshal failed: %v", err)
 	}

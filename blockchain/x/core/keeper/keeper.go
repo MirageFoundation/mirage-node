@@ -408,32 +408,6 @@ func (k Keeper) DeductFeeFromOwner(ctx sdk.Context, owner string, amount uint64)
 	return k.bank.SendCoinsFromAccountToModule(ctx, addr, types.ModuleName, sdk.NewCoins(coin))
 }
 
-// SendToModule transfers umirage from an account to the core module account (escrow).
-func (k Keeper) SendToModule(ctx sdk.Context, from string, amount uint64) error {
-	if amount == 0 {
-		return nil
-	}
-	addr, err := sdk.AccAddressFromBech32(from)
-	if err != nil {
-		return err
-	}
-	coin := sdk.NewCoin("umirage", sdkmath.NewIntFromUint64(amount))
-	return k.bank.SendCoinsFromAccountToModule(ctx, addr, types.ModuleName, sdk.NewCoins(coin))
-}
-
-// SendFromModule transfers umirage from the core module account to a recipient.
-func (k Keeper) SendFromModule(ctx sdk.Context, to string, amount uint64) error {
-	if amount == 0 {
-		return nil
-	}
-	addr, err := sdk.AccAddressFromBech32(to)
-	if err != nil {
-		return err
-	}
-	coin := sdk.NewCoin("umirage", sdkmath.NewIntFromUint64(amount))
-	return k.bank.SendCoinsFromModuleToAccount(ctx, types.ModuleName, addr, sdk.NewCoins(coin))
-}
-
 // GetBalance returns the spendable balance for denom on an address.
 func (k Keeper) GetBalance(ctx sdk.Context, owner string, denom string) sdkmath.Int {
 	addr, err := sdk.AccAddressFromBech32(owner)
@@ -664,16 +638,6 @@ func (k Keeper) BurnFromModuleAmount(ctx sdk.Context, amount uint64) error {
 		return nil
 	}
 	coin := sdk.NewCoin(k.mintDenom(), amt)
-	return k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin))
-}
-
-// BurnFromModuleExact burns exactly 'amount' umirage from the core module account.
-// Fails if the balance is insufficient.
-func (k Keeper) BurnFromModuleExact(ctx sdk.Context, amount uint64) error {
-	if amount == 0 {
-		return nil
-	}
-	coin := sdk.NewCoin(k.mintDenom(), sdkmath.NewIntFromUint64(amount))
 	return k.bank.BurnCoins(ctx, types.ModuleName, sdk.NewCoins(coin))
 }
 

@@ -72,6 +72,14 @@ func (a *Attestor) Run(ctx context.Context) error {
 		a.logger.Printf("INFO  [REPLAY] initialized %s last_sequence=%d", watcher.ChainID(), lastSeq)
 	}
 
+	// Replay pending burns before starting live subscription
+	if err := a.mirage.RequireTxIndex(ctx); err != nil {
+		return err
+	}
+	if err := a.replayPendingBurns(ctx); err != nil {
+		return err
+	}
+
 	externalBurns := make(chan chains.ExternalBurnEvent, a.cfg.Attestor.BatchSize)
 	mirageBurns := make(chan chains.MirageBurnEvent, a.cfg.Attestor.BatchSize)
 
@@ -104,6 +112,129 @@ func (a *Attestor) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// replayPendingBurns queries for outbound burns that haven't been minted yet and processes them.
+// This ensures burns that failed due to temporary issues (e.g., low SOL balance) are retried on startup.
+func (a *Attestor) replayPendingBurns(ctx context.Context) error {
+	a.logger.Printf("INFO  [REPLAY] checking for pending outbound burns...")
+
+	// Query bridge status to get per-chain sequences
+	status, err := a.mirage.QueryBridgeStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to query bridge status: %w", err)
+	}
+
+	totalPending := 0
+	for _, chainStatus := range status.ChainStatus {
+		chainID := chainStatus.ChainId
+		currentSeq := chainStatus.CurrentSequence
+
+		if currentSeq == 0 {
+			continue // No burns on this chain
+		}
+
+		// Find the watcher for this chain
+		watcher, err := a.findWatcher(chainID)
+		if err != nil {
+			a.logger.Printf("DEBUG [REPLAY] skipping chain %s: %v", chainID, err)
+			continue
+		}
+
+		// Get last minted sequence from destination chain
+		a.lastSeqMu.RLock()
+		lastMintedSeq := a.lastSeq[chainID]
+		a.lastSeqMu.RUnlock()
+
+		// Check each sequence from lastMintedSeq+1 to currentSeq
+		pendingCount := 0
+		for seq := lastMintedSeq + 1; seq <= currentSeq; seq++ {
+			burnIDStr := fmt.Sprintf("%d", seq)
+
+			// Check if already minted
+			mintedResp, err := a.mirage.QueryBridgeMint(ctx, chainID, burnIDStr)
+			if err != nil {
+				a.logger.Printf("DEBUG [REPLAY] failed to query minted status for %s/%d: %v", chainID, seq, err)
+				continue
+			}
+			if mintedResp.Minted {
+				continue // Already minted, skip
+			}
+
+			// Get burn record details
+			burnResp, err := a.mirage.QueryBridgeBurn(ctx, chainID, burnIDStr)
+			if err != nil {
+				a.logger.Printf("DEBUG [REPLAY] failed to query burn record for %s/%d: %v", chainID, seq, err)
+				continue
+			}
+			if !burnResp.Found {
+				a.logger.Printf("DEBUG [REPLAY] burn record not found for %s/%d", chainID, seq)
+				continue
+			}
+
+			// Search for the tx hash
+			txHash, err := a.mirage.SearchBurnTxHash(ctx, chainID, seq)
+			if err != nil {
+				a.logger.Printf("DEBUG [REPLAY] failed to find tx hash for %s/%d: %v", chainID, seq, err)
+				continue
+			}
+
+			a.logger.Printf("INFO  [REPLAY] found pending burn: chain=%s seq=%d amount=%d dest=%s",
+				chainID, seq, burnResp.Amount, burnResp.DestinationAddress)
+
+			// Create burn event and process it
+			burn := chains.MirageBurnEvent{
+				BurnID:             burnIDStr,
+				DestinationChain:   chainID,
+				DestinationAddress: burnResp.DestinationAddress,
+				Amount:             burnResp.Amount,
+				BridgeFee:          burnResp.BridgeFee,
+				Owner:              burnResp.Owner,
+				Sequence:           seq,
+				TxHash:             txHash,
+			}
+
+			// Execute mint on destination chain
+			var sig string
+			if err := a.retry(ctx, func() error {
+				var execErr error
+				sig, execErr = watcher.ExecuteMint(ctx, burn)
+				return execErr
+			}); err != nil {
+				a.logger.Printf("ERROR [REPLAY] mint failed for burn_id=%s chain=%s: %v", burn.BurnID, chainID, err)
+				pendingCount++
+				continue
+			}
+
+			if sig != "" {
+				// Update last sequence
+				a.lastSeqMu.Lock()
+				if seq > a.lastSeq[chainID] {
+					a.lastSeq[chainID] = seq
+				}
+				a.lastSeqMu.Unlock()
+
+				// Submit bridge_minted confirmation
+				if err := a.retry(ctx, func() error {
+					return a.mirage.SubmitBridgeMinted(ctx, burn.BurnID, chainID, sig, txHash)
+				}); err != nil {
+					a.logger.Printf("WARN [REPLAY] failed to submit bridge minted burn_id=%s: %v", burn.BurnID, err)
+				} else {
+					a.logger.Printf("INFO  [REPLAY] successfully replayed burn_id=%s chain=%s sig=%s", burn.BurnID, chainID, sig)
+				}
+			}
+		}
+
+		if pendingCount > 0 {
+			a.logger.Printf("WARN [REPLAY] %d pending burns remaining for %s (may need manual intervention)", pendingCount, chainID)
+			totalPending += pendingCount
+		}
+	}
+
+	if totalPending == 0 {
+		a.logger.Printf("INFO  [REPLAY] no pending burns found")
+	}
+	return nil
 }
 
 func (a *Attestor) handleExternalBurns(ctx context.Context, first chains.ExternalBurnEvent, ch <-chan chains.ExternalBurnEvent) error {

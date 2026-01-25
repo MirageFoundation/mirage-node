@@ -1,5 +1,6 @@
 moniker = "${MONIKER}"
 db_backend = "goleveldb"
+tx_index = "on"
 
 [rpc]
 laddr = "tcp://0.0.0.0:26657"

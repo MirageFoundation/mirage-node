@@ -19,7 +19,7 @@ This release also ships **enterprise-grade disaster recovery** for validators. F
 - **Attested Bridge** for non-IBC chains (Solana, future Ethereum support)
   - Validators run orchestrators that watch external chains for burns
   - Attestations require 66.67% of voting power to mint tokens
-  - Per-chain bridge fee (500 MIRAGE) burned when threshold is met
+  - Per-chain bridge fee (500 MIRAGE) burned during `MsgBridgeBurn`
 
 - **IBC Bridge** for Cosmos ecosystem chains (Osmosis)
   - Uses native IBC transfer protocol with MsgIBCTransfer
@@ -30,7 +30,7 @@ This release also ships **enterprise-grade disaster recovery** for validators. F
   - Inbound: burn on external chain → attestations → mint on Mirage
   - Outbound: burn on Mirage → attestations from external chain → confirmation
 
-- **Fee burning**: bridge fees are burned when mint threshold is reached
+- **Fee burning**: bridge fees are burned at burn time (not on mint confirmation)
 
 ---
 
