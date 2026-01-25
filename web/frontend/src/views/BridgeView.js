@@ -144,6 +144,13 @@ const BalanceBannerLabel = styled.span`
     font-weight: 500;
 `;
 
+const BalanceBannerRight = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.1rem;
+`;
+
 const BalanceBannerValue = styled.span`
     font-size: 1.1rem;
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
@@ -158,6 +165,13 @@ const BalanceBannerSuffix = styled.span`
     font-size: 0.7rem;
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
     font-weight: 500;
+`;
+
+const BalanceBannerNetwork = styled.span`
+    font-size: 0.65rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 `;
 
 const BalanceBannerError = styled.span`
@@ -401,24 +415,6 @@ const AddressInput = styled.input`
         box-shadow: 0 0 0 3px ${({ $error }) =>
         $error ? 'rgba(245, 101, 101, 0.2)' : 'rgba(102, 126, 234, 0.2)'};
     }
-`;
-
-const BalanceDisplay = styled.div`
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 0.5rem;
-    font-size: 0.75rem;
-`;
-
-const BalanceLabel = styled.span`
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-`;
-
-const BalanceValue = styled.span`
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-weight: 600;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
 const ErrorText = styled.div`
@@ -984,13 +980,6 @@ const WalletAddress = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#fff'};
 `;
 
-const WalletBalance = styled.div`
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: #14F195;
-    margin-top: 0.5rem;
-`;
-
 const DisconnectButton = styled.button`
     background: transparent;
     border: none;
@@ -1044,7 +1033,6 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 
     // Pre-bridge balance tracking for progress screen
     const [preBridgeSolanaBalance, setPreBridgeSolanaBalance] = useState(null);
-    const [preBridgeMirageBalance, setPreBridgeMirageBalance] = useState(null);
     const [bridgeAmount, setBridgeAmount] = useState(''); // Store amount at bridge time
 
     const refreshMirageBalance = useCallback(async (reason = 'init') => {
@@ -1409,7 +1397,6 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 
         // Capture pre-bridge balances for the progress screen
         setPreBridgeSolanaBalance(solanaWallet.mirageBalance);
-        setPreBridgeMirageBalance(mirageBalance);
         setBridgeAmount(amount.replace(/,/g, ''));
 
         // Reset state
@@ -1488,11 +1475,11 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         if (!amount) return null;
         const num = parseFloat(amount);
         if (isNaN(num) || num <= 0) return 'Enter a valid amount';
-        if (solanaWallet?.balance !== null && num > solanaWallet.mirageBalance) {
+        if (solanaWallet?.mirageBalance !== null && num > solanaWallet.mirageBalance) {
             return 'Insufficient balance';
         }
         return null;
-    }, [amount, solanaWallet?.balance]);
+    }, [amount, solanaWallet?.mirageBalance]);
 
     const canBridge = solanaWallet && amount && parseFloat(amount) > 0 && !amountError && !isBridging && (bridgeStatus === 'idle' || bridgeStatus === 'error');
 
@@ -1507,20 +1494,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         setStepElapsed({});
         setMintStatus({ state: 'idle', txHash: '', error: '' });
         setPreBridgeSolanaBalance(null);
-        setPreBridgeMirageBalance(null);
         setBridgeAmount('');
         // Refresh balances
         refreshMirageBalance('new_bridge');
         if (solanaWallet?.address) {
             fetchSolanaBalance(solanaWallet.address);
         }
-    };
-
-    // Format balance for display
-    const formatBalanceDisplay = (umirage) => {
-        if (!Number.isFinite(umirage)) return '...';
-        const mirage = Math.floor(umirage / 1_000_000);
-        return mirage.toLocaleString();
     };
 
     // Show progress screen when bridging is in progress
@@ -1538,10 +1517,6 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                             <ProgressScreenSubtitle>Solana → Mirage</ProgressScreenSubtitle>
                         </ProgressScreenTitleText>
                     </ProgressScreenTitle>
-                    <ProgressScreenAmount>
-                        <ProgressScreenAmountValue>{bridgeAmount ? parseFloat(bridgeAmount).toLocaleString() : '...'} MIRAGE</ProgressScreenAmountValue>
-                        <ProgressScreenAmountLabel>Amount</ProgressScreenAmountLabel>
-                    </ProgressScreenAmount>
                 </ProgressScreenHeader>
 
                 {/* Progress Steps */}
@@ -1985,21 +1960,6 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
                 {/* Hide form elements when Solana bridging is in progress */}
                 {!isSolanaBridging && (
                     <>
-                        {/* Balance Banner */}
-                        <BalanceBanner>
-                            <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
-                            {balanceError ? (
-                                <BalanceBannerError onClick={() => refreshBalance('retry')}>
-                                    Failed to load - click to retry
-                                </BalanceBannerError>
-                            ) : (
-                                <BalanceBannerValue>
-                                    {balanceLoading ? 'Loading...' : formatBalance(balance)}
-                                    {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
-                                </BalanceBannerValue>
-                            )}
-                        </BalanceBanner>
-
                         {/* Step 1: Source Network Selection */}
                         <SectionTitle>
                             <StepNumber>1</StepNumber>
@@ -3111,16 +3071,19 @@ export default function BridgeView({ state }) {
                                         <BridgeLayout>
                                             {/* Balance Banner */}
                                             <BalanceBanner>
-                                                <BalanceBannerLabel>Your Balance on the Mirage Network</BalanceBannerLabel>
+                                                <BalanceBannerLabel>Your Balance</BalanceBannerLabel>
                                                 {balanceError ? (
                                                     <BalanceBannerError onClick={() => refreshBalance('retry')}>
                                                         Failed to load - click to retry
                                                     </BalanceBannerError>
                                                 ) : (
-                                                    <BalanceBannerValue>
-                                                        {balanceLoading ? 'Loading...' : formatBalance(balance)}
-                                                        {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
-                                                    </BalanceBannerValue>
+                                                    <BalanceBannerRight>
+                                                        <BalanceBannerValue>
+                                                            {balanceLoading ? 'Loading...' : formatBalance(balance)}
+                                                            {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
+                                                        </BalanceBannerValue>
+                                                        {!balanceLoading && <BalanceBannerNetwork>on Mirage Network</BalanceBannerNetwork>}
+                                                    </BalanceBannerRight>
                                                 )}
                                             </BalanceBanner>
 
