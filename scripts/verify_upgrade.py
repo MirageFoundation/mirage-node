@@ -50,7 +50,6 @@ ALL_UPGRADES = [
     "v1.9.3-bridge-fee-burn",
     "v1.9.4-bridge-attestor-fix",
     "v1.9.5-bridge-no-pow",
-    "v1.9.6-bridge-attest-events",
     "v1.9.7-bridge-replay",
 ]
 

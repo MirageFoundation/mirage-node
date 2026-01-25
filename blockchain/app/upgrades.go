@@ -888,32 +888,8 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.9.6-bridge-attest-events: Emit bridge attestation events for all submissions
-	// - Late attestations (after threshold met) now emit bridge_attest with late=true
-	// - Duplicate attestations (validator re-submits) now emit bridge_attest with duplicate=true
-	// - Ensures indexers can track all validator participation, not just threshold-contributing ones
-	// - Fixes "4 validators but 75%" display issue when late attestations have power=0 in indexer
-	// - No data migration needed, just binary change in bridge handlers
-	app.UpgradeKeeper.SetUpgradeHandler(
-		"v1.9.6-bridge-attest-events",
-		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
-			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.9.6-bridge-attest-events...")
-
-			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
-			if err != nil {
-				return nil, err
-			}
-
-			// No data migration needed - this is a binary-only change
-			// Bridge handlers now emit events even for late/duplicate attestations
-
-			sdkCtx.Logger().Info("Upgrade to v1.9.6-bridge-attest-events complete - all attestations now emit events")
-			return toVM, nil
-		},
-	)
-
-	// v1.9.7-bridge-replay: Outbound replay + fee burn simplification
+	// v1.9.7-bridge-replay: Bridge reliability + fee burn simplification (combines v1.9.6 + v1.9.7)
+	// - Late/duplicate attestations now emit bridge_attest events (from v1.9.6)
 	// - Orchestrator replays pending outbound burns on startup
 	// - Requires CometBFT tx_index=on for TxSearch
 	// - Bridge fees burned at MsgBridgeBurn (no escrow/burn-on-confirm)
