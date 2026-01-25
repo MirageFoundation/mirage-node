@@ -1509,6 +1509,11 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
         setPreBridgeSolanaBalance(null);
         setPreBridgeMirageBalance(null);
         setBridgeAmount('');
+        // Refresh balances
+        refreshMirageBalance('new_bridge');
+        if (solanaWallet?.address) {
+            fetchSolanaBalance(solanaWallet.address);
+        }
     };
 
     // Format balance for display
@@ -2561,10 +2566,12 @@ export default function BridgeView({ state }) {
 
     const handleNewBridge = () => {
         setAmount('');
-        setDestinationAddress('');
+        // Keep destination address - it's saved in localStorage
         setUseDifferentAddress(false);
         resetSubmitState();
         setErrors(prev => ({ ...prev, submit: null }));
+        // Refresh balance
+        refreshBalance('new_bridge');
         console.debug('[Bridge] Reset for new transaction');
     };
 
@@ -2580,11 +2587,13 @@ export default function BridgeView({ state }) {
 
     const handleNetworkSelect = (networkId) => {
         setSelectedNetwork(NETWORKS[networkId]);
-        setDestinationAddress('');
+        // Load saved address for this network from localStorage
+        const savedAddress = localStorage.getItem(`bridge_dest_${networkId}`) || '';
+        setDestinationAddress(savedAddress);
         setUseDifferentAddress(false);
         setErrors({});
         resetSubmitState();
-        console.debug('[Bridge] Selected network:', networkId);
+        console.debug('[Bridge] Selected network:', networkId, 'saved address:', savedAddress);
     };
 
     // Format number with thousands separators for display
@@ -2633,6 +2642,10 @@ export default function BridgeView({ state }) {
     const handleAddressChange = (e) => {
         const value = e.target.value;
         setDestinationAddress(value);
+        // Save to localStorage for this network
+        if (selectedNetwork?.id) {
+            localStorage.setItem(`bridge_dest_${selectedNetwork.id}`, value);
+        }
         const error = validateAddress(value);
         setErrors(prev => ({ ...prev, address: error }));
         if (submitStage !== 'idle') resetSubmitState();
