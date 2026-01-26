@@ -4,7 +4,11 @@
 # Run this on the HOST (not inside Docker).
 #
 # Usage:
-#   ./reset_statesync.sh [--yes]
+#   ./reset_statesync.sh [--yes] [--wait]
+#
+# Options:
+#   --yes   Skip confirmation prompt
+#   --wait  Wait for sync to complete and auto-disable state-sync
 #
 # This script will:
 #   1. Stop the node
@@ -12,14 +16,17 @@
 #   3. Wipe data directory
 #   4. Configure state-sync with fresh trust height/hash
 #   5. Restart node to sync from scratch
+#   6. (with --wait) Monitor until synced, then disable state-sync
 #
 set -euo pipefail
 
 # Parse args
 AUTO_YES=false
+WAIT_FOR_SYNC=false
 for arg in "$@"; do
     case $arg in
         -y|--yes) AUTO_YES=true ;;
+        -w|--wait) WAIT_FOR_SYNC=true ;;
     esac
 done
 
@@ -124,12 +131,54 @@ docker exec "$CONTAINER" bash -c "
 
 echo ""
 echo "=== State-sync started ==="
-echo ""
-echo "Monitor progress with:"
-echo "  docker exec $CONTAINER bash -c 'tail -f /root/.mirage/logs/node/miraged-\$(date +%Y-%m-%d).log'"
-echo ""
-echo "Or check status:"
-echo "  curl -s http://localhost:26657/status | jq '.result.sync_info'"
-echo ""
-echo "Once sync completes, disable state-sync to prevent re-sync on restart:"
-echo "  docker exec $CONTAINER sed -i 's/^enable = true/enable = false/' $CONFIG_DIR/config.toml"
+
+if [ "$WAIT_FOR_SYNC" = "true" ]; then
+    echo ""
+    echo "Waiting for state-sync to complete..."
+    echo ""
+    
+    # Wait for node to start responding
+    sleep 10
+    
+    while true; do
+        STATUS=$(curl -s http://localhost:26657/status 2>/dev/null || echo '{}')
+        CATCHING_UP=$(echo "$STATUS" | jq -r '.result.sync_info.catching_up // "true"')
+        LATEST=$(echo "$STATUS" | jq -r '.result.sync_info.latest_block_height // "0"')
+        
+        if [ "$CATCHING_UP" = "false" ] && [ "$LATEST" != "0" ]; then
+            echo ""
+            echo "==> Sync complete at height $LATEST"
+            break
+        fi
+        
+        # Show progress
+        if [ "$LATEST" != "0" ] && [ "$LATEST" != "null" ]; then
+            printf "\r    Syncing... height: %s" "$LATEST"
+        else
+            printf "\r    Waiting for state-sync snapshot..."
+        fi
+        sleep 5
+    done
+    
+    # Disable state-sync
+    echo "==> Disabling state-sync in config..."
+    docker exec "$CONTAINER" sed -i 's/^enable = true/enable = false/' "$CONFIG_DIR/config.toml"
+    
+    echo ""
+    echo "=== State-sync complete ==="
+    echo "Node is synced and state-sync is disabled."
+    echo "Data directory size:"
+    docker exec "$CONTAINER" du -sh "$DATA_DIR"
+else
+    echo ""
+    echo "Monitor progress with:"
+    echo "  docker exec $CONTAINER bash -c 'tail -f /root/.mirage/logs/node/miraged-\$(date +%Y-%m-%d).log'"
+    echo ""
+    echo "Or check status:"
+    echo "  curl -s http://localhost:26657/status | jq '.result.sync_info'"
+    echo ""
+    echo "Once sync completes, disable state-sync to prevent re-sync on restart:"
+    echo "  docker exec $CONTAINER sed -i 's/^enable = true/enable = false/' $CONFIG_DIR/config.toml"
+    echo ""
+    echo "Or re-run with --wait to auto-disable when sync completes."
+fi
