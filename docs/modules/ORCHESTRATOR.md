@@ -646,8 +646,9 @@ chains:
 2. Verify Solana keypair access
 3. Test Solana RPC connectivity
 4. Test Mirage gRPC connectivity
-5. Verify state directory is writable
-6. Check sequence initialization logs
+5. Ensure CometBFT tx indexing is enabled (`tx_index = "on"`)
+6. Verify state directory is writable
+7. Check sequence initialization logs
 
 ### Failure Modes
 

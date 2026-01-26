@@ -929,30 +929,16 @@ class TransactionHandler {
             
             const timeout = Math.max(60, Math.min(86400, Number(timeoutSeconds) || 600));
 
-            // Check subscriber status for PoW
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            if (userLevel === 0) {
-                updateNotification("Preparing bridge transfer");
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
-                } catch (_) { }
-            }
-
+            // IBC transfer never uses PoW - token transfers are self-authenticating
+            // (you can't transfer tokens you don't have)
             const tx = {
                 action: 'ibc_transfer',
                 receiver: receiverTrimmed,
                 amount: amount,
                 source_channel: channel,
                 timeout_seconds: timeout,
-                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
-                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
+                last_block_hash: "",
+                pow_difficulty: 0,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -988,29 +974,15 @@ class TransactionHandler {
             const amount = Number(amountUmirage) || 0;
             if (amount <= 0) return { success: false, error: "amount must be positive" };
 
-            // Check subscriber status for PoW
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            if (userLevel === 0) {
-                updateNotification("Preparing bridge burn");
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
-                } catch (_) { }
-            }
-
+            // Bridge burn never uses PoW - token transfers are self-authenticating
+            // (you can't burn tokens you don't have)
             const tx = {
                 action: 'bridge_burn',
                 destination_chain: chain,
                 destination_address: address,
                 amount: amount,
-                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
-                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
+                last_block_hash: "",
+                pow_difficulty: 0,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 

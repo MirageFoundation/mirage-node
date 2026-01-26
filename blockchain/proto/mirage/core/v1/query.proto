@@ -47,9 +47,14 @@ service Query {
     option (google.api.http).get = "/mirage/core/v1/bridge/config";
   }
 
-  // GetBridgeMinted queries a mint confirmation by destination_chain and burn_id (outbound bridge).
-  rpc GetBridgeMinted(QueryBridgeMintedRequest) returns (QueryBridgeMintedResponse) {
-    option (google.api.http).get = "/mirage/core/v1/bridge/minted/{destination_chain}/{burn_id}";
+  // GetBridgeMint queries a mint confirmation by destination_chain and burn_id (outbound bridge).
+  rpc GetBridgeMint(QueryBridgeMintRequest) returns (QueryBridgeMintResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/mint/{destination_chain}/{burn_id}";
+  }
+
+  // GetBridgeBurn queries a burn record by destination_chain and burn_id (outbound bridge).
+  rpc GetBridgeBurn(QueryBridgeBurnRequest) returns (QueryBridgeBurnResponse) {
+    option (google.api.http).get = "/mirage/core/v1/bridge/burn/{destination_chain}/{burn_id}";
   }
 }
 
@@ -125,12 +130,22 @@ message QueryProfilesResponse {
 // QueryBridgeStatusRequest is the request type for the Query/BridgeStatus RPC method.
 message QueryBridgeStatusRequest {}
 
+// BridgeChainStatus contains per-chain bridge state
+message BridgeChainStatus {
+  // chain_id is the chain identifier (e.g., "solana")
+  string chain_id = 1;
+  // current_sequence is the latest burn sequence for outbound transfers
+  uint64 current_sequence = 2;
+}
+
 // QueryBridgeStatusResponse is the response type for the Query/BridgeStatus RPC method.
 message QueryBridgeStatusResponse {
   // enabled_chains lists all chains with bridging currently enabled
   repeated BridgeChainConfig enabled_chains = 1;
   // pending_attestations_count is the number of attestations awaiting threshold
   uint64 pending_attestations_count = 2;
+  // chain_status contains per-chain sequence counters for outbound burns
+  repeated BridgeChainStatus chain_status = 3;
 }
 
 // QueryBridgeAttestationRequest is the request type for the Query/BridgeAttestation RPC method.
@@ -177,17 +192,17 @@ message QueryBridgeConfigResponse {
   uint64 attestation_threshold = 2;
 }
 
-// QueryBridgeMintedRequest is the request type for the Query/BridgeMinted RPC method.
+// QueryBridgeMintRequest is the request type for the Query/BridgeMint RPC method.
 // Queries outbound bridge mint confirmations (Mirage -> external chain).
-message QueryBridgeMintedRequest {
+message QueryBridgeMintRequest {
   // destination_chain is the external chain where mint should occur (e.g., "solana")
   string destination_chain = 1;
   // burn_id is the Mirage burn sequence number
   string burn_id = 2;
 }
 
-// QueryBridgeMintedResponse is the response type for the Query/BridgeMinted RPC method.
-message QueryBridgeMintedResponse {
+// QueryBridgeMintResponse is the response type for the Query/BridgeMint RPC method.
+message QueryBridgeMintResponse {
   // minted indicates whether the mint has been confirmed (threshold crossed)
   bool minted = 1;
   // destination_chain is the external chain where mint occurred (e.g., "solana")
@@ -202,4 +217,35 @@ message QueryBridgeMintedResponse {
   int64 attested_power = 6;
   // required_power is the voting power required to confirm
   int64 required_power = 7;
+}
+
+// QueryBridgeBurnRequest is the request type for the Query/BridgeBurn RPC method.
+// Queries outbound bridge burn records (Mirage -> external chain).
+message QueryBridgeBurnRequest {
+  // destination_chain is the external chain (e.g., "solana")
+  string destination_chain = 1;
+  // burn_id is the Mirage burn sequence number
+  string burn_id = 2;
+}
+
+// QueryBridgeBurnResponse is the response type for the Query/BridgeBurn RPC method.
+message QueryBridgeBurnResponse {
+  // found indicates whether the burn record exists
+  bool found = 1;
+  // burn_id is the Mirage burn sequence number
+  string burn_id = 2;
+  // owner is the Mirage address that initiated the burn
+  string owner = 3;
+  // destination_chain is the external chain (e.g., "solana")
+  string destination_chain = 4;
+  // destination_address is the recipient address on the destination chain
+  string destination_address = 5;
+  // amount is the gross amount burned (in umirage)
+  uint64 amount = 6;
+  // bridge_fee is the fee deducted from the amount (in umirage)
+  uint64 bridge_fee = 7;
+  // sequence is the outbound bridge sequence for the destination chain
+  uint64 sequence = 8;
+  // created_at is the block height when the burn occurred
+  int64 created_at = 9;
 }

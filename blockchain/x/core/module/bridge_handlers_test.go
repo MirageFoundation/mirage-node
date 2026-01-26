@@ -14,7 +14,6 @@ import (
 type bridgeMockKeeper struct {
 	params            types.Params
 	balances          map[string]uint64
-	moduleBalance     uint64
 	sequences         map[string]uint64
 	burnRecords       map[string]*types.BridgeBurnRecord
 	mintedRecords     map[string]*types.BridgeMintedRecord
@@ -62,33 +61,6 @@ func (mk *bridgeMockKeeper) BurnFromAccount(ctx sdk.Context, addr string, amount
 		return fmt.Errorf("insufficient balance")
 	}
 	mk.balances[addr] = bal - amount
-	return nil
-}
-
-func (mk *bridgeMockKeeper) SendToModule(ctx sdk.Context, from string, amount uint64) error {
-	bal := mk.balances[from]
-	if bal < amount {
-		return fmt.Errorf("insufficient balance")
-	}
-	mk.balances[from] = bal - amount
-	mk.moduleBalance += amount
-	return nil
-}
-
-func (mk *bridgeMockKeeper) SendFromModule(ctx sdk.Context, to string, amount uint64) error {
-	if mk.moduleBalance < amount {
-		return fmt.Errorf("insufficient module balance")
-	}
-	mk.moduleBalance -= amount
-	mk.balances[to] += amount
-	return nil
-}
-
-func (mk *bridgeMockKeeper) BurnFromModuleExact(ctx sdk.Context, amount uint64) error {
-	if mk.moduleBalance < amount {
-		return fmt.Errorf("insufficient module balance")
-	}
-	mk.moduleBalance -= amount
 	return nil
 }
 
@@ -259,9 +231,6 @@ func TestBridgeBurnHandlerHappyPath(t *testing.T) {
 	if mk.balances[owner] != 900 {
 		t.Fatalf("owner balance = %d, want 900", mk.balances[owner])
 	}
-	if mk.moduleBalance != 10 {
-		t.Fatalf("module balance = %d, want 10", mk.moduleBalance)
-	}
 	record, found := mk.burnRecords["solana/1"]
 	if !found {
 		t.Fatal("expected burn record to be stored")
@@ -356,7 +325,6 @@ func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 	mk := newBridgeMockKeeper(params)
 
 	mk.sequences["solana"] = 1
-	mk.moduleBalance = 100
 	mk.burnRecords["solana/1"] = &types.BridgeBurnRecord{
 		BurnID:           "1",
 		DestinationChain: "solana",
@@ -386,9 +354,6 @@ func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 	}
 	if _, found := mk.mintedRecords["solana/1"]; !found {
 		t.Fatal("expected mint record to be stored")
-	}
-	if mk.moduleBalance != 0 {
-		t.Fatalf("module balance = %d, want 0", mk.moduleBalance)
 	}
 }
 

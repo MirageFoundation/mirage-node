@@ -25,17 +25,17 @@ func GetBridgeQueryCmd() *cobra.Command {
 	bridgeQueryCmd.AddCommand(
 		GetCmdQueryBridgeStatus(),
 		GetCmdQueryBridgeAttestation(),
-		GetCmdQueryBridgeMinted(),
+		GetCmdQueryBridgeMint(),
 		GetCmdQueryBridgeConfig(),
 	)
 
 	return bridgeQueryCmd
 }
 
-// GetCmdQueryBridgeMinted implements the query bridge minted command.
-func GetCmdQueryBridgeMinted() *cobra.Command {
+// GetCmdQueryBridgeMint implements the query bridge mint command.
+func GetCmdQueryBridgeMint() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "minted [destination_chain] [burn_id]",
+		Use:   "mint [destination_chain] [burn_id]",
 		Short: "Query mint confirmation by destination chain and burn ID",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -45,7 +45,7 @@ func GetCmdQueryBridgeMinted() *cobra.Command {
 			}
 
 			queryClient := types.NewQueryClient(clientCtx)
-			res, err := queryClient.GetBridgeMinted(cmd.Context(), &types.QueryBridgeMintedRequest{
+			res, err := queryClient.GetBridgeMint(cmd.Context(), &types.QueryBridgeMintRequest{
 				DestinationChain: args[0],
 				BurnId:           args[1],
 			})

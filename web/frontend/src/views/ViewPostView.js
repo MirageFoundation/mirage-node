@@ -3201,7 +3201,7 @@ function ViewPostView({ state, updatePost }) {
         const postUrl = `${origin}/view_post?post_id=${root.post_id}`;
         const postTitle = mergedRoot && mergedRoot.title ? String(mergedRoot.title).trim() : (root && root.title ? String(root.title).trim() : 'Mirage');
         const postDescription = mergedRoot && mergedRoot.content ? String(mergedRoot.content).trim().substring(0, 200) : (root && root.content ? String(root.content).trim().substring(0, 200) : 'Decentralized social network');
-        const imageUrl = `${origin}/logo.webp`;
+        const imageUrl = `${origin}/images/logo.webp`;
 
         return (
             <ContentGrid>

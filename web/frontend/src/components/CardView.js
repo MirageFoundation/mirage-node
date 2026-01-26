@@ -1479,10 +1479,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         h |= 0;
                                     }
                                     const n = (Math.abs(h) % 20) + 1;
-                                    return `/text_post_${String(n).padStart(2, '0')}.png`;
+                                    return `/images/text-posts/text_post_${String(n).padStart(2, '0')}.png`;
                                 } catch (_) {
                                     const n = (Math.floor(Math.random() * 20) % 20) + 1;
-                                    return `/text_post_${String(n).padStart(2, '0')}.png`;
+                                    return `/images/text-posts/text_post_${String(n).padStart(2, '0')}.png`;
                                 }
                             };
                             const placeholderSrc = pickPlaceholder();

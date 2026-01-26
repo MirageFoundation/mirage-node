@@ -730,9 +730,9 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.9.1-query-fix: Bridge query endpoint fixes
-	// - Fixed CLI: `miraged q bridge minted` now requires destination_chain parameter
-	// - Fixed REST: Added GetBridgeMinted handler to REST gateway
-	// - Fixed proto: QueryBridgeMintedResponse now includes attestation progress fields
+	// - Fixed CLI: `miraged q bridge mint` now requires destination_chain parameter
+	// - Fixed REST: Added GetBridgeMint handler to REST gateway
+	// - Fixed proto: QueryBridgeMintResponse now includes attestation progress fields
 	// - Deploy: Always prunes Docker and clears /tmp on remote deploys
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.1-query-fix",
@@ -860,6 +860,53 @@ func (app *App) RegisterUpgradeHandlers() {
 			sdkCtx.Logger().Info("v1.9.4: inbound attestors migrated")
 
 			sdkCtx.Logger().Info("Upgrade to v1.9.4-bridge-attestor-fix complete - all attestors migrated")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.5-bridge-no-pow: Remove PoW requirement for bridge operations
+	// - MsgBridgeBurn and MsgIBCTransfer no longer require PoW
+	// - Token transfers are self-authenticating (can't burn/transfer what you don't have)
+	// - Simplifies bridge UX for free-tier users
+	// - No data migration needed, just binary change in ante handler
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.5-bridge-no-pow",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.5-bridge-no-pow...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// No data migration needed - this is a binary-only change
+			// The ante handler now skips PoW validation for MsgBridgeBurn and MsgIBCTransfer
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.5-bridge-no-pow complete - bridge operations no longer require PoW")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.7-bridge-replay: Bridge reliability + fee burn simplification (combines v1.9.6 + v1.9.7)
+	// - Late/duplicate attestations now emit bridge_attest events (from v1.9.6)
+	// - Orchestrator replays pending outbound burns on startup
+	// - Requires CometBFT tx_index=on for TxSearch
+	// - Bridge fees burned at MsgBridgeBurn (no escrow/burn-on-confirm)
+	// - Bridge mint query renamed to GetBridgeMint
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.7-bridge-replay",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.7-bridge-replay...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// No data migration needed - binary-only changes
+			sdkCtx.Logger().Info("Upgrade to v1.9.7-bridge-replay complete - replay + fee burn simplification enabled")
 			return toVM, nil
 		},
 	)
