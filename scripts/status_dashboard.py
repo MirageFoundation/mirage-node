@@ -289,6 +289,38 @@ def parse_host_port(addr: str) -> tuple[str, int]:
     return host, port
 
 
+def read_app_toml_value(path: str, key: str) -> Optional[str]:
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+    except Exception as e:
+        debug_log(f"retention: failed to read app.toml: {e}")
+        return None
+    match = re.search(rf"^{re.escape(key)}\s*=\s*(.+)$", content, flags=re.MULTILINE)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1]
+    return raw.strip()
+
+
+def parse_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return None
+
+
+def min_non_zero(a: Optional[int], b: Optional[int]) -> Optional[int]:
+    if not a or a <= 0:
+        return b if b and b > 0 else None
+    if not b or b <= 0:
+        return a
+    return a if a < b else b
+
+
 @dataclass
 class ServiceStatus:
     name: str
@@ -592,6 +624,94 @@ def check_node() -> ServiceStatus:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details={})
+
+
+def check_retention() -> ServiceStatus:
+    """Check block retention against config + chain constraints."""
+    node_home = os.path.expanduser("~/.mirage/node")
+    app_toml = os.path.join(node_home, "config", "app.toml")
+    details: dict = {}
+
+    try:
+        status_resp = requests.get("http://127.0.0.1:26657/status", timeout=3).json()
+        sync_info = status_resp.get("result", {}).get("sync_info", {})
+        latest = parse_int(sync_info.get("latest_block_height"))
+        earliest = parse_int(sync_info.get("earliest_block_height"))
+        catching_up = sync_info.get("catching_up", True)
+        retained = None
+        if latest is not None and earliest is not None:
+            retained = max(0, latest - earliest + 1)
+    except Exception as e:
+        debug_log(f"retention: status RPC failed: {e}")
+        return ServiceStatus(name="Retention", status=Status.ERROR, message="RPC unavailable", details={})
+
+    try:
+        consensus_resp = requests.get("http://127.0.0.1:26657/consensus_params", timeout=3).json()
+        evidence = (
+            consensus_resp.get("result", {})
+            .get("consensus_params", {})
+            .get("evidence", {})
+            .get("max_age_num_blocks")
+        )
+        evidence_max_age_blocks = parse_int(evidence)
+    except Exception as e:
+        debug_log(f"retention: consensus_params RPC failed: {e}")
+        evidence_max_age_blocks = None
+
+    pruning_strategy = read_app_toml_value(app_toml, "pruning")
+    pruning_keep_recent = parse_int(read_app_toml_value(app_toml, "pruning-keep-recent"))
+    pruning_interval = parse_int(read_app_toml_value(app_toml, "pruning-interval"))
+    min_retain_blocks = parse_int(read_app_toml_value(app_toml, "min-retain-blocks"))
+    snapshot_interval = parse_int(read_app_toml_value(app_toml, "snapshot-interval"))
+    snapshot_keep_recent = parse_int(read_app_toml_value(app_toml, "snapshot-keep-recent"))
+
+    snapshot_retention = None
+    if snapshot_interval is not None and snapshot_keep_recent is not None:
+        snapshot_retention = snapshot_interval * snapshot_keep_recent
+
+    effective = None
+    for candidate in (min_retain_blocks, evidence_max_age_blocks, snapshot_retention):
+        effective = min_non_zero(effective, candidate)
+
+    details.update(
+        {
+            "retained_blocks": retained,
+            "expected_blocks": effective,
+            "min_retain_blocks": min_retain_blocks,
+            "evidence_max_age_blocks": evidence_max_age_blocks,
+            "snapshot_retention_blocks": snapshot_retention,
+            "pruning_strategy": pruning_strategy,
+            "pruning_keep_recent": pruning_keep_recent,
+            "pruning_interval": pruning_interval,
+            "catching_up": catching_up,
+        }
+    )
+
+    mismatch = False
+    if min_retain_blocks and evidence_max_age_blocks and evidence_max_age_blocks < min_retain_blocks:
+        mismatch = True
+    if min_retain_blocks and snapshot_retention and snapshot_retention < min_retain_blocks:
+        mismatch = True
+
+    if effective is None or retained is None:
+        return ServiceStatus(name="Retention", status=Status.WARN, message="Config missing", details=details)
+
+    tolerance = 100
+    status = Status.OK
+    message = "Within range"
+
+    if retained < max(0, effective - tolerance):
+        status = Status.WARN
+        message = "Below expected" if not catching_up else "Syncing"
+    elif retained > effective + tolerance:
+        status = Status.WARN
+        message = "Above expected"
+
+    if mismatch and status == Status.OK:
+        status = Status.WARN
+        message = "Config mismatch"
+
+    return ServiceStatus(name="Retention", status=status, message=message, details=details)
 
 
 def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
@@ -2180,6 +2300,24 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             else:
                 lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD{Colors.RESET}")
 
+    elif status.name == "Retention":
+        retained = details.get("retained_blocks")
+        expected = details.get("expected_blocks")
+        min_retain = details.get("min_retain_blocks")
+        evidence = details.get("evidence_max_age_blocks")
+        snapshot = details.get("snapshot_retention_blocks")
+
+        if retained is not None:
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
+        if expected is not None:
+            lines.append(f"{bullet}{Colors.DIM}Expected:{Colors.RESET} {expected:,} blocks")
+        if evidence is not None or snapshot is not None:
+            ev = f"{evidence:,}" if isinstance(evidence, int) else "?"
+            sn = f"{snapshot:,}" if isinstance(snapshot, int) else "?"
+            lines.append(f"{bullet}{Colors.DIM}Evidence/Snap:{Colors.RESET} {ev} / {sn}")
+        if min_retain is not None:
+            lines.append(f"{bullet}{Colors.DIM}Min-retain:{Colors.RESET} {min_retain:,}")
+
     elif status.name == "Validator":
         if details.get("moniker"):
             moniker = details["moniker"]
@@ -2432,6 +2570,7 @@ def render_dashboard(refresh_secs: int):
     # Collect all statuses
     statuses = [
         check_node(),
+        check_retention(),
         check_validator(),
         check_postgres(),
         check_backend(),
@@ -2450,7 +2589,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "System")
     ]
 
     # Render header
