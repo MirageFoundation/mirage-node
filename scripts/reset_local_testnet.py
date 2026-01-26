@@ -97,10 +97,32 @@ def query_solana_last_sequence() -> int | None:
         return None
 MIRAGE_TMP = Path.home() / ".mirage" / "tmp"
 
+def read_node_env_value(key: str) -> str:
+    node_env = ROOT / "deploy" / "templates" / "env" / "node.env"
+    if not node_env.exists():
+        raise RuntimeError(f"node.env source not found: {node_env}")
+    for raw in node_env.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith(f"{key}="):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    raise RuntimeError(f"{key} missing in deploy/templates/env/node.env")
+
+
+def read_positive_int(key: str) -> int:
+    value = read_node_env_value(key)
+    if not value.isdigit() or int(value) <= 0:
+        raise RuntimeError(f"{key} must be a positive integer (got {value!r})")
+    return int(value)
+
+
 LOCAL_BLOCK_TIME_SECONDS = 2
-LOCAL_RETENTION_DAYS = 7
-LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_DAYS * 24 * 60 * 60
-LOCAL_RETENTION_BLOCKS = LOCAL_RETENTION_SECONDS // LOCAL_BLOCK_TIME_SECONDS
+LOCAL_RETENTION_BLOCKS = read_positive_int("RETENTION_BLOCKS")
+LOCAL_PRUNING_INTERVAL = read_positive_int("PRUNING_INTERVAL")
+LOCAL_SNAPSHOT_INTERVAL = read_positive_int("SNAPSHOT_INTERVAL")
+LOCAL_SNAPSHOT_KEEP_RECENT = read_positive_int("SNAPSHOT_KEEP_RECENT")
+LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_BLOCKS * LOCAL_BLOCK_TIME_SECONDS
 
 LOCAL_EVIDENCE_PARAMS = {
     "max_age_num_blocks": str(LOCAL_RETENTION_BLOCKS),
@@ -110,10 +132,10 @@ LOCAL_EVIDENCE_PARAMS = {
 
 LOCAL_APP_TOML_OVERRIDES = {
     "pruning-keep-recent": f'"{LOCAL_RETENTION_BLOCKS}"',
-    "pruning-interval": '"100"',
+    "pruning-interval": f'"{LOCAL_PRUNING_INTERVAL}"',
     "min-retain-blocks": str(LOCAL_RETENTION_BLOCKS),
-    "snapshot-interval": str(LOCAL_RETENTION_BLOCKS),
-    "snapshot-keep-recent": "1",
+    "snapshot-interval": str(LOCAL_SNAPSHOT_INTERVAL),
+    "snapshot-keep-recent": str(LOCAL_SNAPSHOT_KEEP_RECENT),
 }
 
 
