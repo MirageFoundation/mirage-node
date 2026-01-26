@@ -1580,6 +1580,74 @@ def check_hermes() -> ServiceStatus:
         return ServiceStatus(name="Hermes IBC", status=Status.WARN, message=str(e)[:20], details=base_details)
 
 
+# Base58 alphabet for Solana addresses
+_BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _base58_encode(data: bytes) -> str:
+    """Encode bytes to base58 string (for Solana addresses)."""
+    # Count leading zeros
+    leading_zeros = 0
+    for b in data:
+        if b == 0:
+            leading_zeros += 1
+        else:
+            break
+
+    # Convert to integer
+    num = int.from_bytes(data, "big")
+
+    # Encode
+    result = []
+    while num > 0:
+        num, rem = divmod(num, 58)
+        result.append(_BASE58_ALPHABET[rem])
+
+    # Add leading '1's for zero bytes
+    return "1" * leading_zeros + "".join(reversed(result))
+
+
+def _get_solana_pubkey(keypair_path: str) -> Optional[str]:
+    """Get Solana public key from keypair file."""
+    try:
+        with open(keypair_path) as f:
+            keypair_bytes = json.load(f)
+        # Solana keypair is 64 bytes: first 32 = private key, last 32 = public key
+        if len(keypair_bytes) != 64:
+            return None
+        pubkey_bytes = bytes(keypair_bytes[32:])
+        return _base58_encode(pubkey_bytes)
+    except Exception as e:
+        debug_log(f"orchestrator: failed to get solana pubkey: {e}")
+        return None
+
+
+def _get_solana_balance(rpc_url: str, pubkey: str) -> Optional[float]:
+    """Query Solana balance in SOL."""
+    try:
+        resp = requests.post(
+            rpc_url,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getBalance",
+                "params": [pubkey],
+            },
+            timeout=5,
+        )
+        data = resp.json()
+        lamports = data.get("result", {}).get("value", 0)
+        return lamports / 1_000_000_000  # Convert lamports to SOL
+    except Exception as e:
+        debug_log(f"orchestrator: failed to get solana balance: {e}")
+        return None
+
+
+# Solana balance thresholds
+ORCHESTRATOR_SOL_WARN = float(os.environ.get("ORCHESTRATOR_SOL_WARN", "0.5"))
+ORCHESTRATOR_SOL_ERROR = float(os.environ.get("ORCHESTRATOR_SOL_ERROR", "0.05"))
+
+
 def check_orchestrator() -> ServiceStatus:
     """Check Bridge Orchestrator status."""
     env_path = os.path.expanduser("~/.mirage/env/orchestrator.env")
@@ -1639,6 +1707,17 @@ def check_orchestrator() -> ServiceStatus:
         else:
             base_details["network"] = "custom"
 
+    # Get Solana wallet balance if keypair exists and RPC is configured
+    sol_balance = None
+    sol_pubkey = None
+    if keypair_exists and solana_rpc:
+        sol_pubkey = _get_solana_pubkey(keypair_path)
+        if sol_pubkey:
+            base_details["sol_pubkey"] = sol_pubkey
+            sol_balance = _get_solana_balance(solana_rpc, sol_pubkey)
+            if sol_balance is not None:
+                base_details["sol_balance"] = sol_balance
+
     if not process_running:
         return ServiceStatus(
             name="Orchestrator", status=Status.ERROR, message="Not running", details=base_details
@@ -1648,6 +1727,17 @@ def check_orchestrator() -> ServiceStatus:
         return ServiceStatus(
             name="Orchestrator", status=Status.WARN, message="No keypair", details=base_details
         )
+
+    # Check SOL balance thresholds
+    if sol_balance is not None:
+        if sol_balance < ORCHESTRATOR_SOL_ERROR:
+            return ServiceStatus(
+                name="Orchestrator", status=Status.ERROR, message="Low SOL!", details=base_details
+            )
+        elif sol_balance < ORCHESTRATOR_SOL_WARN:
+            return ServiceStatus(
+                name="Orchestrator", status=Status.WARN, message="SOL running low", details=base_details
+            )
 
     return ServiceStatus(
         name="Orchestrator", status=Status.OK, message="Running", details=base_details
@@ -1896,6 +1986,19 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_GREEN}OK{Colors.RESET}")
         elif details.get("enabled"):
             lines.append(f"{bullet}{Colors.DIM}Keypair:{Colors.RESET} {Colors.BRIGHT_RED}Missing{Colors.RESET}")
+        # Show SOL balance with color based on thresholds
+        if "sol_balance" in details:
+            bal = details["sol_balance"]
+            if bal < ORCHESTRATOR_SOL_ERROR:
+                bal_color = Colors.BRIGHT_RED
+                bal_suffix = " CRITICAL!"
+            elif bal < ORCHESTRATOR_SOL_WARN:
+                bal_color = Colors.BRIGHT_YELLOW
+                bal_suffix = " LOW"
+            else:
+                bal_color = Colors.BRIGHT_GREEN
+                bal_suffix = ""
+            lines.append(f"{bullet}{Colors.DIM}SOL:{Colors.RESET} {bal_color}{bal:.4f}{bal_suffix}{Colors.RESET}")
 
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:

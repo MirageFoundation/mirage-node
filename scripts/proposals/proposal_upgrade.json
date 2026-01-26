@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.4-bridge-attestor-fix",
+                "name": "v1.9.7-bridge-replay",
                 "height": "T+50",
-                "info": "Store all attestors separately to fix gas variance"
+                "info": "Bridge reliability improvements and fee burn simplification"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.4-bridge-attestor-fix",
-    "summary": "This upgrade stores all bridge attestors in separate KV entries so attestation records remain fixed-size.\n\nProblem:\n- Attestors were stored as growing maps inside attestation records\n- When multiple validators attest in the same block, the map grows between simulation and execution\n- This caused unpredictable gas usage and out-of-gas failures\n\nChanges:\n- New store prefix: bridge_mint_attestors/{chain}/{burn_id}/{valoper} (outbound)\n- New store prefix: bridge_attestors/{chain}/{burn_id}/{valoper} (inbound)\n- Attestation records now fixed-size regardless of attestor count\n- Orchestrator retry ladder: 1.5x → 2x → 2.5x → 3x → 5x\n\nNote: This replaces v1.9.3-bridge-fee-burn which passed governance but didn't execute.\n\nBINARY REQUIREMENT: All validators must update to v1.9.4 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.9.7-bridge-replay",
+    "summary": "This upgrade improves bridge reliability and simplifies fee handling.\n\nReliability improvements:\n- Orchestrator replays pending outbound burns on startup (prevents stuck burns)\n- Late/duplicate attestations now emit bridge_attest events for accurate tracking\n- Requires CometBFT tx_index=on for transaction search\n\nFee simplification:\n- Bridge fees now burned immediately in MsgBridgeBurn (no escrow)\n- Removes BurnFromModuleExact call on attestation confirmation\n- Reduces module account state churn\n\nAPI changes (breaking):\n- REST: /bridge/minted -> /bridge/mint\n- CLI: miraged q bridge minted -> miraged q bridge mint\n- Proto: QueryBridgeMintedRequest/Response -> QueryBridgeMintRequest/Response\n\nBINARY REQUIREMENT: All validators must update to v1.9.7 binary BEFORE the upgrade height.\nCONFIG REQUIREMENT: Ensure config.toml has [tx_index] section with indexer = \"kv\"",
     "expedited": true
 }

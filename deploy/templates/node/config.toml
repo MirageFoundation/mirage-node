@@ -1,6 +1,9 @@
 moniker = "${MONIKER}"
 db_backend = "goleveldb"
 
+[tx_index]
+indexer = "kv"
+
 [rpc]
 laddr = "tcp://0.0.0.0:26657"
 cors_allowed_origins = ["*"]

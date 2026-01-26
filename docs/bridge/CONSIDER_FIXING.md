@@ -4,7 +4,7 @@ This document captures issues and improvements identified in the bridge architec
 
 ## Completed
 
-- ~~Outbound confirmation is internally inconsistent: the flow requires 2/3+ voting power, but the `MsgBridgeAttestMinted` rules only describe per-attestation actions, with no threshold enforcement described.~~ **FIXED**: Outbound now uses `BridgeMintAttestation` to accumulate validator attestations with 2/3 threshold enforcement. Bridge fee is burned when threshold is crossed (v1.9.3+).
+- ~~Outbound confirmation is internally inconsistent: the flow requires 2/3+ voting power, but the `MsgBridgeAttestMinted` rules only describe per-attestation actions, with no threshold enforcement described.~~ **FIXED**: Outbound now uses `BridgeMintAttestation` to accumulate validator attestations with 2/3 threshold enforcement. Bridge fee is burned during `MsgBridgeBurn` (v1.9.3+).
 
 - ~~`burn_sequence` is per-chain, but records are keyed only by `burn_id` (sequence). With multiple destination chains, identical sequences can collide and overwrite/mis-associate burns/mints.~~ **FIXED**: `BridgeBurnRecord` and `BridgeMintedRecord` keys now include destination chain: `bridge_burns/{dest_chain}/{burn_id}` and `bridge_mints/{dest_chain}/{burn_id}`.
 

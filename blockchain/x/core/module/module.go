@@ -2729,9 +2729,24 @@ func (am AppModule) GetBridgeStatus(ctx context.Context, _ *types.QueryBridgeSta
 		return nil, err
 	}
 
+	// Get per-chain sequence counters
+	var chainStatus []*types.BridgeChainStatus
+	for _, chain := range enabledChains {
+		seq, err := am.k.GetCurrentBridgeSequence(sdkCtx, chain.ChainId)
+		if err != nil {
+			// Log but continue - sequence of 0 is valid for new chains
+			seq = 0
+		}
+		chainStatus = append(chainStatus, &types.BridgeChainStatus{
+			ChainId:         chain.ChainId,
+			CurrentSequence: seq,
+		})
+	}
+
 	return &types.QueryBridgeStatusResponse{
 		EnabledChains:            enabledChains,
 		PendingAttestationsCount: pendingCount,
+		ChainStatus:              chainStatus,
 	}, nil
 }
 
@@ -2778,9 +2793,9 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	}, nil
 }
 
-// GetBridgeMinted queries outbound mint status including attestation progress and completion.
+// GetBridgeMint queries outbound mint status including attestation progress and completion.
 // Returns both attestation progress (attested_power, required_power) and completion status (minted).
-func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeMintedRequest) (*types.QueryBridgeMintedResponse, error) {
+func (am AppModule) GetBridgeMint(ctx context.Context, req *types.QueryBridgeMintRequest) (*types.QueryBridgeMintResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
@@ -2811,7 +2826,7 @@ func (am AppModule) GetBridgeMinted(ctx context.Context, req *types.QueryBridgeM
 	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
 
 	// Build response with all info
-	resp := &types.QueryBridgeMintedResponse{
+	resp := &types.QueryBridgeMintResponse{
 		Found:            attFound || recFound,
 		Minted:           recFound,
 		DestinationChain: destChain,
@@ -2845,5 +2860,38 @@ func (am AppModule) GetBridgeConfig(ctx context.Context, _ *types.QueryBridgeCon
 	return &types.QueryBridgeConfigResponse{
 		Chains:               params.BridgeChains,
 		AttestationThreshold: params.BridgeAttestationThreshold,
+	}, nil
+}
+
+// GetBridgeBurn queries an outbound burn record by destination chain and burn_id.
+func (am AppModule) GetBridgeBurn(ctx context.Context, req *types.QueryBridgeBurnRequest) (*types.QueryBridgeBurnResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	destChain := strings.ToLower(strings.TrimSpace(req.GetDestinationChain()))
+	burnID := strings.TrimSpace(req.GetBurnId())
+
+	if destChain == "" || burnID == "" {
+		return nil, fmt.Errorf("destination_chain and burn_id are required")
+	}
+
+	record, found, err := am.k.GetBridgeBurnRecord(sdkCtx, destChain, burnID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get burn record: %w", err)
+	}
+
+	if !found {
+		return &types.QueryBridgeBurnResponse{Found: false}, nil
+	}
+
+	return &types.QueryBridgeBurnResponse{
+		Found:              true,
+		BurnId:             record.BurnID,
+		Owner:              record.Owner,
+		DestinationChain:   record.DestinationChain,
+		DestinationAddress: record.DestinationAddress,
+		Amount:             record.Amount,
+		BridgeFee:          record.BridgeFee,
+		Sequence:           record.Sequence,
+		CreatedAt:          record.CreatedAt,
 	}, nil
 }
