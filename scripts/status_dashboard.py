@@ -1862,6 +1862,99 @@ def _format_bytes(b: int) -> str:
         return f"{b} B"
 
 
+def _get_pending_updates() -> Optional[dict]:
+    """
+    Check for pending system updates (Debian/Ubuntu/Arch).
+    
+    Returns dict with:
+        - total: total number of upgradable packages
+        - security: number of security updates (Debian/Ubuntu only)
+        - names: list of package names (truncated)
+    """
+    try:
+        # Try apt first (Debian/Ubuntu)
+        if os.path.exists("/usr/bin/apt"):
+            result = subprocess.run(
+                ["apt", "list", "--upgradable"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            if result.returncode == 0:
+                lines = result.stdout.strip().split("\n")
+                # First line is "Listing..." header
+                packages = [l for l in lines[1:] if l.strip()]
+                
+                total = len(packages)
+                security = 0
+                names = []
+                
+                for pkg in packages[:10]:
+                    pkg_name = pkg.split("/")[0]
+                    names.append(pkg_name)
+                    if "-security" in pkg or "security" in pkg.lower():
+                        security += 1
+                
+                return {"total": total, "security": security, "names": names}
+        
+        # Try pacman (Arch Linux)
+        if os.path.exists("/usr/bin/pacman"):
+            # checkupdates is the safe way to check for updates (doesn't need root)
+            # Falls back to pacman -Qu if checkupdates isn't available
+            cmd = ["checkupdates"] if os.path.exists("/usr/bin/checkupdates") else ["pacman", "-Qu"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            # pacman -Qu returns 1 if no updates, checkupdates returns 2 if no updates
+            if result.returncode in (0, 1, 2):
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+                total = len(lines)
+                names = []
+                
+                for pkg in lines[:10]:
+                    # Format: "package old_version -> new_version"
+                    pkg_name = pkg.split()[0] if pkg else ""
+                    if pkg_name:
+                        names.append(pkg_name)
+                
+                # Arch doesn't distinguish security updates in the same way
+                return {"total": total, "security": 0, "names": names}
+        
+        # Try dnf (Fedora/RHEL)
+        if os.path.exists("/usr/bin/dnf"):
+            result = subprocess.run(
+                ["dnf", "check-update", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            # dnf returns 100 if updates available, 0 if none
+            if result.returncode in (0, 100):
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+                total = len(lines)
+                names = [l.split()[0] for l in lines[:10] if l.split()]
+                
+                return {"total": total, "security": 0, "names": names}
+        
+        return None
+        
+    except subprocess.TimeoutExpired:
+        debug_log("system: update check timed out")
+        return None
+    except Exception as e:
+        debug_log(f"system: _get_pending_updates failed: {e}")
+        return None
+
+
 def check_system() -> ServiceStatus:
     """Check system health: disk space, memory, CPU load, uptime."""
     details = {}
@@ -1933,6 +2026,20 @@ def check_system() -> ServiceStatus:
         details["uptime_secs"] = uptime
         details["uptime_human"] = _format_uptime(uptime)
     
+    # Check for pending system updates
+    updates = _get_pending_updates()
+    if updates:
+        details["updates_total"] = updates["total"]
+        details["updates_security"] = updates["security"]
+        details["updates_names"] = updates["names"]
+        
+        # Security updates are critical
+        if updates["security"] > 0:
+            issues.append(("error", "security_updates"))
+        elif updates["total"] > 20:
+            # Many pending updates is a warning
+            issues.append(("warn", "many_updates"))
+    
     # Determine overall status and message
     has_error = any(level == "error" for level, _ in issues)
     has_warn = any(level == "warn" for level, _ in issues)
@@ -1941,7 +2048,9 @@ def check_system() -> ServiceStatus:
         status = Status.ERROR
         # Prioritize message by severity
         error_types = [t for l, t in issues if l == "error"]
-        if "disk_critical" in error_types or "mirage_disk_critical" in error_types:
+        if "security_updates" in error_types:
+            message = "Security updates!"
+        elif "disk_critical" in error_types or "mirage_disk_critical" in error_types:
             message = "Disk CRITICAL!"
         elif "memory_critical" in error_types:
             message = "Memory CRITICAL!"
@@ -2274,24 +2383,40 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 f"{bullet}{Colors.DIM}Memory:{Colors.RESET} {mem_color}{used_pct:.0f}% used{Colors.RESET} ({avail_str} free)"
             )
         
-        # CPU load
+        # CPU load (show as percentage of total capacity)
         if "load_1m" in details:
             load_1m = details["load_1m"]
-            load_per_core = details.get("load_per_core", load_1m)
             cpu_count = details.get("cpu_count", 1)
-            if load_per_core >= SYSTEM_LOAD_ERROR_PER_CORE:
+            load_pct = (load_1m / cpu_count) * 100
+            if load_pct >= SYSTEM_LOAD_ERROR_PER_CORE * 100:
                 load_color = Colors.BRIGHT_RED
-            elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
+            elif load_pct >= SYSTEM_LOAD_WARN_PER_CORE * 100:
                 load_color = Colors.BRIGHT_YELLOW
             else:
                 load_color = Colors.BRIGHT_GREEN
             lines.append(
-                f"{bullet}{Colors.DIM}Load:{Colors.RESET} {load_color}{load_1m:.2f}{Colors.RESET} ({cpu_count} cores)"
+                f"{bullet}{Colors.DIM}CPU:{Colors.RESET} {load_color}{load_pct:.0f}%{Colors.RESET} ({cpu_count} cores)"
             )
         
         # Uptime
         if details.get("uptime_human"):
             lines.append(f"{bullet}{Colors.DIM}Uptime:{Colors.RESET} {details['uptime_human']}")
+        
+        # Pending updates
+        if "updates_total" in details:
+            total = details["updates_total"]
+            security = details.get("updates_security", 0)
+            if security > 0:
+                lines.append(
+                    f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)"
+                )
+            elif total > 0:
+                update_color = Colors.BRIGHT_YELLOW if total > 20 else Colors.BRIGHT_GREEN
+                lines.append(
+                    f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {update_color}{total} available{Colors.RESET}"
+                )
+            else:
+                lines.append(f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {Colors.BRIGHT_GREEN}up to date{Colors.RESET}")
 
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:

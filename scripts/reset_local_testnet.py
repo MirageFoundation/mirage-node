@@ -97,6 +97,25 @@ def query_solana_last_sequence() -> int | None:
         return None
 MIRAGE_TMP = Path.home() / ".mirage" / "tmp"
 
+LOCAL_BLOCK_TIME_SECONDS = 2
+LOCAL_RETENTION_DAYS = 7
+LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_DAYS * 24 * 60 * 60
+LOCAL_RETENTION_BLOCKS = LOCAL_RETENTION_SECONDS // LOCAL_BLOCK_TIME_SECONDS
+
+LOCAL_EVIDENCE_PARAMS = {
+    "max_age_num_blocks": str(LOCAL_RETENTION_BLOCKS),
+    "max_age_duration": str(LOCAL_RETENTION_SECONDS * 1_000_000_000),
+    "max_bytes": "1048576",
+}
+
+LOCAL_APP_TOML_OVERRIDES = {
+    "pruning-keep-recent": f'"{LOCAL_RETENTION_BLOCKS}"',
+    "pruning-interval": '"100"',
+    "min-retain-blocks": str(LOCAL_RETENTION_BLOCKS),
+    "snapshot-interval": str(LOCAL_RETENTION_BLOCKS),
+    "snapshot-keep-recent": "1",
+}
+
 
 def ensure_mirage_tmp() -> Path:
     """Ensure ~/.mirage/tmp/ exists and return it."""
@@ -114,6 +133,79 @@ def run(cmd, check=True, capture=False):
         return result.stdout
     subprocess.run(cmd, check=check, text=True)
     return ""
+
+
+def apply_local_pruning_settings():
+    status("Applying local pruning settings (app.toml)...")
+    overrides = LOCAL_APP_TOML_OVERRIDES
+    script = f"""import re
+from pathlib import Path
+
+path = Path("/root/.mirage/node/config/app.toml")
+if not path.exists():
+    raise RuntimeError(f"app.toml not found at {{path}}")
+
+content = path.read_text()
+overrides = {overrides}
+
+for key, value in overrides.items():
+    pattern = rf"^{{re.escape(key)}}\\s*=.*$"
+    repl = f"{{key}} = {{value}}"
+    content, count = re.subn(pattern, repl, content, flags=re.MULTILINE)
+    if count != 1:
+        raise RuntimeError(f"expected 1 match for {{key}}, got {{count}}")
+
+path.write_text(content)
+"""
+    run(["bash", "-lc", f"docker exec -i mirage python3 - <<'PY'\n{script}\nPY"])
+    status(f"Local pruning settings applied: {LOCAL_APP_TOML_OVERRIDES}")
+
+
+def apply_local_evidence_params(gen: dict):
+    consensus = gen.get("consensus")
+    if not isinstance(consensus, dict):
+        raise RuntimeError("missing consensus section in genesis")
+    params = consensus.get("params")
+    if not isinstance(params, dict):
+        raise RuntimeError("missing consensus.params in genesis")
+    evidence = params.get("evidence")
+    if not isinstance(evidence, dict):
+        raise RuntimeError("missing consensus.params.evidence in genesis")
+
+    old = {
+        "max_age_num_blocks": evidence.get("max_age_num_blocks"),
+        "max_age_duration": evidence.get("max_age_duration"),
+        "max_bytes": evidence.get("max_bytes"),
+    }
+    evidence.update(LOCAL_EVIDENCE_PARAMS)
+    params["evidence"] = evidence
+    consensus["params"] = params
+    gen["consensus"] = consensus
+
+    app_state = gen.get("app_state")
+    if app_state is not None:
+        if not isinstance(app_state, dict):
+            raise RuntimeError("invalid app_state in genesis")
+        consensus_state = app_state.get("consensus")
+        if consensus_state is not None:
+            if not isinstance(consensus_state, dict):
+                raise RuntimeError("invalid app_state.consensus in genesis")
+            cs_params = consensus_state.get("params")
+            if not isinstance(cs_params, dict):
+                raise RuntimeError("missing app_state.consensus.params in genesis")
+            cs_evidence = cs_params.get("evidence")
+            if not isinstance(cs_evidence, dict):
+                raise RuntimeError("missing app_state.consensus.params.evidence in genesis")
+            cs_evidence.update(LOCAL_EVIDENCE_PARAMS)
+            cs_params["evidence"] = cs_evidence
+            consensus_state["params"] = cs_params
+            app_state["consensus"] = consensus_state
+            gen["app_state"] = app_state
+
+    status(
+        "Updated genesis evidence params: "
+        f"old={{old}} new={{LOCAL_EVIDENCE_PARAMS}}"
+    )
 
 
 # Cached miraged path inside container
@@ -735,6 +827,8 @@ def transform_to_single_validator(
     with open(export_path, "r", encoding="utf-8") as f:
         gen = json.load(f)
 
+    apply_local_evidence_params(gen)
+
     app_state = gen.get("app_state") or {}
     auth = app_state.get("auth") or {}
     staking = app_state.get("staking") or {}
@@ -1000,6 +1094,8 @@ def write_working_genesis(genesis_json: str):
             'sed -i "s/^keyring-backend *= *.*/keyring-backend = \\"test\\"/" /root/.mirage/node/config/client.toml || true\'',
         ]
     )
+
+    apply_local_pruning_settings()
 
     stop_node_in_container()
 
