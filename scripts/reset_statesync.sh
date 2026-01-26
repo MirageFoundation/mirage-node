@@ -138,14 +138,15 @@ if [ "$WAIT_FOR_SYNC" = "true" ]; then
     echo ""
     
     # Wait for node to start responding
-    sleep 10
+    sleep 15
     
     while true; do
-        STATUS=$(curl -s http://localhost:26657/status 2>/dev/null || echo '{}')
+        # Query status through docker exec for reliability
+        STATUS=$(docker exec "$CONTAINER" curl -s http://127.0.0.1:26657/status 2>/dev/null || echo '{}')
         CATCHING_UP=$(echo "$STATUS" | jq -r '.result.sync_info.catching_up // "true"')
         LATEST=$(echo "$STATUS" | jq -r '.result.sync_info.latest_block_height // "0"')
         
-        if [ "$CATCHING_UP" = "false" ] && [ "$LATEST" != "0" ]; then
+        if [ "$CATCHING_UP" = "false" ] && [ "$LATEST" != "0" ] && [ "$LATEST" != "null" ]; then
             echo ""
             echo "==> Sync complete at height $LATEST"
             break
@@ -153,11 +154,11 @@ if [ "$WAIT_FOR_SYNC" = "true" ]; then
         
         # Show progress
         if [ "$LATEST" != "0" ] && [ "$LATEST" != "null" ]; then
-            printf "\r    Syncing... height: %s" "$LATEST"
+            printf "\r    Syncing... height: %-10s" "$LATEST"
         else
-            printf "\r    Waiting for state-sync snapshot..."
+            printf "\r    Waiting for state-sync snapshot...        "
         fi
-        sleep 5
+        sleep 10
     done
     
     # Disable state-sync after successful sync.
