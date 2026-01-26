@@ -1647,6 +1647,18 @@ def _get_solana_balance(rpc_url: str, pubkey: str) -> Optional[float]:
 ORCHESTRATOR_SOL_WARN = float(os.environ.get("ORCHESTRATOR_SOL_WARN", "0.5"))
 ORCHESTRATOR_SOL_ERROR = float(os.environ.get("ORCHESTRATOR_SOL_ERROR", "0.05"))
 
+# System storage thresholds (in GB)
+SYSTEM_STORAGE_WARN_GB = float(os.environ.get("MIRAGE_STORAGE_WARN_GB", "5"))
+SYSTEM_STORAGE_ERROR_GB = float(os.environ.get("MIRAGE_STORAGE_ERROR_GB", "1"))
+
+# Memory thresholds (percentage used)
+SYSTEM_MEMORY_WARN_PCT = float(os.environ.get("MIRAGE_MEMORY_WARN_PCT", "85"))
+SYSTEM_MEMORY_ERROR_PCT = float(os.environ.get("MIRAGE_MEMORY_ERROR_PCT", "95"))
+
+# Load average thresholds (per CPU core)
+SYSTEM_LOAD_WARN_PER_CORE = float(os.environ.get("MIRAGE_LOAD_WARN_PER_CORE", "0.8"))
+SYSTEM_LOAD_ERROR_PER_CORE = float(os.environ.get("MIRAGE_LOAD_ERROR_PER_CORE", "1.5"))
+
 
 def check_orchestrator() -> ServiceStatus:
     """Check Bridge Orchestrator status."""
@@ -1742,6 +1754,219 @@ def check_orchestrator() -> ServiceStatus:
     return ServiceStatus(
         name="Orchestrator", status=Status.OK, message="Running", details=base_details
     )
+
+
+def _get_cpu_count() -> int:
+    """Get number of CPU cores."""
+    try:
+        return os.cpu_count() or 1
+    except Exception:
+        return 1
+
+
+def _get_load_average() -> Optional[tuple[float, float, float]]:
+    """Get system load average (1min, 5min, 15min)."""
+    try:
+        return os.getloadavg()
+    except (OSError, AttributeError):
+        # Windows doesn't have getloadavg
+        return None
+
+
+def _get_memory_info() -> Optional[dict]:
+    """Get memory usage info from /proc/meminfo."""
+    try:
+        with open("/proc/meminfo") as f:
+            meminfo = {}
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    # Value is in kB, convert to bytes
+                    val_parts = parts[1].strip().split()
+                    if val_parts:
+                        val_kb = int(val_parts[0])
+                        meminfo[key] = val_kb * 1024
+            
+            total = meminfo.get("MemTotal", 0)
+            available = meminfo.get("MemAvailable", 0)
+            
+            if total > 0:
+                used = total - available
+                used_pct = (used / total) * 100
+                return {
+                    "total": total,
+                    "available": available,
+                    "used": used,
+                    "used_pct": used_pct,
+                }
+    except Exception as e:
+        debug_log(f"system: failed to get memory info: {e}")
+    return None
+
+
+def _get_disk_usage(path: str) -> Optional[dict]:
+    """Get disk usage for a given path."""
+    try:
+        stat = os.statvfs(path)
+        total = stat.f_blocks * stat.f_frsize
+        free = stat.f_bavail * stat.f_frsize
+        used = total - free
+        used_pct = (used / total) * 100 if total > 0 else 0
+        return {
+            "total": total,
+            "free": free,
+            "used": used,
+            "used_pct": used_pct,
+        }
+    except Exception as e:
+        debug_log(f"system: failed to get disk usage for {path}: {e}")
+        return None
+
+
+def _get_uptime() -> Optional[float]:
+    """Get system uptime in seconds."""
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except Exception as e:
+        debug_log(f"system: failed to get uptime: {e}")
+        return None
+
+
+def _format_uptime(seconds: float) -> str:
+    """Format uptime in human-readable form."""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    
+    if days > 0:
+        return f"{days}d {hours}h"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def _format_bytes(b: int) -> str:
+    """Format bytes in human-readable form."""
+    if b >= 1024 ** 4:
+        return f"{b / (1024 ** 4):.1f} TB"
+    elif b >= 1024 ** 3:
+        return f"{b / (1024 ** 3):.1f} GB"
+    elif b >= 1024 ** 2:
+        return f"{b / (1024 ** 2):.1f} MB"
+    elif b >= 1024:
+        return f"{b / 1024:.1f} KB"
+    else:
+        return f"{b} B"
+
+
+def check_system() -> ServiceStatus:
+    """Check system health: disk space, memory, CPU load, uptime."""
+    details = {}
+    issues = []
+    
+    # Get disk usage for root filesystem
+    disk = _get_disk_usage("/")
+    if disk:
+        free_gb = disk["free"] / (1024 ** 3)
+        details["disk_total"] = disk["total"]
+        details["disk_free"] = disk["free"]
+        details["disk_used_pct"] = disk["used_pct"]
+        details["disk_free_gb"] = free_gb
+        
+        if free_gb < SYSTEM_STORAGE_ERROR_GB:
+            issues.append(("error", "disk_critical"))
+        elif free_gb < SYSTEM_STORAGE_WARN_GB:
+            issues.append(("warn", "disk_low"))
+    
+    # Get disk usage for ~/.mirage if it exists on a different mount
+    mirage_home = os.path.expanduser("~/.mirage")
+    if os.path.exists(mirage_home):
+        mirage_disk = _get_disk_usage(mirage_home)
+        if mirage_disk and mirage_disk.get("total") != disk.get("total"):
+            # Different filesystem
+            free_gb = mirage_disk["free"] / (1024 ** 3)
+            details["mirage_disk_free"] = mirage_disk["free"]
+            details["mirage_disk_used_pct"] = mirage_disk["used_pct"]
+            details["mirage_disk_free_gb"] = free_gb
+            
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                issues.append(("error", "mirage_disk_critical"))
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                issues.append(("warn", "mirage_disk_low"))
+    
+    # Get memory info
+    mem = _get_memory_info()
+    if mem:
+        details["mem_total"] = mem["total"]
+        details["mem_available"] = mem["available"]
+        details["mem_used_pct"] = mem["used_pct"]
+        
+        if mem["used_pct"] >= SYSTEM_MEMORY_ERROR_PCT:
+            issues.append(("error", "memory_critical"))
+        elif mem["used_pct"] >= SYSTEM_MEMORY_WARN_PCT:
+            issues.append(("warn", "memory_high"))
+    
+    # Get CPU load
+    load = _get_load_average()
+    cpu_count = _get_cpu_count()
+    if load:
+        details["load_1m"] = load[0]
+        details["load_5m"] = load[1]
+        details["load_15m"] = load[2]
+        details["cpu_count"] = cpu_count
+        
+        # Check load per core
+        load_per_core = load[0] / cpu_count
+        details["load_per_core"] = load_per_core
+        
+        if load_per_core >= SYSTEM_LOAD_ERROR_PER_CORE:
+            issues.append(("error", "load_critical"))
+        elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
+            issues.append(("warn", "load_high"))
+    
+    # Get uptime
+    uptime = _get_uptime()
+    if uptime:
+        details["uptime_secs"] = uptime
+        details["uptime_human"] = _format_uptime(uptime)
+    
+    # Determine overall status and message
+    has_error = any(level == "error" for level, _ in issues)
+    has_warn = any(level == "warn" for level, _ in issues)
+    
+    if has_error:
+        status = Status.ERROR
+        # Prioritize message by severity
+        error_types = [t for l, t in issues if l == "error"]
+        if "disk_critical" in error_types or "mirage_disk_critical" in error_types:
+            message = "Disk CRITICAL!"
+        elif "memory_critical" in error_types:
+            message = "Memory CRITICAL!"
+        elif "load_critical" in error_types:
+            message = "Load CRITICAL!"
+        else:
+            message = "Critical issues"
+    elif has_warn:
+        status = Status.WARN
+        warn_types = [t for l, t in issues if l == "warn"]
+        if "disk_low" in warn_types or "mirage_disk_low" in warn_types:
+            message = "Low disk space"
+        elif "memory_high" in warn_types:
+            message = "High memory"
+        elif "load_high" in warn_types:
+            message = "High load"
+        else:
+            message = "Warnings"
+    else:
+        status = Status.OK
+        message = "Healthy"
+    
+    details["issues"] = issues
+    
+    return ServiceStatus(name="System", status=status, message=message, details=details)
 
 
 # ============================================================================
@@ -2000,6 +2225,74 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 bal_suffix = ""
             lines.append(f"{bullet}{Colors.DIM}SOL:{Colors.RESET} {bal_color}{bal:.4f}{bal_suffix}{Colors.RESET}")
 
+    elif status.name == "System":
+        # Disk space (primary concern)
+        if "disk_free_gb" in details:
+            free_gb = details["disk_free_gb"]
+            used_pct = details.get("disk_used_pct", 0)
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                disk_color = Colors.BRIGHT_RED
+                disk_suffix = " CRITICAL!"
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                disk_color = Colors.BRIGHT_YELLOW
+                disk_suffix = " LOW"
+            else:
+                disk_color = Colors.BRIGHT_GREEN
+                disk_suffix = ""
+            lines.append(
+                f"{bullet}{Colors.DIM}Disk:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
+            )
+        
+        # Mirage data disk (if different mount)
+        if "mirage_disk_free_gb" in details:
+            free_gb = details["mirage_disk_free_gb"]
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                disk_color = Colors.BRIGHT_RED
+                disk_suffix = " CRITICAL!"
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                disk_color = Colors.BRIGHT_YELLOW
+                disk_suffix = " LOW"
+            else:
+                disk_color = Colors.BRIGHT_GREEN
+                disk_suffix = ""
+            lines.append(
+                f"{bullet}{Colors.DIM}Data:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
+            )
+        
+        # Memory usage
+        if "mem_used_pct" in details:
+            used_pct = details["mem_used_pct"]
+            mem_avail = details.get("mem_available", 0)
+            if used_pct >= SYSTEM_MEMORY_ERROR_PCT:
+                mem_color = Colors.BRIGHT_RED
+            elif used_pct >= SYSTEM_MEMORY_WARN_PCT:
+                mem_color = Colors.BRIGHT_YELLOW
+            else:
+                mem_color = Colors.BRIGHT_GREEN
+            avail_str = _format_bytes(mem_avail)
+            lines.append(
+                f"{bullet}{Colors.DIM}Memory:{Colors.RESET} {mem_color}{used_pct:.0f}% used{Colors.RESET} ({avail_str} free)"
+            )
+        
+        # CPU load
+        if "load_1m" in details:
+            load_1m = details["load_1m"]
+            load_per_core = details.get("load_per_core", load_1m)
+            cpu_count = details.get("cpu_count", 1)
+            if load_per_core >= SYSTEM_LOAD_ERROR_PER_CORE:
+                load_color = Colors.BRIGHT_RED
+            elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
+                load_color = Colors.BRIGHT_YELLOW
+            else:
+                load_color = Colors.BRIGHT_GREEN
+            lines.append(
+                f"{bullet}{Colors.DIM}Load:{Colors.RESET} {load_color}{load_1m:.2f}{Colors.RESET} ({cpu_count} cores)"
+            )
+        
+        # Uptime
+        if details.get("uptime_human"):
+            lines.append(f"{bullet}{Colors.DIM}Uptime:{Colors.RESET} {details['uptime_human']}")
+
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
         lines.append("")
@@ -2023,6 +2316,7 @@ def render_dashboard(refresh_secs: int):
         check_endpoints(),
         check_hermes(),
         check_orchestrator(),
+        check_system(),
     ]
 
     # Filter out unconfigured services for cleaner display
@@ -2031,7 +2325,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints")
+        or s.name in ("CometBFT", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "System")
     ]
 
     # Render header

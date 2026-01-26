@@ -28,7 +28,6 @@ const (
 	// Key format: bridge_mint_attestors/{destination_chain}/{burn_id}/{valoper}
 	BridgeMintAttestorsPrefix = "bridge_mint_attestors/"
 
-
 	// BridgeBurnsPrefix is the KVStore prefix for outbound bridge burn records
 	// Key format: bridge_burns/{burn_id}
 	BridgeBurnsPrefix = "bridge_burns/"
@@ -147,7 +146,6 @@ type BridgeMintAttestation struct {
 	CreatedAt int64 `json:"created_at"`
 }
 
-
 // NewBridgeAttestation creates a new BridgeAttestation
 func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount uint64, createdAt int64) *BridgeAttestation {
 	return &BridgeAttestation{
@@ -192,7 +190,6 @@ func BridgeMintAttestationKey(destChain, burnID string) []byte {
 func BridgeMintAttestorKey(destChain, burnID, valoper string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeMintAttestorsPrefix, destChain, burnID, valoper))
 }
-
 
 // NewBridgeMintAttestation creates a new BridgeMintAttestation.
 func NewBridgeMintAttestation(burnID, destChain, destTx string, createdAt int64) *BridgeMintAttestation {

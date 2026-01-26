@@ -656,12 +656,12 @@ else
 fi
 
 # Set hostname: prefer DOMAIN, fallback to MONIKER
+# Docker hostnames support dots (RFC 1123), so we only strip protocol prefixes and replace slashes/colons
 if [ -n "$DOMAIN_VALUE" ]; then
-  CLEAN_HOSTNAME=$(echo "$DOMAIN_VALUE" | tr './:' '-')
-  HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
+  HOSTNAME_ARG="--hostname $DOMAIN_VALUE"
 elif [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
+  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr '/:' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi
 
