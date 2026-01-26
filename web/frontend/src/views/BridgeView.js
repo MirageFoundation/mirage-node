@@ -126,63 +126,6 @@ const BridgeLayout = styled.div`
     width: 100%;
 `;
 
-// Balance banner at the top of Bridge Out
-const BalanceBanner = styled.div`
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 10px;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1.25rem;
-`;
-
-const BalanceBannerLabel = styled.span`
-    font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-weight: 500;
-`;
-
-const BalanceBannerRight = styled.div`
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.1rem;
-`;
-
-const BalanceBannerValue = styled.span`
-    font-size: 1.1rem;
-    color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    font-weight: 700;
-    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-    display: flex;
-    align-items: baseline;
-    gap: 0.35rem;
-`;
-
-const BalanceBannerSuffix = styled.span`
-    font-size: 0.7rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-weight: 500;
-`;
-
-const BalanceBannerNetwork = styled.span`
-    font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-`;
-
-const BalanceBannerError = styled.span`
-    font-size: 0.75rem;
-    color: #f56565;
-    cursor: pointer;
-    &:hover {
-        text-decoration: underline;
-    }
-`;
-
 const SectionTitle = styled.h3`
     font-size: 0.75rem;
     font-weight: 600;
@@ -1794,6 +1737,16 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                         Send to Mirage
                     </SectionTitle>
                     <InputSection>
+                        {/* Inline balance display */}
+                        <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'flex-end', 
+                            fontSize: '0.75rem', 
+                            color: theme?.colors?.subtleText || '#888',
+                            marginBottom: '0.35rem'
+                        }}>
+                            Balance: {solanaWallet?.mirageBalance !== null ? `${solanaWallet.mirageBalance.toLocaleString()} MIRAGE` : '...'}
+                        </div>
                         <InputWrapper>
                             <AmountInput
                                 type="text"
@@ -2148,6 +2101,7 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
 
 export default function BridgeView({ state }) {
     const location = useLocation();
+    const theme = useTheme();
     const [searchParams, setSearchParams] = useSearchParams();
     const address = Storage.load('publicKey', '') || '';
     const valoperAddress = Storage.load('validator_operator_address', '') || '';
@@ -2156,11 +2110,17 @@ export default function BridgeView({ state }) {
     const tabFromUrl = searchParams.get('tab');
     const initialTab = (tabFromUrl === 'in' || tabFromUrl === 'out') ? tabFromUrl : 'out';
 
-    // State
+    // State - restore selected network and address from localStorage
     const [activeTab, setActiveTab] = useState(initialTab);
-    const [selectedNetwork, setSelectedNetwork] = useState(null);
+    const [selectedNetwork, setSelectedNetwork] = useState(() => {
+        const savedNetworkId = localStorage.getItem('bridge_out_network');
+        return savedNetworkId && NETWORKS[savedNetworkId] ? NETWORKS[savedNetworkId] : null;
+    });
     const [amount, setAmount] = useState('');
-    const [destinationAddress, setDestinationAddress] = useState('');
+    const [destinationAddress, setDestinationAddress] = useState(() => {
+        const savedNetworkId = localStorage.getItem('bridge_out_network');
+        return savedNetworkId ? localStorage.getItem(`bridge_dest_${savedNetworkId}`) || '' : '';
+    });
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
     const [balance, setBalance] = useState(null);
     const [balanceLoading, setBalanceLoading] = useState(false);
@@ -2547,7 +2507,8 @@ export default function BridgeView({ state }) {
 
     const handleNetworkSelect = (networkId) => {
         setSelectedNetwork(NETWORKS[networkId]);
-        // Load saved address for this network from localStorage
+        // Save network selection and load saved address from localStorage
+        localStorage.setItem('bridge_out_network', networkId);
         const savedAddress = localStorage.getItem(`bridge_dest_${networkId}`) || '';
         setDestinationAddress(savedAddress);
         setUseDifferentAddress(false);
@@ -3069,24 +3030,6 @@ export default function BridgeView({ state }) {
                                 ) : (
                                     <BridgeContainer>
                                         <BridgeLayout>
-                                            {/* Balance Banner */}
-                                            <BalanceBanner>
-                                                <BalanceBannerLabel>Your Balance</BalanceBannerLabel>
-                                                {balanceError ? (
-                                                    <BalanceBannerError onClick={() => refreshBalance('retry')}>
-                                                        Failed to load - click to retry
-                                                    </BalanceBannerError>
-                                                ) : (
-                                                    <BalanceBannerRight>
-                                                        <BalanceBannerValue>
-                                                            {balanceLoading ? 'Loading...' : formatBalance(balance)}
-                                                            {!balanceLoading && <BalanceBannerSuffix>MIRAGE</BalanceBannerSuffix>}
-                                                        </BalanceBannerValue>
-                                                        {!balanceLoading && <BalanceBannerNetwork>on Mirage Network</BalanceBannerNetwork>}
-                                                    </BalanceBannerRight>
-                                                )}
-                                            </BalanceBanner>
-
                                             {/* Step 1: Network Selection */}
                                             <SectionTitle>
                                                 <StepNumber>1</StepNumber>
@@ -3126,6 +3069,16 @@ export default function BridgeView({ state }) {
                                                 {selectedNetwork ? `Send to ${selectedNetwork.name}` : 'Enter Amount'}
                                             </SectionTitle>
                                             <InputSection>
+                                                {/* Inline balance display */}
+                                                <div style={{ 
+                                                    display: 'flex', 
+                                                    justifyContent: 'flex-end', 
+                                                    fontSize: '0.75rem', 
+                                                    color: theme?.colors?.subtleText || '#888',
+                                                    marginBottom: '0.35rem'
+                                                }}>
+                                                    Balance: {balanceLoading ? '...' : balanceError ? 'Error' : `${formatBalance(balance)} MIRAGE`}
+                                                </div>
                                                 <InputWrapper>
                                                     <AmountInput
                                                         type="text"
