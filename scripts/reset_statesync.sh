@@ -108,8 +108,9 @@ for rpc in $(echo "$RPC_SERVERS" | tr ',' ' '); do
     if [ -n "$EARLIEST" ] && [ "$EARLIEST" != "null" ] && [ "$EARLIEST" != "1" ]; then
         echo "    $rpc: earliest=$EARLIEST"
         # Use earliest + 100 as a safe trust height (within snapshot range)
+        # Use MAX earliest to ensure ALL witnesses have the required blocks
         CANDIDATE=$((EARLIEST + 100))
-        if [ -z "$SNAPSHOT_HEIGHT" ] || [ "$CANDIDATE" -lt "$SNAPSHOT_HEIGHT" ]; then
+        if [ -z "$SNAPSHOT_HEIGHT" ] || [ "$CANDIDATE" -gt "$SNAPSHOT_HEIGHT" ]; then
             SNAPSHOT_HEIGHT="$CANDIDATE"
         fi
     fi
