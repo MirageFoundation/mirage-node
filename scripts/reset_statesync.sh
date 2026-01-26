@@ -160,7 +160,11 @@ if [ "$WAIT_FOR_SYNC" = "true" ]; then
         sleep 5
     done
     
-    # Disable state-sync
+    # Disable state-sync after successful sync.
+    # Note: This is a safety convention, not strictly required.
+    # - CometBFT won't re-sync if data already exists (even with enable=true)
+    # - But trust_height/trust_hash become stale after trust_period (7 days)
+    # - Disabling keeps config clean and avoids confusion
     echo "==> Disabling state-sync in config..."
     docker exec "$CONTAINER" sed -i 's/^enable = true/enable = false/' "$CONFIG_DIR/config.toml"
     
@@ -177,8 +181,11 @@ else
     echo "Or check status:"
     echo "  curl -s http://localhost:26657/status | jq '.result.sync_info'"
     echo ""
-    echo "Once sync completes, disable state-sync to prevent re-sync on restart:"
+    echo "Once sync completes, optionally disable state-sync for cleanliness:"
     echo "  docker exec $CONTAINER sed -i 's/^enable = true/enable = false/' $CONFIG_DIR/config.toml"
+    echo ""
+    echo "(Not strictly required - CometBFT won't re-sync if data exists."
+    echo " But trust params go stale after 7 days, so disabling is cleaner.)"
     echo ""
     echo "Or re-run with --wait to auto-disable when sync completes."
 fi
