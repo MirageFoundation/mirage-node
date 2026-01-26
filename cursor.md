@@ -296,21 +296,38 @@ const formatTopicStatus = useCallback((topic) => {
 
 ### Server Modifications
 
-**NEVER manually modify files on servers (SSH + edit)**. All configuration changes must go through:
+**🚨 NEVER make direct changes on servers without explicit user approval 🚨**
+
+This includes:
+- Modifying files (configs, scripts, etc.)
+- Running database queries (UPDATE, INSERT, DELETE)
+- Restarting services
+- Changing environment variables
+- ANY command that modifies state on the server
+
+**If something is broken after deploy:**
+1. **STOP** - Do NOT run commands directly on the server to "fix" it
+2. **ASK** the user what they want to do
+3. **If a script is needed**, create/update the script in the repo FIRST
+4. **Get approval** before running anything on the server
+
+**All configuration changes must go through:**
 1. Template files in `deploy/templates/`
 2. Migration scripts in `deploy/migrations/`
-3. The deploy process
+3. Utility scripts in `scripts/` (for one-time operations like state-sync reset)
+4. The deploy process
 
 If a new config value is needed:
 1. Add it to the appropriate template file
 2. Add a migration if existing deployments need updating
 3. Let the deploy/migration system handle it
 
-**NEVER "quick fix" something on the server**. If something is broken after deploy:
-1. **DO NOT** manually run commands to fix it on the server
-2. **DO** fix the deploy scripts/templates/migrations first
-3. **THEN** redeploy to apply the fix
-4. This ensures the fix is permanent and works on all future deploys
+**For one-time recovery operations (like resetting indexer after state-sync):**
+1. Create a script in `scripts/` that handles it
+2. Show the user the script and get approval
+3. THEN run the script
+
+**NEVER assume you can "quickly fix" something by running commands directly.**
 
 ### Syncing Files to Remote Servers
 

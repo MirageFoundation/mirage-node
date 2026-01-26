@@ -169,6 +169,25 @@ if [ "$WAIT_FOR_SYNC" = "true" ]; then
     echo "==> Disabling state-sync in config..."
     docker exec "$CONTAINER" sed -i 's/^enable = true/enable = false/' "$CONFIG_DIR/config.toml"
     
+    # Reset indexer to start from earliest available block.
+    # After state-sync, old blocks are gone - indexer needs to skip them.
+    echo "==> Resetting indexer position..."
+    EARLIEST=$(docker exec "$CONTAINER" curl -s http://127.0.0.1:26657/status | jq -r '.result.sync_info.earliest_block_height')
+    if [ -n "$EARLIEST" ] && [ "$EARLIEST" != "null" ]; then
+        # Set indexer to one block before earliest so it starts fresh
+        INDEXER_START=$((EARLIEST - 1))
+        docker exec "$CONTAINER" su - postgres -c "psql -d mirage -c \"UPDATE meta SET value = '$INDEXER_START' WHERE key = 'last_height';\"" 2>/dev/null || true
+        echo "    Indexer will resume from block $EARLIEST"
+        
+        # Restart indexer
+        docker exec "$CONTAINER" tmux send-keys -t mirage:indexer C-c 2>/dev/null || true
+        sleep 2
+        docker exec "$CONTAINER" tmux send-keys -t mirage:indexer "cd /opt/mirage/indexer && python3 main.py 2>&1 | tee -a /root/.mirage/logs/indexer/indexer.log" Enter
+        echo "    Indexer restarted"
+    else
+        echo "    Warning: Could not determine earliest block, indexer may need manual reset"
+    fi
+    
     echo ""
     echo "=== State-sync complete ==="
     echo "Node is synced and state-sync is disabled."
