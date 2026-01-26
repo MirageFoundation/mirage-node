@@ -221,12 +221,13 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         "2>/dev/null | cut -f1'",
         capture=True,
     )
-    estimated_bytes = int(size_output.strip()) if size_output.strip() else 0
+    uncompressed_bytes = int(size_output.strip()) if size_output.strip() else 0
+    # Estimate compressed size (~60% of uncompressed for gzip on database files)
+    estimated_bytes = int(uncompressed_bytes * 0.6)
     estimated_gb = estimated_bytes / (1024**3)
-    status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB uncompressed)...")
+    status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB compressed)...")
 
-    # Stream: remote tar | pv (local progress) | local file
-    # Use pv with estimated size (will show ~50% when done due to compression)
+    # Stream: remote tar | gzip | pv (local progress) | local file
     tar_cmd = (
         "cd /root && tar cf - "
         '--exclude=".mirage/tmp" '
