@@ -1089,15 +1089,22 @@ def check_indexer() -> ServiceStatus:
     db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
 
     # Check if indexer process is running
-    # The indexer runs as "python3 main.py" from /opt/mirage/indexer, so we match on that
-    # We exclude status_dashboard.py to avoid matching ourselves
+    # The indexer runs as "python3 main.py" or "python3 indexer/main.py"
+    # We use pgrep to find it, excluding status_dashboard
     try:
         result = subprocess.run(
-            ["bash", "-c", "pgrep -f 'python.*main\\.py' | xargs -r ps -p 2>/dev/null | grep -v status_dashboard"],
+            ["pgrep", "-f", "python.*indexer.*main.py|python.*main.py.*indexer"],
             capture_output=True,
             text=True,
         )
-        process_running = result.returncode == 0 and "main.py" in result.stdout
+        # If that didn't find anything, try the simpler pattern but exclude ourselves
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["bash", "-c", "pgrep -af 'python.*main\\.py' | grep -v status_dashboard | grep -v grep"],
+                capture_output=True,
+                text=True,
+            )
+        process_running = result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         process_running = False
 
