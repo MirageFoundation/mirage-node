@@ -35,8 +35,40 @@ NODE_HOME="/root/.mirage/node"
 DATA_DIR="$NODE_HOME/data"
 CONFIG_DIR="$NODE_HOME/config"
 
-# RPC servers for state-sync (use production validators)
-RPC_SERVERS="http://159.203.114.27:26657,http://64.23.136.132:26657"
+# All nodes in the network
+ALL_NODES=(
+    "159.203.114.27"   # PROD (mirage.talk)
+    "64.23.136.132"    # UAT (mirage.vote)
+    "146.190.108.140"  # Node 3
+    "139.59.9.96"      # Node 4
+)
+
+# Detect current node's IP and build RPC_SERVERS list excluding self
+CURRENT_IP=""
+for ip in "${ALL_NODES[@]}"; do
+    if ip addr show | grep -q "$ip"; then
+        CURRENT_IP="$ip"
+        break
+    fi
+done
+
+RPC_SERVERS=""
+for ip in "${ALL_NODES[@]}"; do
+    if [ "$ip" != "$CURRENT_IP" ]; then
+        if [ -n "$RPC_SERVERS" ]; then
+            RPC_SERVERS="$RPC_SERVERS,"
+        fi
+        RPC_SERVERS="${RPC_SERVERS}http://${ip}:26657"
+    fi
+done
+
+if [ -z "$RPC_SERVERS" ]; then
+    echo "ERROR: Could not build RPC servers list"
+    exit 1
+fi
+
+echo "Current node: ${CURRENT_IP:-unknown}"
+echo "RPC servers:  $RPC_SERVERS"
 
 echo "=== State-Sync Reset ==="
 echo ""
@@ -58,15 +90,48 @@ echo ""
 echo "==> Fetching trust height and hash..."
 RPC_SERVER=$(echo "$RPC_SERVERS" | cut -d',' -f1)
 LATEST=$(curl -s "$RPC_SERVER/status" | jq -r '.result.sync_info.latest_block_height')
-TRUST_HEIGHT=$((LATEST - 2000))
-TRUST_HASH=$(curl -s "$RPC_SERVER/block?height=$TRUST_HEIGHT" | jq -r '.result.block_id.hash')
 
-if [ -z "$TRUST_HASH" ] || [ "$TRUST_HASH" == "null" ]; then
-    echo "ERROR: Could not fetch trust hash from $RPC_SERVER"
+if [ -z "$LATEST" ] || [ "$LATEST" == "null" ]; then
+    echo "ERROR: Could not fetch latest height from $RPC_SERVER"
     exit 1
 fi
 
+# Find available snapshot height from peers
+# State-sync works best when trust_height is close to snapshot height
 echo "    Latest height:  $LATEST"
+echo "==> Checking for available snapshots..."
+
+SNAPSHOT_HEIGHT=""
+for rpc in $(echo "$RPC_SERVERS" | tr ',' ' '); do
+    # Query earliest block height (indicates state-sync starting point)
+    EARLIEST=$(curl -s --connect-timeout 5 "$rpc/status" 2>/dev/null | jq -r '.result.sync_info.earliest_block_height // empty')
+    if [ -n "$EARLIEST" ] && [ "$EARLIEST" != "null" ] && [ "$EARLIEST" != "1" ]; then
+        echo "    $rpc: earliest=$EARLIEST"
+        # Use earliest + 100 as a safe trust height (within snapshot range)
+        CANDIDATE=$((EARLIEST + 100))
+        if [ -z "$SNAPSHOT_HEIGHT" ] || [ "$CANDIDATE" -lt "$SNAPSHOT_HEIGHT" ]; then
+            SNAPSHOT_HEIGHT="$CANDIDATE"
+        fi
+    fi
+done
+
+# Choose trust_height: prefer near snapshot, fallback to LATEST - 2000
+if [ -n "$SNAPSHOT_HEIGHT" ] && [ "$SNAPSHOT_HEIGHT" -gt 0 ]; then
+    TRUST_HEIGHT="$SNAPSHOT_HEIGHT"
+    echo "    Using trust_height near snapshot: $TRUST_HEIGHT"
+else
+    TRUST_HEIGHT=$((LATEST - 2000))
+    echo "    No snapshot info found, using LATEST - 2000: $TRUST_HEIGHT"
+fi
+
+# Get trust hash for the chosen height
+TRUST_HASH=$(curl -s "$RPC_SERVER/block?height=$TRUST_HEIGHT" | jq -r '.result.block_id.hash')
+
+if [ -z "$TRUST_HASH" ] || [ "$TRUST_HASH" == "null" ]; then
+    echo "ERROR: Could not fetch trust hash for height $TRUST_HEIGHT from $RPC_SERVER"
+    exit 1
+fi
+
 echo "    Trust height:   $TRUST_HEIGHT"
 echo "    Trust hash:     $TRUST_HASH"
 
