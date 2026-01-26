@@ -3,12 +3,21 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"time"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
 	coretypes "mirage/x/core/types"
+)
+
+const (
+	// 201600 blocks = 7 days at 3s/block
+	retentionBlocks         = int64(201600)
+	retentionBlockTimeSecs  = int64(3)
+	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
 )
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
@@ -907,6 +916,52 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// No data migration needed - binary-only changes
 			sdkCtx.Logger().Info("Upgrade to v1.9.7-bridge-replay complete - replay + fee burn simplification enabled")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.9-retention: Align evidence retention with deploy retention blocks.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.9-retention",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.9-retention...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			params, err := app.ConsensusParamsKeeper.ParamsStore.Get(ctx)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.9.9-retention: failed to get consensus params", "err", err)
+				return nil, err
+			}
+
+			if params.Evidence == nil {
+				params.Evidence = &cmtproto.EvidenceParams{}
+			}
+
+			oldBlocks := params.Evidence.MaxAgeNumBlocks
+			oldDuration := params.Evidence.MaxAgeDuration
+
+			params.Evidence.MaxAgeNumBlocks = retentionBlocks
+			params.Evidence.MaxAgeDuration = retentionDuration
+
+			if err := app.ConsensusParamsKeeper.ParamsStore.Set(ctx, params); err != nil {
+				sdkCtx.Logger().Error("v1.9.9-retention: failed to set consensus params", "err", err)
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info(
+				"v1.9.9-retention: updated evidence params",
+				"old_max_age_num_blocks", oldBlocks,
+				"old_max_age_duration", oldDuration.String(),
+				"max_age_num_blocks", params.Evidence.MaxAgeNumBlocks,
+				"max_age_duration", params.Evidence.MaxAgeDuration.String(),
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.9-retention complete - evidence retention updated")
 			return toVM, nil
 		},
 	)

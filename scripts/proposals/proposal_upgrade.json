@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.7-bridge-replay",
+                "name": "v1.9.9-retention",
                 "height": "T+50",
-                "info": "Bridge reliability improvements and fee burn simplification"
+                "info": "Block retention optimization"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.7-bridge-replay",
-    "summary": "This upgrade improves bridge reliability and simplifies fee handling.\n\nReliability improvements:\n- Orchestrator replays pending outbound burns on startup (prevents stuck burns)\n- Late/duplicate attestations now emit bridge_attest events for accurate tracking\n- Requires CometBFT tx_index=on for transaction search\n\nFee simplification:\n- Bridge fees now burned immediately in MsgBridgeBurn (no escrow)\n- Removes BurnFromModuleExact call on attestation confirmation\n- Reduces module account state churn\n\nAPI changes (breaking):\n- REST: /bridge/minted -> /bridge/mint\n- CLI: miraged q bridge minted -> miraged q bridge mint\n- Proto: QueryBridgeMintedRequest/Response -> QueryBridgeMintRequest/Response\n\nBINARY REQUIREMENT: All validators must update to v1.9.7 binary BEFORE the upgrade height.\nCONFIG REQUIREMENT: Ensure config.toml has [tx_index] section with indexer = \"kv\"",
+    "title": "Upgrade: v1.9.9-retention",
+    "summary": "Aligns evidence retention with deploy retention blocks.\n\nChanges:\n- Sets evidence.max_age_num_blocks to 88 (matching RETENTION_BLOCKS)\n- Sets evidence.max_age_duration to 264s (88 blocks * 3s)\n- Enables automatic block pruning to reduce disk usage\n\nThis upgrade allows the node to automatically prune old blocks and state, keeping disk usage bounded.\n\nBINARY REQUIREMENT: All validators must update to v1.9.9 binary BEFORE the upgrade height.",
     "expedited": true
 }
