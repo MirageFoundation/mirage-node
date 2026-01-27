@@ -124,13 +124,12 @@ export function useQuests() {
         // Listen for quest-relevant actions (votes, posts, comments) to refresh progress
         const handleQuestAction = (e) => {
             console.log('[useQuests] questActionCompleted event received:', e?.detail);
-            // Delay refresh to give the indexer time to process the action
-            // Use shorter delay (1.5s) for faster UI feedback
+            // Delay refresh to give the blockchain and indexer time to process (1-5s)
             setTimeout(async () => {
                 console.log('[useQuests] Refreshing quests after action...');
                 await fetchQuests(true);
                 console.log('[useQuests] Quest refresh complete');
-            }, 1500);
+            }, 5000);
         };
         window.addEventListener('questActionCompleted', handleQuestAction);
 
@@ -274,8 +273,8 @@ export function usePendingRewards() {
 
         // Listen for quest-relevant actions (votes, posts, comments) to refresh rewards
         const handleQuestAction = () => {
-            // Delay refresh to give the indexer time to process the action
-            setTimeout(fetchRewards, 1500);
+            // Delay refresh to give the blockchain and indexer time to process (1-5s)
+            setTimeout(fetchRewards, 5000);
         };
         window.addEventListener('questActionCompleted', handleQuestAction);
 

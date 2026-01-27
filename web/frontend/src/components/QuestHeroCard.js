@@ -813,7 +813,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
                 {!collapsed && (
                     <QuestList>
-                        {dailyQuests.filter(q => !q.completed).map(quest => (
+                        {dailyQuests.map(quest => (
                             <QuestItem key={quest.id} $completed={quest.completed}>
                                 <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
                                 <QuestDetails>
@@ -862,8 +862,8 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </QuestItem>
                         ))}
 
-                        {/* Flash quest if active and not completed */}
-                        {flashQuest && flashQuest.seconds_remaining > 0 && !flashQuest.completed && (
+                        {/* Flash quest if active */}
+                        {flashQuest && flashQuest.seconds_remaining > 0 && (
                             <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
                                 <QuestIcon>⚡</QuestIcon>
                                 <QuestDetails>
@@ -877,7 +877,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                         </QuestReward>
                                     </QuestName>
                                     <QuestDescription>
-                                        {flashQuest.description} • {formatTime(flashQuest.seconds_remaining)} left
+                                        {flashQuest.description}{!flashQuest.completed && ` • ${formatTime(flashQuest.seconds_remaining)} left`}
                                     </QuestDescription>
                                     {getQuestRequirements(flashQuest).length > 0 && (
                                         <QuestRequirements>

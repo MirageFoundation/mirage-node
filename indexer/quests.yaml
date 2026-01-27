@@ -94,6 +94,62 @@ daily_quests:
       - type: mirage
         amount: 1000
 
+  - id: casual_poster
+    title: "Casual Poster"
+    description: "Create 2 posts today"
+    action_type: post
+    target_count: 2
+    min_content_length: 50
+    rewards:
+      - type: mirage
+        amount: 400
+
+  - id: conversation_contributor
+    title: "Conversation Contributor"
+    description: "Leave 5 comments on different posts"
+    action_type: comment
+    target_count: 5
+    min_content_length: 20
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 600
+
+  - id: quick_curator
+    title: "Quick Curator"
+    description: "Vote on 5 different posts"
+    action_type: vote
+    target_count: 5
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 300
+
+  - id: thoughtful_commenter
+    title: "Thoughtful Commenter"
+    description: "Leave 3 detailed comments (50+ chars each)"
+    action_type: comment
+    target_count: 3
+    min_content_length: 50
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 500
+
+  - id: daily_voter
+    title: "Daily Voter"
+    description: "Vote on 10 different posts"
+    action_type: vote
+    target_count: 10
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 500
+
 flash_quest_templates:
   # Easy quests (small payouts, quick to complete)
   - id: quick_vote

@@ -222,6 +222,7 @@ def get_daily_quests():
                     SELECT quest_id, progress, progress_meta, completed_at
                     FROM user_daily_quests
                     WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    ORDER BY quest_id ASC
                     """,
                     (owner, day_utc)
                 )
