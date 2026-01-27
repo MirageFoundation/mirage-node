@@ -14,15 +14,22 @@ const pickThemeColor = (theme, key) => {
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
-// Container styling matching HomeFeedInfoCard exactly
+// Container styling with red theme
 const QuestCardContainer = styled.div`
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%)'
+        : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%)'};
+    border: 2px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(239, 68, 68, 0.4)'
+        : 'rgba(239, 68, 68, 0.5)'};
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
+    box-shadow: ${({ theme }) => theme?.name === 'light'
+        ? '0 4px 12px rgba(239, 68, 68, 0.25)'
+        : '0 4px 12px rgba(239, 68, 68, 0.4)'};
 
     @media (max-width: 1000px) {
         border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
@@ -83,6 +90,16 @@ const MultiplierBadge = styled.div`
     font-weight: 600;
 
     @media (max-width: 768px) {
+        font-size: 0.5rem;
+    }
+`;
+
+const QuestCountBadge = styled.span`
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 500;
+
+    @media (max-width: 1000px) {
         font-size: 0.5rem;
     }
 `;
@@ -496,9 +513,30 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         setShowCelebration(false);
     }, []);
 
-    // Don't render if loading or no quests system
+    // Show loading state
     if (questsLoading) {
-        return null;
+        return (
+            <QuestCardContainer $size={size}>
+                <QuestHeader>
+                    <QuestTitle>
+                        <span>🚀</span> Daily Quests
+                        {collapsed && (
+                            <span style={{ fontWeight: 'normal' }}>
+                                {' '}— Loading...
+                            </span>
+                        )}
+                    </QuestTitle>
+                    {onToggleCollapse && (
+                        <CollapseButton onClick={onToggleCollapse}>
+                            {collapsed ? 'Show' : 'Hide'}
+                        </CollapseButton>
+                    )}
+                </QuestHeader>
+                {!collapsed && (
+                    <EmptyState>Loading quests...</EmptyState>
+                )}
+            </QuestCardContainer>
+        );
     }
 
     // If suspended, show a banner
@@ -507,7 +545,12 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🎯</span> Daily Quests
+                        <span>🚀</span> Daily Quests
+                        {collapsed && (
+                            <span style={{ fontWeight: 'normal' }}>
+                                {' '}— None available
+                            </span>
+                        )}
                     </QuestTitle>
                     {onToggleCollapse && (
                         <CollapseButton onClick={onToggleCollapse}>
@@ -528,7 +571,12 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🎯</span> Daily Quests
+                        <span>🚀</span> Daily Quests
+                        {collapsed && (
+                            <span style={{ fontWeight: 'normal' }}>
+                                {' '}— None available
+                            </span>
+                        )}
                     </QuestTitle>
                     {onToggleCollapse && (
                         <CollapseButton onClick={onToggleCollapse}>
@@ -553,10 +601,17 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             <QuestCardContainer $size={size} role="region" aria-label="Daily Quests">
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🎯</span> Daily Quests
-                        <MultiplierBadge>
-                            {rewardMultiplier.toFixed(1)}x rewards
-                        </MultiplierBadge>
+                        <span>🚀</span> Daily Quests
+                        {collapsed && (
+                            <span style={{ fontWeight: 'normal' }}>
+                                {' '}— {dailyQuests.filter(q => !q.completed).length} available
+                            </span>
+                        )}
+                        {!collapsed && (
+                            <MultiplierBadge>
+                                {rewardMultiplier.toFixed(1)}x rewards
+                            </MultiplierBadge>
+                        )}
                     </QuestTitle>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                         {!collapsed && (
