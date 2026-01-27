@@ -72,7 +72,43 @@ else
   MONIKER="${MONIKER:-validator}"
 fi
 
-export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBOUND_PEERS
+if [ -z "${RETENTION_BLOCKS:-}" ]; then
+  echo "ERROR: RETENTION_BLOCKS not set in node.env" >&2
+  exit 1
+fi
+if ! [[ "$RETENTION_BLOCKS" =~ ^[0-9]+$ ]] || [ "$RETENTION_BLOCKS" -le 0 ]; then
+  echo "ERROR: RETENTION_BLOCKS must be a positive integer" >&2
+  exit 1
+fi
+
+if [ -z "${PRUNING_INTERVAL:-}" ]; then
+  echo "ERROR: PRUNING_INTERVAL not set in node.env" >&2
+  exit 1
+fi
+if ! [[ "$PRUNING_INTERVAL" =~ ^[0-9]+$ ]] || [ "$PRUNING_INTERVAL" -le 0 ]; then
+  echo "ERROR: PRUNING_INTERVAL must be a positive integer" >&2
+  exit 1
+fi
+
+if [ -z "${SNAPSHOT_INTERVAL:-}" ]; then
+  echo "ERROR: SNAPSHOT_INTERVAL not set in node.env" >&2
+  exit 1
+fi
+if ! [[ "$SNAPSHOT_INTERVAL" =~ ^[0-9]+$ ]] || [ "$SNAPSHOT_INTERVAL" -le 0 ]; then
+  echo "ERROR: SNAPSHOT_INTERVAL must be a positive integer" >&2
+  exit 1
+fi
+
+if [ -z "${SNAPSHOT_KEEP_RECENT:-}" ]; then
+  echo "ERROR: SNAPSHOT_KEEP_RECENT not set in node.env" >&2
+  exit 1
+fi
+if ! [[ "$SNAPSHOT_KEEP_RECENT" =~ ^[0-9]+$ ]] || [ "$SNAPSHOT_KEEP_RECENT" -le 0 ]; then
+  echo "ERROR: SNAPSHOT_KEEP_RECENT must be a positive integer" >&2
+  exit 1
+fi
+
+export MONIKER CHAIN_ID PERSISTENT_PEERS PEX_ENABLED MAX_INBOUND_PEERS MAX_OUTBOUND_PEERS RETENTION_BLOCKS PRUNING_INTERVAL SNAPSHOT_INTERVAL SNAPSHOT_KEEP_RECENT
 
 # Render templates atomically
 OUT="$NODE_HOME/config"

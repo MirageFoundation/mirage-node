@@ -253,7 +253,7 @@ class ChainClient:
 
                 if not messages:
                     raise RuntimeError(
-                        f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTo)"
+                        f"Proposal {proposal_id} has no trackable messages (may contain only governance-only messages like MsgMintTokens or MsgBurnTokens)"
                     )
 
                 return messages

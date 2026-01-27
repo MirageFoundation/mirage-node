@@ -51,11 +51,6 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	icacontrollerkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/controller/keeper"
-	icahostkeeper "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/host/keeper"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
-	ibckeeper "github.com/cosmos/ibc-go/v10/modules/core/keeper"
-
 	"mirage/docs"
 	corekeeper "mirage/x/core/keeper"
 	coretypes "mirage/x/core/types"
@@ -104,12 +99,6 @@ type App struct {
 	CircuitBreakerKeeper  circuitkeeper.Keeper
 	ParamsKeeper          paramskeeper.Keeper
 	CoreKeeper            corekeeper.Keeper
-
-	// ibc keepers
-	IBCKeeper           *ibckeeper.Keeper
-	ICAControllerKeeper icacontrollerkeeper.Keeper
-	ICAHostKeeper       icahostkeeper.Keeper
-	TransferKeeper      ibctransferkeeper.Keeper
 
 	// Posts module removed. No keeper.
 	// this line is used by starport scaffolding # stargate/app/keeperDeclaration
@@ -281,7 +270,7 @@ func New(
 					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
 					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
 					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-					*coretypes.MsgIBCTransfer, *coretypes.MsgBridgeBurn:
+					*coretypes.MsgBridgeBurn:
 					containsMeta = true
 					}
 				}
@@ -367,14 +356,6 @@ func New(
 			})
 		}
 	}
-
-	// register legacy modules
-	if err := app.registerIBCModules(appOpts); err != nil {
-		panic(err)
-	}
-
-	// Set the IBC transfer keeper on the core keeper (needed for bridge operations)
-	app.CoreKeeper.SetTransferKeeper(&app.TransferKeeper)
 
 	// Register upgrade handlers
 	app.RegisterUpgradeHandlers()

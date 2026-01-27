@@ -594,20 +594,8 @@ echo "==> Starting container..."
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage
 if [ "$LOCAL_MODE" -eq 1 ]; then
   mkdir -p "$HOME/.caddy" "$HOME/.mirage"
-  # Skip hermes migration for local
 else
   run_ssh 'mkdir -p ~/.caddy ~/.mirage'
-  # One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
-  run_ssh '
-    if [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
-      echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
-      mv ~/.hermes ~/.mirage/hermes
-    elif [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
-      echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
-      cp -a ~/.hermes/. ~/.mirage/hermes/
-      rm -rf ~/.hermes
-    fi
-  '
 fi
 
 # Initialize persistent config directory and seed env files if missing (for --init)
@@ -656,12 +644,12 @@ else
 fi
 
 # Set hostname: prefer DOMAIN, fallback to MONIKER
+# Docker hostnames support dots (RFC 1123), so we only strip protocol prefixes and replace slashes/colons
 if [ -n "$DOMAIN_VALUE" ]; then
-  CLEAN_HOSTNAME=$(echo "$DOMAIN_VALUE" | tr './:' '-')
-  HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
+  HOSTNAME_ARG="--hostname $DOMAIN_VALUE"
 elif [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
+  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr '/:' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi
 

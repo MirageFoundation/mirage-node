@@ -53,11 +53,6 @@ Cleaner separation between "what happened" and "current state"
 - `circuit` - emergency shutdown, never used
 - `evidence` - double-sign evidence, never used
 
-### IBC Stack - CONSIDER REMOVING
-- `ibc-core`, `ibc-transfer`, `ica`, `ibctm`, `solomachine`
-- Plus external Hermes relayer
-- Only useful if we want Osmosis bridge (IBC is arguably dead)
-
 ### Actually Needed
 - `auth` - accounts, signatures
 - `bank` - balances, mint/burn (heavily used)
@@ -68,13 +63,12 @@ Cleaner separation between "what happened" and "current state"
 - `consensus` - required by SDK
 
 ### Partially Used (infrastructure only)
-- `params` - legacy, only for IBC subspaces
+- `params` - legacy, only for subspaces
 - `slashing` - only in export.go and PunishValidator
 - `distribution` - only in export.go
 
 ### Summary
 - 8 modules are pure bloat
-- 5 modules are IBC (debatable)
 - ~7 modules actually needed
 
 

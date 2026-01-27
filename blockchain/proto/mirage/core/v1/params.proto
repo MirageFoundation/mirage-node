@@ -1,40 +1,41 @@
 syntax = "proto3";
 package mirage.core.v1;
 
+option go_package = "mirage/x/core/types";
+
 import "amino/amino.proto";
 import "gogoproto/gogo.proto";
-
-option go_package = "mirage/x/core/types";
 
 // TierConfig defines the configuration for a membership tier.
 message TierConfig {
   option (gogoproto.equal) = true;
 
   // uint64 fields
-  uint64 period_fee = 1;             // umirage per period (0 for free tier)
-  uint64 max_followed_mods = 2;      // 5, 10, 25, 50
-  uint64 max_followed_users = 3;     // 25, 125, 500, 1000
-  uint64 max_followed_topics = 4;    // 50, 250, 500, 1000
-  uint64 max_blocked_users = 5;      // 10, 125, 500, 1000
-  uint64 max_blocked_posts = 6;      // 25, 100, 200, 500
-  uint64 max_quality_posts = 7;      // 0, 0, 50, 100
-  uint64 max_title_length = 8;       // 130, 165, 200, 250
-  uint64 max_content_length = 9;     // 1000, 2000, 5000, 25000
-  uint64 editing_time_mins = 10;     // 10, 60, 360, 720
-  uint64 archive_duration_days = 12; // 30, 90, 180, 365
+  uint64 period_fee = 1;
+  uint64 max_followed_mods = 2;
+  uint64 max_followed_users = 3;
+  uint64 max_followed_topics = 4;
+  uint64 max_blocked_users = 5;
+  uint64 max_blocked_posts = 6;
+  uint64 max_quality_posts = 7;
+  uint64 max_title_length = 8;
+  uint64 max_content_length = 9;
+  uint64 editing_time_mins = 10;
+  // tag 11 reserved
+  uint64 archive_duration_days = 12;
 
   // double fields
-  double vote_weight = 13;           // 1.0, 1.15, 1.30, 1.45
+  double vote_weight = 13;
 
   // uint32 fields
-  uint32 award_permissions = 14;     // 0-3 (0=none, higher=more award types)
+  uint32 award_permissions = 14;
 
   // bool fields
-  bool eligible_for_mod = 15;        // false, false, true, true
-  bool can_change_name = 16;         // false, true, true, true
-  bool can_have_biography = 17;      // false, true, true, true
-  bool can_have_avatar = 18;         // false, true, true, true
-  bool can_have_banner = 19;         // false, true, true, true
+  bool eligible_for_mod = 15;
+  bool can_change_name = 16;
+  bool can_have_biography = 17;
+  bool can_have_avatar = 18;
+  bool can_have_banner = 19;
 }
 
 // Params defines the parameters for the module.
@@ -57,6 +58,8 @@ message Params {
   // pow_calm_sequence_threshold: number of consecutive calm periods before decreasing difficulty
   uint64 pow_calm_sequence_threshold = 5;
 
+  // tag 6 reserved
+
   // mint_interval is the number of blocks between minting events
   uint64 mint_interval = 7;
 
@@ -69,6 +72,20 @@ message Params {
   // pow_difficulty_allowance: number of blocks after a change where previous difficulty is accepted
   uint64 pow_difficulty_allowance = 10;
 
+  // tags 11-33 reserved
+
+  // max_username_size is the maximum username length
+  uint64 max_username_size = 34;
+
+  // max_topic_size is the maximum topic length
+  uint64 max_topic_size = 35;
+
+  // min_username_size is the minimum username length
+  uint64 min_username_size = 36;
+
+  // min_topic_size is the minimum topic length
+  uint64 min_topic_size = 37;
+
   // mint_dynamic_credit_cap caps per-interval relay credits per validator
   uint64 mint_dynamic_credit_cap = 38;
 
@@ -80,18 +97,6 @@ message Params {
 
   // tiers defines the tier configurations; index 0 = free, 1-3 = paid tiers
   repeated TierConfig tiers = 41;
-
-  // min_username_size is the minimum username length
-  uint64 min_username_size = 36;
-
-  // max_username_size is the maximum username length
-  uint64 max_username_size = 34;
-
-  // max_topic_size is the maximum topic length
-  uint64 max_topic_size = 35;
-
-  // min_topic_size is the minimum topic length
-  uint64 min_topic_size = 37;
 
   // subscription_reserve_percent is the percentage of period fee escrowed as gas reserve (0-100)
   // Default: 80 (80% of period fee goes to reserve, 20% burned)
@@ -111,7 +116,7 @@ message Params {
   // Default: 60 (reject transactions older than 60 seconds).
   uint64 max_envelope_age = 45;
 
-  // Bridge parameters (field numbers 50+)
+  // tags 46-49 reserved
 
   // bridge_chains defines the configuration for each supported bridge chain
   repeated BridgeChainConfig bridge_chains = 50;
@@ -119,15 +124,14 @@ message Params {
   // bridge_attestation_threshold is the voting power threshold for minting (basis points)
   // Default: 6667 = 66.67% of total voting power required
   uint64 bridge_attestation_threshold = 51;
-
 }
 
 // BridgeChainConfig defines the configuration for a bridgeable chain.
-// Supports both IBC chains (Osmosis, etc.) and attested chains (Solana, etc.)
+// Supports attested chains (Solana, etc.)
 message BridgeChainConfig {
   option (gogoproto.equal) = true;
 
-  // chain_id is the unique identifier for this chain (e.g., "solana", "osmosis")
+  // chain_id is the unique identifier for this chain (e.g., "solana")
   string chain_id = 1;
 
   // enabled indicates whether bridging to/from this chain is currently allowed
@@ -136,8 +140,4 @@ message BridgeChainConfig {
   // fee is the flat fee in umirage charged and burned for bridge transfers to this chain
   // Default: 1000000 = 1 MIRAGE
   uint64 fee = 3;
-
-  // ibc_channel is the IBC channel ID for IBC chains (e.g., "channel-0")
-  // Empty means attested bridge (Solana, etc.)
-  string ibc_channel = 4;
 }

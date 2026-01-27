@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.7-bridge-replay",
+                "name": "v1.10.0-remove-ibc",
                 "height": "T+50",
-                "info": "Bridge reliability improvements and fee burn simplification"
+                "info": "Remove IBC/Osmosis support"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.7-bridge-replay",
-    "summary": "This upgrade improves bridge reliability and simplifies fee handling.\n\nReliability improvements:\n- Orchestrator replays pending outbound burns on startup (prevents stuck burns)\n- Late/duplicate attestations now emit bridge_attest events for accurate tracking\n- Requires CometBFT tx_index=on for transaction search\n\nFee simplification:\n- Bridge fees now burned immediately in MsgBridgeBurn (no escrow)\n- Removes BurnFromModuleExact call on attestation confirmation\n- Reduces module account state churn\n\nAPI changes (breaking):\n- REST: /bridge/minted -> /bridge/mint\n- CLI: miraged q bridge minted -> miraged q bridge mint\n- Proto: QueryBridgeMintedRequest/Response -> QueryBridgeMintRequest/Response\n\nBINARY REQUIREMENT: All validators must update to v1.9.7 binary BEFORE the upgrade height.\nCONFIG REQUIREMENT: Ensure config.toml has [tx_index] section with indexer = \"kv\"",
+    "title": "Upgrade: v1.10.0-remove-ibc",
+    "summary": "Removes IBC and Osmosis bridge support from Mirage.\n\nChanges:\n- Removes all IBC module integration (transfer, client, connection, channel)\n- Removes Osmosis from bridge_chains configuration\n- Removes MsgIBCTransfer message type\n- Renames MsgMintTo to MsgMintTokens (field: recipient → target)\n- Adds MsgBurnTokens for governance-controlled token burns\n- Cleans up Hermes relayer tooling and configs\n\nThe Solana attested bridge remains fully functional.\n\nBINARY REQUIREMENT: All validators must update to v1.10.0 binary BEFORE the upgrade height.",
     "expedited": true
 }

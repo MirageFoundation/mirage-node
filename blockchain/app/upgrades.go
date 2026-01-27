@@ -3,12 +3,21 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"time"
 
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
 	coretypes "mirage/x/core/types"
+)
+
+const (
+	// 201600 blocks = 7 days at 3s/block
+	retentionBlocks         = int64(201600)
+	retentionBlockTimeSecs  = int64(3)
+	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
 )
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
@@ -589,8 +598,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.9.0-bridge: Cross-chain bridge functionality
-	// - IBC bridge transfers for Cosmos chains (Osmosis, etc.)
-	// - Attested bridge for non-IBC chains (Solana, Ethereum)
+	// - Attested bridge for external chains (Solana, Ethereum)
 	// - New params: bridge_chains, bridge_attestation_threshold, bridge_fee
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.0-bridge",
@@ -630,37 +638,6 @@ func (app *App) RegisterUpgradeHandlers() {
 				})
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
-			}
-
-			// Enable Osmosis IBC bridge with 500 MIRAGE fee
-			osmosisEnabled := false
-			for _, chain := range params.BridgeChains {
-				if chain.ChainId == "osmosis" {
-					osmosisEnabled = true
-					if chain.Fee != 500_000_000 {
-						oldFee := chain.Fee
-						chain.Fee = 500_000_000
-						changed = true
-						sdkCtx.Logger().Info("v1.9.0-bridge: updated Osmosis bridge fee to 500 MIRAGE",
-							"old_fee", oldFee, "new_fee", 500_000_000)
-					}
-					if chain.IbcChannel != "channel-0" {
-						chain.IbcChannel = "channel-0"
-						changed = true
-						sdkCtx.Logger().Info("v1.9.0-bridge: set Osmosis IBC channel to channel-0")
-					}
-					break
-				}
-			}
-			if !osmosisEnabled {
-				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
-					ChainId:    "osmosis",
-					Enabled:    true,
-					Fee:        500_000_000, // 500 MIRAGE
-					IbcChannel: "channel-0",
-				})
-				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Osmosis IBC bridge with 500 MIRAGE fee on channel-0")
 			}
 
 			// Set attestation threshold: 66.67% (6667 basis points)
@@ -907,6 +884,148 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// No data migration needed - binary-only changes
 			sdkCtx.Logger().Info("Upgrade to v1.9.7-bridge-replay complete - replay + fee burn simplification enabled")
+			return toVM, nil
+		},
+	)
+
+	// v1.9.8-burn-osmosis-escrow: Burn IBC escrow tokens for dead Osmosis channel
+	// The IBC client expired (osmosis pruned the required historical data),
+	// so the ~599M MIRAGE in escrow for channel-1 is permanently stuck.
+	// This burns those tokens since they can never be recovered.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.8-burn-osmosis-escrow",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.8-burn-osmosis-escrow...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// IBC escrow address for transfer/channel-1 (Osmosis)
+			escrowAddr, err := sdk.AccAddressFromBech32("mirage1kq2rzz6fq2q7fsu75a9g7cpzjeanmk6877t950")
+			if err != nil {
+				return nil, err
+			}
+
+			// Get current balance
+			balance := app.BankKeeper.GetAllBalances(sdkCtx, escrowAddr)
+			if balance.IsZero() {
+				sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow: escrow account already empty")
+				return toVM, nil
+			}
+
+			sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow: burning escrow balance",
+				"address", escrowAddr.String(),
+				"balance", balance.String(),
+			)
+
+			// Send from escrow to core module, then burn
+			if err := app.BankKeeper.SendCoinsFromAccountToModule(sdkCtx, escrowAddr, coretypes.ModuleName, balance); err != nil {
+				sdkCtx.Logger().Error("v1.9.8-burn-osmosis-escrow: failed to send to module", "err", err)
+				return nil, err
+			}
+
+			if err := app.BankKeeper.BurnCoins(sdkCtx, coretypes.ModuleName, balance); err != nil {
+				sdkCtx.Logger().Error("v1.9.8-burn-osmosis-escrow: failed to burn coins", "err", err)
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow complete - burned stuck IBC escrow tokens",
+				"burned", balance.String(),
+			)
+			return toVM, nil
+		},
+	)
+
+	// v1.9.9-retention: Align evidence retention with deploy retention blocks.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.9-retention",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.9-retention...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			params, err := app.ConsensusParamsKeeper.ParamsStore.Get(ctx)
+			if err != nil {
+				sdkCtx.Logger().Error("v1.9.9-retention: failed to get consensus params", "err", err)
+				return nil, err
+			}
+
+			if params.Evidence == nil {
+				params.Evidence = &cmtproto.EvidenceParams{}
+			}
+
+			oldBlocks := params.Evidence.MaxAgeNumBlocks
+			oldDuration := params.Evidence.MaxAgeDuration
+
+			params.Evidence.MaxAgeNumBlocks = retentionBlocks
+			params.Evidence.MaxAgeDuration = retentionDuration
+
+			if err := app.ConsensusParamsKeeper.ParamsStore.Set(ctx, params); err != nil {
+				sdkCtx.Logger().Error("v1.9.9-retention: failed to set consensus params", "err", err)
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info(
+				"v1.9.9-retention: updated evidence params",
+				"old_max_age_num_blocks", oldBlocks,
+				"old_max_age_duration", oldDuration.String(),
+				"max_age_num_blocks", params.Evidence.MaxAgeNumBlocks,
+				"max_age_duration", params.Evidence.MaxAgeDuration.String(),
+			)
+
+			sdkCtx.Logger().Info("Upgrade to v1.9.9-retention complete - evidence retention updated")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.0-remove-ibc: Remove IBC/Osmosis support entirely
+	// - Removes Osmosis from bridge_chains params
+	// - IBC modules have been removed from the binary
+	// - Adds MsgBurnTokens for governance burns
+	// - Renames MsgMintTo to MsgMintTokens
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.0-remove-ibc",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.0-remove-ibc...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Remove Osmosis from bridge_chains if present
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			changed := false
+			newChains := make([]*coretypes.BridgeChainConfig, 0, len(params.BridgeChains))
+			for _, chain := range params.BridgeChains {
+				if chain.ChainId == "osmosis" {
+					sdkCtx.Logger().Info("v1.10.0-remove-ibc: removing Osmosis from bridge_chains")
+					changed = true
+					continue
+				}
+				newChains = append(newChains, chain)
+			}
+
+			if changed {
+				params.BridgeChains = newChains
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.10.0-remove-ibc: failed to update params", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.10.0-remove-ibc: params updated - Osmosis removed")
+			} else {
+				sdkCtx.Logger().Info("v1.10.0-remove-ibc: Osmosis not in bridge_chains, no changes needed")
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
 			return toVM, nil
 		},
 	)

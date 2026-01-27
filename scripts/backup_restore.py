@@ -8,6 +8,9 @@ Usage:
     # Download full backup from mirage.vote
     python3 scripts/backup_restore.py backup --source mirage.vote
 
+    # Backup all 4 production servers
+    python3 scripts/backup_restore.py backup --all
+
     # Restore to same server (uses keys from backup - no mnemonic needed)
     python3 scripts/backup_restore.py restore --target mirage.vote --latest
     python3 scripts/backup_restore.py restore --target mirage.vote --file ~/.mirage/backups/mirage.vote/mirage.vote-20260123-120000.tgz
@@ -46,7 +49,7 @@ Restore modes:
         Use when restoring a DIFFERENT server using another server's backup data.
         The backup's identity files (priv_validator_key.json, keyring) are deleted
         and new ones are derived from your mnemonic.
-        You'll still need to manually set up hermes and orchestrator afterward.
+        You'll still need to manually set up the orchestrator afterward.
         Must use --file to specify which server's backup to use.
 
 WARNING: Backups are large (~5-10GB) and contain sensitive keys!
@@ -61,6 +64,14 @@ from pathlib import Path
 
 BACKUP_DIR = Path.home() / ".mirage" / "backups"
 SSH_USER = "root"
+
+# All production servers (same as deploy_all_prod.sh)
+ALL_SERVERS = [
+    "mirage.vote",
+    "146.190.108.140",
+    "139.59.9.96",
+    "mirage.talk",
+]
 
 
 def status(msg: str):
@@ -221,12 +232,13 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         "2>/dev/null | cut -f1'",
         capture=True,
     )
-    estimated_bytes = int(size_output.strip()) if size_output.strip() else 0
+    uncompressed_bytes = int(size_output.strip()) if size_output.strip() else 0
+    # Estimate compressed size (~60% of uncompressed for gzip on database files)
+    estimated_bytes = int(uncompressed_bytes * 0.6)
     estimated_gb = estimated_bytes / (1024**3)
-    status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB uncompressed)...")
+    status(f"Streaming backup to {local_path} (~{estimated_gb:.1f} GB compressed)...")
 
-    # Stream: remote tar | pv (local progress) | local file
-    # Use pv with estimated size (will show ~50% when done due to compression)
+    # Stream: remote tar | gzip | pv (local progress) | local file
     tar_cmd = (
         "cd /root && tar cf - "
         '--exclude=".mirage/tmp" '
@@ -445,37 +457,32 @@ def restore(
                 print("       Example: --image mirage:dev-20260115", file=sys.stderr)
                 sys.exit(1)
 
-        # -------------------------------------------------------------------------
-        # Step 7: Delete node_key.json (ALWAYS - will be regenerated with new P2P identity)
-        # -------------------------------------------------------------------------
-        status("Deleting node_key.json (will be regenerated with new P2P identity)...")
-        run(f"ssh {conn} 'rm -f /root/.mirage/node/config/node_key.json'")
-
-        status("Removing self from persistent_peers...")
-        # Remove any entry matching *@<target_host>:26656
-        run_ssh(
-            conn,
-            f"""
-            CONFIG="/root/.mirage/node/config/config.toml"
-            if [ -f "$CONFIG" ]; then
-                sed -i 's/[^,]*@{target_host}:26656,//g' "$CONFIG"
-                sed -i 's/,[^,]*@{target_host}:26656//g' "$CONFIG"
-                sed -i 's/[^"]*@{target_host}:26656//g' "$CONFIG"
-            fi
-        """,
-        )
-
         if migrate:
             # -------------------------------------------------------------------------
-            # Step 8: Delete identity files (priv_validator_key.json, keyring-*)
-            # Only for --migrate (cross-server restore)
+            # Step 7: Delete identity files for --migrate (cross-server restore)
+            # node_key.json = P2P identity, priv_validator_key.json = validator identity
             # -------------------------------------------------------------------------
             status("Deleting identity files from backup (--migrate mode)...")
+            run(f"ssh {conn} 'rm -f /root/.mirage/node/config/node_key.json'")
             run(f"ssh {conn} 'rm -f /root/.mirage/node/config/priv_validator_key.json'")
             run(f"ssh {conn} 'rm -rf /root/.mirage/node/keyring-*'")
 
+            # Remove target host from persistent_peers (backup may have it as a peer)
+            status("Removing self from persistent_peers...")
+            run_ssh(
+                conn,
+                f"""
+                CONFIG="/root/.mirage/node/config/config.toml"
+                if [ -f "$CONFIG" ]; then
+                    sed -i 's/[^,]*@{target_host}:26656,//g' "$CONFIG"
+                    sed -i 's/,[^,]*@{target_host}:26656//g' "$CONFIG"
+                    sed -i 's/[^"]*@{target_host}:26656//g' "$CONFIG"
+                fi
+            """,
+            )
+
             # -------------------------------------------------------------------------
-            # Step 9: Derive consensus key (one-shot container)
+            # Step 8: Derive consensus key (one-shot container)
             # -------------------------------------------------------------------------
             status("Deriving consensus key from mnemonic...")
             derive_cmd = f"""docker run --rm -i \\
@@ -491,7 +498,7 @@ def restore(
                 input=mnemonic,
             )
         else:
-            status("Keeping identity files from backup (same-server restore)")
+            status("Keeping all identity files from backup (same-server restore)")
 
     # -------------------------------------------------------------------------
     # Step 10: Restore PostgreSQL (temporary container, avoid full entrypoint)
@@ -749,6 +756,9 @@ Examples:
   # Create backup from a server
   %(prog)s backup --source mirage.vote
 
+  # Backup all 4 production servers
+  %(prog)s backup --all
+
   # Restore SAME server using its own backup (no mnemonic needed)
   %(prog)s restore --target mirage.vote --latest
 
@@ -767,7 +777,13 @@ Examples:
 
     # Backup command
     backup_parser = subparsers.add_parser("backup", help="Create backup from a server")
-    backup_parser.add_argument("--source", required=True, help="Source server hostname (e.g., mirage.vote)")
+    backup_source = backup_parser.add_mutually_exclusive_group(required=True)
+    backup_source.add_argument("--source", help="Source server hostname (e.g., mirage.vote)")
+    backup_source.add_argument(
+        "--all",
+        action="store_true",
+        help=f"Backup all 4 production servers: {', '.join(ALL_SERVERS)}",
+    )
     backup_parser.add_argument("--user", default=SSH_USER, help=f"SSH user (default: {SSH_USER})")
 
     # Restore command
@@ -804,7 +820,38 @@ Examples:
     args = parser.parse_args()
 
     if args.command == "backup":
-        backup(args.source, args.user)
+        if args.all:
+            # Backup all 4 servers
+            status(f"Backing up all {len(ALL_SERVERS)} servers: {', '.join(ALL_SERVERS)}")
+            results = []
+            for i, server in enumerate(ALL_SERVERS, 1):
+                print(f"\n{'='*60}")
+                print(f"[{i}/{len(ALL_SERVERS)}] Backing up {server}")
+                print(f"{'='*60}\n")
+                try:
+                    backup_path = backup(server, args.user)
+                    results.append((server, "OK", backup_path))
+                except Exception as e:
+                    print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
+                    results.append((server, "FAILED", str(e)))
+            
+            # Summary
+            print(f"\n{'='*60}")
+            print("Backup Summary")
+            print(f"{'='*60}")
+            for server, status_str, path_or_error in results:
+                if status_str == "OK":
+                    size_gb = path_or_error.stat().st_size / (1024**3)
+                    print(f"  {server}: OK ({size_gb:.2f} GB)")
+                else:
+                    print(f"  {server}: FAILED - {path_or_error}")
+            
+            failed = [r for r in results if r[1] == "FAILED"]
+            if failed:
+                print(f"\n{len(failed)} backup(s) failed!")
+                sys.exit(1)
+        else:
+            backup(args.source, args.user)
     elif args.command == "restore":
         # --migrate requires --file (you must specify which server's backup to use)
         if args.migrate and args.latest:

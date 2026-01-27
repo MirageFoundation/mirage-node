@@ -534,7 +534,7 @@ def check_core_params_exhaustive(core: dict, failures: list[str]) -> dict:
                 for err in tier_errors:
                     failures.append(f"core params.tiers[{i}].{err}")
 
-    print("\n   Bridge chains (attested only, IBC handled separately):")
+    print("\n   Bridge chains (attested only):")
     bridge_chains = core.get("bridge_chains")
     if bridge_chains is None:
         print("   [FAIL] bridge_chains is None")
@@ -767,7 +767,6 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         "MsgSetLevel",
         "MsgUpgradeLevel",
         "MsgSetAutoRenewal",
-        "MsgIBCTransfer",
         "MsgBridgeBurn",
         "MsgBridgeAttestBurned",
         "MsgBridgeAttestBurnedResponse",
