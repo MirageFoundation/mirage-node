@@ -71,7 +71,7 @@ COPY deploy/ /opt/mirage/deploy/
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH=/usr/local/bin:/usr/bin:/bin
+ENV PATH=/opt/mirage/blockchain/bin:/usr/local/bin:/usr/bin:/bin
 ENV PYTHONPATH=/opt/mirage
 ENV BACKEND_HOST=127.0.0.1
 ENV BACKEND_PORT=5000

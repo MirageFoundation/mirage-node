@@ -42,6 +42,7 @@ class QuestDefinition:
     time_spacing_minutes: Optional[int] = None
     min_content_length: Optional[int] = None
     unique_target: bool = False
+    unique_topic: bool = False  # Require unique topics (for topic_explorer quest)
     unique_topics_min: Optional[int] = None
     allow_self: bool = True
     count_vote_changes: bool = False
@@ -233,6 +234,330 @@ class QuestTracker:
                 return q
         return None
     
+    # ==================== Flash Quest Methods ====================
+    
+    def _get_active_flash_quest(self, owner: str, ts: int) -> Optional[dict]:
+        """Get the user's currently active (non-expired, non-completed) flash quest."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT template_id, starts_at, ends_at, progress, progress_meta, last_action_at, completed_at
+                    FROM user_flash_quests
+                    WHERE LOWER(owner) = LOWER(%s)
+                      AND ends_at > %s
+                      AND completed_at IS NULL
+                    ORDER BY starts_at DESC
+                    LIMIT 1
+                    """,
+                    (owner, ts)
+                )
+                row = cur.fetchone()
+                if row:
+                    return {
+                        "template_id": row[0],
+                        "starts_at": row[1],
+                        "ends_at": row[2],
+                        "progress": row[3],
+                        "progress_meta": row[4] if row[4] else {},
+                        "last_action_at": row[5],
+                        "completed_at": row[6],
+                    }
+                return None
+    
+    def _get_next_flash_time(self, owner: str) -> int:
+        """Get the timestamp when user can receive their next flash quest."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)",
+                    (owner,)
+                )
+                row = cur.fetchone()
+                return row[0] if row else 0
+    
+    def _set_next_flash_time(self, owner: str, next_ts: int) -> None:
+        """Set when the user can receive their next flash quest."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_quest_state (owner, next_flash_at)
+                    VALUES (%s, %s)
+                    ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
+                    """,
+                    (owner, next_ts)
+                )
+    
+    def _maybe_assign_flash_quest(self, owner: str, ts: int) -> Optional[dict]:
+        """
+        Assign a flash quest if enough time has passed since the last one.
+        Returns the newly assigned flash quest or None.
+        """
+        if not self.flash_templates:
+            return None
+        
+        # Check if user already has an active flash quest
+        active = self._get_active_flash_quest(owner, ts)
+        if active:
+            return None
+        
+        # Check if enough time has passed
+        next_flash_at = self._get_next_flash_time(owner)
+        if ts < next_flash_at:
+            return None
+        
+        # Select a random flash quest template
+        template = random.choice(self.flash_templates)
+        
+        # Calculate duration based on time_window_minutes (default 60 min)
+        duration_seconds = (template.time_window_minutes or 60) * 60
+        ends_at = ts + duration_seconds
+        
+        # Insert the flash quest
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
+                    VALUES (%s, %s, %s, %s, 0, '{}')
+                    """,
+                    (owner, template.id, ts, ends_at)
+                )
+        
+        # Schedule next flash quest (random interval between MIN and MAX hours)
+        min_hours = settings.FLASH_QUEST_MIN_INTERVAL_HOURS
+        max_hours = settings.FLASH_QUEST_MAX_INTERVAL_HOURS
+        next_interval_seconds = random.randint(min_hours * 3600, max_hours * 3600)
+        self._set_next_flash_time(owner, ts + next_interval_seconds)
+        
+        logger.info(f"Assigned flash quest {template.id} to {owner}, ends at {ends_at}")
+        
+        return {
+            "template_id": template.id,
+            "starts_at": ts,
+            "ends_at": ends_at,
+            "progress": 0,
+            "progress_meta": {},
+            "last_action_at": None,
+            "completed_at": None,
+        }
+    
+    def _get_flash_quest_progress(self, owner: str, starts_at: int) -> QuestProgress:
+        """Get progress for a specific flash quest."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT progress, progress_meta, last_action_at, completed_at
+                    FROM user_flash_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
+                    """,
+                    (owner, starts_at)
+                )
+                row = cur.fetchone()
+                if row:
+                    return QuestProgress(
+                        progress=row[0],
+                        progress_meta=row[1] if row[1] else {},
+                        last_action_at=row[2],
+                        completed_at=row[3]
+                    )
+                return QuestProgress()
+    
+    def _update_flash_quest_progress(
+        self,
+        owner: str,
+        starts_at: int,
+        progress: int,
+        progress_meta: dict,
+        last_action_at: int,
+        completed_at: Optional[int]
+    ) -> None:
+        """Update flash quest progress."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE user_flash_quests
+                    SET progress = %s, progress_meta = %s, last_action_at = %s, completed_at = %s
+                    WHERE LOWER(owner) = LOWER(%s) AND starts_at = %s
+                    """,
+                    (progress, json.dumps(progress_meta), last_action_at, completed_at, owner, starts_at)
+                )
+    
+    def _flash_quest_has_target(self, owner: str, starts_at: int, target: str) -> bool:
+        """Check if target is already counted for this flash quest."""
+        progress = self._get_flash_quest_progress(owner, starts_at)
+        targets = progress.progress_meta.get("targets", [])
+        return target.lower() in [t.lower() for t in targets]
+    
+    def _flash_quest_has_root(self, owner: str, starts_at: int, root_post_id: str) -> bool:
+        """Check if root post is already counted for this flash quest."""
+        progress = self._get_flash_quest_progress(owner, starts_at)
+        roots = progress.progress_meta.get("roots", [])
+        return root_post_id.lower() in [r.lower() for r in roots]
+    
+    def _flash_quest_has_topic(self, owner: str, starts_at: int, topic: str) -> bool:
+        """Check if topic is already counted for this flash quest."""
+        progress = self._get_flash_quest_progress(owner, starts_at)
+        topics = progress.progress_meta.get("unique_topics", [])
+        return topic.lower() in [t.lower() for t in topics]
+    
+    def _increment_flash_progress(
+        self,
+        owner: str,
+        quest: QuestDefinition,
+        flash_data: dict,
+        ts: int,
+        **kwargs
+    ) -> None:
+        """
+        Increment flash quest progress if conditions are met.
+        Similar to _increment_daily_progress but for flash quests.
+        """
+        starts_at = flash_data["starts_at"]
+        progress = self._get_flash_quest_progress(owner, starts_at)
+        
+        # Already completed
+        if progress.completed_at is not None:
+            return
+        
+        # Enforce minimum content length if configured
+        if quest.min_content_length:
+            content_length = kwargs.get("content_length", 0)
+            if content_length < quest.min_content_length:
+                return
+        
+        # Enforce unique root thread for comment quests
+        if quest.unique_root_post:
+            root_post_id = kwargs.get("root_post_id")
+            if root_post_id and self._flash_quest_has_root(owner, starts_at, root_post_id):
+                return
+        
+        # Reject self-target interactions if configured
+        if not quest.allow_self:
+            target_owner = kwargs.get("target_owner")
+            if target_owner and target_owner.lower() == owner.lower():
+                return
+        
+        # Ignore vote changes if configured
+        if not quest.count_vote_changes:
+            vote_is_change = kwargs.get("vote_is_change", False)
+            if vote_is_change:
+                return
+        
+        # Enforce unique targets if configured
+        if quest.unique_target:
+            target = kwargs.get("target")
+            if target and self._flash_quest_has_target(owner, starts_at, target):
+                return
+        
+        # Enforce unique topics if configured (for topic_explorer quest)
+        if quest.unique_topic:
+            topic = kwargs.get("topic")
+            if topic and self._flash_quest_has_topic(owner, starts_at, topic):
+                return
+        
+        # Check time spacing
+        if quest.time_spacing_minutes:
+            if progress.last_action_at:
+                elapsed_minutes = (ts - progress.last_action_at) / 60
+                if elapsed_minutes < quest.time_spacing_minutes:
+                    return
+        
+        # Update progress_meta
+        meta = progress.progress_meta.copy()
+        
+        # Track unique targets
+        if quest.unique_target:
+            target = kwargs.get("target")
+            if target:
+                targets = meta.get("targets", [])
+                targets.append(target.lower())
+                meta["targets"] = targets
+        
+        # Track unique roots
+        if quest.unique_root_post:
+            root_post_id = kwargs.get("root_post_id")
+            if root_post_id:
+                roots = meta.get("roots", [])
+                roots.append(root_post_id.lower())
+                meta["roots"] = roots
+        
+        # Track unique topics (for topic_explorer quest)
+        if quest.unique_topic:
+            topic = kwargs.get("topic")
+            if topic:
+                unique_topics = meta.get("unique_topics", [])
+                unique_topics.append(topic.lower())
+                meta["unique_topics"] = unique_topics
+        
+        # Track unique topics for vote quests
+        if quest.unique_topics_min:
+            target_topic = kwargs.get("target_topic")
+            if target_topic:
+                topics = set(meta.get("topics", []))
+                topics.add(target_topic.lower())
+                meta["topics"] = list(topics)
+        
+        # Increment progress
+        new_progress = progress.progress
+        completed = False
+        
+        if quest.action_type == "balanced_vote":
+            vote_direction = kwargs.get("vote_direction", 0)
+            if vote_direction > 0:
+                meta["upvotes"] = meta.get("upvotes", 0) + 1
+            elif vote_direction < 0:
+                meta["downvotes"] = meta.get("downvotes", 0) + 1
+            
+            new_progress = meta.get("upvotes", 0) + meta.get("downvotes", 0)
+            completed = (
+                meta.get("upvotes", 0) >= (quest.target_upvotes or 0) and
+                meta.get("downvotes", 0) >= (quest.target_downvotes or 0)
+            )
+        else:
+            new_progress = progress.progress + 1
+            completed = new_progress >= quest.target_count
+            
+            if quest.unique_topics_min:
+                if len(meta.get("topics", [])) < quest.unique_topics_min:
+                    completed = False
+        
+        # Update progress
+        self._update_flash_quest_progress(
+            owner,
+            starts_at,
+            new_progress,
+            meta,
+            ts,
+            ts if completed else None
+        )
+        
+        logger.info(f"Flash quest progress: {owner} {quest.id} {new_progress}/{quest.target_count}")
+        
+        # Add rewards if completed
+        if completed:
+            for reward in quest.rewards:
+                reward_type = reward.get("type", "mirage")
+                if reward_type == "mirage":
+                    # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
+                    amount_umirage = reward.get("amount", 0) * 1_000_000
+                    reward_data = {"amount": amount_umirage}
+                else:
+                    reward_data = {"id": reward.get("id")}
+                
+                self._add_pending_reward(
+                    owner,
+                    reward_type,
+                    reward_data,
+                    f"flash:{quest.id}",
+                    ts
+                )
+            
+            logger.info(f"Flash quest completed: {owner} finished {quest.id}")
+    
     def _add_pending_reward(
         self,
         owner: str,
@@ -264,6 +589,12 @@ class QuestTracker:
         progress = self._get_daily_quest_progress(owner, quest_id, day_utc)
         roots = progress.progress_meta.get("roots", [])
         return root_post_id.lower() in [r.lower() for r in roots]
+    
+    def _quest_has_topic(self, owner: str, quest_id: str, day_utc: int, topic: str) -> bool:
+        """Check if topic is already counted for this quest/day."""
+        progress = self._get_daily_quest_progress(owner, quest_id, day_utc)
+        topics = progress.progress_meta.get("unique_topics", [])
+        return topic.lower() in [t.lower() for t in topics]
     
     def _increment_daily_progress(
         self,
@@ -310,6 +641,12 @@ class QuestTracker:
             if target and self._quest_has_target(owner, quest.id, day_utc, target):
                 return
         
+        # Enforce unique topics if configured (for topic_explorer quest)
+        if quest.unique_topic:
+            topic = kwargs.get("topic")
+            if topic and self._quest_has_topic(owner, quest.id, day_utc, topic):
+                return
+        
         # Check time spacing
         if quest.time_spacing_minutes:
             if progress.last_action_at:
@@ -335,6 +672,14 @@ class QuestTracker:
                 roots = meta.get("roots", [])
                 roots.append(root_post_id.lower())
                 meta["roots"] = roots
+        
+        # Track unique topics (for topic_explorer quest)
+        if quest.unique_topic:
+            topic = kwargs.get("topic")
+            if topic:
+                unique_topics = meta.get("unique_topics", [])
+                unique_topics.append(topic.lower())
+                meta["unique_topics"] = unique_topics
         
         # Track unique topics for vote quests
         if quest.unique_topics_min:
@@ -388,7 +733,9 @@ class QuestTracker:
             for reward in quest.rewards:
                 reward_type = reward.get("type", "mirage")
                 if reward_type == "mirage":
-                    reward_data = {"amount": reward.get("amount", 0)}
+                    # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
+                    amount_umirage = reward.get("amount", 0) * 1_000_000
+                    reward_data = {"amount": amount_umirage}
                 else:
                     reward_data = {"id": reward.get("id")}
                 
@@ -460,7 +807,9 @@ class QuestTracker:
             for reward in achievement.rewards:
                 reward_type = reward.get("type", "mirage")
                 if reward_type == "mirage":
-                    reward_data = {"amount": reward.get("amount", 0)}
+                    # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
+                    amount_umirage = reward.get("amount", 0) * 1_000_000
+                    reward_data = {"amount": amount_umirage}
                 else:
                     reward_data = {"id": reward.get("id")}
                 
@@ -509,7 +858,12 @@ class QuestTracker:
                 if quest and quest.action_type == action_type:
                     self._increment_daily_progress(owner, quest, day_utc, ts, **kwargs)
             
-            # TODO: Handle flash quests
+            # Handle flash quests
+            flash_data = self._get_active_flash_quest(owner, ts)
+            if flash_data:
+                flash_quest = self._get_quest_by_id(flash_data["template_id"])
+                if flash_quest and flash_quest.action_type == action_type:
+                    self._increment_flash_progress(owner, flash_quest, flash_data, ts, **kwargs)
         
         # Process achievements
         if settings.ACHIEVEMENTS_ENABLED:
@@ -587,9 +941,38 @@ class QuestTracker:
         seconds_into_day = ts % 86400
         seconds_until_reset = 86400 - seconds_into_day
         
+        # Get flash quest (may assign one if eligible)
+        flash_quest_data = None
+        flash_data = self._get_active_flash_quest(owner, ts)
+        if not flash_data:
+            # Try to assign a new flash quest
+            flash_data = self._maybe_assign_flash_quest(owner, ts)
+        
+        if flash_data:
+            template = self._get_quest_by_id(flash_data["template_id"])
+            if template:
+                # Calculate target
+                if template.action_type == "balanced_vote":
+                    target = (template.target_upvotes or 0) + (template.target_downvotes or 0)
+                else:
+                    target = template.target_count
+                
+                flash_quest_data = {
+                    "id": template.id,
+                    "title": template.title,
+                    "description": template.description,
+                    "progress": flash_data["progress"],
+                    "target": target,
+                    "completed": flash_data["completed_at"] is not None,
+                    "rewards": template.rewards,
+                    "starts_at": flash_data["starts_at"],
+                    "ends_at": flash_data["ends_at"],
+                    "seconds_remaining": max(0, flash_data["ends_at"] - ts),
+                }
+        
         return {
             "daily_quests": daily_quests,
-            "flash_quest": None,  # TODO: Implement flash quests
+            "flash_quest": flash_quest_data,
             "achievements": achievements,
             "seconds_until_reset": seconds_until_reset,
         }
