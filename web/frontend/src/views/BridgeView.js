@@ -2023,11 +2023,13 @@ export default function BridgeView({ state }) {
     }, [selectedNetwork, chainConfigs]);
 
     // Derive the user's address on the destination chain (for Cosmos chains)
+    // Note: Currently unused as only Solana bridge remains (different key derivation)
     const derivedAddress = useMemo(() => {
         if (!address || !selectedNetwork?.canDerive || !selectedNetwork?.addressPrefix) {
             return null;
         }
-        return convertBech32Prefix(address, selectedNetwork.addressPrefix);
+        // Cosmos address derivation removed with IBC/Osmosis (v1.10.0)
+        return null;
     }, [address, selectedNetwork]);
 
     // The effective destination address (derived or manual)
