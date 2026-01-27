@@ -194,8 +194,8 @@ const InviteOnlyHeroButtons = styled.div`
 
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.2);
+    background: #2C3246;
+    border: 1px solid #4F679B;
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
@@ -214,6 +214,27 @@ const InviteOnlyBanner = styled.div`
 `;
 
 const InviteBannerContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1;
+    min-width: 0;
+`;
+
+const InviteBannerContentWrapper = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+`;
+
+const InviteBannerTextContent = styled.div`
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
@@ -2577,24 +2598,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     <HomeFeedInfoTitle>
                                         <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Exclusive Beta Community
                                     </HomeFeedInfoTitle>
-                                    <HomeFeedModeInline>
-                                        {!inviteBannerCollapsed && (
-                                            <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
-                                                {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
-                                            </InviteBannerButton>
-                                        )}
-                                        <CollapseButton onClick={toggleInviteBanner}>
-                                            {inviteBannerCollapsed ? 'Show' : 'Hide'}
-                                        </CollapseButton>
-                                    </HomeFeedModeInline>
+                                    <CollapseButton onClick={toggleInviteBanner}>
+                                        {inviteBannerCollapsed ? 'Show' : 'Hide'}
+                                    </CollapseButton>
                                 </HomeFeedHeaderRow>
                                 {!inviteBannerCollapsed && (
-                                    <HomeFeedInfoDescription>
-                                        Mirage is now invite-only — because great conversations require great people!
-                                        {' '}{availableCodeCount > 0
-                                            ? "But don't fret, we've given you some invite codes for your friends. Use them wisely."
-                                            : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
-                                    </HomeFeedInfoDescription>
+                                    <InviteBannerContentWrapper>
+                                        <InviteBannerTextContent>
+                                            <HomeFeedInfoDescription>
+                                                Mirage is now invite-only — because great conversations require great people!
+                                                {' '}{availableCodeCount > 0
+                                                    ? "But don't fret, we've given you some invite codes for your friends. Use them wisely."
+                                                    : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
+                                            </HomeFeedInfoDescription>
+                                        </InviteBannerTextContent>
+                                        <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
+                                            {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
+                                        </InviteBannerButton>
+                                    </InviteBannerContentWrapper>
                                 )}
                             </InviteOnlyBanner>
                         )}
