@@ -82,14 +82,19 @@ export function useQuests() {
 
             // Fetch flash quest
             const flashResponse = await Api.get('/quests/flash', { owner: userAddress });
+            console.log('[useQuests] Flash quest response:', flashResponse);
             if (!flashResponse.suspended && flashResponse.flash_quest) {
                 const newFlash = flashResponse.flash_quest;
+                console.log('[useQuests] New flash quest data:', newFlash);
                 // Merge flash quest updates
                 setFlashQuest(prev => {
+                    console.log('[useQuests] Previous flash quest:', prev);
                     if (!prev || prev.id !== newFlash.id) {
+                        console.log('[useQuests] Flash quest replaced (different ID)');
                         return newFlash;
                     }
                     // Same flash quest, update progress/completed/seconds_remaining
+                    console.log('[useQuests] Flash quest merged - progress:', prev.progress, '->', newFlash.progress);
                     return {
                         ...prev,
                         progress: newFlash.progress,
@@ -117,9 +122,15 @@ export function useQuests() {
         const interval = setInterval(() => fetchQuests(true), 5 * 60 * 1000);
 
         // Listen for quest-relevant actions (votes, posts, comments) to refresh progress
-        const handleQuestAction = () => {
+        const handleQuestAction = (e) => {
+            console.log('[useQuests] questActionCompleted event received:', e?.detail);
             // Delay refresh to give the indexer time to process the action
-            setTimeout(() => fetchQuests(true), 3000);
+            // Use shorter delay (1.5s) for faster UI feedback
+            setTimeout(async () => {
+                console.log('[useQuests] Refreshing quests after action...');
+                await fetchQuests(true);
+                console.log('[useQuests] Quest refresh complete');
+            }, 1500);
         };
         window.addEventListener('questActionCompleted', handleQuestAction);
 
@@ -264,7 +275,7 @@ export function usePendingRewards() {
         // Listen for quest-relevant actions (votes, posts, comments) to refresh rewards
         const handleQuestAction = () => {
             // Delay refresh to give the indexer time to process the action
-            setTimeout(fetchRewards, 3000);
+            setTimeout(fetchRewards, 1500);
         };
         window.addEventListener('questActionCompleted', handleQuestAction);
 

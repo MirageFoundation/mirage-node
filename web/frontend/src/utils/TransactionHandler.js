@@ -3448,6 +3448,7 @@ class TransactionHandler {
                     // Dispatch event for quest-relevant actions so quest progress can refresh
                     const action = transaction?.action;
                     if (action === 'create_vote' || action === 'create_post' || action === 'create_comment') {
+                        console.log('[TransactionHandler] Dispatching questActionCompleted for action:', action);
                         window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { action, txHash } }));
                     }
                 } else {
