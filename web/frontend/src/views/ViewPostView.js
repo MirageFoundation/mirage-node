@@ -890,15 +890,19 @@ function ViewPostView({ state, updatePost }) {
     const [blockSuccess, setBlockSuccess] = useState('');
     const [isBlocking, setIsBlocking] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(null);
-    const [confirmBlockUser, setConfirmBlockUser] = useState(null);
+    const [confirmBlockUser, setConfirmBlockUser] = useState(null); // { userId, postId }
     const [confirmDeletePost, setConfirmDeletePost] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteMessages, setDeleteMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [deletedPosts, setDeletedPosts] = useState(new Set()); // Track successfully deleted posts to hide them
-    const [confirmDonate, setConfirmDonate] = useState(null);
-    const [donateAmount, setDonateAmount] = useState("1.000");
+    const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(null); // { userId, postId }
+    const [isSuspending, setIsSuspending] = useState(false);
+    const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
+    const [suspendSuccess, setSuspendSuccess] = useState({}); // { postId: message }
+    const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
+    const [donateAmount, setDonateAmount] = useState("1");
     const [isDonating, setIsDonating] = useState(false);
-    const [donateMessages, setDonateMessages] = useState({}); // { userId: { type: 'success'|'error', message: string } }
+    const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
     const [confirmReportPost, setConfirmReportPost] = useState(null);
     const [reportReason, setReportReason] = useState("");
     const [isReporting, setIsReporting] = useState(false);
@@ -1365,7 +1369,7 @@ function ViewPostView({ state, updatePost }) {
         clearBlockMessages();
     };
 
-    const handleBlockUser = (userAddress) => {
+    const handleBlockUser = (userAddress, postId) => {
         if (!userAddress) {
             showBlockError("Invalid user address");
             return;
@@ -1375,13 +1379,13 @@ function ViewPostView({ state, updatePost }) {
         setConfirmReportPost(null);
         setConfirmDeletePost(null);
         setConfirmDonate(null);
-        setConfirmBlockUser(userAddress);
+        setConfirmBlockUser({ userId: userAddress, postId });
         // Close reply box for root (if any)
         try { if (root && root.post_id) updatePost(root.post_id, { replyOpen: false }); } catch (_) { }
     };
 
     const confirmBlockUserAction = async () => {
-        const userAddress = confirmBlockUser;
+        const userAddress = confirmBlockUser?.userId;
         setConfirmBlockUser(null);
         setIsBlocking(true);
 
@@ -1540,6 +1544,61 @@ function ViewPostView({ state, updatePost }) {
         clearBlockMessages();
     };
 
+    const handleSuspendFromQuests = (userId, postId) => {
+        if (!userId) return;
+        clearBlockMessages();
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmDeletePost(null);
+        setConfirmReportPost(null);
+        setConfirmDonate(null);
+        setConfirmSuspendQuests({ userId, postId });
+    };
+
+    const confirmSuspendFromQuests = async () => {
+        const userId = confirmSuspendQuests?.userId;
+        const postId = confirmSuspendQuests?.postId;
+        if (!userId) return;
+        const adminAddress = state.publicKey;
+        if (!adminAddress) return;
+        
+        setIsSuspending(true);
+        try {
+            const response = await Api.post('/admin/rewards/suspend', {
+                admin: adminAddress,
+                target: userId,
+                duration_days: suspendDuration,  // 0 = permanent
+                reason: 'Attempting to game the quest system',
+            });
+            if (response.success) {
+                const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
+                setConfirmSuspendQuests(null);
+                if (postId) {
+                    setSuspendSuccess(prev => ({ ...prev, [postId]: `User suspended from quests ${durationText}` }));
+                }
+                setTimeout(() => {
+                    setSuspendSuccess(prev => {
+                        const updated = { ...prev };
+                        if (postId) delete updated[postId];
+                        return updated;
+                    });
+                }, 4000);
+            } else {
+                alert(`Failed to suspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmSuspendQuests(null);
+            }
+        } catch (err) {
+            alert(`Error suspending user: ${err.message || 'Unknown error'}`);
+            setConfirmSuspendQuests(null);
+        }
+        setIsSuspending(false);
+        setSuspendDuration(7); // Reset to default
+    };
+
+    const cancelSuspendFromQuests = () => {
+        setConfirmSuspendQuests(null);
+    };
+
     const handleDonate = (userAddress, postId) => {
         if (!userAddress) {
             return;
@@ -1548,9 +1607,10 @@ function ViewPostView({ state, updatePost }) {
         setConfirmBlockUser(null);
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
-        setConfirmDonate(userAddress);
+        setConfirmSuspendQuests(null);
+        setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
-        setDonateAmount("1.000"); // Reset to default
+        setDonateAmount("1"); // Reset to default
     };
 
     const openEdit = (post) => {
@@ -1617,23 +1677,26 @@ function ViewPostView({ state, updatePost }) {
     };
 
     const confirmDonateAction = async () => {
-        const userAddress = confirmDonate;
+        const userAddress = confirmDonate?.userId;
+        const postId = confirmDonate?.postId;
         setConfirmDonate(null);
         setIsDonating(true);
 
-        const amount = parseFloat(donateAmount);
+        const amount = parseInt(String(donateAmount || "").replace(/[^\d]/g, ""), 10);
         if (isNaN(amount) || amount <= 0) {
-            setDonateMessages(prev => ({
-                ...prev,
-                [userAddress]: { type: 'error', message: 'Invalid amount' }
-            }));
-            setTimeout(() => {
-                setDonateMessages(prev => {
-                    const updated = { ...prev };
-                    delete updated[userAddress];
-                    return updated;
-                });
-            }, 5000);
+            if (postId) {
+                setDonateMessages(prev => ({
+                    ...prev,
+                    [postId]: { type: 'error', message: 'Invalid amount' }
+                }));
+                setTimeout(() => {
+                    setDonateMessages(prev => {
+                        const updated = { ...prev };
+                        delete updated[postId];
+                        return updated;
+                    });
+                }, 5000);
+            }
             setIsDonating(false);
             return;
         }
@@ -1641,43 +1704,49 @@ function ViewPostView({ state, updatePost }) {
         try {
             const result = await tx.sendTokens(userAddress, amount);
             if (result.success) {
-                setDonateMessages(prev => ({
-                    ...prev,
-                    [userAddress]: { type: 'success', message: `Successfully sent ${amount} MIRAGE!` }
-                }));
-                setTimeout(() => {
-                    setDonateMessages(prev => {
-                        const updated = { ...prev };
-                        delete updated[userAddress];
-                        return updated;
-                    });
-                }, 5000);
+                if (postId) {
+                    setDonateMessages(prev => ({
+                        ...prev,
+                        [postId]: { type: 'success', message: `Successfully sent ${amount} MIRAGE!` }
+                    }));
+                    setTimeout(() => {
+                        setDonateMessages(prev => {
+                            const updated = { ...prev };
+                            delete updated[postId];
+                            return updated;
+                        });
+                    }, 5000);
+                }
             } else {
+                if (postId) {
+                    setDonateMessages(prev => ({
+                        ...prev,
+                        [postId]: { type: 'error', message: `Failed: ${result.error}` }
+                    }));
+                    setTimeout(() => {
+                        setDonateMessages(prev => {
+                            const updated = { ...prev };
+                            delete updated[postId];
+                            return updated;
+                        });
+                    }, 5000);
+                }
+            }
+        } catch (error) {
+            console.error("Donate error:", error);
+            if (postId) {
                 setDonateMessages(prev => ({
                     ...prev,
-                    [userAddress]: { type: 'error', message: `Failed: ${result.error}` }
+                    [postId]: { type: 'error', message: `Error: ${error.message || error}` }
                 }));
                 setTimeout(() => {
                     setDonateMessages(prev => {
                         const updated = { ...prev };
-                        delete updated[userAddress];
+                        delete updated[postId];
                         return updated;
                     });
                 }, 5000);
             }
-        } catch (error) {
-            console.error("Donate error:", error);
-            setDonateMessages(prev => ({
-                ...prev,
-                [userAddress]: { type: 'error', message: `Error: ${error.message || error}` }
-            }));
-            setTimeout(() => {
-                setDonateMessages(prev => {
-                    const updated = { ...prev };
-                    delete updated[userAddress];
-                    return updated;
-                });
-            }, 5000);
         } finally {
             setIsDonating(false);
         }
@@ -1688,8 +1757,15 @@ function ViewPostView({ state, updatePost }) {
     };
 
     const handleDonateAmountChange = (value) => {
-        setDonateAmount(value);
+        setDonateAmount(String(value || '').replace(/[^\d]/g, ""));
     };
+
+    const formatDonateAmount = (value) => {
+        const digits = String(value || "").replace(/[^\d]/g, "");
+        if (!digits) return "";
+        return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    };
+
 
     // Recursively find all descendant post IDs of a given post
     const findAllDescendantPostIds = (postId, commentsTree) => {
@@ -2117,6 +2193,13 @@ function ViewPostView({ state, updatePost }) {
                             }, 100);
                         }
                     }
+                    // Auto-open donate dialog if donate query parameter is present
+                    const shouldDonate = params.get('donate') === 'true';
+                    if (shouldDonate && data.root && data.root.user_id) {
+                        setTimeout(() => {
+                            setConfirmDonate(data.root.user_id);
+                        }, 100);
+                    }
                     // Do not auto-open reply; user explicitly opens when needed
                 })
                 .catch((error) => {
@@ -2498,7 +2581,7 @@ function ViewPostView({ state, updatePost }) {
                 </BlockConfirmMessage>
             );
         }
-        if (confirmBlockUser === post.user_id) {
+        if (confirmBlockUser?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
                     <span>⚠ Confirm block user? This will hide all their posts and comments.</span>
@@ -2515,7 +2598,7 @@ function ViewPostView({ state, updatePost }) {
             const isComment = post.target && post.target !== '';
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm delete {isComment ? 'comment' : 'post'}? This action cannot be undone.</span>
+                    <span>⚠ Confirm delete {isComment ? 'comment' : 'post'}?</span>
                     <ConfirmButtons>
                         <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
                             Delete
@@ -2523,6 +2606,53 @@ function ViewPostView({ state, updatePost }) {
                         <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
                     </ConfirmButtons>
                 </BlockConfirmMessage>
+            );
+        }
+
+        if (confirmSuspendQuests?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
+                        <select
+                            value={suspendDuration}
+                            onChange={(e) => setSuspendDuration(Number(e.target.value))}
+                            style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #d97706', background: '#fef3c7', color: '#92400e', fontWeight: 500 }}
+                        >
+                            <option value={1}>1 day</option>
+                            <option value={3}>3 days</option>
+                            <option value={7}>7 days</option>
+                            <option value={30}>30 days</option>
+                            <option value={0}>Permanent</option>
+                        </select>
+                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
+                                {isSuspending ? 'Suspending...' : 'Suspend'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
+        if (suspendSuccess[post.post_id]) {
+            return (
+                <div style={{
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px solid #22c55e',
+                    borderRadius: '3px',
+                    padding: '0.75rem 1rem',
+                    margin: '0.5rem 0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    color: '#16a34a',
+                    fontSize: '0.8rem',
+                }}>
+                    <span>✓</span>
+                    {suspendSuccess[post.post_id]}
+                </div>
             );
         }
 
@@ -2547,36 +2677,55 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
-        if (confirmDonate === post.user_id) {
+        if (confirmDonate?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>Send MIRAGE to {post.username || post.user_id.substring(0, 12) + '...'}:</span>
-                    <div style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
-                        <input
-                            type="text"
-                            value={donateAmount}
-                            onChange={(e) => handleDonateAmountChange(e.target.value)}
-                            placeholder="1.000"
-                            style={{
-                                padding: '0.25rem',
-                                fontSize: '0.8rem',
-                                width: '8rem',
-                                marginRight: '0.5rem',
-                            }}
-                        />
-                        <span style={{ fontSize: '0.75rem' }}>MIRAGE</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
+                        <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            Send MIRAGE to {post.username || post.user_id.substring(0, 12) + '...'}
+                        </span>
+                        <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            background: 'rgba(255, 255, 255, 0.6)',
+                            border: '1px solid rgba(148, 163, 184, 0.55)',
+                            borderRadius: '8px',
+                            padding: '0.2rem 0.5rem',
+                            minWidth: '6.5rem',
+                        }}>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                value={formatDonateAmount(donateAmount)}
+                                onChange={(e) => handleDonateAmountChange(e.target.value)}
+                                placeholder="1,000"
+                                style={{
+                                    flex: 1,
+                                    minWidth: '4rem',
+                                    background: 'transparent',
+                                    border: 'none',
+                                    outline: 'none',
+                                    color: 'inherit',
+                                    fontSize: '0.8rem',
+                                    fontWeight: 700,
+                                    textAlign: 'right',
+                                }}
+                            />
+                            <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
+                        </div>
+                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
+                                {isDonating ? 'Sending...' : 'Send'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
+                        </ConfirmButtons>
                     </div>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
-                            Send
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
-                    </ConfirmButtons>
                 </BlockConfirmMessage>
             );
         }
 
-        const donateMsg = donateMessages[post.user_id];
+        const donateMsg = donateMessages[post.post_id];
         if (donateMsg) {
             return (
                 <>
@@ -2750,13 +2899,16 @@ function ViewPostView({ state, updatePost }) {
                                         : (isFollowingThisAuthor ? 'Unfollow user' : 'Follow user')}
                                 </MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
-                                <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id); }} data-danger="true">Block user</MenuItem>
+                                <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>
                                 {!isAdmin && (
                                     <MenuItem onClick={() => { setOpenMenuId(null); handleReport(post.post_id); }}>Report</MenuItem>
                                 )}
                                 {isAdmin && (
-                                    <MenuItem onClick={() => { setOpenMenuId(null); handleDeletePost(post.post_id); }} data-danger="true">🛡️ Admin delete</MenuItem>
+                                    <>
+                                        <MenuItem onClick={() => { setOpenMenuId(null); handleDeletePost(post.post_id); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
+                                        <MenuItem onClick={() => { setOpenMenuId(null); handleSuspendFromQuests(post.user_id, post.post_id); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                    </>
                                 )}
                             </>
                         )}

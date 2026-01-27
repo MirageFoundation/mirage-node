@@ -607,6 +607,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         loading: questsLoading,
         error: questsError,
         suspended: questsSuspended,
+        suspensionInfo: questsSuspensionInfo,
         disabled: questsDisabled,
         refresh: refreshQuests,
     } = useQuests();
@@ -730,18 +731,13 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         );
     }
 
-    // If suspended, show a banner
+    // If suspended, show suspension message
     if (questsSuspended) {
         return (
             <QuestCardContainer $size={size}>
                 <QuestHeader>
                     <QuestTitle>
-                        <span>🚀</span> Daily Quests
-                        {collapsed && (
-                            <span style={{ fontWeight: 'normal' }}>
-                                {' '}— None available
-                            </span>
-                        )}
+                        <span>🚫</span> Quests Suspended
                     </QuestTitle>
                     {onToggleCollapse && (
                         <CollapseButton onClick={onToggleCollapse}>
@@ -750,7 +746,22 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     )}
                 </QuestHeader>
                 {!collapsed && (
-                    <EmptyState>Rewards suspended</EmptyState>
+                    <SuspendedBanner>
+                        <div style={{ fontWeight: 700, marginBottom: '0.3rem' }}>
+                            Your quest rewards have been suspended
+                        </div>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 600 }}>
+                            Reason: Attempting to game the system
+                        </div>
+                        {questsSuspensionInfo?.suspended_until && (
+                            <div style={{ fontSize: '0.6rem', fontWeight: 600, marginTop: '0.2rem' }}>
+                                {questsSuspensionInfo.suspended_until > 4000000000 
+                                    ? 'Permanent suspension'
+                                    : `Until: ${new Date(questsSuspensionInfo.suspended_until * 1000).toISOString().replace('T', ' ').replace('Z', 'Z')}`
+                                }
+                            </div>
+                        )}
+                    </SuspendedBanner>
                 )}
             </QuestCardContainer>
         );

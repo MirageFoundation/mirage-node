@@ -19,6 +19,7 @@ export function useQuests() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [suspended, setSuspended] = useState(false);
+    const [suspensionInfo, setSuspensionInfo] = useState(null);
     const [disabled, setDisabled] = useState(false);
     const [initialLoadDone, setInitialLoadDone] = useState(false);
 
@@ -53,6 +54,7 @@ export function useQuests() {
             
             if (dailyResponse.suspended) {
                 setSuspended(true);
+                setSuspensionInfo(dailyResponse.suspension || null);
                 setDailyQuests([]);
                 setFlashQuest(null);
             } else {
@@ -177,6 +179,7 @@ export function useQuests() {
         loading,
         error,
         suspended,
+        suspensionInfo,
         disabled,
         refresh: fetchQuests,
     };
