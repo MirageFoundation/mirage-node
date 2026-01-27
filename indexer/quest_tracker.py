@@ -218,7 +218,7 @@ class QuestTracker:
                         (owner, day_utc, quest_id)
                     )
         
-        logger.debug(f"Assigned daily quests {quest_ids} to {owner} for day {day_utc}")
+        logger.info(f"Assigned daily quests {quest_ids} to {owner} for day {day_utc}")
         return quest_ids
     
     def _get_quest_by_id(self, quest_id: str) -> Optional[QuestDefinition]:
@@ -419,44 +419,53 @@ class QuestTracker:
         starts_at = flash_data["starts_at"]
         progress = self._get_flash_quest_progress(owner, starts_at)
         
+        logger.info(f"_increment_flash_progress: quest={quest.id}, progress={progress.progress}/{quest.target_count}, kwargs={kwargs}")
+        
         # Already completed
         if progress.completed_at is not None:
+            logger.info(f"Flash quest {quest.id} already completed")
             return
         
         # Enforce minimum content length if configured
         if quest.min_content_length:
             content_length = kwargs.get("content_length", 0)
             if content_length < quest.min_content_length:
+                logger.info(f"Flash quest {quest.id} rejected: content_length {content_length} < {quest.min_content_length}")
                 return
         
         # Enforce unique root thread for comment quests
         if quest.unique_root_post:
             root_post_id = kwargs.get("root_post_id")
             if root_post_id and self._flash_quest_has_root(owner, starts_at, root_post_id):
+                logger.info(f"Flash quest {quest.id} rejected: duplicate root_post_id {root_post_id}")
                 return
         
         # Reject self-target interactions if configured
         if not quest.allow_self:
             target_owner = kwargs.get("target_owner")
             if target_owner and target_owner.lower() == owner.lower():
+                logger.info(f"Flash quest {quest.id} rejected: self-interaction (owner={owner})")
                 return
         
         # Ignore vote changes if configured
         if not quest.count_vote_changes:
             vote_is_change = kwargs.get("vote_is_change", False)
             if vote_is_change:
+                logger.info(f"Flash quest {quest.id} rejected: vote_is_change=True")
                 return
         
         # Enforce unique targets if configured
         if quest.unique_target:
             target = kwargs.get("target")
             if target and self._flash_quest_has_target(owner, starts_at, target):
+                logger.info(f"Flash quest {quest.id} rejected: duplicate target {target}")
                 return
         
         # Enforce unique topics if configured (for topic_explorer quest)
         if quest.unique_topic:
             topic = kwargs.get("topic")
             if topic and self._flash_quest_has_topic(owner, starts_at, topic):
+                logger.info(f"Flash quest {quest.id} rejected: duplicate topic {topic}")
                 return
         
         # Check time spacing
@@ -464,6 +473,7 @@ class QuestTracker:
             if progress.last_action_at:
                 elapsed_minutes = (ts - progress.last_action_at) / 60
                 if elapsed_minutes < quest.time_spacing_minutes:
+                    logger.info(f"Flash quest {quest.id} rejected: time_spacing {elapsed_minutes:.1f}m < {quest.time_spacing_minutes}m")
                     return
         
         # Update progress_meta
@@ -862,8 +872,11 @@ class QuestTracker:
             flash_data = self._get_active_flash_quest(owner, ts)
             if flash_data:
                 flash_quest = self._get_quest_by_id(flash_data["template_id"])
+                logger.info(f"Flash quest check: template={flash_data['template_id']}, quest_action={flash_quest.action_type if flash_quest else 'None'}, incoming_action={action_type}")
                 if flash_quest and flash_quest.action_type == action_type:
                     self._increment_flash_progress(owner, flash_quest, flash_data, ts, **kwargs)
+                elif flash_quest:
+                    logger.info(f"Flash quest action mismatch: expected {flash_quest.action_type}, got {action_type}")
         
         # Process achievements
         if settings.ACHIEVEMENTS_ENABLED:

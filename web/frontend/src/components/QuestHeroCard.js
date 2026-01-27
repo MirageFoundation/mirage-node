@@ -538,6 +538,10 @@ function getQuestRequirements(quest) {
     if (quest.quality_threshold) {
         reqs.push(`Needs ${quest.quality_threshold}+ upvotes`);
     }
+    // For vote quests, show if vote changes don't count
+    if (quest.action_type === 'vote' && quest.count_vote_changes === false) {
+        reqs.push('New votes only (changes don\'t count)');
+    }
     return reqs;
 }
 
@@ -809,7 +813,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
                 {!collapsed && (
                     <QuestList>
-                        {dailyQuests.map(quest => (
+                        {dailyQuests.filter(q => !q.completed).map(quest => (
                             <QuestItem key={quest.id} $completed={quest.completed}>
                                 <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
                                 <QuestDetails>
@@ -858,8 +862,8 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </QuestItem>
                         ))}
 
-                        {/* Flash quest if active */}
-                        {flashQuest && flashQuest.seconds_remaining > 0 && (
+                        {/* Flash quest if active and not completed */}
+                        {flashQuest && flashQuest.seconds_remaining > 0 && !flashQuest.completed && (
                             <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
                                 <QuestIcon>⚡</QuestIcon>
                                 <QuestDetails>

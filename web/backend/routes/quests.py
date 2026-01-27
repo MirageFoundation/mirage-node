@@ -259,6 +259,7 @@ def get_daily_quests():
                 "unique_target": quest_def.get("unique_target"),
                 "unique_topics_min": quest_def.get("unique_topics_min"),
                 "quality_threshold": quest_def.get("quality_threshold"),
+                "count_vote_changes": quest_def.get("count_vote_changes", True),
             })
         
         multiplier = _get_user_reward_multiplier(owner, ts)
@@ -362,6 +363,7 @@ def get_flash_quests():
             "unique_target": quest_def.get("unique_target"),
             "unique_topics_min": quest_def.get("unique_topics_min"),
             "quality_threshold": quest_def.get("quality_threshold"),
+            "count_vote_changes": quest_def.get("count_vote_changes", True),
         }
         
         log_event(rid, "quests.flash.ok", owner=owner, template_id=template_id)

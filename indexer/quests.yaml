@@ -95,6 +95,81 @@ daily_quests:
         amount: 1000
 
 flash_quest_templates:
+  # Easy quests (small payouts, quick to complete)
+  - id: quick_vote
+    title: "Quick Vote"
+    description: "Vote on 3 different posts in the next 10 minutes"
+    action_type: vote
+    target_count: 3
+    time_window_minutes: 10
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 200
+
+  - id: first_comment
+    title: "First Comment"
+    description: "Leave a comment in the next 5 minutes"
+    action_type: comment
+    target_count: 1
+    time_window_minutes: 5
+    min_content_length: 20
+    rewards:
+      - type: mirage
+        amount: 100
+
+  - id: speed_voter
+    title: "Speed Voter"
+    description: "Vote on 5 different posts in the next 15 minutes"
+    action_type: vote
+    target_count: 5
+    time_window_minutes: 15
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 200
+
+  - id: quick_post
+    title: "Quick Post"
+    description: "Create a post in the next 10 minutes"
+    action_type: post
+    target_count: 1
+    time_window_minutes: 10
+    min_content_length: 50
+    rewards:
+      - type: mirage
+        amount: 250
+
+  - id: mini_commenter
+    title: "Mini Commenter"
+    description: "Leave 3 comments in the next 20 minutes"
+    action_type: comment
+    target_count: 3
+    time_window_minutes: 20
+    min_content_length: 15
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 450
+
+  - id: double_vote
+    title: "Double Vote"
+    description: "Vote on 2 different posts in the next 5 minutes"
+    action_type: vote
+    target_count: 2
+    time_window_minutes: 5
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 100
+
+  # Medium quests (moderate payouts)
   - id: comment_blitz
     title: "Comment Blitz"
     description: "Create 5 lengthy comments in the next hour, each 10 minutes apart"
@@ -111,7 +186,7 @@ flash_quest_templates:
 
   - id: voting_spree
     title: "Voting Spree"
-    description: "Vote on 15 posts in the next 3 hours, each at least 5 minutes apart"
+    description: "Vote on 15 different posts in the next 3 hours"
     action_type: vote
     target_count: 15
     time_window_minutes: 180

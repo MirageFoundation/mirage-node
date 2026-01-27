@@ -7,7 +7,7 @@ Configuration (via environment variables):
 - REWARDS_POOL_ADDRESS: The address holding reward tokens
 - PAYOUTS_ENABLED: Set to "true" to enable actual token transfers (default: false)
 
-In dry-run mode (PAYOUTS_ENABLED != "true"), rewards are logged but not sent.
+When PAYOUTS_ENABLED != "true", rewards are logged but not sent.
 This allows testing the full flow without requiring a funded rewards pool.
 
 To set up the rewards pool:
@@ -21,12 +21,15 @@ To set up the rewards pool:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from typing import Optional
+import subprocess
+from typing import Optional, Tuple
 
 from bank import get_balance
 from db import connect_db
+from node import min_gas_price_umirage
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,110 @@ logger = logging.getLogger(__name__)
 # Configuration from environment
 REWARDS_POOL_ADDRESS = os.environ.get("REWARDS_POOL_ADDRESS", "")
 PAYOUTS_ENABLED = os.environ.get("PAYOUTS_ENABLED", "").lower() == "true"
+
+# Node configuration
+NODE_HOME = os.environ.get("NODE_HOME", os.path.expanduser("~/.mirage/node"))
+KEYRING_BACKEND = "test"
+REWARDS_POOL_KEY_NAME = "rewards_pool"
+
+
+def _get_miraged_path() -> str:
+    """Get the path to the miraged binary."""
+    # Check if it's in PATH first
+    try:
+        result = subprocess.run(["which", "miraged"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    # Fallback to expected location
+    return "/opt/mirage/blockchain/bin/miraged"
+
+
+
+
+def _send_tokens_via_cli(
+    from_key: str,
+    to_address: str,
+    amount: int,
+    node_home: str,
+) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Send tokens using miraged CLI.
+    
+    Returns:
+        (success, tx_hash, error_message)
+    """
+    miraged = _get_miraged_path()
+    amount_str = f"{amount}umirage"
+    
+    # Get the actual minimum gas price from the node config
+    try:
+        gas_price = int(min_gas_price_umirage())
+    except Exception:
+        gas_price = 5000  # Fallback to reasonable default
+    
+    cmd = [
+        miraged,
+        "tx", "bank", "send",
+        from_key,
+        to_address,
+        amount_str,
+        "--home", node_home,
+        "--keyring-backend", KEYRING_BACKEND,
+        "--chain-id", "mirage-1",
+        "--gas", "auto",
+        "--gas-adjustment", "1.5",
+        "--gas-prices", f"{gas_price}umirage",
+        "--yes",  # Skip confirmation
+        "--output", "json",
+    ]
+    
+    logger.info(f"Executing: {' '.join(cmd)}")
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        
+        logger.info(f"miraged exit code: {result.returncode}")
+        logger.info(f"miraged stdout: {result.stdout[:500] if result.stdout else 'empty'}")
+        if result.stderr:
+            logger.warning(f"miraged stderr: {result.stderr[:500]}")
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or result.stdout or "Unknown error"
+            return False, None, error_msg
+        
+        # Parse the JSON output to get tx_hash
+        try:
+            output = json.loads(result.stdout)
+            tx_hash = output.get("txhash")
+            code = output.get("code", 0)
+            
+            if code != 0:
+                raw_log = output.get("raw_log", "Transaction failed")
+                return False, tx_hash, raw_log
+            
+            return True, tx_hash, None
+        except json.JSONDecodeError:
+            # If not JSON, try to extract tx hash from output
+            if "txhash" in result.stdout.lower():
+                # Try to find tx hash in output
+                for line in result.stdout.split("\n"):
+                    if "txhash" in line.lower():
+                        parts = line.split(":")
+                        if len(parts) >= 2:
+                            return True, parts[1].strip(), None
+            return True, None, None  # Assume success if no error code
+            
+    except subprocess.TimeoutExpired:
+        return False, None, "Transaction timed out"
+    except Exception as e:
+        return False, None, str(e)
 
 
 class RewardDistributor:
@@ -90,7 +197,6 @@ class RewardDistributor:
             - success: bool
             - tx_hash: str or None
             - amount: int (actual amount sent)
-            - dry_run: bool
             - error: str or None
         """
         if amount <= 0:
@@ -98,21 +204,19 @@ class RewardDistributor:
                 "success": False,
                 "tx_hash": None,
                 "amount": 0,
-                "dry_run": not self.enabled,
                 "error": "amount must be positive",
             }
 
         if not self.enabled:
-            # Dry run mode - log but don't send
+            # Payouts disabled - log but don't send
             logger.info(
-                f"[DRY RUN] Would send {amount} umirage to {recipient} "
+                f"[PAYOUTS DISABLED] Would send {amount} umirage to {recipient} "
                 f"from {self.pool_address or 'NO_POOL'} ({reason})"
             )
             return {
                 "success": True,
                 "tx_hash": None,
                 "amount": amount,
-                "dry_run": True,
                 "error": None,
             }
 
@@ -124,31 +228,34 @@ class RewardDistributor:
                 "success": False,
                 "tx_hash": None,
                 "amount": 0,
-                "dry_run": False,
                 "error": "insufficient_pool_balance",
             }
 
-        # Live mode - actually send tokens
-        # NOTE: This requires implementing proper transaction signing with the rewards pool key.
-        # For now, we log the intent and return success for the MVP.
-        # TODO: Implement actual MsgSend transaction signing and broadcasting
+        # Live mode - actually send tokens via miraged CLI
+        logger.info(f"[LIVE] Sending {amount} umirage to {recipient} from {self.pool_address} ({reason})")
 
-        logger.info(f"[LIVE] Sending {amount} umirage to {recipient} " f"from {self.pool_address} ({reason})")
+        success, tx_hash, error = _send_tokens_via_cli(
+            from_key=REWARDS_POOL_KEY_NAME,
+            to_address=recipient,
+            amount=amount,
+            node_home=NODE_HOME,
+        )
 
-        # Placeholder for actual transaction
-        # When implemented, this would:
-        # 1. Build a MsgSend message
-        # 2. Sign with the rewards pool key
-        # 3. Broadcast the transaction
-        # 4. Return the tx_hash
+        if not success:
+            logger.error(f"Failed to send tokens: {error}")
+            return {
+                "success": False,
+                "tx_hash": tx_hash,
+                "amount": 0,
+                "error": error or "transaction_failed",
+            }
 
-        logger.warning("Live token sending not yet implemented - " "marking reward as sent without actual transfer")
+        logger.info(f"[LIVE] Successfully sent {amount} umirage to {recipient}, tx_hash={tx_hash}")
 
         return {
             "success": True,
-            "tx_hash": None,  # Would be actual tx hash
+            "tx_hash": tx_hash,
             "amount": amount,
-            "dry_run": False,
             "error": None,
         }
 
@@ -242,7 +349,6 @@ class RewardDistributor:
                         "amount": payout_amount,
                         "raw_amount": total_mirage,
                         "multiplier": round(multiplier, 4),
-                        "dry_run": send_result.get("dry_run", False),
                     }
                 )
             else:
