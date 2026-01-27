@@ -7,6 +7,10 @@ import styled, { keyframes, css } from 'styled-components';
 import { useQuests, usePendingRewards } from '../utils/useQuests';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
+// DEBUG IMPORTS - TEMPORARY - REMOVE BEFORE PRODUCTION
+import Api from '../lib/api';
+import Storage from '../utils/Storage';
+// END DEBUG IMPORTS
 
 const pickThemeColor = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -14,22 +18,22 @@ const pickThemeColor = (theme, key) => {
     return (isLight ? fallbackLightColors : fallbackDarkColors)[key];
 };
 
-// Container styling with red theme
+// Container styling matching invite codes card (blue/indigo theme)
 const QuestCardContainer = styled.div`
     background: ${({ theme }) => theme?.name === 'light'
-        ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%)'
-        : 'linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(220, 38, 38, 0.15) 100%)'};
+        ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
+        : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
     border: 2px solid ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(239, 68, 68, 0.4)'
-        : 'rgba(239, 68, 68, 0.5)'};
+        ? 'rgba(59, 130, 246, 0.5)'
+        : 'rgba(59, 130, 246, 0.5)'};
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
     box-shadow: ${({ theme }) => theme?.name === 'light'
-        ? '0 4px 12px rgba(239, 68, 68, 0.25)'
-        : '0 4px 12px rgba(239, 68, 68, 0.4)'};
+        ? '0 4px 12px rgba(59, 130, 246, 0.15)'
+        : '0 4px 12px rgba(59, 130, 246, 0.25)'};
 
     @media (max-width: 1000px) {
         border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
@@ -88,6 +92,17 @@ const MultiplierBadge = styled.div`
     padding: 0.15rem 0.35rem;
     border-radius: 4px;
     font-weight: 600;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: default;
+    transition: all 0.15s ease;
+
+    &:hover {
+        color: #93c5fd;
+        background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(59, 130, 246, 0.25)'
+        : 'rgba(96, 165, 250, 0.35)'};
+    }
 
     @media (max-width: 768px) {
         font-size: 0.5rem;
@@ -112,7 +127,7 @@ const QuestList = styled.div`
 
 const QuestItem = styled.div`
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.5rem;
     padding: 0.4rem 0.5rem;
     background: ${({ theme, $completed }) => {
@@ -167,18 +182,66 @@ const QuestName = styled.div`
 
     @media (max-width: 768px) {
         font-size: 0.55rem;
+        white-space: normal;
+        overflow: visible;
     }
 `;
 
 const QuestDescription = styled.div`
-    font-size: 0.55rem;
+    font-size: 0.6rem;
     color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 
     @media (max-width: 768px) {
-        font-size: 0.5rem;
+        font-size: 0.55rem;
+        white-space: normal;
+        overflow: visible;
+    }
+`;
+
+const QuestReward = styled.div`
+    font-size: 0.5rem;
+    color: #f59e0b;
+    font-weight: 600;
+
+    @media (max-width: 768px) {
+        font-size: 0.45rem;
+    }
+`;
+
+const QuestRequirements = styled.ul`
+    font-size: 0.5rem;
+    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    margin: 0.2rem 0 0 0;
+    padding-left: 1rem;
+    list-style-type: disc;
+
+    li {
+        margin: 0.1rem 0;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.45rem;
+    }
+`;
+
+const LoyaltyBonusText = styled.div`
+    font-size: 0.5rem;
+    color: #60a5fa;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: default;
+    transition: color 0.15s ease;
+    margin-top: 0.15rem;
+
+    &:hover {
+        color: #93c5fd;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.45rem;
     }
 `;
 
@@ -236,7 +299,7 @@ const CheckMark = styled.div`
 const ClaimSection = styled.div`
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     padding-top: 0.4rem;
     border-top: 1px solid ${({ theme }) => theme?.name === 'light'
         ? 'rgba(0, 0, 0, 0.08)'
@@ -411,7 +474,7 @@ function formatTime(seconds) {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
-    
+
     if (h > 0) {
         return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
     }
@@ -445,6 +508,39 @@ function getQuestIcon(actionType) {
     return icons[actionType] || '🎯';
 }
 
+/**
+ * Get MIRAGE reward amount from quest rewards array
+ */
+function getQuestMirageReward(rewards) {
+    if (!rewards || !Array.isArray(rewards)) return 0;
+    const mirageReward = rewards.find(r => r.type === 'mirage');
+    return mirageReward?.amount || 0;
+}
+
+/**
+ * Get quest requirements as array of strings
+ */
+function getQuestRequirements(quest) {
+    const reqs = [];
+    if (quest.min_content_length) {
+        reqs.push(`Min ${quest.min_content_length} characters`);
+    }
+    if (quest.time_spacing_minutes) {
+        const mins = quest.time_spacing_minutes;
+        reqs.push(mins >= 60 ? `Min ${mins / 60} hour${mins >= 120 ? 's' : ''} between each` : `Min ${mins} min between each`);
+    }
+    if (quest.unique_target) {
+        reqs.push('Must be different targets');
+    }
+    if (quest.unique_topics_min) {
+        reqs.push(`At least ${quest.unique_topics_min} different topics`);
+    }
+    if (quest.quality_threshold) {
+        reqs.push(`Needs ${quest.quality_threshold}+ upvotes`);
+    }
+    return reqs;
+}
+
 const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
 
 // Collapse button
@@ -464,11 +560,39 @@ const CollapseButton = styled.button`
 
     &:hover {
         color: ${({ theme }) => pickThemeColor(theme, 'text')};
-        background: ${({ theme }) => theme?.name === 'light' 
-            ? 'rgba(0, 0, 0, 0.05)' 
-            : 'rgba(255, 255, 255, 0.05)'};
+        background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
+
+// ==========================================================================
+// DEBUG STYLED COMPONENT - TEMPORARY - REMOVE BEFORE PRODUCTION
+// ==========================================================================
+const DebugCompleteButton = styled.button`
+    background: #ef4444;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.5rem;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: 8px;
+    flex-shrink: 0;
+    
+    &:hover {
+        background: #dc2626;
+    }
+    
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+// ==========================================================================
+// END DEBUG STYLED COMPONENT
+// ==========================================================================
 
 export default function QuestHeroCard({ collapsed = false, onToggleCollapse, size = 'large' }) {
     const {
@@ -479,6 +603,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         loading: questsLoading,
         error: questsError,
         suspended: questsSuspended,
+        disabled: questsDisabled,
         refresh: refreshQuests,
     } = useQuests();
 
@@ -486,6 +611,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         totalAfterMultiplier,
         claiming,
         claimRewards,
+        claimingAvailable,
         refresh: refreshRewards,
     } = usePendingRewards();
 
@@ -494,15 +620,15 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const handleClaim = useCallback(async () => {
         const result = await claimRewards();
-        
+
         if (result.success) {
             // Find the MIRAGE reward amount
             const mirageReward = result.rewards?.find(r => r.type === 'mirage');
             const amount = mirageReward?.amount || 0;
-            
+
             setClaimedAmount(amount);
             setShowCelebration(true);
-            
+
             // Refresh data
             refreshQuests();
             refreshRewards();
@@ -513,8 +639,69 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         setShowCelebration(false);
     }, []);
 
-    // Show loading state
-    if (questsLoading) {
+    // ==========================================================================
+    // DEBUG HANDLER - TEMPORARY - REMOVE BEFORE PRODUCTION
+    // ==========================================================================
+    const [debugCompleting, setDebugCompleting] = useState(null);
+
+    const handleDebugComplete = useCallback(async (questId) => {
+        const owner = Storage.load('publicKey', '');
+        if (!owner) {
+            console.error('[DEBUG] No user address found');
+            return;
+        }
+
+        setDebugCompleting(questId);
+        try {
+            const result = await Api.post('/debug/quest/complete', { owner, quest_id: questId });
+            console.log('[DEBUG] Quest complete result:', result);
+            if (result.success) {
+                // Refresh quests and rewards
+                refreshQuests();
+                refreshRewards();
+            }
+        } catch (err) {
+            console.error('[DEBUG] Failed to complete quest:', err);
+        } finally {
+            setDebugCompleting(null);
+        }
+    }, [refreshQuests, refreshRewards]);
+
+    const [debugResetting, setDebugResetting] = useState(false);
+
+    const handleDebugReset = useCallback(async () => {
+        const owner = Storage.load('publicKey', '');
+        if (!owner) {
+            console.error('[DEBUG] No user address found');
+            return;
+        }
+
+        setDebugResetting(true);
+        try {
+            const result = await Api.post('/debug/quest/reset', { owner });
+            console.log('[DEBUG] Quest reset result:', result);
+            if (result.success) {
+                // Refresh quests and rewards
+                refreshQuests();
+                refreshRewards();
+            }
+        } catch (err) {
+            console.error('[DEBUG] Failed to reset quests:', err);
+        } finally {
+            setDebugResetting(false);
+        }
+    }, [refreshQuests, refreshRewards]);
+    // ==========================================================================
+    // END DEBUG HANDLER
+    // ==========================================================================
+
+    // If quests system is disabled, don't render anything
+    if (questsDisabled) {
+        return null;
+    }
+
+    // Show loading state only on initial load (when we have no quests yet)
+    if (questsLoading && dailyQuests.length === 0) {
         return (
             <QuestCardContainer $size={size}>
                 <QuestHeader>
@@ -608,109 +795,146 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </span>
                         )}
                         {!collapsed && (
-                            <MultiplierBadge>
-                                {rewardMultiplier.toFixed(1)}x rewards
-                            </MultiplierBadge>
-                        )}
-                    </QuestTitle>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                        {!collapsed && (
-                            <ResetTimer title="Time until daily reset">
-                                {formatTime(secondsUntilReset)}
+                            <ResetTimer title="Time until daily quest reset">
+                                {formatTime(secondsUntilReset)} left
                             </ResetTimer>
                         )}
-                        {onToggleCollapse && (
-                            <CollapseButton onClick={onToggleCollapse}>
-                                {collapsed ? 'Show' : 'Hide'}
-                            </CollapseButton>
-                        )}
-                    </div>
+                    </QuestTitle>
+                    {onToggleCollapse && (
+                        <CollapseButton onClick={onToggleCollapse}>
+                            {collapsed ? 'Show' : 'Hide'}
+                        </CollapseButton>
+                    )}
                 </QuestHeader>
 
                 {!collapsed && (
-                <QuestList>
-                    {dailyQuests.map(quest => (
-                        <QuestItem key={quest.id} $completed={quest.completed}>
-                            <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
-                            <QuestDetails>
-                                <QuestName $completed={quest.completed}>{quest.title}</QuestName>
-                                <QuestDescription>{quest.description}</QuestDescription>
-                            </QuestDetails>
-                            {quest.completed ? (
-                                <CheckMark aria-label="Completed">✓</CheckMark>
-                            ) : (
-                                <ProgressContainer>
-                                    <ProgressBar>
-                                        <ProgressFill
-                                            $progress={quest.progress}
-                                            $target={quest.target}
-                                            $completed={quest.completed}
-                                        />
-                                    </ProgressBar>
-                                    <ProgressText>
-                                        {quest.progress}/{quest.target}
-                                    </ProgressText>
-                                </ProgressContainer>
-                            )}
-                        </QuestItem>
-                    ))}
+                    <QuestList>
+                        {dailyQuests.map(quest => (
+                            <QuestItem key={quest.id} $completed={quest.completed}>
+                                <QuestIcon>{getQuestIcon(quest.action_type)}</QuestIcon>
+                                <QuestDetails>
+                                    <QuestName $completed={quest.completed}>
+                                        {quest.title}
+                                        <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
+                                            +{Math.round(getQuestMirageReward(quest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                        </QuestReward>
+                                    </QuestName>
+                                    <QuestDescription>{quest.description}</QuestDescription>
+                                    {getQuestRequirements(quest).length > 0 && (
+                                        <QuestRequirements>
+                                            {getQuestRequirements(quest).map((req, i) => (
+                                                <li key={i}>{req}</li>
+                                            ))}
+                                        </QuestRequirements>
+                                    )}
+                                </QuestDetails>
+                                {quest.completed ? (
+                                    <CheckMark aria-label="Completed">✓</CheckMark>
+                                ) : (
+                                    <>
+                                        <ProgressContainer>
+                                            <ProgressBar>
+                                                <ProgressFill
+                                                    $progress={quest.progress}
+                                                    $target={quest.target}
+                                                    $completed={quest.completed}
+                                                />
+                                            </ProgressBar>
+                                            <ProgressText>
+                                                {quest.progress}/{quest.target}
+                                            </ProgressText>
+                                        </ProgressContainer>
+                                        {/* DEBUG BUTTON - TEMPORARY - REMOVE BEFORE PRODUCTION */}
+                                        <DebugCompleteButton
+                                            onClick={() => handleDebugComplete(quest.id)}
+                                            disabled={debugCompleting === quest.id}
+                                            title="DEBUG: Instantly complete this quest"
+                                        >
+                                            {debugCompleting === quest.id ? '...' : 'DEBUG'}
+                                        </DebugCompleteButton>
+                                        {/* END DEBUG BUTTON */}
+                                    </>
+                                )}
+                            </QuestItem>
+                        ))}
 
-                    {/* Flash quest if active */}
-                    {flashQuest && (
-                        <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
-                            <QuestIcon>⚡</QuestIcon>
-                            <QuestDetails>
-                                <QuestName $completed={flashQuest.completed}>
-                                    {flashQuest.title}
-                                    <span style={{ color: '#f59e0b', fontSize: '0.5rem', marginLeft: '0.3rem' }}>
-                                        FLASH
-                                    </span>
-                                </QuestName>
-                                <QuestDescription>
-                                    {flashQuest.description} • {formatTime(flashQuest.seconds_remaining)} left
-                                </QuestDescription>
-                            </QuestDetails>
-                            {flashQuest.completed ? (
-                                <CheckMark aria-label="Completed">✓</CheckMark>
-                            ) : (
-                                <ProgressContainer>
-                                    <ProgressBar>
-                                        <ProgressFill
-                                            $progress={flashQuest.progress}
-                                            $target={flashQuest.target}
-                                            $completed={flashQuest.completed}
-                                        />
-                                    </ProgressBar>
-                                    <ProgressText>
-                                        {flashQuest.progress}/{flashQuest.target}
-                                    </ProgressText>
-                                </ProgressContainer>
-                            )}
-                        </QuestItem>
-                    )}
-                </QuestList>
+                        {/* Flash quest if active */}
+                        {flashQuest && flashQuest.seconds_remaining > 0 && (
+                            <QuestItem $completed={flashQuest.completed} style={{ borderLeft: '2px solid #f59e0b' }}>
+                                <QuestIcon>⚡</QuestIcon>
+                                <QuestDetails>
+                                    <QuestName $completed={flashQuest.completed}>
+                                        {flashQuest.title}
+                                        <span style={{ color: '#f59e0b', fontSize: '0.5rem', marginLeft: '0.3rem' }}>
+                                            FLASH
+                                        </span>
+                                        <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
+                                            +{Math.round(getQuestMirageReward(flashQuest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                        </QuestReward>
+                                    </QuestName>
+                                    <QuestDescription>
+                                        {flashQuest.description} • {formatTime(flashQuest.seconds_remaining)} left
+                                    </QuestDescription>
+                                    {getQuestRequirements(flashQuest).length > 0 && (
+                                        <QuestRequirements>
+                                            {getQuestRequirements(flashQuest).map((req, i) => (
+                                                <li key={i}>{req}</li>
+                                            ))}
+                                        </QuestRequirements>
+                                    )}
+                                </QuestDetails>
+                                {flashQuest.completed ? (
+                                    <CheckMark aria-label="Completed">✓</CheckMark>
+                                ) : (
+                                    <ProgressContainer>
+                                        <ProgressBar>
+                                            <ProgressFill
+                                                $progress={flashQuest.progress}
+                                                $target={flashQuest.target}
+                                                $completed={flashQuest.completed}
+                                            />
+                                        </ProgressBar>
+                                        <ProgressText>
+                                            {flashQuest.progress}/{flashQuest.target}
+                                        </ProgressText>
+                                    </ProgressContainer>
+                                )}
+                            </QuestItem>
+                        )}
+                    </QuestList>
                 )}
 
                 {!collapsed && (
-                <ClaimSection>
-                    <div>
-                        <div style={{ fontSize: '0.55rem', color: 'inherit', opacity: 0.7 }}>
-                            {completedCount}/{dailyQuests.length} completed
+                    <ClaimSection>
+                        <div>
+                            <LoyaltyBonusText
+                                as="div"
+                                title="Loyalty multiplier increases from 1x to 5x over your first 30 days"
+                                style={{ marginTop: 0, fontSize: '0.55rem', fontWeight: 600 }}
+                            >
+                                {rewardMultiplier.toFixed(2)}x loyalty multiplier
+                            </LoyaltyBonusText>
                         </div>
-                        {hasClaimableRewards && (
-                            <RewardAmount>
-                                {formatMirage(totalAfterMultiplier)} MIRAGE available
-                            </RewardAmount>
-                        )}
-                    </div>
-                    <ClaimButton
-                        onClick={handleClaim}
-                        disabled={!hasClaimableRewards || claiming}
-                        $hasRewards={hasClaimableRewards}
-                    >
-                        {claiming ? 'Claiming...' : hasClaimableRewards ? 'Claim Rewards' : 'Complete Quests'}
-                    </ClaimButton>
-                </ClaimSection>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                            {/* DEBUG BUTTON - TEMPORARY - REMOVE BEFORE PRODUCTION */}
+                            <DebugCompleteButton
+                                onClick={handleDebugReset}
+                                disabled={debugResetting}
+                                title="DEBUG: Reset quests and get new random ones"
+                            >
+                                {debugResetting ? '...' : 'RESET'}
+                            </DebugCompleteButton>
+                            {/* END DEBUG BUTTON */}
+                            <ClaimButton
+                                onClick={handleClaim}
+                                disabled={!hasClaimableRewards || claiming || !claimingAvailable}
+                                $hasRewards={hasClaimableRewards && claimingAvailable}
+                                title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
+                            >
+                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE` : 'Complete Quests'}
+                            </ClaimButton>
+                        </div>
+                    </ClaimSection>
                 )}
             </QuestCardContainer>
 
@@ -731,7 +955,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                         <CelebrationEmoji>🎉</CelebrationEmoji>
                         <CelebrationTitle>Rewards Claimed!</CelebrationTitle>
                         <CelebrationAmount>
-                            +{formatMirage(claimedAmount)} MIRAGE
+                            +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
                         </CelebrationAmount>
                         <CelebrationClose onClick={closeCelebration}>
                             Awesome!

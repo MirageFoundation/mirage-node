@@ -19,21 +19,37 @@ export function useQuests() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [suspended, setSuspended] = useState(false);
+    const [disabled, setDisabled] = useState(false);
+    const [initialLoadDone, setInitialLoadDone] = useState(false);
 
-    const userAddress = Storage.load('address', '');
+    const userAddress = Storage.load('publicKey', '');
 
-    const fetchQuests = useCallback(async () => {
+    const fetchQuests = useCallback(async (isRefresh = false) => {
         if (!userAddress) {
             setLoading(false);
             return;
         }
 
         try {
-            setLoading(true);
+            // Only show loading spinner on initial load, not refreshes
+            if (!isRefresh) {
+                setLoading(true);
+            }
             setError(null);
 
             // Fetch daily quests
             const dailyResponse = await Api.get('/quests/daily', { owner: userAddress });
+            
+            // Check if quests system is disabled
+            if (dailyResponse.disabled) {
+                setDisabled(true);
+                setDailyQuests([]);
+                setFlashQuest(null);
+                setLoading(false);
+                return;
+            }
+            
+            setDisabled(false);
             
             if (dailyResponse.suspended) {
                 setSuspended(true);
@@ -41,7 +57,25 @@ export function useQuests() {
                 setFlashQuest(null);
             } else {
                 setSuspended(false);
-                setDailyQuests(dailyResponse.daily_quests || []);
+                const newQuests = dailyResponse.daily_quests || [];
+                
+                // Merge updates to preserve stable references - only update progress/completed
+                setDailyQuests(prev => {
+                    if (prev.length === 0 || prev.length !== newQuests.length) {
+                        return newQuests;
+                    }
+                    // Check if quest IDs match (same quests, just updated progress)
+                    const sameQuests = prev.every((q, i) => q.id === newQuests[i]?.id);
+                    if (!sameQuests) {
+                        return newQuests;
+                    }
+                    // Update only progress and completed fields
+                    return prev.map((q, i) => ({
+                        ...q,
+                        progress: newQuests[i].progress,
+                        completed: newQuests[i].completed,
+                    }));
+                });
                 setSecondsUntilReset(dailyResponse.seconds_until_reset || 0);
                 setRewardMultiplier(dailyResponse.reward_multiplier || 0);
             }
@@ -49,8 +83,25 @@ export function useQuests() {
             // Fetch flash quest
             const flashResponse = await Api.get('/quests/flash', { owner: userAddress });
             if (!flashResponse.suspended && flashResponse.flash_quest) {
-                setFlashQuest(flashResponse.flash_quest);
+                const newFlash = flashResponse.flash_quest;
+                // Merge flash quest updates
+                setFlashQuest(prev => {
+                    if (!prev || prev.id !== newFlash.id) {
+                        return newFlash;
+                    }
+                    // Same flash quest, update progress/completed/seconds_remaining
+                    return {
+                        ...prev,
+                        progress: newFlash.progress,
+                        completed: newFlash.completed,
+                        seconds_remaining: newFlash.seconds_remaining,
+                    };
+                });
+            } else {
+                setFlashQuest(null);
             }
+            
+            setInitialLoadDone(true);
         } catch (err) {
             console.error('Failed to fetch quests:', err);
             setError(err.message || 'Failed to load quests');
@@ -60,14 +111,25 @@ export function useQuests() {
     }, [userAddress]);
 
     useEffect(() => {
-        fetchQuests();
+        fetchQuests(false); // Initial load
         
-        // Refresh every 5 minutes
-        const interval = setInterval(fetchQuests, 5 * 60 * 1000);
-        return () => clearInterval(interval);
+        // Refresh every 5 minutes (silent refresh)
+        const interval = setInterval(() => fetchQuests(true), 5 * 60 * 1000);
+
+        // Listen for quest-relevant actions (votes, posts, comments) to refresh progress
+        const handleQuestAction = () => {
+            // Delay refresh to give the indexer time to process the action
+            setTimeout(() => fetchQuests(true), 3000);
+        };
+        window.addEventListener('questActionCompleted', handleQuestAction);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('questActionCompleted', handleQuestAction);
+        };
     }, [fetchQuests]);
 
-    // Update countdown timer
+    // Update countdown timer for daily reset
     useEffect(() => {
         if (secondsUntilReset <= 0) return;
         
@@ -78,6 +140,25 @@ export function useQuests() {
         return () => clearInterval(interval);
     }, [secondsUntilReset]);
 
+    // Update countdown timer for flash quest
+    useEffect(() => {
+        if (!flashQuest || flashQuest.seconds_remaining <= 0) return;
+        
+        const interval = setInterval(() => {
+            setFlashQuest(prev => {
+                if (!prev) return prev;
+                const newRemaining = Math.max(0, prev.seconds_remaining - 1);
+                // Clear flash quest when expired
+                if (newRemaining <= 0) {
+                    return null;
+                }
+                return { ...prev, seconds_remaining: newRemaining };
+            });
+        }, 1000);
+        
+        return () => clearInterval(interval);
+    }, [flashQuest?.id]); // Only re-run when flash quest changes
+
     return {
         dailyQuests,
         flashQuest,
@@ -86,6 +167,7 @@ export function useQuests() {
         loading,
         error,
         suspended,
+        disabled,
         refresh: fetchQuests,
     };
 }
@@ -104,8 +186,9 @@ export function usePendingRewards() {
     const [claiming, setClaiming] = useState(false);
     const [error, setError] = useState(null);
     const [suspended, setSuspended] = useState(false);
+    const [claimingAvailable, setClaimingAvailable] = useState(true);
 
-    const userAddress = Storage.load('address', '');
+    const userAddress = Storage.load('publicKey', '');
 
     const fetchRewards = useCallback(async () => {
         if (!userAddress) {
@@ -130,6 +213,7 @@ export function usePendingRewards() {
                 setTotalMirage(response.total_mirage || 0);
                 setTotalAfterMultiplier(response.total_mirage_after_multiplier || 0);
                 setRewardMultiplier(response.reward_multiplier || 0);
+                setClaimingAvailable(response.claiming_available !== false);
             }
         } catch (err) {
             console.error('Failed to fetch pending rewards:', err);
@@ -176,7 +260,18 @@ export function usePendingRewards() {
         
         // Refresh every 2 minutes
         const interval = setInterval(fetchRewards, 2 * 60 * 1000);
-        return () => clearInterval(interval);
+
+        // Listen for quest-relevant actions (votes, posts, comments) to refresh rewards
+        const handleQuestAction = () => {
+            // Delay refresh to give the indexer time to process the action
+            setTimeout(fetchRewards, 3000);
+        };
+        window.addEventListener('questActionCompleted', handleQuestAction);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('questActionCompleted', handleQuestAction);
+        };
     }, [fetchRewards]);
 
     return {
@@ -188,6 +283,7 @@ export function usePendingRewards() {
         claiming,
         error,
         suspended,
+        claimingAvailable,
         refresh: fetchRewards,
         claimRewards,
     };
@@ -203,7 +299,7 @@ export function useAchievements() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    const userAddress = Storage.load('address', '');
+    const userAddress = Storage.load('publicKey', '');
 
     const fetchAchievements = useCallback(async () => {
         if (!userAddress) {

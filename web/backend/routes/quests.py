@@ -16,8 +16,10 @@ Admin endpoints (require level >= 100):
 """
 
 import json
+import os
+import random
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -29,6 +31,12 @@ from routes.core import get_user_level
 
 
 quests_bp = Blueprint("quests", __name__)
+
+# Number of daily quests to assign per user
+DAILY_QUESTS_COUNT = 2
+
+# Quest system enabled flag
+QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -119,6 +127,48 @@ def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
             }
 
 
+def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any]) -> List[str]:
+    """Assign daily quests to a user if they don't have any for today.
+    
+    Returns the list of assigned quest IDs.
+    """
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            # Check if user already has quests for today
+            cur.execute(
+                """
+                SELECT DISTINCT quest_id FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                """,
+                (owner, day_utc)
+            )
+            existing = [row[0] for row in cur.fetchall()]
+            
+            if existing:
+                return existing
+            
+            # No quests assigned yet - assign random ones
+            if not daily_defs:
+                return []
+            
+            available_ids = list(daily_defs.keys())
+            count = min(DAILY_QUESTS_COUNT, len(available_ids))
+            selected_ids = random.sample(available_ids, count)
+            
+            # Insert initial progress records
+            for quest_id in selected_ids:
+                cur.execute(
+                    """
+                    INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
+                    VALUES (%s, %s, %s, 0, '{}')
+                    ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+                    """,
+                    (owner, day_utc, quest_id)
+                )
+            
+            return selected_ids
+
+
 @quests_bp.route("/api/quests/daily", methods=["GET"])
 def get_daily_quests():
     """Get user's daily quest status.
@@ -128,6 +178,15 @@ def get_daily_quests():
     """
     rid = next_request_id()
     log_event(rid, "quests.daily.begin")
+    
+    # Check if quests are enabled
+    if not QUESTS_ENABLED:
+        return jsonify({
+            "disabled": True,
+            "daily_quests": [],
+            "seconds_until_reset": 0,
+            "reward_multiplier": 1,
+        })
     
     try:
         owner = (request.args.get("owner") or "").strip().lower()
@@ -151,6 +210,9 @@ def get_daily_quests():
         # Load quest definitions
         defs = _load_quest_definitions()
         daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        
+        # Assign quests if user doesn't have any for today
+        _assign_daily_quests_if_needed(owner, day_utc, daily_defs)
         
         # Get user's assigned quests for today
         with connect_db() as conn:
@@ -186,10 +248,17 @@ def get_daily_quests():
                 "id": quest_id,
                 "title": quest_def.get("title", ""),
                 "description": quest_def.get("description", ""),
+                "action_type": quest_def.get("action_type", ""),
                 "progress": progress,
                 "target": target,
                 "completed": completed_at is not None,
                 "rewards": quest_def.get("rewards", []),
+                # Additional requirements for display
+                "min_content_length": quest_def.get("min_content_length"),
+                "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+                "unique_target": quest_def.get("unique_target"),
+                "unique_topics_min": quest_def.get("unique_topics_min"),
+                "quality_threshold": quest_def.get("quality_threshold"),
             })
         
         multiplier = _get_user_reward_multiplier(owner, ts)
@@ -215,6 +284,13 @@ def get_flash_quests():
     """
     rid = next_request_id()
     log_event(rid, "quests.flash.begin")
+    
+    # Check if quests are enabled
+    if not QUESTS_ENABLED:
+        return jsonify({
+            "disabled": True,
+            "flash_quest": None,
+        })
     
     try:
         owner = (request.args.get("owner") or "").strip().lower()
@@ -280,6 +356,12 @@ def get_flash_quests():
             "ends_at": ends_at,
             "seconds_remaining": max(0, ends_at - ts),
             "rewards": quest_def.get("rewards", []),
+            # Additional requirements for display
+            "min_content_length": quest_def.get("min_content_length"),
+            "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+            "unique_target": quest_def.get("unique_target"),
+            "unique_topics_min": quest_def.get("unique_topics_min"),
+            "quality_threshold": quest_def.get("quality_threshold"),
         }
         
         log_event(rid, "quests.flash.ok", owner=owner, template_id=template_id)
@@ -411,6 +493,10 @@ def get_pending_rewards():
         
         multiplier = _get_user_reward_multiplier(owner, ts)
         
+        # Check if claiming is available
+        distributor = get_distributor()
+        claiming_available = distributor.is_configured()
+        
         log_event(rid, "rewards.pending.ok", owner=owner, count=len(pending_rewards), total_mirage=total_mirage)
         return jsonify({
             "suspended": False,
@@ -418,6 +504,7 @@ def get_pending_rewards():
             "total_mirage": total_mirage,
             "total_mirage_after_multiplier": int(total_mirage * multiplier),
             "reward_multiplier": round(multiplier, 4),
+            "claiming_available": claiming_available,
         })
     except Exception as e:
         log_event(rid, "rewards.pending.err", error=str(e))
@@ -458,6 +545,16 @@ def claim_rewards():
         
         # Use reward distributor to process claim
         distributor = get_distributor()
+        
+        # Check if rewards distribution is properly configured
+        if not distributor.is_configured():
+            log_event(rid, "rewards.claim.not_configured", owner=owner)
+            return jsonify({
+                "success": False,
+                "error": "not_configured",
+                "message": "Reward distribution is not yet configured. Please try again later.",
+            }), 503  # Service Unavailable
+        
         result = distributor.claim_rewards(owner, ts)
         
         if not result["success"]:
@@ -492,6 +589,186 @@ def claim_rewards():
     except Exception as e:
         log_event(rid, "rewards.claim.err", error=str(e))
         return jsonify({"error": str(e)}), 500
+
+
+# ==========================================================================
+# DEBUG ENDPOINT - TEMPORARY - REMOVE BEFORE PRODUCTION
+# ==========================================================================
+@quests_bp.route("/api/debug/quest/complete", methods=["POST"])
+def debug_complete_quest():
+    """DEBUG ONLY - Instantly complete a quest for testing.
+    
+    ⚠️  TEMPORARY DEBUG ENDPOINT - REMOVE BEFORE PRODUCTION ⚠️
+    
+    Body:
+    - owner: User address (required)
+    - quest_id: Quest ID to complete (required)
+    """
+    rid = next_request_id()
+    log_event(rid, "debug.quest.complete.begin")
+    
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        quest_id = str(data.get("quest_id", "")).strip()
+        
+        if not owner or not quest_id:
+            return jsonify({"error": "owner and quest_id required"}), 400
+        
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+        
+        # Load quest definitions to get the reward
+        defs = _load_quest_definitions()
+        daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        quest_def = daily_defs.get(quest_id, {})
+        
+        if not quest_def:
+            return jsonify({"error": f"quest {quest_id} not found"}), 404
+        
+        # Get target count for this quest
+        if quest_def.get("action_type") == "balanced_vote":
+            target = (quest_def.get("target_upvotes", 0) or 0) + (quest_def.get("target_downvotes", 0) or 0)
+        else:
+            target = quest_def.get("target_count", 1)
+        
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Update quest to completed
+                cur.execute(
+                    """
+                    UPDATE user_daily_quests
+                    SET progress = %s, completed_at = %s
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (target, ts, owner, day_utc, quest_id)
+                )
+                
+                if cur.rowcount == 0:
+                    return jsonify({"error": "quest not assigned to user"}), 404
+                
+                # Add pending rewards (convert MIRAGE to umirage for storage)
+                rewards = quest_def.get("rewards", [])
+                for reward in rewards:
+                    reward_type = reward.get("type", "")
+                    if reward_type == "mirage":
+                        # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1_000_000 umirage)
+                        amount_umirage = reward.get("amount", 0) * 1_000_000
+                        cur.execute(
+                            """
+                            INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                            VALUES (%s, %s, %s, %s, %s)
+                            """,
+                            (owner, "mirage", json.dumps({"amount": amount_umirage}), f"Quest: {quest_id}", ts)
+                        )
+        
+        log_event(rid, "debug.quest.complete.ok", owner=owner, quest_id=quest_id)
+        return jsonify({
+            "success": True,
+            "quest_id": quest_id,
+            "message": f"DEBUG: Quest {quest_id} marked as complete",
+        })
+    except Exception as e:
+        log_event(rid, "debug.quest.complete.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/debug/quest/reset", methods=["POST"])
+def debug_reset_quests():
+    """DEBUG ONLY - Reset daily quests and assign new random ones.
+    
+    ⚠️  TEMPORARY DEBUG ENDPOINT - REMOVE BEFORE PRODUCTION ⚠️
+    
+    Body:
+    - owner: User address (required)
+    """
+    rid = next_request_id()
+    log_event(rid, "debug.quest.reset.begin")
+    
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+        
+        # Load quest definitions
+        defs = _load_quest_definitions()
+        daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        flash_defs = defs.get("flash_quest_templates", [])
+        
+        if not daily_defs:
+            return jsonify({"error": "no quest definitions found"}), 500
+        
+        flash_quest_id = None
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Delete existing quests for today
+                cur.execute(
+                    """
+                    DELETE FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    """,
+                    (owner, day_utc)
+                )
+                deleted_count = cur.rowcount
+                
+                # Assign new random quests
+                available_ids = list(daily_defs.keys())
+                count = min(DAILY_QUESTS_COUNT, len(available_ids))
+                selected_ids = random.sample(available_ids, count)
+                
+                for quest_id in selected_ids:
+                    cur.execute(
+                        """
+                        INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
+                        VALUES (%s, %s, %s, 0, '{}')
+                        ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+                        """,
+                        (owner, day_utc, quest_id)
+                    )
+                
+                # 50% chance to also assign a flash quest
+                if flash_defs and random.random() < 0.5:
+                    flash_template = random.choice(flash_defs)
+                    flash_quest_id = flash_template["id"]
+                    time_window = flash_template.get("time_window_minutes", 60) * 60  # Convert to seconds
+                    starts_at = ts
+                    ends_at = ts + time_window
+                    
+                    # Delete any existing flash quest and insert new one
+                    cur.execute(
+                        """
+                        DELETE FROM user_flash_quests
+                        WHERE LOWER(owner) = LOWER(%s)
+                        """,
+                        (owner,)
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
+                        VALUES (%s, %s, %s, %s, 0, '{}')
+                        """,
+                        (owner, flash_quest_id, starts_at, ends_at)
+                    )
+        
+        log_event(rid, "debug.quest.reset.ok", owner=owner, deleted=deleted_count, new_quests=selected_ids, flash_quest=flash_quest_id)
+        return jsonify({
+            "success": True,
+            "deleted_count": deleted_count,
+            "new_quests": selected_ids,
+            "flash_quest": flash_quest_id,
+            "message": f"DEBUG: Reset quests. Assigned: {', '.join(selected_ids)}" + (f" + Flash: {flash_quest_id}" if flash_quest_id else ""),
+        })
+    except Exception as e:
+        log_event(rid, "debug.quest.reset.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+# ==========================================================================
+# END DEBUG ENDPOINT
+# ==========================================================================
 
 
 # ========== Admin Endpoints ==========

@@ -298,6 +298,7 @@ class MessageProcessor:
                         "unique_topic_post",
                         ts,
                         topic=root_topic,
+                        content_length=len(content),
                     )
             except Exception as e:
                 logger.warning("Quest progress tracking failed for post %s: %s", txhash, e)

@@ -2637,8 +2637,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </InviteOnlyBanner>
                         )}
 
-                        {/* Quest hero card - shown to logged-in users on home feed */}
-                        {isLoggedIn && urlTopic === 'home' && (
+                        {/* Quest hero card - shown to logged-in users on home/following feeds */}
+                        {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
                             <QuestHeroCard
                                 collapsed={questCardCollapsed}
                                 onToggleCollapse={toggleQuestCard}

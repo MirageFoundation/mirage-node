@@ -63,8 +63,8 @@ ACHIEVEMENTS_ENABLED = True
 
 # Quest assignment
 DAILY_QUESTS_COUNT = 2  # Number of random daily quests per user
-FLASH_QUEST_MIN_INTERVAL_HOURS = 4  # Minimum hours between flash quests
-FLASH_QUEST_MAX_INTERVAL_HOURS = 8  # Maximum hours between flash quests
+FLASH_QUEST_MIN_INTERVAL_HOURS = 5  # Minimum hours between flash quests
+FLASH_QUEST_MAX_INTERVAL_HOURS = 7  # Maximum hours between flash quests
 
 # Reward multiplier (account age-based)
 REWARD_MULTIPLIER_DAYS = 30  # Days to reach max multiplier
