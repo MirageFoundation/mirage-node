@@ -320,34 +320,24 @@ const InviteBannerCount = styled.span`
 
 // Collapse button for hero cards
 const CollapseButton = styled.button`
+    background: transparent;
+    border: none;
+    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 12px;
+    transition: all 0.2s ease;
     display: flex;
     align-items: center;
-    justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    padding: 0;
-    border: none;
-    border-radius: 4px;
-    background: ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(0, 0, 0, 0.06)'
-        : 'rgba(255, 255, 255, 0.08)'};
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    cursor: pointer;
-    transition: all 0.15s ease;
-    flex-shrink: 0;
-    font-size: 0.65rem;
-    line-height: 1;
+    gap: 4px;
 
     &:hover {
-        background: ${({ theme }) => theme?.name === 'light'
-            ? 'rgba(0, 0, 0, 0.1)'
-            : 'rgba(255, 255, 255, 0.12)'};
-    }
-
-    @media (max-width: 768px) {
-        width: 1.2rem;
-        height: 1.2rem;
-        font-size: 0.55rem;
+        color: ${({ theme }) => pickThemeColor(theme, 'text')};
+        background: ${({ theme }) => theme?.name === 'light' 
+            ? 'rgba(0, 0, 0, 0.05)' 
+            : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
 
@@ -2593,8 +2583,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                                 {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
                                             </InviteBannerButton>
                                         )}
-                                        <CollapseButton onClick={toggleInviteBanner} title={inviteBannerCollapsed ? 'Expand' : 'Collapse'}>
-                                            {inviteBannerCollapsed ? '▼' : '▲'}
+                                        <CollapseButton onClick={toggleInviteBanner}>
+                                            {inviteBannerCollapsed ? 'Show' : 'Hide'}
                                         </CollapseButton>
                                     </HomeFeedModeInline>
                                 </HomeFeedHeaderRow>
