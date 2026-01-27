@@ -920,6 +920,57 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
+	// v1.9.8-burn-osmosis-escrow: Burn IBC escrow tokens for dead Osmosis channel
+	// The IBC client expired (osmosis pruned the required historical data),
+	// so the ~599M MIRAGE in escrow for channel-1 is permanently stuck.
+	// This burns those tokens since they can never be recovered.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.9.8-burn-osmosis-escrow",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.9.8-burn-osmosis-escrow...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// IBC escrow address for transfer/channel-1 (Osmosis)
+			escrowAddr, err := sdk.AccAddressFromBech32("mirage1kq2rzz6fq2q7fsu75a9g7cpzjeanmk6877t950")
+			if err != nil {
+				return nil, err
+			}
+
+			// Get current balance
+			balance := app.BankKeeper.GetAllBalances(sdkCtx, escrowAddr)
+			if balance.IsZero() {
+				sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow: escrow account already empty")
+				return toVM, nil
+			}
+
+			sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow: burning escrow balance",
+				"address", escrowAddr.String(),
+				"balance", balance.String(),
+			)
+
+			// Send from escrow to core module, then burn
+			if err := app.BankKeeper.SendCoinsFromAccountToModule(sdkCtx, escrowAddr, coretypes.ModuleName, balance); err != nil {
+				sdkCtx.Logger().Error("v1.9.8-burn-osmosis-escrow: failed to send to module", "err", err)
+				return nil, err
+			}
+
+			if err := app.BankKeeper.BurnCoins(sdkCtx, coretypes.ModuleName, balance); err != nil {
+				sdkCtx.Logger().Error("v1.9.8-burn-osmosis-escrow: failed to burn coins", "err", err)
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("v1.9.8-burn-osmosis-escrow complete - burned stuck IBC escrow tokens",
+				"burned", balance.String(),
+			)
+			return toVM, nil
+		},
+	)
+
 	// v1.9.9-retention: Align evidence retention with deploy retention blocks.
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.9-retention",
