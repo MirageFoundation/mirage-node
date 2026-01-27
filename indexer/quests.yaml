@@ -1,0 +1,165 @@
+# Mirage Quest and Achievement Definitions
+#
+# Reward type definitions:
+# - type: "mirage" - MIRAGE tokens (amount in umirage)
+# - type: "icon" - Unlockable profile icon (future)
+# - type: "badge" - Achievement badge displayed on profile (future)
+# - type: "frame" - Profile frame/border (future)
+#
+# Quest parameters:
+# - action_type: The type of action that progresses this quest
+# - target_count: Number of actions needed to complete
+# - time_spacing_minutes: Minimum minutes between counted actions
+# - min_content_length: Minimum character count for posts/comments
+# - unique_target: Require unique targets (no voting same post twice)
+# - unique_topics_min: Minimum number of unique topics for votes
+# - allow_self: Whether self-interactions count (default: true)
+# - count_vote_changes: Whether changing a vote counts (default: false)
+# - quality_threshold: Minimum upvotes/score required
+# - unique_root_post: Comments must be on distinct root posts
+
+daily_quests:
+  - id: active_poster
+    title: "Active Poster"
+    description: "Create 5 posts, each at least 1 hour apart"
+    action_type: post
+    target_count: 5
+    time_spacing_minutes: 60
+    min_content_length: 120
+    rewards:
+      - type: mirage
+        amount: 100000000  # 100 MIRAGE
+
+  - id: quality_creator
+    title: "Quality Creator"
+    description: "Create a post that gets 10+ upvotes"
+    action_type: upvotes_received
+    target_count: 1
+    quality_threshold: 10
+    min_content_length: 120
+    rewards:
+      - type: mirage
+        amount: 250000000  # 250 MIRAGE
+
+  - id: engaged_commenter
+    title: "Engaged Commenter"
+    description: "Create a comment that gets 5+ upvotes"
+    action_type: comment_upvotes_received
+    target_count: 1
+    quality_threshold: 5
+    min_content_length: 30
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 150000000  # 150 MIRAGE
+
+  - id: community_curator
+    title: "Community Curator"
+    description: "Vote on 15 posts, each at least 5 minutes apart"
+    action_type: vote
+    target_count: 15
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 50000000  # 50 MIRAGE
+
+  - id: balanced_voter
+    title: "Balanced Voter"
+    description: "Give 5 upvotes and 5 downvotes, each at least 5 minutes apart"
+    action_type: balanced_vote
+    target_upvotes: 5
+    target_downvotes: 5
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 75000000  # 75 MIRAGE
+
+  - id: topic_explorer
+    title: "Topic Explorer"
+    description: "Post in 3 different topics"
+    action_type: unique_topic_post
+    target_count: 3
+    rewards:
+      - type: mirage
+        amount: 75000000  # 75 MIRAGE
+
+flash_quest_templates:
+  - id: comment_blitz
+    title: "Comment Blitz"
+    description: "Create 5 comments in the next 3 hours"
+    action_type: comment
+    target_count: 5
+    time_window_minutes: 180
+    quality_threshold: 0  # must not be negative
+    min_content_length: 30
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 200000000  # 200 MIRAGE
+
+  - id: voting_spree
+    title: "Voting Spree"
+    description: "Vote on 20 posts in the next 2 hours, each at least 5 minutes apart"
+    action_type: vote
+    target_count: 20
+    time_window_minutes: 120
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 100000000  # 100 MIRAGE
+
+achievements:
+  - id: first_viral
+    title: "First Viral Post"
+    description: "Have a post reach 50+ upvotes"
+    action_type: upvotes_received
+    target_count: 1
+    quality_threshold: 50
+    rewards:
+      - type: mirage
+        amount: 1000000000  # 1000 MIRAGE
+    badge_icon: "🔥"
+
+  - id: conversation_starter
+    title: "Conversation Starter"
+    description: "Have a post receive 20+ comments"
+    action_type: comments_received
+    target_count: 1
+    quality_threshold: 20
+    rewards:
+      - type: mirage
+        amount: 500000000  # 500 MIRAGE
+    badge_icon: "💬"
+
+  - id: trusted_member
+    title: "Trusted Member"
+    description: "Have 10 comments reach 5+ upvotes"
+    action_type: quality_comments
+    target_count: 10
+    quality_threshold: 5
+    rewards:
+      - type: mirage
+        amount: 750000000  # 750 MIRAGE
+    badge_icon: "⭐"
+
+  - id: topic_pioneer
+    title: "Topic Pioneer"
+    description: "Be the first to post in a new topic"
+    action_type: first_topic_post
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 200000000  # 200 MIRAGE
+    badge_icon: "🏴"

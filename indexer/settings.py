@@ -55,3 +55,21 @@ DB_MAX_FOLLOWED_TOPICS = 2000
 DB_MAX_BLOCKED_USERS = 2000
 DB_MAX_BLOCKED_POSTS = 1000
 DB_MAX_QUALITY_POSTS = 200
+
+# ========== Quest System Settings ==========
+# Feature flags - set to False to disable without code changes
+QUESTS_ENABLED = True
+ACHIEVEMENTS_ENABLED = True
+
+# Quest assignment
+DAILY_QUESTS_COUNT = 2  # Number of random daily quests per user
+FLASH_QUEST_MIN_INTERVAL_HOURS = 4  # Minimum hours between flash quests
+FLASH_QUEST_MAX_INTERVAL_HOURS = 8  # Maximum hours between flash quests
+
+# Reward multiplier (account age-based)
+REWARD_MULTIPLIER_DAYS = 30  # Days to reach max multiplier
+REWARD_MULTIPLIER_MIN = 1.0  # Minimum multiplier (new accounts get 1x)
+REWARD_MULTIPLIER_MAX = 5.0  # Maximum multiplier (mature accounts get 5x)
+
+# Daily reward cap (in umirage, 0 = no cap)
+DAILY_REWARD_CAP = 0
