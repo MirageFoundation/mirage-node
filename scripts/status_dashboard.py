@@ -12,7 +12,6 @@ Services monitored:
   - Backend API
   - Indexer
   - Caddy (web server)
-  - Hermes IBC relayer (if configured)
   - Bridge Orchestrator (if configured)
 """
 
@@ -287,6 +286,38 @@ def parse_host_port(addr: str) -> tuple[str, int]:
     host = parts[0].strip() or "127.0.0.1"
     port = int(parts[1].strip())
     return host, port
+
+
+def read_app_toml_value(path: str, key: str) -> Optional[str]:
+    try:
+        content = Path(path).read_text(encoding="utf-8")
+    except Exception as e:
+        debug_log(f"retention: failed to read app.toml: {e}")
+        return None
+    match = re.search(rf"^{re.escape(key)}\s*=\s*(.+)$", content, flags=re.MULTILINE)
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+        raw = raw[1:-1]
+    return raw.strip()
+
+
+def parse_int(value: Optional[str]) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except Exception:
+        return None
+
+
+def min_non_zero(a: Optional[int], b: Optional[int]) -> Optional[int]:
+    if not a or a <= 0:
+        return b if b and b > 0 else None
+    if not b or b <= 0:
+        return a
+    return a if a < b else b
 
 
 @dataclass
@@ -592,6 +623,94 @@ def check_node() -> ServiceStatus:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message="Not reachable", details={})
     except Exception as e:
         return ServiceStatus(name="CometBFT", status=Status.ERROR, message=str(e)[:30], details={})
+
+
+def check_retention() -> ServiceStatus:
+    """Check block retention against config + chain constraints."""
+    node_home = os.path.expanduser("~/.mirage/node")
+    app_toml = os.path.join(node_home, "config", "app.toml")
+    details: dict = {}
+
+    try:
+        status_resp = requests.get("http://127.0.0.1:26657/status", timeout=3).json()
+        sync_info = status_resp.get("result", {}).get("sync_info", {})
+        latest = parse_int(sync_info.get("latest_block_height"))
+        earliest = parse_int(sync_info.get("earliest_block_height"))
+        catching_up = sync_info.get("catching_up", True)
+        retained = None
+        if latest is not None and earliest is not None:
+            retained = max(0, latest - earliest + 1)
+    except Exception as e:
+        debug_log(f"retention: status RPC failed: {e}")
+        return ServiceStatus(name="Retention", status=Status.ERROR, message="RPC unavailable", details={})
+
+    try:
+        consensus_resp = requests.get("http://127.0.0.1:26657/consensus_params", timeout=3).json()
+        evidence = (
+            consensus_resp.get("result", {})
+            .get("consensus_params", {})
+            .get("evidence", {})
+            .get("max_age_num_blocks")
+        )
+        evidence_max_age_blocks = parse_int(evidence)
+    except Exception as e:
+        debug_log(f"retention: consensus_params RPC failed: {e}")
+        evidence_max_age_blocks = None
+
+    pruning_strategy = read_app_toml_value(app_toml, "pruning")
+    pruning_keep_recent = parse_int(read_app_toml_value(app_toml, "pruning-keep-recent"))
+    pruning_interval = parse_int(read_app_toml_value(app_toml, "pruning-interval"))
+    min_retain_blocks = parse_int(read_app_toml_value(app_toml, "min-retain-blocks"))
+    snapshot_interval = parse_int(read_app_toml_value(app_toml, "snapshot-interval"))
+    snapshot_keep_recent = parse_int(read_app_toml_value(app_toml, "snapshot-keep-recent"))
+
+    snapshot_retention = None
+    if snapshot_interval is not None and snapshot_keep_recent is not None:
+        snapshot_retention = snapshot_interval * snapshot_keep_recent
+
+    effective = None
+    for candidate in (min_retain_blocks, evidence_max_age_blocks, snapshot_retention):
+        effective = min_non_zero(effective, candidate)
+
+    details.update(
+        {
+            "retained_blocks": retained,
+            "expected_blocks": effective,
+            "min_retain_blocks": min_retain_blocks,
+            "evidence_max_age_blocks": evidence_max_age_blocks,
+            "snapshot_retention_blocks": snapshot_retention,
+            "pruning_strategy": pruning_strategy,
+            "pruning_keep_recent": pruning_keep_recent,
+            "pruning_interval": pruning_interval,
+            "catching_up": catching_up,
+        }
+    )
+
+    mismatch = False
+    if min_retain_blocks and evidence_max_age_blocks and evidence_max_age_blocks < min_retain_blocks:
+        mismatch = True
+    if min_retain_blocks and snapshot_retention and snapshot_retention < min_retain_blocks:
+        mismatch = True
+
+    if effective is None or retained is None:
+        return ServiceStatus(name="Retention", status=Status.WARN, message="Config missing", details=details)
+
+    tolerance = 100
+    status = Status.OK
+    message = "Within range"
+
+    if retained < max(0, effective - tolerance):
+        status = Status.WARN
+        message = "Below expected" if not catching_up else "Syncing"
+    elif retained > effective + tolerance:
+        status = Status.WARN
+        message = "Above expected"
+
+    if mismatch and status == Status.OK:
+        status = Status.WARN
+        message = "Config mismatch"
+
+    return ServiceStatus(name="Retention", status=status, message=message, details=details)
 
 
 def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
@@ -969,9 +1088,22 @@ def check_indexer() -> ServiceStatus:
     db_url = os.environ.get("INDEXER_DB_URL", "postgresql://mirage:mirage@127.0.0.1:5432/mirage")
 
     # Check if indexer process is running
+    # The indexer runs as "python3 main.py" or "python3 indexer/main.py"
+    # We use pgrep to find it, excluding status_dashboard
     try:
-        result = subprocess.run(["pgrep", "-f", "indexer/main.py"], capture_output=True, text=True)
-        process_running = result.returncode == 0
+        result = subprocess.run(
+            ["pgrep", "-f", "python.*indexer.*main.py|python.*main.py.*indexer"],
+            capture_output=True,
+            text=True,
+        )
+        # If that didn't find anything, try the simpler pattern but exclude ourselves
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["bash", "-c", "pgrep -af 'python.*main\\.py' | grep -v status_dashboard | grep -v grep"],
+                capture_output=True,
+                text=True,
+            )
+        process_running = result.returncode == 0 and result.stdout.strip() != ""
     except Exception:
         process_running = False
 
@@ -1208,12 +1340,10 @@ def check_endpoints() -> ServiceStatus:
 
     results = {}
     all_ok = True
-    new_ok = True
-    legacy_ok = True
     block_height = None
 
-    def check_rpc(path: str, name: str, is_legacy: bool):
-        nonlocal all_ok, new_ok, legacy_ok, block_height
+    def check_rpc(path: str, name: str):
+        nonlocal all_ok, block_height
         try:
             start = time.time()
             resp = requests.get(f"{base_url}{path}/status", timeout=5, verify=use_https)
@@ -1230,27 +1360,15 @@ def check_endpoints() -> ServiceStatus:
                 else:
                     results[name] = {"ok": False, "error": f"bad response"}
                     all_ok = False
-                    if is_legacy:
-                        legacy_ok = False
-                    else:
-                        new_ok = False
             else:
                 results[name] = {"ok": False, "status": resp.status_code}
                 all_ok = False
-                if is_legacy:
-                    legacy_ok = False
-                else:
-                    new_ok = False
         except Exception as e:
             results[name] = {"ok": False, "error": str(e)[:20]}
             all_ok = False
-            if is_legacy:
-                legacy_ok = False
-            else:
-                new_ok = False
 
-    def check_rest(path: str, name: str, is_legacy: bool):
-        nonlocal all_ok, new_ok, legacy_ok
+    def check_rest(path: str, name: str):
+        nonlocal all_ok
         try:
             start = time.time()
             # Query bank module params to verify REST is functional
@@ -1265,32 +1383,31 @@ def check_endpoints() -> ServiceStatus:
                 else:
                     results[name] = {"ok": False, "error": "bad response"}
                     all_ok = False
-                    if is_legacy:
-                        legacy_ok = False
-                    else:
-                        new_ok = False
             else:
                 results[name] = {"ok": False, "status": resp.status_code}
                 all_ok = False
-                if is_legacy:
-                    legacy_ok = False
-                else:
-                    new_ok = False
         except Exception as e:
             results[name] = {"ok": False, "error": str(e)[:20]}
             all_ok = False
-            if is_legacy:
-                legacy_ok = False
+
+    def check_grpc_endpoint():
+        nonlocal all_ok
+        try:
+            grpc_host, grpc_port = parse_host_port(MIRAGE_GRPC_ADDR)
+            ms = tcp_connect_ms(grpc_host, grpc_port, timeout_secs=1.5)
+            if ms is not None:
+                results["grpc"] = {"ok": True, "ms": ms, "addr": MIRAGE_GRPC_ADDR}
             else:
-                new_ok = False
+                results["grpc"] = {"ok": False, "error": "Not reachable"}
+                all_ok = False
+        except Exception as e:
+            results["grpc"] = {"ok": False, "error": str(e)[:20]}
+            all_ok = False
 
-    # Check new paths
-    check_rpc("/chain/rpc", "chain/rpc", False)
-    check_rest("/chain/rest", "chain/rest", False)
-
-    # Check legacy paths
-    check_rpc("/rpc", "rpc (legacy)", True)
-    check_rest("/lcd", "lcd (legacy)", True)
+    # Check endpoints
+    check_rpc("/chain/rpc", "chain/rpc")
+    check_rest("/chain/rest", "chain/rest")
+    check_grpc_endpoint()
 
     details = {
         "configured": True,
@@ -1307,25 +1424,11 @@ def check_endpoints() -> ServiceStatus:
             message=f"All OK @ {block_height:,}" if block_height else "All OK",
             details=details,
         )
-    elif new_ok and not legacy_ok:
-        return ServiceStatus(
-            name="Endpoints",
-            status=Status.WARN,
-            message="Legacy unreachable",
-            details=details,
-        )
-    elif not new_ok and legacy_ok:
-        return ServiceStatus(
-            name="Endpoints",
-            status=Status.ERROR,
-            message="Primary unreachable",
-            details=details,
-        )
     else:
         return ServiceStatus(
             name="Endpoints",
             status=Status.ERROR,
-            message="Paths unreachable",
+            message="Some unreachable",
             details=details,
         )
 
@@ -1378,206 +1481,6 @@ def check_referrals() -> ServiceStatus:
             "pid": pid,
         },
     )
-
-
-def check_hermes() -> ServiceStatus:
-    """Check Hermes IBC relayer status."""
-    hermes_home = os.path.expanduser("~/.mirage/hermes")
-    config_path = os.path.join(hermes_home, "config.toml")
-
-    # Active IBC channel (Mirage <-> Osmosis)
-    # channel-1 on mirage-1 <-> channel-108698 on osmosis-1
-    monitor_channel = "channel-1"
-
-    if not os.path.exists(config_path):
-        return ServiceStatus(
-            name="Hermes IBC", status=Status.UNKNOWN, message="Not configured", details={"configured": False}
-        )
-
-    # Check if process is running
-    try:
-        result = subprocess.run(["pgrep", "-f", "hermes.*start"], capture_output=True, text=True)
-        process_running = result.returncode == 0
-    except Exception:
-        process_running = False
-
-    # Parse config.toml to get chain IDs
-    chains = []
-    try:
-        with open(config_path) as f:
-            config_content = f.read()
-            chain_matches = re.findall(r'id\s*=\s*["\']([^"\']+)["\']', config_content)
-            chains = chain_matches[:3]
-    except Exception:
-        pass
-
-    # Check if relayer keys exist
-    keys_missing = []
-    for chain_id in chains:
-        key_path = os.path.join(hermes_home, "keys", chain_id, "keyring-test", "relayer.json")
-        if not os.path.exists(key_path):
-            keys_missing.append(chain_id)
-
-    base_details = {
-        "configured": True,
-        "running": process_running,
-        "chains": ", ".join(chains) if chains else None,
-        "channel": monitor_channel if monitor_channel else None,
-    }
-
-    if not process_running:
-        return ServiceStatus(name="Hermes IBC", status=Status.ERROR, message="Not running", details=base_details)
-
-    # Critical: relayer keys missing
-    if keys_missing:
-        return ServiceStatus(
-            name="Hermes IBC",
-            status=Status.ERROR,
-            message="Keys missing",
-            details={**base_details, "keys_missing": ", ".join(keys_missing)},
-        )
-
-    # Check channel and client health via hermes CLI
-    try:
-        # Check if channel is open and get connection info
-        result = subprocess.run(
-            [
-                "hermes",
-                "--config",
-                config_path,
-                "--json",
-                "query",
-                "channel",
-                "end",
-                "--chain",
-                "mirage-1",
-                "--port",
-                "transfer",
-                "--channel",
-                monitor_channel,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode != 0:
-            return ServiceStatus(
-                name="Hermes IBC",
-                status=Status.WARN,
-                message="Query failed",
-                details={**base_details, "error": truncate((result.stderr or result.stdout).strip(), 40)},
-            )
-
-        # Hermes may print multiple JSON lines (e.g., a JSON log line + a JSON result line).
-        # Parse the last JSON object that contains a "result" field.
-        payload = None
-        for line in (result.stdout or "").splitlines():
-            line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                obj = json.loads(line)
-            except Exception:
-                continue
-            if isinstance(obj, dict) and "result" in obj:
-                payload = obj
-
-        if not payload or not isinstance(payload.get("result"), dict):
-            return ServiceStatus(
-                name="Hermes IBC",
-                status=Status.WARN,
-                message="Bad JSON",
-                details={**base_details, "error": "Could not parse hermes JSON output"},
-            )
-
-        channel_state = payload["result"].get("state")
-        state_upper = (channel_state or "").upper()
-        channel_open = state_upper == "OPEN"
-
-        if not channel_open:
-            return ServiceStatus(
-                name="Hermes IBC",
-                status=Status.ERROR,
-                message="Channel closed",
-                details={**base_details, "channel_state": channel_state or "unknown"},
-            )
-
-        # Extract connection ID from channel query JSON (preferred)
-        connection_id = None
-        hops = payload["result"].get("connection_hops")
-        if isinstance(hops, list) and hops:
-            connection_id = str(hops[0])
-        if not connection_id:
-            # Fallback to regex
-            conn_match = re.search(r"connection-\d+", result.stdout)
-            connection_id = conn_match.group(0) if conn_match else None
-
-        if connection_id:
-            # Get the client ID for this specific connection
-            conn_result = subprocess.run(
-                [
-                    "hermes",
-                    "--config",
-                    config_path,
-                    "query",
-                    "connection",
-                    "end",
-                    "--chain",
-                    "mirage-1",
-                    "--connection",
-                    connection_id,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            # Extract client ID (e.g., "client_id: 07-tendermint-2")
-            client_match = re.search(r"07-tendermint-\d+", conn_result.stdout)
-            client_id = client_match.group(0) if client_match else None
-
-            if client_id:
-                # Check this specific client's status
-                client_status = subprocess.run(
-                    [
-                        "hermes",
-                        "--config",
-                        config_path,
-                        "query",
-                        "client",
-                        "status",
-                        "--chain",
-                        "mirage-1",
-                        "--client",
-                        client_id,
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=15,
-                )
-                combined = client_status.stdout + client_status.stderr
-                if (
-                    "expired" in combined.lower()
-                    or "frozen" in combined.lower()
-                    or "outside of trusting period" in combined
-                ):
-                    return ServiceStatus(
-                        name="Hermes IBC",
-                        status=Status.ERROR,
-                        message="Client expired",
-                        details={**base_details, "expired": True, "client": client_id},
-                    )
-                base_details["client"] = client_id
-
-        return ServiceStatus(
-            name="Hermes IBC",
-            status=Status.OK,
-            message="Running",
-            details={**base_details, "channel_open": True, "channel_state": channel_state or "OPEN"},
-        )
-    except subprocess.TimeoutExpired:
-        return ServiceStatus(name="Hermes IBC", status=Status.WARN, message="Query timeout", details=base_details)
-    except Exception as e:
-        return ServiceStatus(name="Hermes IBC", status=Status.WARN, message=str(e)[:20], details=base_details)
 
 
 # Base58 alphabet for Solana addresses
@@ -1646,6 +1549,18 @@ def _get_solana_balance(rpc_url: str, pubkey: str) -> Optional[float]:
 # Solana balance thresholds
 ORCHESTRATOR_SOL_WARN = float(os.environ.get("ORCHESTRATOR_SOL_WARN", "0.5"))
 ORCHESTRATOR_SOL_ERROR = float(os.environ.get("ORCHESTRATOR_SOL_ERROR", "0.05"))
+
+# System storage thresholds (in GB)
+SYSTEM_STORAGE_WARN_GB = float(os.environ.get("MIRAGE_STORAGE_WARN_GB", "5"))
+SYSTEM_STORAGE_ERROR_GB = float(os.environ.get("MIRAGE_STORAGE_ERROR_GB", "1"))
+
+# Memory thresholds (percentage used)
+SYSTEM_MEMORY_WARN_PCT = float(os.environ.get("MIRAGE_MEMORY_WARN_PCT", "85"))
+SYSTEM_MEMORY_ERROR_PCT = float(os.environ.get("MIRAGE_MEMORY_ERROR_PCT", "95"))
+
+# Load average thresholds (per CPU core)
+SYSTEM_LOAD_WARN_PER_CORE = float(os.environ.get("MIRAGE_LOAD_WARN_PER_CORE", "0.8"))
+SYSTEM_LOAD_ERROR_PER_CORE = float(os.environ.get("MIRAGE_LOAD_ERROR_PER_CORE", "1.5"))
 
 
 def check_orchestrator() -> ServiceStatus:
@@ -1742,6 +1657,328 @@ def check_orchestrator() -> ServiceStatus:
     return ServiceStatus(
         name="Orchestrator", status=Status.OK, message="Running", details=base_details
     )
+
+
+def _get_cpu_count() -> int:
+    """Get number of CPU cores."""
+    try:
+        return os.cpu_count() or 1
+    except Exception:
+        return 1
+
+
+def _get_load_average() -> Optional[tuple[float, float, float]]:
+    """Get system load average (1min, 5min, 15min)."""
+    try:
+        return os.getloadavg()
+    except (OSError, AttributeError):
+        # Windows doesn't have getloadavg
+        return None
+
+
+def _get_memory_info() -> Optional[dict]:
+    """Get memory usage info from /proc/meminfo."""
+    try:
+        with open("/proc/meminfo") as f:
+            meminfo = {}
+            for line in f:
+                parts = line.split(":")
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    # Value is in kB, convert to bytes
+                    val_parts = parts[1].strip().split()
+                    if val_parts:
+                        val_kb = int(val_parts[0])
+                        meminfo[key] = val_kb * 1024
+            
+            total = meminfo.get("MemTotal", 0)
+            available = meminfo.get("MemAvailable", 0)
+            
+            if total > 0:
+                used = total - available
+                used_pct = (used / total) * 100
+                return {
+                    "total": total,
+                    "available": available,
+                    "used": used,
+                    "used_pct": used_pct,
+                }
+    except Exception as e:
+        debug_log(f"system: failed to get memory info: {e}")
+    return None
+
+
+def _get_disk_usage(path: str) -> Optional[dict]:
+    """Get disk usage for a given path."""
+    try:
+        stat = os.statvfs(path)
+        total = stat.f_blocks * stat.f_frsize
+        free = stat.f_bavail * stat.f_frsize
+        used = total - free
+        used_pct = (used / total) * 100 if total > 0 else 0
+        return {
+            "total": total,
+            "free": free,
+            "used": used,
+            "used_pct": used_pct,
+        }
+    except Exception as e:
+        debug_log(f"system: failed to get disk usage for {path}: {e}")
+        return None
+
+
+def _get_uptime() -> Optional[float]:
+    """Get system uptime in seconds."""
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except Exception as e:
+        debug_log(f"system: failed to get uptime: {e}")
+        return None
+
+
+def _format_uptime(seconds: float) -> str:
+    """Format uptime in human-readable form."""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    
+    if days > 0:
+        return f"{days}d {hours}h"
+    elif hours > 0:
+        return f"{hours}h {minutes}m"
+    else:
+        return f"{minutes}m"
+
+
+def _format_bytes(b: int) -> str:
+    """Format bytes in human-readable form."""
+    if b >= 1024 ** 4:
+        return f"{b / (1024 ** 4):.1f} TB"
+    elif b >= 1024 ** 3:
+        return f"{b / (1024 ** 3):.1f} GB"
+    elif b >= 1024 ** 2:
+        return f"{b / (1024 ** 2):.1f} MB"
+    elif b >= 1024:
+        return f"{b / 1024:.1f} KB"
+    else:
+        return f"{b} B"
+
+
+def _get_pending_updates() -> Optional[dict]:
+    """
+    Check for pending system updates (Debian/Ubuntu/Arch).
+    
+    Returns dict with:
+        - total: total number of upgradable packages
+        - security: number of security updates (Debian/Ubuntu only)
+        - names: list of package names (truncated)
+    """
+    try:
+        # Try apt first (Debian/Ubuntu)
+        if os.path.exists("/usr/bin/apt"):
+            result = subprocess.run(
+                ["apt", "list", "--upgradable"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            if result.returncode == 0:
+                lines = result.stdout.strip().split("\n")
+                # First line is "Listing..." header
+                packages = [l for l in lines[1:] if l.strip()]
+                
+                total = len(packages)
+                security = 0
+                names = []
+                
+                for pkg in packages[:10]:
+                    pkg_name = pkg.split("/")[0]
+                    names.append(pkg_name)
+                    if "-security" in pkg or "security" in pkg.lower():
+                        security += 1
+                
+                return {"total": total, "security": security, "names": names}
+        
+        # Try pacman (Arch Linux)
+        if os.path.exists("/usr/bin/pacman"):
+            # checkupdates is the safe way to check for updates (doesn't need root)
+            # Falls back to pacman -Qu if checkupdates isn't available
+            cmd = ["checkupdates"] if os.path.exists("/usr/bin/checkupdates") else ["pacman", "-Qu"]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            # pacman -Qu returns 1 if no updates, checkupdates returns 2 if no updates
+            if result.returncode in (0, 1, 2):
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+                total = len(lines)
+                names = []
+                
+                for pkg in lines[:10]:
+                    # Format: "package old_version -> new_version"
+                    pkg_name = pkg.split()[0] if pkg else ""
+                    if pkg_name:
+                        names.append(pkg_name)
+                
+                # Arch doesn't distinguish security updates in the same way
+                return {"total": total, "security": 0, "names": names}
+        
+        # Try dnf (Fedora/RHEL)
+        if os.path.exists("/usr/bin/dnf"):
+            result = subprocess.run(
+                ["dnf", "check-update", "-q"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env={**os.environ, "LANG": "C"},
+            )
+            
+            # dnf returns 100 if updates available, 0 if none
+            if result.returncode in (0, 100):
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
+                total = len(lines)
+                names = [l.split()[0] for l in lines[:10] if l.split()]
+                
+                return {"total": total, "security": 0, "names": names}
+        
+        return None
+        
+    except subprocess.TimeoutExpired:
+        debug_log("system: update check timed out")
+        return None
+    except Exception as e:
+        debug_log(f"system: _get_pending_updates failed: {e}")
+        return None
+
+
+def check_system() -> ServiceStatus:
+    """Check system health: disk space, memory, CPU load, uptime."""
+    details = {}
+    issues = []
+    
+    # Get disk usage for root filesystem
+    disk = _get_disk_usage("/")
+    if disk:
+        free_gb = disk["free"] / (1024 ** 3)
+        details["disk_total"] = disk["total"]
+        details["disk_free"] = disk["free"]
+        details["disk_used_pct"] = disk["used_pct"]
+        details["disk_free_gb"] = free_gb
+        
+        if free_gb < SYSTEM_STORAGE_ERROR_GB:
+            issues.append(("error", "disk_critical"))
+        elif free_gb < SYSTEM_STORAGE_WARN_GB:
+            issues.append(("warn", "disk_low"))
+    
+    # Get disk usage for ~/.mirage if it exists on a different mount
+    mirage_home = os.path.expanduser("~/.mirage")
+    if os.path.exists(mirage_home):
+        mirage_disk = _get_disk_usage(mirage_home)
+        if mirage_disk and mirage_disk.get("total") != disk.get("total"):
+            # Different filesystem
+            free_gb = mirage_disk["free"] / (1024 ** 3)
+            details["mirage_disk_free"] = mirage_disk["free"]
+            details["mirage_disk_used_pct"] = mirage_disk["used_pct"]
+            details["mirage_disk_free_gb"] = free_gb
+            
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                issues.append(("error", "mirage_disk_critical"))
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                issues.append(("warn", "mirage_disk_low"))
+    
+    # Get memory info
+    mem = _get_memory_info()
+    if mem:
+        details["mem_total"] = mem["total"]
+        details["mem_available"] = mem["available"]
+        details["mem_used_pct"] = mem["used_pct"]
+        
+        if mem["used_pct"] >= SYSTEM_MEMORY_ERROR_PCT:
+            issues.append(("error", "memory_critical"))
+        elif mem["used_pct"] >= SYSTEM_MEMORY_WARN_PCT:
+            issues.append(("warn", "memory_high"))
+    
+    # Get CPU load
+    load = _get_load_average()
+    cpu_count = _get_cpu_count()
+    if load:
+        details["load_1m"] = load[0]
+        details["load_5m"] = load[1]
+        details["load_15m"] = load[2]
+        details["cpu_count"] = cpu_count
+        
+        # Check load per core
+        load_per_core = load[0] / cpu_count
+        details["load_per_core"] = load_per_core
+        
+        if load_per_core >= SYSTEM_LOAD_ERROR_PER_CORE:
+            issues.append(("error", "load_critical"))
+        elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
+            issues.append(("warn", "load_high"))
+    
+    # Get uptime
+    uptime = _get_uptime()
+    if uptime:
+        details["uptime_secs"] = uptime
+        details["uptime_human"] = _format_uptime(uptime)
+    
+    # Check for pending system updates
+    updates = _get_pending_updates()
+    if updates:
+        details["updates_total"] = updates["total"]
+        details["updates_security"] = updates["security"]
+        details["updates_names"] = updates["names"]
+        
+        # Security updates are critical
+        if updates["security"] > 0:
+            issues.append(("error", "security_updates"))
+        elif updates["total"] > 20:
+            # Many pending updates is a warning
+            issues.append(("warn", "many_updates"))
+    
+    # Determine overall status and message
+    has_error = any(level == "error" for level, _ in issues)
+    has_warn = any(level == "warn" for level, _ in issues)
+    
+    if has_error:
+        status = Status.ERROR
+        # Prioritize message by severity
+        error_types = [t for l, t in issues if l == "error"]
+        if "security_updates" in error_types:
+            message = "Security updates!"
+        elif "disk_critical" in error_types or "mirage_disk_critical" in error_types:
+            message = "Disk CRITICAL!"
+        elif "memory_critical" in error_types:
+            message = "Memory CRITICAL!"
+        elif "load_critical" in error_types:
+            message = "Load CRITICAL!"
+        else:
+            message = "Critical issues"
+    elif has_warn:
+        status = Status.WARN
+        warn_types = [t for l, t in issues if l == "warn"]
+        if "disk_low" in warn_types or "mirage_disk_low" in warn_types:
+            message = "Low disk space"
+        elif "memory_high" in warn_types:
+            message = "High memory"
+        elif "load_high" in warn_types:
+            message = "High load"
+        else:
+            message = "Warnings"
+    else:
+        status = Status.OK
+        message = "Healthy"
+    
+    details["issues"] = issues
+    
+    return ServiceStatus(name="System", status=status, message=message, details=details)
 
 
 # ============================================================================
@@ -1846,6 +2083,24 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             else:
                 lines.append(f"{bullet}{Colors.DIM}RPC health:{Colors.RESET} {Colors.BRIGHT_RED}BAD{Colors.RESET}")
 
+    elif status.name == "Retention":
+        retained = details.get("retained_blocks")
+        expected = details.get("expected_blocks")
+        min_retain = details.get("min_retain_blocks")
+        evidence = details.get("evidence_max_age_blocks")
+        snapshot = details.get("snapshot_retention_blocks")
+
+        if retained is not None:
+            lines.append(f"{bullet}{Colors.DIM}Retained:{Colors.RESET} {retained:,} blocks")
+        if expected is not None:
+            lines.append(f"{bullet}{Colors.DIM}Expected:{Colors.RESET} {expected:,} blocks")
+        if evidence is not None or snapshot is not None:
+            ev = f"{evidence:,}" if isinstance(evidence, int) else "?"
+            sn = f"{snapshot:,}" if isinstance(snapshot, int) else "?"
+            lines.append(f"{bullet}{Colors.DIM}Evidence/Snap:{Colors.RESET} {ev} / {sn}")
+        if min_retain is not None:
+            lines.append(f"{bullet}{Colors.DIM}Min-retain:{Colors.RESET} {min_retain:,}")
+
     elif status.name == "Validator":
         if details.get("moniker"):
             moniker = details["moniker"]
@@ -1900,14 +2155,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             code = details["status_code"]
             code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
-
-    elif status.name == "gRPC":
-        addr = details.get("addr") or MIRAGE_GRPC_ADDR
-        lines.append(f"{bullet}{Colors.DIM}Addr:{Colors.RESET} {truncate(str(addr), 22)}")
-        ms = details.get("ms")
-        if isinstance(ms, int):
-            ms_color = Colors.BRIGHT_GREEN if ms < 50 else Colors.BRIGHT_YELLOW if ms < 200 else Colors.BRIGHT_RED
-            lines.append(f"{bullet}{Colors.DIM}Connect:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
 
     elif status.name == "Indexer":
         if details.get("height"):
@@ -1965,18 +2212,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 err = str(err)[:12]
                 lines.append(f"{bullet}{Colors.DIM}{name}:{Colors.RESET} {Colors.BRIGHT_RED}{err}{Colors.RESET}")
 
-    elif status.name == "Hermes IBC":
-        if details.get("keys_missing"):
-            lines.append(f"{bullet}{Colors.BRIGHT_RED}Keys missing:{Colors.RESET} {details['keys_missing']}")
-        if details.get("expired"):
-            lines.append(f"{bullet}{Colors.BRIGHT_RED}Client EXPIRED{Colors.RESET}")
-        if details.get("channel_open"):
-            lines.append(f"{bullet}{Colors.DIM}Channel:{Colors.RESET} {Colors.BRIGHT_GREEN}OPEN{Colors.RESET}")
-        elif details.get("channel"):
-            lines.append(f"{bullet}{Colors.DIM}Channel:{Colors.RESET} {details['channel']}")
-        if details.get("chains"):
-            lines.append(f"{bullet}{Colors.DIM}Chains:{Colors.RESET} {details['chains']}")
-
     elif status.name == "Orchestrator":
         if details.get("network"):
             network = details["network"]
@@ -2000,6 +2235,90 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 bal_suffix = ""
             lines.append(f"{bullet}{Colors.DIM}SOL:{Colors.RESET} {bal_color}{bal:.4f}{bal_suffix}{Colors.RESET}")
 
+    elif status.name == "System":
+        # Disk space (primary concern)
+        if "disk_free_gb" in details:
+            free_gb = details["disk_free_gb"]
+            used_pct = details.get("disk_used_pct", 0)
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                disk_color = Colors.BRIGHT_RED
+                disk_suffix = " CRITICAL!"
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                disk_color = Colors.BRIGHT_YELLOW
+                disk_suffix = " LOW"
+            else:
+                disk_color = Colors.BRIGHT_GREEN
+                disk_suffix = ""
+            lines.append(
+                f"{bullet}{Colors.DIM}Disk:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
+            )
+        
+        # Mirage data disk (if different mount)
+        if "mirage_disk_free_gb" in details:
+            free_gb = details["mirage_disk_free_gb"]
+            if free_gb < SYSTEM_STORAGE_ERROR_GB:
+                disk_color = Colors.BRIGHT_RED
+                disk_suffix = " CRITICAL!"
+            elif free_gb < SYSTEM_STORAGE_WARN_GB:
+                disk_color = Colors.BRIGHT_YELLOW
+                disk_suffix = " LOW"
+            else:
+                disk_color = Colors.BRIGHT_GREEN
+                disk_suffix = ""
+            lines.append(
+                f"{bullet}{Colors.DIM}Data:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
+            )
+        
+        # Memory usage
+        if "mem_used_pct" in details:
+            used_pct = details["mem_used_pct"]
+            mem_avail = details.get("mem_available", 0)
+            if used_pct >= SYSTEM_MEMORY_ERROR_PCT:
+                mem_color = Colors.BRIGHT_RED
+            elif used_pct >= SYSTEM_MEMORY_WARN_PCT:
+                mem_color = Colors.BRIGHT_YELLOW
+            else:
+                mem_color = Colors.BRIGHT_GREEN
+            avail_str = _format_bytes(mem_avail)
+            lines.append(
+                f"{bullet}{Colors.DIM}Memory:{Colors.RESET} {mem_color}{used_pct:.0f}% used{Colors.RESET} ({avail_str} free)"
+            )
+        
+        # CPU load (show as percentage of total capacity)
+        if "load_1m" in details:
+            load_1m = details["load_1m"]
+            cpu_count = details.get("cpu_count", 1)
+            load_pct = (load_1m / cpu_count) * 100
+            if load_pct >= SYSTEM_LOAD_ERROR_PER_CORE * 100:
+                load_color = Colors.BRIGHT_RED
+            elif load_pct >= SYSTEM_LOAD_WARN_PER_CORE * 100:
+                load_color = Colors.BRIGHT_YELLOW
+            else:
+                load_color = Colors.BRIGHT_GREEN
+            lines.append(
+                f"{bullet}{Colors.DIM}CPU:{Colors.RESET} {load_color}{load_pct:.0f}%{Colors.RESET} ({cpu_count} cores)"
+            )
+        
+        # Uptime
+        if details.get("uptime_human"):
+            lines.append(f"{bullet}{Colors.DIM}Uptime:{Colors.RESET} {details['uptime_human']}")
+        
+        # Pending updates
+        if "updates_total" in details:
+            total = details["updates_total"]
+            security = details.get("updates_security", 0)
+            if security > 0:
+                lines.append(
+                    f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)"
+                )
+            elif total > 0:
+                update_color = Colors.BRIGHT_YELLOW if total > 20 else Colors.BRIGHT_GREEN
+                lines.append(
+                    f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {update_color}{total} available{Colors.RESET}"
+                )
+            else:
+                lines.append(f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {Colors.BRIGHT_GREEN}up to date{Colors.RESET}")
+
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
         lines.append("")
@@ -2014,15 +2333,15 @@ def render_dashboard(refresh_secs: int):
     # Collect all statuses
     statuses = [
         check_node(),
+        check_retention(),
         check_validator(),
         check_postgres(),
         check_backend(),
-        check_grpc(),
         check_indexer(),
         check_caddy(),
         check_endpoints(),
-        check_hermes(),
         check_orchestrator(),
+        check_system(),
     ]
 
     # Filter out unconfigured services for cleaner display
@@ -2031,7 +2350,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "System")
     ]
 
     # Render header

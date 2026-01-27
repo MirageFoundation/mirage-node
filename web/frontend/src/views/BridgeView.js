@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Helmet } from 'react-helmet-async';
 import styled, { keyframes, css, useTheme } from 'styled-components';
 import { useLocation, useSearchParams } from 'react-router-dom';
-import { bech32 } from 'bech32';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
 import Sidebar from '../components/Sidebar';
@@ -11,39 +10,13 @@ import Button from '../components/Button';
 import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
-import { ibcTransfer, bridgeBurn, pollTxStatus } from '../utils/tx';
+import { bridgeBurn, pollTxStatus } from '../utils/tx';
 
 // Lazy import for Solana bridge - only loads when needed
 const loadSolanaBridge = () => import('../utils/solanaBridge');
 
-// Convert a bech32 address from one prefix to another (e.g., mirage1... -> osmo1...)
-const convertBech32Prefix = (address, newPrefix) => {
-    try {
-        const decoded = bech32.decode(address);
-        return bech32.encode(newPrefix, decoded.words);
-    } catch (e) {
-        return null;
-    }
-};
-
 // Network configurations - static metadata for supported bridge destinations
 const NETWORKS = {
-    osmosis: {
-        id: 'osmosis',
-        name: 'Osmosis',
-        symbol: 'OSMO',
-        icon: '/images/bridges/osmosis.svg',
-        color: '#5E12A0',
-        colorLight: 'rgba(94, 18, 160, 0.15)',
-        addressPrefix: 'osmo',
-        addressLength: 43,
-        estimatedTime: '~30 seconds',
-        minAmount: 1,
-        enabled: true,
-        canDerive: true, // Same key derives address on this chain
-        isIbc: true,
-        ibcChannel: 'channel-0', // IBC channel to Osmosis
-    },
     solana: {
         id: 'solana',
         name: 'Solana',
@@ -57,7 +30,6 @@ const NETWORKS = {
         minAmount: 10,
         enabled: true,
         canDerive: false, // Different cryptography, no derived address
-        isIbc: false,
     },
 };
 
@@ -796,19 +768,6 @@ const ExplanationIcon = styled.span`
 
 // Source network configurations for Bridge In (where tokens come FROM)
 const SOURCE_NETWORKS = {
-    osmosis: {
-        id: 'osmosis',
-        name: 'Osmosis',
-        symbol: 'OSMO',
-        icon: '/images/bridges/osmosis.svg',
-        color: '#5E12A0',
-        colorLight: 'rgba(94, 18, 160, 0.15)',
-        addressPrefix: 'osmo',
-        estimatedTime: '~30 seconds',
-        enabled: true,
-        isIbc: true,
-        ibcChannel: 'channel-???', // Channel from Osmosis to Mirage (user needs to look this up)
-    },
     solana: {
         id: 'solana',
         name: 'Solana',
@@ -818,7 +777,6 @@ const SOURCE_NETWORKS = {
         colorLight: 'rgba(20, 241, 149, 0.15)',
         estimatedTime: '~2-5 minutes',
         enabled: true,
-        isIbc: false,
     },
 };
 
@@ -1865,12 +1823,6 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
     const [copiedAddress, setCopiedAddress] = useState(null); // Track which address was copied
     const [isSolanaBridging, setIsSolanaBridging] = useState(false); // Track when Solana bridge is in progress
 
-    // Derive Osmosis address from Mirage address (same key)
-    const derivedOsmoAddress = useMemo(() => {
-        if (!address) return null;
-        return convertBech32Prefix(address, 'osmo');
-    }, [address]);
-
     const handleSourceSelect = (networkId) => {
         setSelectedSource(SOURCE_NETWORKS[networkId]);
         setAddressConfirmed(null); // Reset when changing source
@@ -1945,132 +1897,6 @@ function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance
                                 </NetworkCard>
                             ))}
                         </NetworkGrid>
-                    </>
-                )}
-
-                {/* Osmosis Bridge In Flow */}
-                {selectedSource?.id === 'osmosis' && (
-                    <>
-                        {/* Step 2: Connect Wallet */}
-                        <SectionTitle>
-                            <StepNumber>2</StepNumber>
-                            Connect Wallet
-                        </SectionTitle>
-                        <InputSection>
-                            <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888' }}>
-                                Open <a href="https://app.osmosis.zone/assets/ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2" target="_blank" rel="noopener noreferrer" style={{ color: theme?.colors?.link || '#667eea' }}>MIRAGE on Osmosis</a> and
-                                connect your wallet (we recommend <a href="https://www.keplr.app/" target="_blank" rel="noopener noreferrer" style={{ color: theme?.colors?.link || '#667eea' }}>Keplr</a>)
-                            </div>
-                        </InputSection>
-
-                        {/* Step 3: Verify Address */}
-                        <SectionTitle>
-                            <StepNumber>3</StepNumber>
-                            Verify Your Address
-                        </SectionTitle>
-                        <InputSection>
-                            <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888', marginBottom: '0.5rem' }}>
-                                Does the Osmosis website show this address after connecting?
-                            </div>
-                            <div style={{
-                                fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
-                                fontSize: '0.85rem',
-                                padding: '0.6rem 0.85rem',
-                                background: theme?.colors?.panelAlt || '#1f2328',
-                                border: `1px solid ${theme?.colors?.border || '#444'}`,
-                                borderRadius: '8px',
-                                wordBreak: 'break-all',
-                                color: theme?.colors?.text || '#fff',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                gap: '0.5rem'
-                            }}>
-                                <span style={{ flex: 1, minWidth: 0 }}>{derivedOsmoAddress || '...'}</span>
-                                <CopyButton type="button" onClick={() => handleCopy(derivedOsmoAddress)}>
-                                    {copiedAddress === derivedOsmoAddress ? 'Copied' : 'Copy'}
-                                </CopyButton>
-                            </div>
-                            <ConfirmButtonRow>
-                                <ConfirmButton
-                                    type="button"
-                                    $variant="yes"
-                                    $selected={addressConfirmed === true}
-                                    onClick={() => setAddressConfirmed(true)}
-                                >
-                                    ✓ Yes, it matches
-                                </ConfirmButton>
-                                <ConfirmButton
-                                    type="button"
-                                    $variant="no"
-                                    $selected={addressConfirmed === false}
-                                    onClick={() => setAddressConfirmed(false)}
-                                >
-                                    ✗ No, different address
-                                </ConfirmButton>
-                            </ConfirmButtonRow>
-
-                            {addressConfirmed === false && (
-                                <WarningBanner style={{ marginTop: '1rem', marginBottom: 0, flexDirection: 'column', alignItems: 'stretch', gap: '0.5rem' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        <WarningIcon>⚠️</WarningIcon>
-                                        <span><strong>Your MIRAGE is in a different wallet</strong></span>
-                                    </div>
-                                    <div style={{ fontSize: '0.75rem', lineHeight: 1.8, marginTop: '0.5rem' }}>
-                                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                                            <span style={{ fontWeight: 700 }}>1.</span>
-                                            <span>From your current Osmosis wallet, send your MIRAGE to:</span>
-                                        </div>
-                                        <div style={{
-                                            fontFamily: "'Monaco', 'Menlo', 'Ubuntu Mono', monospace",
-                                            fontSize: '0.75rem',
-                                            padding: '0.4rem 0.6rem',
-                                            background: 'rgba(245, 158, 11, 0.15)',
-                                            borderRadius: '4px',
-                                            wordBreak: 'break-all',
-                                            marginBottom: '0.5rem',
-                                            marginLeft: '1rem',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            justifyContent: 'space-between',
-                                            gap: '0.5rem'
-                                        }}>
-                                            <span style={{ flex: 1, minWidth: 0 }}>{derivedOsmoAddress}</span>
-                                            <CopyButton type="button" onClick={() => handleCopy(derivedOsmoAddress)} style={{ fontSize: '0.6rem', padding: '0.25rem 0.4rem' }}>
-                                                {copiedAddress === derivedOsmoAddress ? 'Copied' : 'Copy'}
-                                            </CopyButton>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                                            <span style={{ fontWeight: 700 }}>2.</span>
-                                            <span>Import your Mirage seed phrase (12 words) into <a href="https://www.keplr.app/" target="_blank" rel="noopener noreferrer" style={{ color: '#f59e0b' }}>Keplr</a></span>
-                                        </div>
-                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                            <span style={{ fontWeight: 700 }}>3.</span>
-                                            <span>Withdraw from Osmosis (now your wallet will show the correct address)</span>
-                                        </div>
-                                    </div>
-                                </WarningBanner>
-                            )}
-                        </InputSection>
-
-                        {/* Step 4: Withdraw (only shown when address is confirmed) */}
-                        {addressConfirmed === true && (
-                            <>
-                                <SectionTitle>
-                                    <StepNumber>4</StepNumber>
-                                    Withdraw
-                                </SectionTitle>
-                                <InputSection>
-                                    <div style={{ fontSize: '0.8rem', color: theme?.colors?.subtleText || '#888', lineHeight: 1.6 }}>
-                                        Click <strong>Withdraw</strong>, enter the amount, and confirm the transaction.
-                                        Tokens typically arrive within 30 seconds.
-                                    </div>
-                                    <StatusBanner $success style={{ marginTop: '0.75rem' }}>
-                                        ✓ Your tokens will arrive at your Mirage address
-                                    </StatusBanner>
-                                </InputSection>
-                            </>
-                        )}
                     </>
                 )}
 
@@ -2197,11 +2023,13 @@ export default function BridgeView({ state }) {
     }, [selectedNetwork, chainConfigs]);
 
     // Derive the user's address on the destination chain (for Cosmos chains)
+    // Note: Currently unused as only Solana bridge remains (different key derivation)
     const derivedAddress = useMemo(() => {
         if (!address || !selectedNetwork?.canDerive || !selectedNetwork?.addressPrefix) {
             return null;
         }
-        return convertBech32Prefix(address, selectedNetwork.addressPrefix);
+        // Cosmos address derivation removed with IBC/Osmosis (v1.10.0)
+        return null;
     }, [address, selectedNetwork]);
 
     // The effective destination address (derived or manual)
@@ -2291,24 +2119,6 @@ export default function BridgeView({ state }) {
         if (!selectedNetwork) return null;
 
         const trimmed = value.trim();
-
-        if (selectedNetwork.id === 'osmosis') {
-            if (!trimmed.startsWith('osmo1')) {
-                return 'Osmosis address must start with osmo1';
-            }
-            try {
-                const decoded = bech32.decode(trimmed);
-                if (decoded.prefix !== 'osmo') {
-                    return 'Invalid Osmosis bech32 prefix';
-                }
-                const bytes = bech32.fromWords(decoded.words);
-                if (!bytes || bytes.length !== 20) {
-                    return 'Invalid Osmosis address payload';
-                }
-            } catch (_) {
-                return 'Invalid Osmosis address (bech32 checksum failed)';
-            }
-        }
 
         if (selectedNetwork.id === 'solana') {
             // Basic Solana address validation (base58, 32-44 chars)
@@ -2626,15 +2436,7 @@ export default function BridgeView({ state }) {
             // Convert MIRAGE to umirage (1 MIRAGE = 1,000,000 umirage)
             const amountUmirage = Math.floor(parseFloat(rawAmount) * 1_000_000);
 
-            let result;
-            if (selectedNetwork.isIbc) {
-                // IBC transfer to Cosmos chains
-                const sourceChannel = selectedNetwork.ibcChannel || 'channel-0';
-                result = await ibcTransfer(effectiveDestination, amountUmirage, sourceChannel, 600);
-            } else {
-                // Attested burn for non-IBC chains (e.g., Solana)
-                result = await bridgeBurn(selectedNetwork.id, effectiveDestination, amountUmirage);
-            }
+            const result = await bridgeBurn(selectedNetwork.id, effectiveDestination, amountUmirage);
 
             if (!result || !result.success) {
                 throw new Error(result?.error || 'Bridge transaction failed');
@@ -2899,7 +2701,7 @@ export default function BridgeView({ state }) {
                                                         <StepTitle>
                                                             {isSolanaBridge
                                                                 ? 'Minting tokens on Solana'
-                                                                : `IBC transfer to ${bridgeOutNetwork?.name || selectedNetwork?.name || 'destination'}`}
+                                                                : `Finalizing bridge to ${bridgeOutNetwork?.name || selectedNetwork?.name || 'destination'}`}
                                                             {showMintTimer ? formatStepTime('confirmed') : ''}
                                                         </StepTitle>
                                                         <StepMeta style={{ fontFamily: 'Monaco, Menlo, monospace', fontSize: '0.65rem', wordBreak: 'break-all' }}>
@@ -2928,7 +2730,7 @@ export default function BridgeView({ state }) {
                                                                 )
                                                             ) : (
                                                                 submitStage === 'confirmed'
-                                                                    ? 'IBC packet sent. Tokens will arrive in ~30 seconds.'
+                                                                    ? 'Bridge burn confirmed.'
                                                                     : 'Waiting for transaction confirmation'
                                                             )}
                                                         </StepMeta>
@@ -2953,7 +2755,6 @@ export default function BridgeView({ state }) {
                                         </StepsCard>
 
                                         {/* Balance Comparison - only show when fully complete or error */}
-                                        {/* For Solana: wait for mintStatus.state === 'minted', for IBC: wait for submitStage === 'confirmed' */}
                                         {(submitStage === 'error' ||
                                             (isSolanaBridge && (mintStatus.state === 'minted' || mintStatus.state === 'error' || mintStatus.state === 'timeout')) ||
                                             (!isSolanaBridge && submitStage === 'confirmed')
@@ -3009,7 +2810,6 @@ export default function BridgeView({ state }) {
                                                 fullWidth
                                                 disabled={
                                                     // For Solana: wait for mint to complete (or error/timeout)
-                                                    // For IBC: wait for submitStage confirmed (or error)
                                                     isSolanaBridge
                                                         ? (mintStatus.state !== 'minted' && mintStatus.state !== 'error' && mintStatus.state !== 'timeout')
                                                         : (submitStage !== 'confirmed' && submitStage !== 'error')

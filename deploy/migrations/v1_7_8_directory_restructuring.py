@@ -14,7 +14,7 @@ Target structure after migration:
 ├── postgres/      # moved from main/data/postgres/
 ├── env/           # unchanged
 ├── logs/          # unchanged
-└── hermes/        # unchanged
+└── orchestrator/  # unchanged (if present)
 """
 
 import shutil

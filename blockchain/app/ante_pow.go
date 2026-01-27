@@ -402,16 +402,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
-		case *coretypes.MsgIBCTransfer:
-			if m.Authority == govAuthority {
-				continue
-			}
-		if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
-			ctx.Logger().Error("PoW: MsgIBCTransfer cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
-			return ctx, fmt.Errorf("MsgIBCTransfer cannot use PoW")
-		}
-		ctx.Logger().Debug("PoW: skipped for MsgIBCTransfer", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "channel", m.SourceChannel)
-
 		case *coretypes.MsgBridgeBurn:
 			if m.Authority == govAuthority {
 				continue
@@ -774,20 +764,6 @@ func buildCanonForSendTokens(m *coretypes.MsgSendTokens) []byte {
 	cw.writeString(100, m.Sender)
 	cw.writeString(101, m.Target)
 	cw.writeUvarint(102, m.Amount)
-	return cw.buf
-}
-
-func buildCanonForIBCTransfer(m *coretypes.MsgIBCTransfer) []byte {
-	cw := newCanonWriter("MsgIBCTransfer")
-	cw.writeBytes(2, m.EnvelopePubkey)
-	cw.writeBytes(3, m.EnvelopeBlockHash)
-	cw.writeUvarint(4, m.EnvelopeDifficulty)
-	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
-	cw.writeUvarint(6, m.EnvelopeTimestamp)
-	cw.writeString(100, m.Receiver)
-	cw.writeUvarint(101, m.Amount)
-	cw.writeString(102, m.SourceChannel)
-	cw.writeUvarint(103, m.TimeoutSeconds)
 	return cw.buf
 }
 

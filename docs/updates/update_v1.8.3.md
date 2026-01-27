@@ -47,7 +47,7 @@ The chain endpoints have been reorganized under `/chain/rpc` and `/chain/rest` f
 
 - `/rpc/*` → `/chain/rpc/*` (CometBFT RPC, includes WebSocket)
 - `/lcd/*` → `/chain/rest/*` (Cosmos REST API)
-- Old paths remain functional until 2026-02-20 for backwards compatibility
+- Legacy paths (`/rpc/*`, `/lcd/*`) have been removed as of v1.10.0
 - Migration `v1_8_3_caddy_chain_paths` auto-updates Caddyfile on deploy
 
 ---
@@ -98,8 +98,6 @@ The "magic" sort mode now uses a single scoring function across all feeds (home,
 ### Bug Fixes
 
 - Fix gas estimation: increased per-byte gas cost to 100, include indentation
-- Fix Hermes config for v1.8.0 economics (gas_price = 5000)
-- Fix IBC denom in Hermes config
 - Fix local testnet reset: preserve .migrations file, prevent indexer log spam
 - `letsencrypt_register.sh` now renders from template instead of hardcoding paths
 - Status dashboard tile alignment fixed for consistent card layout
@@ -111,7 +109,6 @@ The "magic" sort mode now uses a single scoring function across all feeds (home,
 
 **Migrations:**
 - `v1_8_0_economics` - Updates app.toml minimum-gas-prices
-- `v1_8_1_hermes_gas_price` - Regenerates Hermes config for new gas price
 - `v1_8_3_caddy_chain_paths` - Updates Caddyfile with new endpoint paths
 
 **Code changes:**
@@ -123,6 +120,6 @@ The "magic" sort mode now uses a single scoring function across all feeds (home,
 **Script renames:**
 - `check_status.py` → `status_dashboard.py`
 
-**Deprecated endpoints (remove after 2026-02-20):**
+**Removed legacy endpoints (as of v1.10.0):**
 - `/rpc/*` → use `/chain/rpc/*`
 - `/lcd/*` → use `/chain/rest/*`

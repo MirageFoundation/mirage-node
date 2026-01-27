@@ -152,7 +152,7 @@ MsgBlockUser, MsgUnblockUser
 MsgUpgradeLevel, MsgSetAutoRenewal, MsgSetLevel
 
 # Bridge messages
-MsgIBCTransfer, MsgBridgeBurn
+MsgBridgeBurn
 MsgBridgeAttestBurned, MsgBridgeAttestMinted
 
 # Query types
@@ -389,7 +389,6 @@ def get_indexer_config(self) -> Dict[str, Any]:
 ├── indexer/        # indexer-YYYY-MM-DD.log
 ├── backend/        # backend-YYYY-MM-DD.log
 ├── postgres/       # postgres-YYYY-MM-DD.log
-├── hermes/         # IBC relayer logs
 ├── caddy/          # Web server logs
 ├── referrals/      # Referral daemon logs
 ├── deploy/         # Deployment logs

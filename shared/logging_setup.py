@@ -64,7 +64,7 @@ def log_dir_for_component(component: str) -> str:
     Get log directory for a component.
 
     New structure: ~/.mirage/logs/<component>/
-    Components: node, indexer, backend, postgres, hermes, caddy, referrals, deploy
+    Components: node, indexer, backend, postgres, caddy, referrals, deploy
     """
     # ~/.mirage/logs/<component>/
     base_dir = os.path.expanduser("~/.mirage/logs")

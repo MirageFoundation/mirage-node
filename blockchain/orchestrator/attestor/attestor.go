@@ -59,24 +59,8 @@ func (a *Attestor) Run(ctx context.Context) error {
 		return fmt.Errorf("no enabled chain watchers")
 	}
 
-	// Initialize sequence tracking by querying each chain's bridge state
-	for _, watcher := range a.watchers {
-		lastSeq, err := watcher.GetLastSequence(ctx)
-		if err != nil {
-			a.logger.Printf("WARN failed to get last sequence for %s: %v (starting at 0)", watcher.ChainID(), err)
-			lastSeq = 0
-		}
-		a.lastSeqMu.Lock()
-		a.lastSeq[watcher.ChainID()] = lastSeq
-		a.lastSeqMu.Unlock()
-		a.logger.Printf("INFO  [REPLAY] initialized %s last_sequence=%d", watcher.ChainID(), lastSeq)
-	}
-
-	// Replay pending burns before starting live subscription
-	if err := a.mirage.RequireTxIndex(ctx); err != nil {
-		return err
-	}
-	if err := a.replayPendingBurns(ctx); err != nil {
+	// Initialize with retries - the node may not be ready immediately after container start
+	if err := a.initializeWithRetry(ctx); err != nil {
 		return err
 	}
 
@@ -112,6 +96,70 @@ func (a *Attestor) Run(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+// initializeWithRetry performs initialization with retries.
+// This handles the case where the orchestrator starts before the Mirage node is fully synced.
+// It will keep retrying for up to 10 minutes before giving up.
+func (a *Attestor) initializeWithRetry(ctx context.Context) error {
+	const (
+		maxInitDuration = 10 * time.Minute
+		retryInterval   = 10 * time.Second
+	)
+
+	deadline := time.Now().Add(maxInitDuration)
+	attempt := 0
+
+	for {
+		attempt++
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("initialization failed: timed out after %v", maxInitDuration)
+		}
+
+		err := a.initialize(ctx)
+		if err == nil {
+			return nil
+		}
+
+		remaining := time.Until(deadline).Round(time.Second)
+		a.logger.Printf("WARN initialization attempt %d failed: %v (retrying for %v more)", attempt, err, remaining)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(retryInterval):
+		}
+	}
+}
+
+// initialize performs the one-time startup initialization.
+func (a *Attestor) initialize(ctx context.Context) error {
+	// Initialize sequence tracking by querying each chain's bridge state
+	for _, watcher := range a.watchers {
+		lastSeq, err := watcher.GetLastSequence(ctx)
+		if err != nil {
+			a.logger.Printf("WARN failed to get last sequence for %s: %v (starting at 0)", watcher.ChainID(), err)
+			lastSeq = 0
+		}
+		a.lastSeqMu.Lock()
+		a.lastSeq[watcher.ChainID()] = lastSeq
+		a.lastSeqMu.Unlock()
+		a.logger.Printf("INFO  [REPLAY] initialized %s last_sequence=%d", watcher.ChainID(), lastSeq)
+	}
+
+	// Replay pending burns before starting live subscription
+	if err := a.mirage.RequireTxIndex(ctx); err != nil {
+		return err
+	}
+	if err := a.replayPendingBurns(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // replayPendingBurns queries for outbound burns that haven't been minted yet and processes them.
