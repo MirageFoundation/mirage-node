@@ -418,6 +418,14 @@ class MessageProcessor:
         # Check for previous vote to handle vote changes correctly
         previous_vote = self.db.get_vote_by_owner_target(owner, target)
         prev_vote = previous_vote[1] if previous_vote else 0.0
+        logger.info(
+            "Vote processing: owner=%s target=%s new_direction=%s previous_vote_exists=%s prev_vote_value=%s",
+            owner[:12] if owner else None,
+            target[:12] if target else None,
+            raw_direction,
+            previous_vote is not None,
+            prev_vote,
+        )
 
         # Calculate user_weight based on vote direction:
         # - UPVOTES always count at full tier weight (1.0 for free, higher for subscribers)
@@ -554,7 +562,18 @@ class MessageProcessor:
         # Track quest progress for votes
         if owner and raw_direction != 0:
             try:
+                # A vote is only a "change" if there was a non-zero previous vote.
+                # If user unvoted (set to 0) first, then votes again, that's a NEW vote.
                 is_vote_change = previous_vote is not None and prev_vote != 0
+                logger.info(
+                    "Vote quest tracking: owner=%s target=%s direction=%s previous_vote=%s prev_vote=%s is_vote_change=%s",
+                    owner[:12] if owner else None,
+                    target[:12] if target else None,
+                    raw_direction,
+                    previous_vote is not None,
+                    prev_vote,
+                    is_vote_change,
+                )
                 self.quest_tracker.update_progress(
                     owner,
                     "vote",
