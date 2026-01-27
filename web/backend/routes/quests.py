@@ -350,6 +350,7 @@ def get_flash_quests():
             "id": template_id,
             "title": quest_def.get("title", ""),
             "description": quest_def.get("description", ""),
+            "action_type": quest_def.get("action_type", ""),
             "progress": progress,
             "target": quest_def.get("target_count", 1),
             "completed": completed_at is not None,
