@@ -1341,12 +1341,10 @@ def check_endpoints() -> ServiceStatus:
 
     results = {}
     all_ok = True
-    new_ok = True
-    legacy_ok = True
     block_height = None
 
-    def check_rpc(path: str, name: str, is_legacy: bool):
-        nonlocal all_ok, new_ok, legacy_ok, block_height
+    def check_rpc(path: str, name: str):
+        nonlocal all_ok, block_height
         try:
             start = time.time()
             resp = requests.get(f"{base_url}{path}/status", timeout=5, verify=use_https)
@@ -1363,27 +1361,15 @@ def check_endpoints() -> ServiceStatus:
                 else:
                     results[name] = {"ok": False, "error": f"bad response"}
                     all_ok = False
-                    if is_legacy:
-                        legacy_ok = False
-                    else:
-                        new_ok = False
             else:
                 results[name] = {"ok": False, "status": resp.status_code}
                 all_ok = False
-                if is_legacy:
-                    legacy_ok = False
-                else:
-                    new_ok = False
         except Exception as e:
             results[name] = {"ok": False, "error": str(e)[:20]}
             all_ok = False
-            if is_legacy:
-                legacy_ok = False
-            else:
-                new_ok = False
 
-    def check_rest(path: str, name: str, is_legacy: bool):
-        nonlocal all_ok, new_ok, legacy_ok
+    def check_rest(path: str, name: str):
+        nonlocal all_ok
         try:
             start = time.time()
             # Query bank module params to verify REST is functional
@@ -1398,32 +1384,31 @@ def check_endpoints() -> ServiceStatus:
                 else:
                     results[name] = {"ok": False, "error": "bad response"}
                     all_ok = False
-                    if is_legacy:
-                        legacy_ok = False
-                    else:
-                        new_ok = False
             else:
                 results[name] = {"ok": False, "status": resp.status_code}
                 all_ok = False
-                if is_legacy:
-                    legacy_ok = False
-                else:
-                    new_ok = False
         except Exception as e:
             results[name] = {"ok": False, "error": str(e)[:20]}
             all_ok = False
-            if is_legacy:
-                legacy_ok = False
+
+    def check_grpc_endpoint():
+        nonlocal all_ok
+        try:
+            grpc_host, grpc_port = parse_host_port(MIRAGE_GRPC_ADDR)
+            ms = tcp_connect_ms(grpc_host, grpc_port, timeout_secs=1.5)
+            if ms is not None:
+                results["grpc"] = {"ok": True, "ms": ms, "addr": MIRAGE_GRPC_ADDR}
             else:
-                new_ok = False
+                results["grpc"] = {"ok": False, "error": "Not reachable"}
+                all_ok = False
+        except Exception as e:
+            results["grpc"] = {"ok": False, "error": str(e)[:20]}
+            all_ok = False
 
-    # Check new paths
-    check_rpc("/chain/rpc", "chain/rpc", False)
-    check_rest("/chain/rest", "chain/rest", False)
-
-    # Check legacy paths
-    check_rpc("/rpc", "rpc (legacy)", True)
-    check_rest("/lcd", "lcd (legacy)", True)
+    # Check endpoints
+    check_rpc("/chain/rpc", "chain/rpc")
+    check_rest("/chain/rest", "chain/rest")
+    check_grpc_endpoint()
 
     details = {
         "configured": True,
@@ -1440,25 +1425,11 @@ def check_endpoints() -> ServiceStatus:
             message=f"All OK @ {block_height:,}" if block_height else "All OK",
             details=details,
         )
-    elif new_ok and not legacy_ok:
-        return ServiceStatus(
-            name="Endpoints",
-            status=Status.WARN,
-            message="Legacy unreachable",
-            details=details,
-        )
-    elif not new_ok and legacy_ok:
-        return ServiceStatus(
-            name="Endpoints",
-            status=Status.ERROR,
-            message="Primary unreachable",
-            details=details,
-        )
     else:
         return ServiceStatus(
             name="Endpoints",
             status=Status.ERROR,
-            message="Paths unreachable",
+            message="Some unreachable",
             details=details,
         )
 
@@ -2386,14 +2357,6 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             code_color = Colors.BRIGHT_GREEN if code < 400 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {code_color}{code}{Colors.RESET}")
 
-    elif status.name == "gRPC":
-        addr = details.get("addr") or MIRAGE_GRPC_ADDR
-        lines.append(f"{bullet}{Colors.DIM}Addr:{Colors.RESET} {truncate(str(addr), 22)}")
-        ms = details.get("ms")
-        if isinstance(ms, int):
-            ms_color = Colors.BRIGHT_GREEN if ms < 50 else Colors.BRIGHT_YELLOW if ms < 200 else Colors.BRIGHT_RED
-            lines.append(f"{bullet}{Colors.DIM}Connect:{Colors.RESET} {ms_color}{ms}ms{Colors.RESET}")
-
     elif status.name == "Indexer":
         if details.get("height"):
             lines.append(f"{bullet}{Colors.DIM}Height:{Colors.RESET} {details['height']:,}")
@@ -2587,7 +2550,6 @@ def render_dashboard(refresh_secs: int):
         check_validator(),
         check_postgres(),
         check_backend(),
-        check_grpc(),
         check_indexer(),
         check_caddy(),
         check_endpoints(),
@@ -2602,7 +2564,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "gRPC", "Indexer", "Caddy", "Endpoints", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "System")
     ]
 
     # Render header
