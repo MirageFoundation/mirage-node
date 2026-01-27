@@ -1,16 +1,15 @@
 syntax = "proto3";
-
 package mirage.core.v1;
-
-import "amino/amino.proto";
-import "cosmos/msg/v1/msg.proto";
-import "cosmos_proto/cosmos.proto";
-import "gogoproto/gogo.proto";
-import "mirage/core/v1/params.proto";
 
 option go_package = "mirage/x/core/types";
 
-// Msg defines the Msg service.
+import "cosmos/msg/v1/msg.proto";
+import "cosmos_proto/cosmos.proto";
+import "amino/amino.proto";
+import "gogoproto/gogo.proto";
+import "mirage/core/v1/params.proto";
+
+// Msg defines the Msg service for the core module.
 service Msg {
   option (cosmos.msg.v1.service) = true;
 
@@ -72,8 +71,11 @@ service Msg {
   // PunishValidator slashes/jails/tombstones a validator (governance only).
   rpc PunishValidator(MsgPunishValidator) returns (MsgPunishValidatorResponse);
 
-  // MintTo mints new tokens to a recipient address (governance only).
-  rpc MintTo(MsgMintTo) returns (MsgMintToResponse);
+  // MintTokens mints new tokens to a target address (governance only).
+  rpc MintTokens(MsgMintTokens) returns (MsgMintTokensResponse);
+
+  // BurnTokens burns tokens from a target address (governance only).
+  rpc BurnTokens(MsgBurnTokens) returns (MsgBurnTokensResponse);
 
   // UpgradeLevel upgrades user tier (requires token payment, no PoW).
   rpc UpgradeLevel(MsgUpgradeLevel) returns (MsgUpgradeLevelResponse);
@@ -81,10 +83,6 @@ service Msg {
   // SetAutoRenewal sets the auto_renew flag for a user's subscription.
   // Paid subscribers must pay via reserve; PoW is not allowed.
   rpc SetAutoRenewal(MsgSetAutoRenewal) returns (MsgSetAutoRenewalResponse);
-
-  // IBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis).
-  // Uses envelope fields for relay signature verification.
-  rpc IBCTransfer(MsgIBCTransfer) returns (MsgIBCTransferResponse);
 
   // BridgeBurn burns MIRAGE tokens for bridging to an external chain (e.g., Solana).
   // Uses envelope fields for relay signature verification.
@@ -99,24 +97,18 @@ service Msg {
   // When 2/3 threshold is met, BridgeConfirmed event is emitted.
   // Signed by validator's operator key.
   rpc BridgeAttestMinted(MsgBridgeAttestMinted) returns (MsgBridgeAttestMintedResponse);
-
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
 message MsgUpdateParams {
   option (cosmos.msg.v1.signer) = "authority";
-  option (amino.name) = "mirage/x/core/MsgUpdateParams";
+  option (amino.name) = "mirage/MsgUpdateParams";
 
   // authority is the address that controls the module (defaults to x/gov unless overwritten).
   string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
-  // params defines the module parameters to update.
-
   // NOTE: All parameters must be supplied.
-  Params params = 2 [
-    (gogoproto.nullable) = false,
-    (amino.dont_omitempty) = true
-  ];
+  Params params = 2 [(gogoproto.nullable) = false, (amino.dont_omitempty) = true];
 }
 
 // MsgUpdateParamsResponse defines the response structure for executing a
@@ -126,10 +118,10 @@ message MsgUpdateParamsResponse {}
 // MsgPost creates a post or comment
 message MsgPost {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -138,7 +130,7 @@ message MsgPost {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string topic = 101;
@@ -152,10 +144,10 @@ message MsgPostResponse {}
 // MsgEdit updates an existing post or comment
 message MsgEdit {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -164,7 +156,7 @@ message MsgEdit {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string topic = 101;
@@ -179,10 +171,10 @@ message MsgEditResponse {}
 // MsgVote creates an upvote or downvote
 message MsgVote {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -191,7 +183,7 @@ message MsgVote {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   int32 direction = 101;
@@ -202,10 +194,10 @@ message MsgVoteResponse {}
 // MsgSetUsername sets a username for an address
 message MsgSetUsername {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -214,7 +206,7 @@ message MsgSetUsername {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string username = 101;
@@ -222,13 +214,13 @@ message MsgSetUsername {
 
 message MsgSetUsernameResponse {}
 
-// MsgFollowModerator follows a moderator (adds to followed list, capped deque)
+// MsgFollowModerator adds a moderator to the followed list
 message MsgFollowModerator {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -237,7 +229,7 @@ message MsgFollowModerator {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string moderator = 101;
@@ -245,13 +237,13 @@ message MsgFollowModerator {
 
 message MsgFollowModeratorResponse {}
 
-// MsgUnfollowModerator unfollows a moderator (removes from followed list)
+// MsgUnfollowModerator removes a moderator from the followed list
 message MsgUnfollowModerator {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -260,7 +252,7 @@ message MsgUnfollowModerator {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string moderator = 101;
@@ -268,13 +260,13 @@ message MsgUnfollowModerator {
 
 message MsgUnfollowModeratorResponse {}
 
-// MsgFollowUser follows a user (adds to followed users list, capped deque)
+// MsgFollowUser adds a user to the followed list
 message MsgFollowUser {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -283,7 +275,7 @@ message MsgFollowUser {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string user = 101;
@@ -291,13 +283,13 @@ message MsgFollowUser {
 
 message MsgFollowUserResponse {}
 
-// MsgUnfollowUser unfollows a user (removes from followed users list)
+// MsgUnfollowUser removes a user from the followed list
 message MsgUnfollowUser {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -306,7 +298,7 @@ message MsgUnfollowUser {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string user = 101;
@@ -314,13 +306,13 @@ message MsgUnfollowUser {
 
 message MsgUnfollowUserResponse {}
 
-// MsgFollowTopic follows a topic (adds to followed topics list, capped deque)
+// MsgFollowTopic adds a topic to the followed list
 message MsgFollowTopic {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -329,7 +321,7 @@ message MsgFollowTopic {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string topic = 101;
@@ -337,13 +329,13 @@ message MsgFollowTopic {
 
 message MsgFollowTopicResponse {}
 
-// MsgUnfollowTopic unfollows a topic (removes from followed topics list)
+// MsgUnfollowTopic removes a topic from the followed list
 message MsgUnfollowTopic {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -352,7 +344,7 @@ message MsgUnfollowTopic {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   string topic = 101;
@@ -360,13 +352,13 @@ message MsgUnfollowTopic {
 
 message MsgUnfollowTopicResponse {}
 
-// MsgBlockPost blocks a post (persisted on-chain)
+// MsgBlockPost blocks a post txhash (persisted on-chain)
 message MsgBlockPost {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -375,20 +367,20 @@ message MsgBlockPost {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
 }
 
 message MsgBlockPostResponse {}
 
-// MsgUnblockPost unblocks a post (persisted on-chain)
+// MsgUnblockPost unblocks a post txhash (persisted on-chain)
 message MsgUnblockPost {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -397,20 +389,20 @@ message MsgUnblockPost {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
 }
 
 message MsgUnblockPostResponse {}
 
-// MsgBlockUser blocks a user (persisted on-chain)
+// MsgBlockUser blocks a user address (persisted on-chain)
 message MsgBlockUser {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -419,20 +411,20 @@ message MsgBlockUser {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
 }
 
 message MsgBlockUserResponse {}
 
-// MsgUnblockUser unblocks a user (persisted on-chain)
+// MsgUnblockUser unblocks a user address (persisted on-chain)
 message MsgUnblockUser {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -441,20 +433,20 @@ message MsgUnblockUser {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
 }
 
 message MsgUnblockUserResponse {}
 
-// MsgDelete marks a post or comment as deleted (not persisted, only emits event for indexer)
+// MsgDelete marks a post or comment as deleted
 message MsgDelete {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -463,20 +455,20 @@ message MsgDelete {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
 }
 
 message MsgDeleteResponse {}
 
-// MsgSendTokens sends tokens from sender to target
+// MsgSendTokens sends tokens from signer to target
 message MsgSendTokens {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -485,7 +477,7 @@ message MsgSendTokens {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string sender = 100;
   string target = 101;
@@ -494,13 +486,13 @@ message MsgSendTokens {
 
 message MsgSendTokensResponse {}
 
-// MsgSetLevel sets the user level for an address (governance-only)
+// MsgSetLevel sets the user level for an address (governance only)
 message MsgSetLevel {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -509,7 +501,7 @@ message MsgSetLevel {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   string target = 100;
   int32 level = 101;
@@ -517,42 +509,40 @@ message MsgSetLevel {
 
 message MsgSetLevelResponse {}
 
-// MsgPunishValidator defines a governance message to punish a validator.
+// MsgPunishValidator slashes/jails/tombstones a validator (governance only)
 message MsgPunishValidator {
   option (cosmos.msg.v1.signer) = "authority";
-  option (amino.name) = "mirage/x/core/MsgPunishValidator";
 
-  // authority must be x/gov module address
+  // REQUIRED: address of the signer (must be gov module account)
   string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
-  // valoper is the target validator operator address
+  // valoper is the validator operator address to punish
   string valoper = 2;
 
-  // fraction is the slashing fraction in [0,1] as decimal string (e.g., "0.25", "1.0")
+  // fraction is the slash fraction as a decimal string (e.g., "0.01" for 1%)
   string fraction = 3;
 
-  // jail, if true, jails the validator
+  // jail if true, jail the validator
   bool jail = 4;
 
-  // tombstone, if true, tombstones the validator (irreversible)
+  // tombstone if true, tombstone the validator (permanent)
   bool tombstone = 5;
 
-  // reason is a free-form string recorded in events
+  // reason is an optional explanation for the punishment
   string reason = 6;
 }
 
 message MsgPunishValidatorResponse {}
 
-// MsgMintTo defines a governance message to mint new tokens to a recipient.
-message MsgMintTo {
+// MsgMintTokens defines a governance message to mint new tokens to a target address.
+message MsgMintTokens {
   option (cosmos.msg.v1.signer) = "authority";
-  option (amino.name) = "mirage/x/core/MsgMintTo";
 
   // authority must be x/gov module address
   string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
-  // recipient account address (mirage1...); account will be auto-created on receive
-  string recipient = 2;
+  // target account address (mirage1...); account will be auto-created on receive
+  string target = 2;
 
   // amount to mint in base denom (umirage)
   uint64 amount = 3;
@@ -561,15 +551,34 @@ message MsgMintTo {
   string reason = 4;
 }
 
-message MsgMintToResponse {}
+message MsgMintTokensResponse {}
+
+// MsgBurnTokens defines a governance message to burn tokens from a target address.
+message MsgBurnTokens {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // authority must be x/gov module address
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // target account address (mirage1...); tokens will be burned from this account
+  string target = 2;
+
+  // amount to burn in base denom (umirage)
+  uint64 amount = 3;
+
+  // optional reason recorded in events
+  string reason = 4;
+}
+
+message MsgBurnTokensResponse {}
 
 // MsgUpgradeLevel upgrades a user's tier subscription
 message MsgUpgradeLevel {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -578,20 +587,20 @@ message MsgUpgradeLevel {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   uint32 level = 100;
 }
 
 message MsgUpgradeLevelResponse {}
 
-// MsgSetAutoRenewal sets auto_renew for a user's subscription
+// MsgSetAutoRenewal sets the auto_renew flag for a user's subscription
 message MsgSetAutoRenewal {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -600,47 +609,20 @@ message MsgSetAutoRenewal {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
   bool auto_renew = 100;
 }
 
 message MsgSetAutoRenewalResponse {}
 
-// MsgIBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis)
-message MsgIBCTransfer {
-  option (cosmos.msg.v1.signer) = "authority";
-  
-  // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
-  // Envelope fields for msg relaying (not required for gov proposals)
-  bytes envelope_pubkey = 2;
-  bytes envelope_block_hash = 3;
-  uint64 envelope_difficulty = 4;
-  uint64 envelope_pow = 5;
-  uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
-  bytes envelope_signature = 10;
-  
-  // Payload
-  string receiver = 100;           // destination address on target chain (e.g., osmo1...)
-  uint64 amount = 101;             // amount in umirage to transfer
-  string source_channel = 102;     // IBC channel ID (e.g., "channel-1")
-  uint64 timeout_seconds = 103;    // timeout in seconds from now (default: 600 = 10 min)
-}
-
-message MsgIBCTransferResponse {
-  uint64 sequence = 1;  // IBC packet sequence number
-}
-
 // MsgBridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
 message MsgBridgeBurn {
   option (cosmos.msg.v1.signer) = "authority";
-  
+
   // REQUIRED: address of the signer (node or governance)
-  string authority = 1;
-  
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
   // Envelope fields for msg relaying (not required for gov proposals)
   bytes envelope_pubkey = 2;
   bytes envelope_block_hash = 3;
@@ -649,15 +631,15 @@ message MsgBridgeBurn {
   uint64 envelope_timestamp = 6;
   // tags 7-9 reserved
   bytes envelope_signature = 10;
-  
+
   // Payload
-  string destination_chain = 100;    // target chain identifier (e.g., "solana", "ethereum")
-  string destination_address = 101;  // recipient address on target chain
-  uint64 amount = 102;               // amount in umirage to burn and bridge
+  string destination_chain = 100;
+  string destination_address = 101;
+  uint64 amount = 102;
 }
 
 message MsgBridgeBurnResponse {
-  uint64 burn_id = 1;  // sequence number assigned to this burn
+  uint64 burn_id = 1;
 }
 
 // MsgBridgeAttestBurned allows validators to attest to a burn on an external chain (inbound).
@@ -665,10 +647,9 @@ message MsgBridgeBurnResponse {
 // NOTE: This message does NOT use envelope fields - it's signed directly by validator.
 message MsgBridgeAttestBurned {
   option (cosmos.msg.v1.signer) = "validator";
-  option (amino.name) = "mirage/x/core/MsgBridgeAttestBurned";
 
   // validator is the validator operator address submitting the attestation
-  string validator = 1;
+  string validator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
   // source_chain is the external chain where the burn occurred (e.g., "solana")
   string source_chain = 2;
@@ -684,19 +665,18 @@ message MsgBridgeAttestBurned {
 }
 
 message MsgBridgeAttestBurnedResponse {
-  bool confirmed = 1;        // true if this attestation triggered confirmation (mint)
-  int64 attested_power = 2;  // total voting power that has attested
-  int64 required_power = 3;  // voting power required to confirm (2/3 threshold)
+  bool confirmed = 1;
+  int64 attested_power = 2;
+  int64 required_power = 3;
 }
 
 // MsgBridgeAttestMinted allows validators to attest to a mint on an external chain (outbound).
 // When attestations reach 2/3 validator threshold, BridgeConfirmed event is emitted.
 message MsgBridgeAttestMinted {
   option (cosmos.msg.v1.signer) = "validator";
-  option (amino.name) = "mirage/x/core/MsgBridgeAttestMinted";
 
   // validator is the validator operator address submitting the attestation
-  string validator = 1;
+  string validator = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
 
   // burn_id is the Mirage burn sequence number (as string for consistency)
   string burn_id = 2;
@@ -712,7 +692,7 @@ message MsgBridgeAttestMinted {
 }
 
 message MsgBridgeAttestMintedResponse {
-  bool confirmed = 1;        // true if this attestation triggered confirmation
-  int64 attested_power = 2;  // total voting power that has attested
-  int64 required_power = 3;  // voting power required to confirm (2/3 threshold)
+  bool confirmed = 1;
+  int64 attested_power = 2;
+  int64 required_power = 3;
 }
