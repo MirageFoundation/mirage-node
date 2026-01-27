@@ -194,13 +194,20 @@ const InviteOnlyHeroButtons = styled.div`
 
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
-    background: #2C3246;
-    border: 1px solid #4F679B;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
+        : 'linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%)'};
+    border: 2px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(59, 130, 246, 0.5)'
+        : 'rgba(96, 165, 250, 0.6)'};
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
     padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
     flex-direction: column;
     gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
+    box-shadow: ${({ theme }) => theme?.name === 'light'
+        ? '0 0 12px rgba(59, 130, 246, 0.2)'
+        : '0 0 15px rgba(96, 165, 250, 0.25)'};
 
     @media (max-width: 1000px) {
         border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
@@ -240,6 +247,11 @@ const InviteBannerTextContent = styled.div`
     gap: 0.2rem;
     flex: 1;
     min-width: 0;
+    padding-right: 3rem;
+
+    @media (max-width: 768px) {
+        padding-right: 0;
+    }
 `;
 
 const InviteBannerTitle = styled.div`
@@ -356,9 +368,9 @@ const CollapseButton = styled.button`
 
     &:hover {
         color: ${({ theme }) => pickThemeColor(theme, 'text')};
-        background: ${({ theme }) => theme?.name === 'light' 
-            ? 'rgba(0, 0, 0, 0.05)' 
-            : 'rgba(255, 255, 255, 0.05)'};
+        background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
 
@@ -2596,7 +2608,12 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
-                                        <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Exclusive Beta Community
+                                        <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
+                                        {inviteBannerCollapsed && (
+                                            <span style={{ fontWeight: 'normal' }}>
+                                                {' '}{availableCodeCount === 0 ? '— None available' : `— ${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} left`}
+                                            </span>
+                                        )}
                                     </HomeFeedInfoTitle>
                                     <CollapseButton onClick={toggleInviteBanner}>
                                         {inviteBannerCollapsed ? 'Show' : 'Hide'}
