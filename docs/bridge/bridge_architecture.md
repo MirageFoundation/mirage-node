@@ -1,6 +1,6 @@
 # Bridge Architecture
 
-This document describes the complete bridge architecture for transferring MIRAGE tokens between the Mirage blockchain and external chains (Solana, Osmosis/IBC).
+This document describes the bridge architecture for transferring MIRAGE tokens between the Mirage blockchain and external chains (Solana).
 
 ## Overview
 
@@ -120,19 +120,6 @@ The bridge exposes two distinct identifiers and they are **not interchangeable**
 4. Each orchestrator submits `MsgBridgeAttestMinted` (includes `mirage_tx_hash` for linking)
 5. When 2/3+ voting power attests → mark as confirmed
 6. Frontend polls `/api/bridge/status` to show completion
-
-### IBC Bridge (Osmosis)
-
-IBC transfers to Osmosis use the standard Cosmos IBC protocol:
-
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Mirage    │    │     IBC     │    │   Osmosis   │
-│   Chain     │───▶│   Relayer   │───▶│   Chain     │
-└─────────────┘    └─────────────┘    └─────────────┘
-```
-
-No attestation required - IBC handles finality via light client verification.
 
 ## State Records
 

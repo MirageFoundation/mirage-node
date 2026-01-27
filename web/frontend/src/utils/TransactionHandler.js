@@ -907,54 +907,7 @@ class TransactionHandler {
     }
 
     /**
-     * Bridge tokens to a Cosmos chain via IBC (e.g., Osmosis)
-     * @param {string} receiver - Destination address on target chain (e.g., osmo1...)
-     * @param {number} amountUmirage - Amount in umirage to transfer
-     * @param {string} sourceChannel - IBC channel ID (e.g., "channel-1")
-     * @param {number} timeoutSeconds - Timeout in seconds (default: 600)
-     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
-     */
-    async ibcTransfer(receiver, amountUmirage, sourceChannel, timeoutSeconds = 600) {
-        try {
-            const seedPhrase = Storage.load("seedPhrase", "");
-            const publicKey = Storage.load("publicKey", "");
-            const receiverTrimmed = String(receiver || "").trim();
-            if (!receiverTrimmed) return { success: false, error: "receiver address required" };
-            
-            const amount = Number(amountUmirage) || 0;
-            if (amount <= 0) return { success: false, error: "amount must be positive" };
-            
-            const channel = String(sourceChannel || "").trim();
-            if (!channel) return { success: false, error: "source_channel required" };
-            
-            const timeout = Math.max(60, Math.min(86400, Number(timeoutSeconds) || 600));
-
-            // IBC transfer never uses PoW - token transfers are self-authenticating
-            // (you can't transfer tokens you don't have)
-            const tx = {
-                action: 'ibc_transfer',
-                receiver: receiverTrimmed,
-                amount: amount,
-                source_channel: channel,
-                timeout_seconds: timeout,
-                last_block_hash: "",
-                pow_difficulty: 0,
-                timestamp: Math.max(0, Date.now() - 15000),
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${tx.last_block_hash}:${tx.pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
-        } catch (e) {
-            return { success: false, error: String(e?.message || e) };
-        }
-    }
-
-    /**
-     * Bridge tokens to a non-IBC chain via attested burn (e.g., Solana)
+     * Bridge tokens via attested burn (e.g., Solana)
      * @param {string} destinationChain - Target chain ID (e.g., "solana")
      * @param {string} destinationAddress - Recipient address on target chain
      * @param {number} amountUmirage - Amount in umirage to burn and bridge
@@ -2523,7 +2476,6 @@ class TransactionHandler {
             else if (action === 'edit_post') msgName = 'MsgEdit';
             else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
-            else if (action === 'ibc_transfer') msgName = 'MsgIBCTransfer';
             else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
             else throw new Error(`CRITICAL: Missing or invalid transaction.action: "${action}". Transaction must have explicit action field.`);
 
@@ -3224,79 +3176,8 @@ class TransactionHandler {
                     auto_renew: flag,
                 };
                 endpoint = 'core/set_auto_renewal';
-            } else if (msgName === 'MsgIBCTransfer') {
-                // Sign relay for IBC transfer (bridge to Cosmos chains like Osmosis)
-                const difficulty = Number(transaction.pow_difficulty || 0);
-                const uvarint = (n) => {
-                    const out = [];
-                    let v = (n >>> 0);
-                    while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-                    out.push(v);
-                    return Uint8Array.from(out);
-                };
-                const uvarint64 = (n) => {
-                    const out = [];
-                    let v = BigInt(n || 0);
-                    while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-                    out.push(Number(v));
-                    return Uint8Array.from(out);
-                };
-                const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-                const encStr = (s) => { const b = new TextEncoder().encode(s || ""); return new Uint8Array([...uvarint(b.length), ...b]); };
-                const hexToBytes = (hex) => {
-                    const h = (hex || "").replace(/^0x/i, "");
-                    if (!h || h.length % 2) return new Uint8Array(0);
-                    const arr = new Uint8Array(h.length / 2);
-                    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-                    return arr;
-                };
-                const concat = (...arrs) => {
-                    let total = 0; arrs.forEach(a => total += a.length);
-                    const out = new Uint8Array(total);
-                    let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-                    return out;
-                };
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgIBCTransfer\x00");
-                const tag2 = Uint8Array.from([2]);   // envelope_pubkey
-                const tag3 = Uint8Array.from([3]);   // envelope_block_hash
-                const tag4 = Uint8Array.from([4]);   // envelope_difficulty
-                const tag5 = Uint8Array.from([5]);   // envelope_pow
-                const tag6 = Uint8Array.from([6]);   // envelope_timestamp
-                const tag100 = Uint8Array.from([100]); // receiver
-                const tag101 = Uint8Array.from([101]); // amount
-                const tag102 = Uint8Array.from([102]); // source_channel
-                const tag103 = Uint8Array.from([103]); // timeout_seconds
-                const canon = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag5, uvarint(Number(proof)),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    tag100, encStr(transaction.receiver || ""),
-                    tag101, uvarint64(transaction.amount || 0),
-                    tag102, encStr(transaction.source_channel || ""),
-                    tag103, uvarint64(transaction.timeout_seconds || 600),
-                );
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp || 0,
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                    receiver: transaction.receiver || "",
-                    amount: transaction.amount || 0,
-                    source_channel: transaction.source_channel || "",
-                    timeout_seconds: transaction.timeout_seconds || 600,
-                };
-                endpoint = 'bridge/ibc_transfer';
             } else if (msgName === 'MsgBridgeBurn') {
-                // Sign relay for bridge burn (bridge to non-IBC chains like Solana)
+                // Sign relay for bridge burn (e.g., Solana)
                 const difficulty = Number(transaction.pow_difficulty || 0);
                 const uvarint = (n) => {
                     const out = [];

@@ -52,7 +52,6 @@ Several features from the prod branch were accidentally missing from dev. This r
 - Unified `get_tx_status` endpoint with type-specific enrichment
 - Standardized vote field naming across DB, API, and frontend
 - Added React Native API guide with comprehensive endpoint documentation
-- Hermes IBC relayer setup improvements
 
 ---
 

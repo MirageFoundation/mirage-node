@@ -34,9 +34,6 @@ import (
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
 	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	icatypes "github.com/cosmos/ibc-go/v10/modules/apps/27-interchain-accounts/types"
-	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
-	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 )
 
 var (
@@ -334,8 +331,6 @@ func reservedModuleAccountNames() []string {
 		stakingtypes.BondedPoolName,
 		stakingtypes.NotBondedPoolName,
 		govtypes.ModuleName,
-		ibctransfertypes.ModuleName,
-		icatypes.ModuleName,
 		types.ModuleName, // core module account
 	}
 }
@@ -2323,29 +2318,54 @@ func (am AppModule) PunishValidator(ctx context.Context, req *types.MsgPunishVal
 	return &types.MsgPunishValidatorResponse{}, nil
 }
 
-// MintTo mints new tokens to a recipient (governance only)
-func (am AppModule) MintTo(ctx context.Context, req *types.MsgMintTo) (*types.MsgMintToResponse, error) {
+// MintTokens mints new tokens to a target address (governance only)
+func (am AppModule) MintTokens(ctx context.Context, req *types.MsgMintTokens) (*types.MsgMintTokensResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 
 	if req.Authority != authtypes.NewModuleAddress(govtypes.ModuleName).String() {
 		return nil, fmt.Errorf("unauthorized: only governance can mint")
 	}
 
-	recipient := strings.TrimSpace(req.Recipient)
-	if recipient == "" {
-		return nil, fmt.Errorf("recipient cannot be empty")
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		return nil, fmt.Errorf("target cannot be empty")
 	}
 	if req.Amount == 0 {
 		return nil, fmt.Errorf("amount must be > 0")
 	}
 
-	if err := am.k.MintToAccount(sdkCtx, recipient, req.Amount); err != nil {
+	if err := am.k.MintToAccount(sdkCtx, target, req.Amount); err != nil {
 		return nil, err
 	}
 
-	sdkCtx.Logger().Info("MintTo", "recipient", recipient, "amount", req.Amount)
+	sdkCtx.Logger().Debug("MintTokens", "target", target, "amount", req.Amount, "reason", strings.TrimSpace(req.Reason))
 
-	return &types.MsgMintToResponse{}, nil
+	return &types.MsgMintTokensResponse{}, nil
+}
+
+// BurnTokens burns tokens from a target address (governance only)
+func (am AppModule) BurnTokens(ctx context.Context, req *types.MsgBurnTokens) (*types.MsgBurnTokensResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+
+	if req.Authority != authtypes.NewModuleAddress(govtypes.ModuleName).String() {
+		return nil, fmt.Errorf("unauthorized: only governance can burn")
+	}
+
+	target := strings.TrimSpace(req.Target)
+	if target == "" {
+		return nil, fmt.Errorf("target cannot be empty")
+	}
+	if req.Amount == 0 {
+		return nil, fmt.Errorf("amount must be > 0")
+	}
+
+	if err := am.k.BurnFromAccount(sdkCtx, target, req.Amount); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Debug("BurnTokens", "target", target, "amount", req.Amount, "reason", strings.TrimSpace(req.Reason))
+
+	return &types.MsgBurnTokensResponse{}, nil
 }
 
 // UpgradeLevel upgrades or cancels a user's tier subscription
@@ -2559,142 +2579,6 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 // ============================================
 // Bridge Handlers
 // ============================================
-
-// IBCTransfer initiates an IBC transfer to another chain (e.g., Osmosis)
-func (am AppModule) IBCTransfer(ctx context.Context, req *types.MsgIBCTransfer) (*types.MsgIBCTransferResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-
-	// Derive owner from envelope_pubkey
-	if len(req.GetEnvelopePubkey()) != 33 {
-		return nil, fmt.Errorf("invalid envelope_pubkey length")
-	}
-	owner, err := deriveOwnerFromPubkey(req.GetEnvelopePubkey())
-	if err != nil {
-		return nil, err
-	}
-
-	// Get user level for gas fee
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
-
-	// Validate amount
-	amount := req.GetAmount()
-	if amount == 0 {
-		return nil, fmt.Errorf("amount must be > 0")
-	}
-
-	// Validate source channel first
-	sourceChannel := strings.TrimSpace(req.GetSourceChannel())
-	if sourceChannel == "" {
-		return nil, fmt.Errorf("source_channel cannot be empty")
-	}
-
-	// Look up IBC chain config to get the fee
-	params := am.k.GetParams(sdkCtx)
-	chainConfig := types.FindIBCChainConfig(sourceChannel, params.BridgeChains)
-
-	// Determine bridge fee from config (or 0 if chain not configured)
-	bridgeFee := uint64(0)
-	if chainConfig != nil {
-		bridgeFee = chainConfig.Fee
-	}
-	totalNeeded := amount + bridgeFee
-
-	// Check balance
-	balance := am.k.GetBalance(sdkCtx, owner, types.MintDenom)
-	if balance.LT(sdkmath.NewIntFromUint64(totalNeeded)) {
-		return nil, fmt.Errorf("insufficient balance: need %d (amount %d + fee %d), have %s",
-			totalNeeded, amount, bridgeFee, balance.String())
-	}
-
-	// Validate owner address
-	if _, err := sdk.AccAddressFromBech32(owner); err != nil {
-		return nil, fmt.Errorf("invalid owner address: %w", err)
-	}
-
-	// Validate receiver address format
-	receiver := strings.TrimSpace(req.GetReceiver())
-	if receiver == "" {
-		return nil, fmt.Errorf("receiver cannot be empty")
-	}
-
-	// Burn the bridge fee (deflationary)
-	if bridgeFee > 0 {
-		if err := am.k.BurnFromAccount(sdkCtx, owner, bridgeFee); err != nil {
-			return nil, fmt.Errorf("failed to burn bridge fee: %w", err)
-		}
-	}
-
-	// Check if transfer keeper is set
-	transferKeeper := am.k.TransferKeeper()
-	if transferKeeper == nil {
-		return nil, fmt.Errorf("IBC transfer not available")
-	}
-
-	// Calculate timeout
-	timeoutSeconds := req.GetTimeoutSeconds()
-	if timeoutSeconds == 0 {
-		timeoutSeconds = 600 // Default 10 minutes
-	}
-	nowNs := uint64(sdkCtx.BlockTime().UnixNano())
-	if timeoutSeconds > (math.MaxUint64-nowNs)/1_000_000_000 {
-		return nil, fmt.Errorf("timeout_seconds too large")
-	}
-	timeoutTimestamp := nowNs + (timeoutSeconds * 1_000_000_000)
-
-	coin := sdk.NewCoin(types.MintDenom, sdkmath.NewIntFromUint64(amount))
-
-	// Execute IBC transfer
-	msgTransfer := ibctransfertypes.NewMsgTransfer(
-		ibctransfertypes.PortID,
-		sourceChannel,
-		coin,
-		owner,
-		receiver,
-		clienttypes.ZeroHeight(),
-		timeoutTimestamp,
-		"", // memo
-	)
-
-	// Use the transfer keeper to execute the transfer
-	resp, err := transferKeeper.Transfer(sdkCtx, msgTransfer)
-	if err != nil {
-		return nil, fmt.Errorf("IBC transfer failed: %w", err)
-	}
-
-	// Deduct relay gas fee
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
-		return nil, err
-	}
-
-	// Emit event
-	sdkCtx.EventManager().EmitEvent(
-		sdk.NewEvent(
-			"bridge_ibc_transfer",
-			sdk.NewAttribute("owner", owner),
-			sdk.NewAttribute("receiver", receiver),
-			sdk.NewAttribute("amount", fmt.Sprintf("%d", amount)),
-			sdk.NewAttribute("channel", sourceChannel),
-			sdk.NewAttribute("sequence", fmt.Sprintf("%d", resp.Sequence)),
-			sdk.NewAttribute("bridge_fee", fmt.Sprintf("%d", bridgeFee)),
-		),
-	)
-
-	sdkCtx.Logger().Info("IBCTransfer",
-		"owner", owner,
-		"receiver", receiver,
-		"amount", amount,
-		"channel", sourceChannel,
-		"sequence", resp.Sequence,
-		"bridge_fee", bridgeFee,
-	)
-
-	return &types.MsgIBCTransferResponse{Sequence: resp.Sequence}, nil
-}
 
 // BridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
 func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {

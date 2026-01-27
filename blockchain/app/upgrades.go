@@ -598,8 +598,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.9.0-bridge: Cross-chain bridge functionality
-	// - IBC bridge transfers for Cosmos chains (Osmosis, etc.)
-	// - Attested bridge for non-IBC chains (Solana, Ethereum)
+	// - Attested bridge for external chains (Solana, Ethereum)
 	// - New params: bridge_chains, bridge_attestation_threshold, bridge_fee
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.9.0-bridge",
@@ -639,37 +638,6 @@ func (app *App) RegisterUpgradeHandlers() {
 				})
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
-			}
-
-			// Enable Osmosis IBC bridge with 500 MIRAGE fee
-			osmosisEnabled := false
-			for _, chain := range params.BridgeChains {
-				if chain.ChainId == "osmosis" {
-					osmosisEnabled = true
-					if chain.Fee != 500_000_000 {
-						oldFee := chain.Fee
-						chain.Fee = 500_000_000
-						changed = true
-						sdkCtx.Logger().Info("v1.9.0-bridge: updated Osmosis bridge fee to 500 MIRAGE",
-							"old_fee", oldFee, "new_fee", 500_000_000)
-					}
-					if chain.IbcChannel != "channel-0" {
-						chain.IbcChannel = "channel-0"
-						changed = true
-						sdkCtx.Logger().Info("v1.9.0-bridge: set Osmosis IBC channel to channel-0")
-					}
-					break
-				}
-			}
-			if !osmosisEnabled {
-				params.BridgeChains = append(params.BridgeChains, &coretypes.BridgeChainConfig{
-					ChainId:    "osmosis",
-					Enabled:    true,
-					Fee:        500_000_000, // 500 MIRAGE
-					IbcChannel: "channel-0",
-				})
-				changed = true
-				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Osmosis IBC bridge with 500 MIRAGE fee on channel-0")
 			}
 
 			// Set attestation threshold: 66.67% (6667 basis points)
@@ -1013,6 +981,51 @@ func (app *App) RegisterUpgradeHandlers() {
 			)
 
 			sdkCtx.Logger().Info("Upgrade to v1.9.9-retention complete - evidence retention updated")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.0-remove-ibc: Remove IBC/Osmosis support entirely
+	// - Removes Osmosis from bridge_chains params
+	// - IBC modules have been removed from the binary
+	// - Adds MsgBurnTokens for governance burns
+	// - Renames MsgMintTo to MsgMintTokens
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.0-remove-ibc",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.0-remove-ibc...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Remove Osmosis from bridge_chains if present
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			changed := false
+			newChains := make([]*coretypes.BridgeChainConfig, 0, len(params.BridgeChains))
+			for _, chain := range params.BridgeChains {
+				if chain.ChainId == "osmosis" {
+					sdkCtx.Logger().Info("v1.10.0-remove-ibc: removing Osmosis from bridge_chains")
+					changed = true
+					continue
+				}
+				newChains = append(newChains, chain)
+			}
+
+			if changed {
+				params.BridgeChains = newChains
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.10.0-remove-ibc: failed to update params", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.10.0-remove-ibc: params updated - Osmosis removed")
+			} else {
+				sdkCtx.Logger().Info("v1.10.0-remove-ibc: Osmosis not in bridge_chains, no changes needed")
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
 			return toVM, nil
 		},
 	)
