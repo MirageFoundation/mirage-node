@@ -184,8 +184,6 @@ curl http://127.0.0.1/chain/rpc/status
 # NOT /api/params - that doesn't exist!
 ```
 
-Legacy paths `/rpc/*` and `/lcd/*` are deprecated (remove after 2026-02-20).
-
 ### Chain Parameters - EVERYTHING MUST BE QUERYABLE
 
 All paths below are relative to `public/mirage-node/`.

@@ -30,7 +30,7 @@ The Mirage deployment system packages all components into a single Docker contai
 - **Indexer** (Python) - PostgreSQL-backed chain indexer
 - **PostgreSQL** - Database for indexed data
 - **Caddy** - Reverse proxy with automatic HTTPS
-- **Optional Services**: Hermes (IBC relayer), Bridge Orchestrator
+- **Optional Services**: Bridge Orchestrator
 
 **Key Design Principle:** One container per node. All services are managed via tmux windows for easy operator access. Persistent data lives in `~/.mirage` on the host (volume-mounted).
 
@@ -74,8 +74,7 @@ Traditional microservices would split each component into separate containers. M
 │    ├── node/        (blockchain data)                                        │
 │    ├── postgres/    (database files)                                         │
 │    ├── logs/        (all service logs)                                       │
-│    ├── env/         (environment files)                                      │
-│    └── hermes/      (IBC relayer data)                                       │
+│    └── env/         (environment files)                                      │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -316,7 +315,7 @@ python3 render_template.py templates/caddy/Caddyfile /etc/caddy/Caddyfile
 tmux new-session -d -s mirage
 
 # 7. Start services in order:
-#    Caddy → PostgreSQL → Node → Indexer → Backend → (optional: Hermes, Orchestrator)
+#    Caddy → PostgreSQL → Node → Indexer → Backend → (optional: Orchestrator)
 ```
 
 ### Service Dependencies
@@ -336,7 +335,6 @@ tmux new-session -d -s mirage
 │    ↓                                                                         │
 │  Backend (after Node RPC ready)                                              │
 │    ↓                                                                         │
-│  Hermes (if config exists)                                                   │
 │  Orchestrator (if binary exists)                                             │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -384,7 +382,6 @@ tmux new-window -t mirage -n postgres
 tmux new-window -t mirage -n node
 tmux new-window -t mirage -n indexer
 tmux new-window -t mirage -n backend
-tmux new-window -t mirage -n hermes      # Optional
 tmux new-window -t mirage -n orchestrator # Optional
 tmux new-window -t mirage -n status
 ```
@@ -425,7 +422,6 @@ Logs are stored in `~/.mirage/logs/<component>/`:
 ├── backend/backend-2026-01-21.log
 ├── postgres/postgres-2026-01-21.log
 ├── caddy/caddy-2026-01-21.log
-├── hermes/hermes-2026-01-21.log
 ├── orchestrator/orchestrator-2026-01-21.log
 └── deploy/entrypoint-2026-01-21.log
 ```

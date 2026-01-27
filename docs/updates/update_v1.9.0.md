@@ -2,11 +2,11 @@
 
 ### Overview
 
-Mirage goes multi-chain. v1.9.0 delivers **native bridge support for Solana and Osmosis**, bringing MIRAGE tokens to two of the most active ecosystems in crypto. Transfer seamlessly between chains with the security guarantees you'd expect from a decentralized network—no centralized multisigs, no trusted third parties. Every bridge transfer is secured by the same validator set that runs the Mirage chain itself, requiring 2/3 of stake to confirm before tokens move.
+Mirage goes multi-chain. v1.9.0 delivers **native bridge support for Solana**, bringing MIRAGE tokens to one of the most active ecosystems in crypto. Transfer seamlessly between chains with the security guarantees you'd expect from a decentralized network—no centralized multisigs, no trusted third parties. Every bridge transfer is secured by the same validator set that runs the Mirage chain itself, requiring 2/3 of stake to confirm before tokens move.
 
-**Solana** gets a custom validator-attested bridge with an on-chain Anchor program. Validators run orchestrators that watch for burns on either chain and submit cryptographic attestations. When supermajority consensus is reached, tokens mint automatically. **Osmosis** connects via native IBC—the battle-tested Inter-Blockchain Communication protocol that powers the Cosmos ecosystem. The Hermes relayer handles packet forwarding with light client verification, no attestation needed.
+**Solana** gets a custom validator-attested bridge with an on-chain Anchor program. Validators run orchestrators that watch for burns on either chain and submit cryptographic attestations. When supermajority consensus is reached, tokens mint automatically.
 
-The architecture is built for expansion. Adding new chains—whether EVM-compatible like Ethereum and Arbitrum, or entirely different architectures—requires only a new orchestrator module and chain-specific program. The core attestation logic, fee handling, and replay protection are chain-agnostic by design. Solana and Osmosis are just the beginning.
+The architecture is built for expansion. Adding new chains—whether EVM-compatible like Ethereum and Arbitrum, or entirely different architectures—requires only a new orchestrator module and chain-specific program. The core attestation logic, fee handling, and replay protection are chain-agnostic by design.
 
 This release also ships **enterprise-grade disaster recovery** for validators. Full node backups stream directly to your local machine, and restores work with or without the original mnemonic depending on your recovery scenario. One command to backup, one command to restore.
 
@@ -16,15 +16,10 @@ This release also ships **enterprise-grade disaster recovery** for validators. F
 
 ### Cross-Chain Bridge
 
-- **Attested Bridge** for non-IBC chains (Solana, future Ethereum support)
+- **Attested Bridge** for external chains (Solana, future Ethereum support)
   - Validators run orchestrators that watch external chains for burns
   - Attestations require 66.67% of voting power to mint tokens
   - Per-chain bridge fee (500 MIRAGE) burned during `MsgBridgeBurn`
-
-- **IBC Bridge** for Cosmos ecosystem chains (Osmosis)
-  - Uses native IBC transfer protocol with MsgIBCTransfer
-  - Per-chain bridge fee (500 MIRAGE for Osmosis)
-  - Auto-configured channel for Osmosis (channel-0)
 
 - **Bidirectional attestation model**
   - Inbound: burn on external chain → attestations → mint on Mirage
@@ -66,53 +61,6 @@ A new **Anchor-based Solana program** deployed at `ghcr.io/miragefoundation/mira
 | `bun run bridge:unpause` | Unpause bridge |
 
 ---
-
-### IBC Bridge (Osmosis)
-
-The Osmosis bridge uses standard **Inter-Blockchain Communication (IBC)** protocol, requiring no validator attestation—finality is handled via light client verification.
-
-**How it works:**
-```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│   Mirage    │    │   Hermes    │    │   Osmosis   │
-│   Chain     │───▶│   Relayer   │───▶│   Chain     │
-└─────────────┘    └─────────────┘    └─────────────┘
-```
-
-1. User initiates transfer with `MsgIBCTransfer` on Mirage
-2. Hermes relayer (run by validators) relays the packet
-3. Osmosis receives and credits the IBC-wrapped MIRAGE
-
-**Hermes relayer setup:**
-```bash
-python3 deploy/setup_hermes.py
-```
-
-The setup script:
-- Installs Hermes v1.13.2 binary
-- Generates config from `deploy/templates/hermes/config.toml`
-- Imports relayer keys for both chains (same mnemonic)
-- Finds existing IBC channel or creates new one
-- Starts relayer in tmux window
-
-**Relayer addresses need funding:**
-- Mirage: at least 100 MIRAGE
-- Osmosis: at least 100 OSMO
-
-**IBC channel:** `channel-0` (Mirage) ↔ `channel-108698` (Osmosis)
-
-**IBC denom on Osmosis:**
-```
-ibc/E132A35DC380C8D68E99F46BC7A5083602F171D00E3BE9471541FB1AA62D8BE2
-```
-
-**Test transfer:**
-```bash
-miraged tx ibc-transfer transfer transfer channel-0 <OSMO_ADDR> 1000000umirage \
-  --from validator --chain-id mirage-1 --fees 50000umirage
-```
-
-**Key difference from Solana:** No orchestrator needed—the Hermes relayer handles everything. However, the relayer must run continuously to keep IBC clients alive (trusting period ~13 days).
 
 ---
 
@@ -161,7 +109,7 @@ python3 scripts/backup_restore.py restore --target 139.59.9.96 --file ~/.mirage/
 
 - Requires mnemonic to derive new identity
 - Deletes backup's identity files and re-derives from mnemonic
-- Hermes and orchestrator must be set up manually afterward
+- Orchestrator must be set up manually afterward
 
 **What gets backed up:**
 - `~/.mirage/node/data/` - Full blockchain data and state
@@ -223,7 +171,7 @@ python3 scripts/switch_to_pebbledb.py --target mirage.vote
 - **Dynamic bridge fees**: fetched from `/api/bridge/config` per chain
 - **Multi-step progress UI**: shows burn → attestation → confirm stages with real-time polling
 - **Balance display**: shows both Mirage and external chain balances
-- **Chain icons**: SVG icons for Solana and Osmosis in `/public/bridges/`
+- **Chain icons**: SVG icon for Solana in `/public/bridges/`
 
 ---
 
@@ -258,7 +206,6 @@ python3 scripts/switch_to_pebbledb.py --target mirage.vote
 **Setup Scripts (converted from bash to Python):**
 - `deploy/setup_orchestrator.py` - generates Solana wallet, configures orchestrator
 - `deploy/setup_letsencrypt.py` - SSL certificate setup
-- `deploy/setup_hermes.py` - IBC relayer configuration
 
 ---
 
@@ -266,12 +213,11 @@ python3 scripts/switch_to_pebbledb.py --target mirage.vote
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| `bridge_chains` | Solana + Osmosis enabled | Per-chain config with fees and IBC channels |
+| `bridge_chains` | Solana enabled | Per-chain config with fees |
 | `bridge_attestation_threshold` | `6667` (66.67%) | Voting power required for attestation |
 
 **Bridge chain configs in genesis:**
 - Solana: `{chain_id: "solana", enabled: true, fee: 500000000}`
-- Osmosis: `{chain_id: "osmosis", enabled: true, fee: 500000000, ibc_channel: "channel-0"}`
 
 ---
 
@@ -316,16 +262,7 @@ miraged tx bridge burn <dest_chain> <dest_address> <amount>
    # Restart container to start orchestrator
    ```
 
-2. Set up Hermes relayer if participating in IBC relaying:
-   ```bash
-   python3 deploy/setup_hermes.py
-   
-   # Fund relayer addresses:
-   #   Mirage: at least 100 MIRAGE
-   #   Osmosis: at least 100 OSMO
-   ```
-
-3. Verify upgrade with verification script:
+2. Verify upgrade with verification script:
    ```bash
    python3 scripts/verify_upgrade.py --phase post
    ```
@@ -335,12 +272,6 @@ After starting, check logs for:
 - `[REPLAY] initialized solana last_sequence=<N>` - replay protection active
 - `solscan: https://solscan.io/tx/...` - correct cluster URL
 - Startup banner showing validator and Solana addresses
-
-**Hermes Verification:**
-After starting, check tmux window `hermes`:
-- `tmux select-window -t mirage:hermes`
-- Look for `spawned packet worker` messages
-- Run `hermes query channel end --chain mirage-1 --port transfer --channel channel-0` to verify channel is Open
 
 ---
 
@@ -358,7 +289,6 @@ After starting, check tmux window `hermes`:
 - Example: `Params` → `GetParams`, `Profile` → `GetProfile`
 
 **New Messages:**
-- `MsgIBCTransfer` - IBC token transfer with envelope signature
 - `MsgBridgeBurn` - Burn tokens for outbound bridge
 - `MsgBridgeAttestBurned` - Validator attestation for inbound burns
 - `MsgBridgeAttestMinted` - Validator confirmation for outbound mints
@@ -399,7 +329,6 @@ New comprehensive module documentation in `docs/modules/`:
 - `blockchain/app/ante_canon_test.go` - Canonical serialization tests
 - `deploy/setup_orchestrator.py` - Orchestrator setup
 - `deploy/setup_letsencrypt.py` - SSL setup
-- `deploy/setup_hermes.py` - IBC relayer setup
 - `deploy/enable_rate_limiting.sh` - P2P rate limiting
 - `deploy/templates/env/orchestrator.env` - Orchestrator config
 - `deploy/migrations/v1_9_0_*.py` - Deploy migrations
@@ -434,7 +363,6 @@ Run `python3 scripts/verify_upgrade.py --phase post` which checks:
 - [ ] All core params set correctly
 - [ ] All 4 tiers configured with correct values
 - [ ] Solana bridge chain enabled with fee = 500,000,000 (500 MIRAGE)
-- [ ] Osmosis bridge chain enabled with fee = 500,000,000 (500 MIRAGE)
 - [ ] Bridge attestation threshold = 6667
 - [ ] Bridge queries working (status, config)
 - [ ] Gov params unchanged
@@ -453,6 +381,6 @@ If issues occur, the upgrade cannot be rolled back without a coordinated hard fo
 
 | Handler | Description |
 |---------|-------------|
-| `v1.9.0-bridge` | Main bridge upgrade - enables Solana + Osmosis |
+| `v1.9.0-bridge` | Main bridge upgrade - enables Solana bridge |
 | `v1.9.1-seq-fix` | Advances Solana sequence to 100 (recovery hack) |
 | `v1.10.0-bridge-refactor` | Bridge attestation model refactor |

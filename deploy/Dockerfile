@@ -151,7 +151,6 @@ COPY --from=builder /opt/mirage/deploy/setup_letsencrypt.py /opt/mirage/deploy/s
 COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/deploy/enable_validator_mode.sh
 
 # Setup scripts
-COPY --from=builder /opt/mirage/deploy/setup_hermes.py /opt/mirage/deploy/setup_hermes.py
 COPY --from=builder /opt/mirage/deploy/setup_orchestrator.py /opt/mirage/deploy/setup_orchestrator.py
 
 # Set working directory

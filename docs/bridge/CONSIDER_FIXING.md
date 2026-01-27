@@ -76,7 +76,7 @@ Implement a CometBFT light client inside the Solana program that:
 - ICS-23 Merkle proof verification in BPF
 - Significant engineering effort (months of work)
 
-This is essentially "IBC on Solana" and is **out of scope** for now.
+This is out of scope for now.
 
 #### Current Decision
 

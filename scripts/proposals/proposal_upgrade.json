@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.9.9-retention",
+                "name": "v1.10.0-remove-ibc",
                 "height": "T+50",
-                "info": "Block retention optimization"
+                "info": "Remove IBC/Osmosis support"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.9.9-retention",
-    "summary": "Aligns evidence retention with deploy retention blocks.\n\nChanges:\n- Sets evidence.max_age_num_blocks to 88 (matching RETENTION_BLOCKS)\n- Sets evidence.max_age_duration to 264s (88 blocks * 3s)\n- Enables automatic block pruning to reduce disk usage\n\nThis upgrade allows the node to automatically prune old blocks and state, keeping disk usage bounded.\n\nBINARY REQUIREMENT: All validators must update to v1.9.9 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.10.0-remove-ibc",
+    "summary": "Removes IBC and Osmosis bridge support from Mirage.\n\nChanges:\n- Removes all IBC module integration (transfer, client, connection, channel)\n- Removes Osmosis from bridge_chains configuration\n- Removes MsgIBCTransfer message type\n- Renames MsgMintTo to MsgMintTokens (field: recipient → target)\n- Adds MsgBurnTokens for governance-controlled token burns\n- Cleans up Hermes relayer tooling and configs\n\nThe Solana attested bridge remains fully functional.\n\nBINARY REQUIREMENT: All validators must update to v1.10.0 binary BEFORE the upgrade height.",
     "expedited": true
 }

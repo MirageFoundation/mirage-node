@@ -19,8 +19,6 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	ibctransferkeeper "github.com/cosmos/ibc-go/v10/modules/apps/transfer/keeper"
-
 	"mirage/x/core/types"
 )
 
@@ -31,21 +29,10 @@ type Keeper struct {
 	staking      *stakingkeeper.Keeper
 	distribution *distrkeeper.Keeper
 	slashing     slashingkeeper.Keeper
-	transfer     *ibctransferkeeper.Keeper // for IBC bridge transfers
 }
 
 func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec, bank bankkeeper.Keeper, staking *stakingkeeper.Keeper, distribution *distrkeeper.Keeper, slashing slashingkeeper.Keeper) Keeper {
-	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing, transfer: nil}
-}
-
-// SetTransferKeeper sets the IBC transfer keeper (called after IBC module initialization)
-func (k *Keeper) SetTransferKeeper(transfer *ibctransferkeeper.Keeper) {
-	k.transfer = transfer
-}
-
-// TransferKeeper returns the IBC transfer keeper for bridge operations
-func (k Keeper) TransferKeeper() *ibctransferkeeper.Keeper {
-	return k.transfer
+	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing}
 }
 
 func (k Keeper) profileKey(addr string) []byte   { return []byte(types.ProfilesPrefix + addr) }

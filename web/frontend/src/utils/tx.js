@@ -167,11 +167,6 @@ export async function setAutoRenewal(autoRenew) {
     return h.setAutoRenewal(autoRenew);
 }
 
-export async function ibcTransfer(receiver, amountUmirage, sourceChannel, timeoutSeconds = 600) {
-    const h = await getHandler();
-    return h.ibcTransfer(receiver, amountUmirage, sourceChannel, timeoutSeconds);
-}
-
 export async function bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
     const h = await getHandler();
     return h.bridgeBurn(destinationChain, destinationAddress, amountUmirage);

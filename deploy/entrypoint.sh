@@ -88,7 +88,7 @@ CHAIN_ID="mirage-1"
 MONIKER="${MONIKER:-validator}"
 
 # Create centralized log directory structure
-mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,hermes,caddy,referrals,deploy,orchestrator}
+mkdir -p "$LOGS_DIR"/{node,indexer,backend,postgres,caddy,referrals,deploy,orchestrator}
 
 # Clean up old log files (older than 30 days)
 find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
@@ -326,26 +326,6 @@ tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 P
 # Referral accrual daemon (fifth) - DISABLED FOR NOW
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"
 # tmux send-keys -t "$SESSION:referrals" "PYTHONPATH=$ROOT_DIR python3 referrals/referral_accrue.py" C-m
-
-# IBC Relayer (sixth) - only if Hermes is configured
-# NOTE: This hermes startup code is duplicated in deploy/setup_hermes.py
-#       If you change this, update the other file too!
-HERMES_HOME="$DATA_DIR/hermes"
-if [ -f "$HERMES_HOME/config.toml" ]; then
-  # Install or upgrade hermes if needed
-  HERMES_VERSION="v1.13.3"
-  INSTALLED_VERSION=$(hermes version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
-  if [ "$INSTALLED_VERSION" != "$HERMES_VERSION" ]; then
-    echo "==> Installing Hermes ${HERMES_VERSION} (was: ${INSTALLED_VERSION:-not installed})..."
-    curl -sL "https://github.com/informalsystems/hermes/releases/download/${HERMES_VERSION}/hermes-${HERMES_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -o /tmp/hermes.tar.gz
-    tar -xzf /tmp/hermes.tar.gz -C /usr/local/bin/
-    chmod +x /usr/local/bin/hermes
-    rm /tmp/hermes.tar.gz
-  fi
-  echo "==> Starting Hermes IBC relayer..."
-  tmux new-window -t "$SESSION" -n hermes -c "$ROOT_DIR"
-  tmux send-keys -t "$SESSION:hermes" "hermes --config \"$HERMES_HOME/config.toml\" start 2>&1 | tee >(cronolog \"$LOGS_DIR/hermes/hermes-%Y-%m-%d.log\")" C-m
-fi
 
 # Bridge Orchestrator - always starts, handles enabled/disabled internally via ORCHESTRATOR_ENABLED env var
 ORCHESTRATOR_BIN="$ROOT_DIR/blockchain/bin/orchestrator"

@@ -145,8 +145,6 @@ class MessageProcessor:
             self._handle_bridge_attest_burned(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgBridgeAttestMinted":
             self._handle_bridge_attest_minted(type_url, value, tx_hash, ts, height)
-        elif type_url == "/mirage.core.v1.MsgIBCTransfer":
-            pass
         else:
             raise RuntimeError(f"Unhandled message type {type_url}")
 

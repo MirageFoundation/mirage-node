@@ -149,9 +149,9 @@ def generate_proposal(validators: list[dict], output_path: Path | None = None) -
         print()
         
         messages.append({
-            "@type": "/mirage.core.v1.MsgMintTo",
+            "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": GOV_MODULE_ADDRESS,
-            "recipient": account,
+            "target": account,
             "amount": str(MINT_AMOUNT_UMIRAGE),
             "reason": f"Economics v2.0: Mint to {moniker} - increase stake to 5B MIRAGE ($50,000 at $0.00001/MIRAGE)"
         })

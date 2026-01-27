@@ -30,7 +30,7 @@ The frontend is a React SPA that provides:
 - Content creation (posts, comments, votes)
 - Social features (follow users/topics, block content)
 - Subscription management and token transfers
-- Cross-chain bridging UI (IBC, Solana)
+- Cross-chain bridging UI (Solana)
 - Personalized feeds and discovery
 
 **Key Design Principle:** The frontend handles all cryptographic operations locally. Private keys never leave the browser. The backend only receives signed messages and public keys.
@@ -470,7 +470,6 @@ async function post(path, body, options) {
 | `/api/bridge/burn` | POST | Bridge burn transaction |
 | `/api/bridge/config` | GET | Bridge configuration (chains, fees) |
 | `/api/bridge/status` | GET | Query bridge status and attestation progress |
-| `/api/bridge/ibc_transfer` | POST | IBC transfer to Cosmos chains |
 
 ---
 

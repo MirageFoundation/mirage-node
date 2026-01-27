@@ -262,6 +262,30 @@ def _build_pool():
     add_f(msg_set_level, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_set_level, "level", 101, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
 
+    # MsgMintTokens (governance only)
+    msg_mint_tokens = file_proto.message_type.add()
+    msg_mint_tokens.name = "MsgMintTokens"
+    add_f(msg_mint_tokens, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_mint_tokens, "target", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_mint_tokens, "amount", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_mint_tokens, "reason", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgMintTokensResponse
+    msg_mint_tokens_resp = file_proto.message_type.add()
+    msg_mint_tokens_resp.name = "MsgMintTokensResponse"
+
+    # MsgBurnTokens (governance only)
+    msg_burn_tokens = file_proto.message_type.add()
+    msg_burn_tokens.name = "MsgBurnTokens"
+    add_f(msg_burn_tokens, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_burn_tokens, "target", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_burn_tokens, "amount", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_burn_tokens, "reason", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgBurnTokensResponse
+    msg_burn_tokens_resp = file_proto.message_type.add()
+    msg_burn_tokens_resp.name = "MsgBurnTokensResponse"
+
     # MsgUpgradeLevel (user-initiated tier upgrade)
     msg_upgrade_level = file_proto.message_type.add()
     msg_upgrade_level.name = "MsgUpgradeLevel"
@@ -285,21 +309,6 @@ def _build_pool():
     add_f(msg_set_auto, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_set_auto, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_set_auto, "auto_renew", 100, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-
-    # MsgIBCTransfer (bridge via IBC to Cosmos chains like Osmosis)
-    msg_ibc_transfer = file_proto.message_type.add()
-    msg_ibc_transfer.name = "MsgIBCTransfer"
-    add_f(msg_ibc_transfer, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_ibc_transfer, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_ibc_transfer, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_ibc_transfer, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_ibc_transfer, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_ibc_transfer, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_ibc_transfer, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
-    add_f(msg_ibc_transfer, "receiver", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_ibc_transfer, "amount", 101, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg_ibc_transfer, "source_channel", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_ibc_transfer, "timeout_seconds", 103, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # MsgBridgeBurn (burn MIRAGE for bridging to non-IBC chains like Solana)
     msg_bridge_burn = file_proto.message_type.add()
@@ -343,7 +352,6 @@ def _build_pool():
     add_f(bridge_config, "chain_id", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(bridge_config, "enabled", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(bridge_config, "fee", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(bridge_config, "ibc_channel", 4, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # MsgBridgeAttestBurned (validator attestation for external chain burns - inbound)
     msg_bridge_attest_burned = file_proto.message_type.add()
@@ -576,9 +584,12 @@ MsgUnblockUser = _get_message_class("mirage.core.v1.MsgUnblockUser")
 MsgDelete = _get_message_class("mirage.core.v1.MsgDelete")
 MsgSendTokens = _get_message_class("mirage.core.v1.MsgSendTokens")
 MsgSetLevel = _get_message_class("mirage.core.v1.MsgSetLevel")
+MsgMintTokens = _get_message_class("mirage.core.v1.MsgMintTokens")
+MsgMintTokensResponse = _get_message_class("mirage.core.v1.MsgMintTokensResponse")
+MsgBurnTokens = _get_message_class("mirage.core.v1.MsgBurnTokens")
+MsgBurnTokensResponse = _get_message_class("mirage.core.v1.MsgBurnTokensResponse")
 MsgUpgradeLevel = _get_message_class("mirage.core.v1.MsgUpgradeLevel")
 MsgSetAutoRenewal = _get_message_class("mirage.core.v1.MsgSetAutoRenewal")
-MsgIBCTransfer = _get_message_class("mirage.core.v1.MsgIBCTransfer")
 MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
 MsgBridgeAttestBurned = _get_message_class("mirage.core.v1.MsgBridgeAttestBurned")
 MsgBridgeAttestBurnedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestBurnedResponse")

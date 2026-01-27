@@ -4,7 +4,8 @@ Migration: v1.8.3 - Update Caddyfile with new /chain/rpc and /chain/rest paths
 This migration re-renders the Caddyfile from the template to add:
 - /chain/rpc (new path for CometBFT RPC)
 - /chain/rest (new path for Cosmos REST API)
-- Backwards compatibility for /rpc and /lcd (deprecated 2026-02-20)
+
+Legacy paths /rpc and /lcd have been removed as of v1.10.0.
 """
 
 import shutil

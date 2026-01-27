@@ -196,7 +196,6 @@ func testBridgeParams(chain string, fee uint64) types.Params {
 			ChainId:  chain,
 			Enabled:  true,
 			Fee:      fee,
-			IbcChannel: "",
 		},
 	}
 	return params

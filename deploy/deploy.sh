@@ -594,20 +594,8 @@ echo "==> Starting container..."
 # Persist caddy data for future TLS issuance; persist node data under ~/.mirage
 if [ "$LOCAL_MODE" -eq 1 ]; then
   mkdir -p "$HOME/.caddy" "$HOME/.mirage"
-  # Skip hermes migration for local
 else
   run_ssh 'mkdir -p ~/.caddy ~/.mirage'
-  # One-time migration: move ~/.hermes to ~/.mirage/hermes (old volume mount location)
-  run_ssh '
-    if [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ ! -e ~/.mirage/hermes ]; then
-      echo "==> Migrating ~/.hermes to ~/.mirage/hermes..."
-      mv ~/.hermes ~/.mirage/hermes
-    elif [ -d ~/.hermes ] && [ ! -L ~/.hermes ] && [ -d ~/.mirage/hermes ]; then
-      echo "==> Merging ~/.hermes into ~/.mirage/hermes..."
-      cp -a ~/.hermes/. ~/.mirage/hermes/
-      rm -rf ~/.hermes
-    fi
-  '
 fi
 
 # Initialize persistent config directory and seed env files if missing (for --init)

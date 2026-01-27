@@ -21,10 +21,9 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBlockPost{}, &MsgUnblockPost{},
 		&MsgBlockUser{}, &MsgUnblockUser{},
 		&MsgDelete{}, &MsgSendTokens{}, &MsgSetLevel{},
-		&MsgPunishValidator{}, &MsgMintTo{}, &MsgUpgradeLevel{},
+		&MsgPunishValidator{}, &MsgMintTokens{}, &MsgBurnTokens{}, &MsgUpgradeLevel{},
 		&MsgSetAutoRenewal{},
-		// IBC and Bridge messages
-		&MsgIBCTransfer{},
+		// Bridge messages
 		&MsgBridgeBurn{},
 		&MsgBridgeAttestBurned{},
 		&MsgBridgeAttestMinted{},
@@ -40,10 +39,9 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},
 		&MsgBlockUserResponse{}, &MsgUnblockUserResponse{},
 		&MsgDeleteResponse{}, &MsgSendTokensResponse{}, &MsgSetLevelResponse{},
-		&MsgPunishValidatorResponse{}, &MsgMintToResponse{}, &MsgUpgradeLevelResponse{},
+		&MsgPunishValidatorResponse{}, &MsgMintTokensResponse{}, &MsgBurnTokensResponse{}, &MsgUpgradeLevelResponse{},
 		&MsgSetAutoRenewalResponse{},
-		// IBC and Bridge responses
-		&MsgIBCTransferResponse{},
+		// Bridge responses
 		&MsgBridgeBurnResponse{},
 		&MsgBridgeAttestBurnedResponse{},
 		&MsgBridgeAttestMintedResponse{},

@@ -1,30 +1,30 @@
 {
     "messages": [
         {
-            "@type": "/mirage.core.v1.MsgMintTo",
+            "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "recipient": "mirage1rd00maj4htc0f550pjy302maywy2wtaxv8ntaq",
+            "target": "mirage1rd00maj4htc0f550pjy302maywy2wtaxv8ntaq",
             "amount": "5000000000000000",
             "reason": "Economics v2.0: Mint to https://mirage.talk - increase stake to 5B MIRAGE ($50,000 at $0.00001/MIRAGE)"
         },
         {
-            "@type": "/mirage.core.v1.MsgMintTo",
+            "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "recipient": "mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5",
+            "target": "mirage1vkdacfe53x4ak7redgy6wlegdlglnlst8p47d5",
             "amount": "5000000000000000",
             "reason": "Economics v2.0: Mint to https://mirage.vote - increase stake to 5B MIRAGE ($50,000 at $0.00001/MIRAGE)"
         },
         {
-            "@type": "/mirage.core.v1.MsgMintTo",
+            "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "recipient": "mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3",
+            "target": "mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3",
             "amount": "5000000000000000",
             "reason": "Economics v2.0: Mint to mirage-node-3 - increase stake to 5B MIRAGE ($50,000 at $0.00001/MIRAGE)"
         },
         {
-            "@type": "/mirage.core.v1.MsgMintTo",
+            "@type": "/mirage.core.v1.MsgMintTokens",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "recipient": "mirage1ur6xu4ue9f4pk4a2thnhnf8ctu4dpkqehp7yqs",
+            "target": "mirage1ur6xu4ue9f4pk4a2thnhnf8ctu4dpkqehp7yqs",
             "amount": "5000000000000000",
             "reason": "Economics v2.0: Mint to mirage-node-4 - increase stake to 5B MIRAGE ($50,000 at $0.00001/MIRAGE)"
         }

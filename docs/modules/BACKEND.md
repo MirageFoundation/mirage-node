@@ -107,7 +107,7 @@ web/backend/
 ├── routes/
 │   ├── public.py    # Read-only endpoints (feeds, profiles, search)
 │   ├── core.py      # Write endpoints (post, vote, username, etc.)
-│   └── bridge.py    # Bridge endpoints (IBC, attested transfers)
+│   └── bridge.py    # Bridge endpoints (attested transfers)
 └── logging_utils.py # Structured logging
 ```
 
@@ -529,7 +529,6 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/bridge/config` | Enabled chains, fees |
-| `POST /api/bridge/ibc_transfer` | IBC transfer to Cosmos chains |
 | `POST /api/bridge/burn` | Burn for attested bridge (Solana) |
 | `GET /api/bridge/status` | Query bridge status and attestation progress |
 
@@ -641,41 +640,9 @@ if entry and (now - entry[0]) < ttl:
 
 ## Bridge Endpoints
 
-### IBC Transfer
-
-For IBC-enabled chains (e.g., Osmosis):
-
-```python
-@bridge_bp.route("/api/bridge/ibc_transfer", methods=["POST"])
-def bridge_ibc_transfer():
-    # 1. Validate request
-    receiver = data["receiver"]      # e.g., osmo1...
-    amount = data["amount"]          # umirage
-    source_channel = data["source_channel"]  # e.g., channel-1
-    timeout_seconds = data.get("timeout_seconds", 600)
-    
-    # 2. Verify channel is enabled
-    chain_cfg = _resolve_enabled_ibc_chain(source_channel)
-    if not chain_cfg:
-        return error("ibc channel not enabled")
-    
-    # 3. Validate receiver address format
-    expected_hrp = _expected_receiver_hrp(chain_cfg)  # e.g., "osmo"
-    if not _validate_bech32_20(receiver, expected_hrp):
-        return error("invalid receiver address")
-    
-    # 4. Build and broadcast MsgIBCTransfer
-    msg = MsgIBCTransfer()
-    msg.receiver = receiver
-    msg.amount = amount
-    msg.source_channel = source_channel
-    msg.timeout_seconds = timeout_seconds
-    # ... envelope fields, broadcast
-```
-
 ### Attested Bridge (Solana)
 
-For non-IBC chains using validator attestation:
+For validator-attested chains:
 
 ```python
 @bridge_bp.route("/api/bridge/burn", methods=["POST"])
@@ -685,7 +652,7 @@ def bridge_burn():
     destination_address = data["destination_address"]
     amount = data["amount"]
     
-    # 2. Verify chain is enabled (non-IBC)
+    # 2. Verify chain is enabled
     if not _resolve_enabled_attested_chain(destination_chain):
         return error("destination_chain not enabled")
     

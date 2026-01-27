@@ -29,7 +29,7 @@ Mirage is a decentralized social platform built on **Cosmos SDK** with **CometBF
 2. **Spam Prevention Without Fees**: Use Proof-of-Work as an alternative to economic barriers for free-tier users
 3. **Tiered Feature Access**: Paid subscriptions unlock additional platform capabilities
 4. **Deflationary Economics**: Burn mechanisms reduce supply over time
-5. **Cross-Chain Interoperability**: Support bridging to external chains (Solana, IBC chains)
+5. **Cross-Chain Interoperability**: Support bridging to external chains (Solana)
 
 ### Technology Stack
 
@@ -49,7 +49,7 @@ The decision to build on Cosmos SDK stems from several architectural needs:
 
 1. **Modular Design**: Custom application logic (`x/core`) integrates cleanly with standard SDK modules (auth, bank, staking, governance)
 2. **Sovereignty**: Full control over transaction processing, fee models, and consensus parameters
-3. **IBC Native**: Built-in Inter-Blockchain Communication for cross-chain token transfers
+3. **Bridge Support**: Attested bridge for external chain transfers
 4. **Governance**: On-chain parameter updates through proposal/voting mechanisms
 
 ### Why Not a Traditional Backend?
@@ -163,7 +163,7 @@ User Device                    Backend/Node                    Blockchain
 The ante handler detects transaction type and routes accordingly:
 
 **Path A: Standard SDK Transactions**
-- Used for: staking, governance, IBC transfers by validators
+- Used for: staking, governance, validator ops
 - Full Cosmos SDK signature verification
 - Standard gas/fee model
 
@@ -293,7 +293,6 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgSetAutoRenewal`: Toggle subscription auto-renewal
 
 **Bridge Messages:**
-- `MsgIBCTransfer`: Transfer to IBC-connected chains
 - `MsgBridgeBurn`: Burn for external chain bridge
 - `MsgBridgeAttestBurned`: Validator attestation for inbound bridge
 - `MsgBridgeAttestMinted`: Validator attestation for outbound bridge
@@ -302,7 +301,8 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgUpdateParams`: Update chain parameters
 - `MsgSetLevel`: Set user level (admin assignment)
 - `MsgPunishValidator`: Slash/jail validator
-- `MsgMintTo`: Mint tokens to address
+- `MsgMintTokens`: Mint tokens to address
+- `MsgBurnTokens`: Burn tokens from address
 
 ### State Storage
 
@@ -453,7 +453,7 @@ If reserve is insufficient for even one transaction, the user is immediately dow
 - Reserve fees burned as consumed or at subscription end
 
 **Bridge Fees:**
-- IBC and external bridge transfers include fees
+- External bridge transfers include fees
 - Bridge fees are burned (deflationary)
 
 ### Economic Equilibrium
@@ -526,7 +526,6 @@ The module emits events that the indexer consumes:
 
 - `subscription_renewed`: Subscription successfully renewed
 - `subscription_expired`: Subscription ended (with reason)
-- `bridge_ibc_transfer`: IBC transfer initiated
 - `bridge_burn`: External bridge burn initiated
 
 ### Query Endpoints
