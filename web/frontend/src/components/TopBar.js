@@ -324,7 +324,8 @@ function TopBar({ state }) {
     });
     const [searchQuery, setSearchQuery] = useState('');
     const [userBalance, setUserBalance] = useState(() => {
-        const stored = Storage.load('user_balance', '0');
+        const stored = Storage.load('user_balance', null);
+        if (stored === null) return null; // Not loaded yet
         return Number(stored) || 0;
     });
     const menuRef = useRef(null);
@@ -443,12 +444,13 @@ function TopBar({ state }) {
     // Track user balance changes
     useEffect(() => {
         if (!hasPublicKey) {
-            setUserBalance(0);
+            setUserBalance(null);
             return;
         }
 
         const checkBalance = () => {
-            const stored = Storage.load('user_balance', '0');
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return; // Not loaded yet, keep showing "~"
             setUserBalance(Number(stored) || 0);
         };
 
@@ -522,7 +524,7 @@ function TopBar({ state }) {
                 />
                 {hasPublicKey && (
                     <BalanceDisplay title="Your MIRAGE balance">
-                        <BalanceAmount>{formatMirageBalance(userBalance)}</BalanceAmount>
+                        <BalanceAmount>{userBalance === null ? '~' : formatMirageBalance(userBalance)}</BalanceAmount>
                         <BalanceLabel>MIRAGE</BalanceLabel>
                     </BalanceDisplay>
                 )}
