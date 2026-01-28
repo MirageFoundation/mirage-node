@@ -823,6 +823,31 @@ const ConfirmButtons = styled.div`
     justify-content: flex-end;
 `;
 
+const InlineCancelButton = styled.button`
+    background: transparent;
+    border: none;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.35rem 0.4rem;
+    cursor: pointer;
+    line-height: 1;
+
+    &:hover {
+        color: ${({ theme }) => theme?.colors?.text || '#fff'};
+    }
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        outline: 2px solid rgba(245, 158, 11, 0.5);
+        outline-offset: 2px;
+        border-radius: 6px;
+    }
+`;
+
 
 const ReportInput = styled.input`
     display: block;
@@ -2718,7 +2743,7 @@ function ViewPostView({ state, updatePost }) {
                             <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
                                 {isDonating ? 'Sending...' : 'Send'}
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
+                            <InlineCancelButton type="button" onClick={cancelDonate}>Cancel</InlineCancelButton>
                         </ConfirmButtons>
                     </div>
                 </BlockConfirmMessage>
