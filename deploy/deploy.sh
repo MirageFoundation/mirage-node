@@ -767,11 +767,15 @@ if [ "$MODE" = "update" ]; then
   fi
 fi
 
-# Run host-side rate limiting setup - remote only
+# Run host-side security setup - remote only
 if [ "$LOCAL_MODE" -eq 0 ]; then
   echo "==> Running host rate limiting setup..."
   run_scp "$SCRIPT_DIR/enable_rate_limiting.sh" "$REMOTE:/tmp/enable_rate_limiting.sh"
   run_ssh "chmod +x /tmp/enable_rate_limiting.sh && /tmp/enable_rate_limiting.sh && rm /tmp/enable_rate_limiting.sh"
+  
+  echo "==> Running host fail2ban setup..."
+  run_scp "$SCRIPT_DIR/enable_fail2ban.sh" "$REMOTE:/tmp/enable_fail2ban.sh"
+  run_ssh "chmod +x /tmp/enable_fail2ban.sh && /tmp/enable_fail2ban.sh && rm /tmp/enable_fail2ban.sh"
 fi
 
 if [ "$LOCAL_MODE" -eq 1 ]; then

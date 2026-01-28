@@ -364,6 +364,22 @@ const ClaimButton = styled.button`
     }
 `;
 
+const ClaimErrorMessage = styled.div`
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 6px;
+    font-size: 0.6rem;
+    color: #ef4444;
+    line-height: 1.4;
+
+    @media (max-width: 768px) {
+        font-size: 0.55rem;
+        padding: 0.4rem 0.6rem;
+    }
+`;
+
 // Celebration animation
 const confettiAnimation = keyframes`
     0% { transform: translateY(0) rotate(0deg); opacity: 1; }
@@ -622,8 +638,10 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const [showCelebration, setShowCelebration] = useState(false);
     const [claimedAmount, setClaimedAmount] = useState(0);
+    const [claimError, setClaimError] = useState(null);
 
     const handleClaim = useCallback(async () => {
+        setClaimError(null);
         const result = await claimRewards();
 
         if (result.success) {
@@ -637,6 +655,17 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             // Refresh data
             refreshQuests();
             refreshRewards();
+        } else {
+            // Handle specific errors with user-friendly messages
+            if (result.error === 'insufficient_funds') {
+                setClaimError('Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.');
+            } else if (result.error === 'no_rewards') {
+                setClaimError('No rewards to claim.');
+            } else {
+                setClaimError(result.error || 'Failed to claim rewards. Please try again later.');
+            }
+            // Clear error after 10 seconds
+            setTimeout(() => setClaimError(null), 10000);
         }
     }, [claimRewards, refreshQuests, refreshRewards]);
 
@@ -950,6 +979,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </ClaimButton>
                         </div>
                     </ClaimSection>
+                )}
+                {claimError && !collapsed && (
+                    <ClaimErrorMessage>
+                        ⚠️ {claimError}
+                    </ClaimErrorMessage>
                 )}
             </QuestCardContainer>
 

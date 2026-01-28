@@ -493,7 +493,7 @@ const BlockConfirmMessage = styled.div`
     border: 1px solid #f59e0b;
     border-radius: 3px;
     padding: 0.4rem 0.75rem;
-    margin: 0.5rem 0 0.5rem 0;
+    margin: 0.6rem 0 0.25rem 0;
     color: #f59e0b;
     font-size: 0.85rem;
     display: flex;
@@ -910,6 +910,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [isSuspending, setIsSuspending] = useState(false);
     const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
     const [suspendSuccess, setSuspendSuccess] = useState(null); // success message or null
+    const [confirmUnsuspend, setConfirmUnsuspend] = useState(false);
+    const [isUnsuspending, setIsUnsuspending] = useState(false);
+    const [userSuspendedStatus, setUserSuspendedStatus] = useState(null); // null = unknown, true/false = known
     const [followOverride, setFollowOverride] = useState(null);
     const [topicFollowOverride, setTopicFollowOverride] = useState(null);
     const [confirmDonate, setConfirmDonate] = useState(false);
@@ -1021,6 +1024,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setDonateMessage(null);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
         setConfirmDelete(true);
     };
 
@@ -1059,6 +1063,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setDonateMessage(null);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
         setConfirmSuspendQuests(true);
     };
 
@@ -1087,6 +1092,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             if (response.success) {
                 const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
                 setConfirmSuspendQuests(false);
+                setUserSuspendedStatus(true); // Update status after successful suspend
                 setSuspendSuccess(`User suspended from quests ${durationText}`);
                 setTimeout(() => setSuspendSuccess(null), 4000);
             } else {
@@ -1105,6 +1111,64 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const cancelSuspendFromQuests = () => {
         setConfirmSuspendQuests(false);
         setIsSuspending(false);
+    };
+
+    const fetchUserSuspensionStatus = async (userId) => {
+        if (!userId) return;
+        try {
+            const response = await Api.get(`/rewards/pending?owner=${encodeURIComponent(userId)}`);
+            setUserSuspendedStatus(response.suspended === true);
+        } catch (err) {
+            console.error('Error fetching suspension status:', err);
+            setUserSuspendedStatus(null);
+        }
+    };
+
+    const handleUnsuspendFromQuests = () => {
+        setMenuOpen(false);
+        if (!post || !post.user_id) return;
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(true);
+    };
+
+    const confirmUnsuspendFromQuests = async () => {
+        if (!post || !post.user_id) return;
+        const adminAddress = Storage.load('publicKey', '');
+        if (!adminAddress) {
+            alert('You must be logged in');
+            return;
+        }
+
+        setIsUnsuspending(true);
+        try {
+            const response = await Api.post('/admin/rewards/unsuspend', {
+                admin: adminAddress,
+                target: post.user_id,
+            });
+            if (response.success) {
+                setConfirmUnsuspend(false);
+                setUserSuspendedStatus(false); // Update status after successful unsuspend
+                setSuspendSuccess('User unsuspended from quests');
+                setTimeout(() => setSuspendSuccess(null), 4000);
+            } else {
+                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmUnsuspend(false);
+            }
+        } catch (err) {
+            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
+            setConfirmUnsuspend(false);
+        }
+        setIsUnsuspending(false);
+    };
+
+    const cancelUnsuspendFromQuests = () => {
+        setConfirmUnsuspend(false);
+        setIsUnsuspending(false);
     };
 
     // Close menu when clicking outside
@@ -1149,6 +1213,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setDonateMessage(null);
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
         setDonateAmountRaw("10000");
         setConfirmDonate(true);
     };
@@ -1199,6 +1264,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmSuspendQuests(false);
         setConfirmDonate(false);
         setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
         setConfirmBlockPost(true);
     };
 
@@ -1231,6 +1297,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmSuspendQuests(false);
         setConfirmDonate(false);
         setConfirmBlockPost(false);
+        setConfirmUnsuspend(false);
         setConfirmBlockUser(true);
     };
 
@@ -1915,6 +1982,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             top: rect.bottom + 4,
                                             left: rect.right - 180 // 180 is min-width of dropdown
                                         });
+                                        // Fetch suspension status for admins
+                                        if (isAdmin && post?.user_id) {
+                                            setUserSuspendedStatus(null); // Reset while loading
+                                            fetchUserSuspensionStatus(post.user_id);
+                                        }
                                     }
                                     setMenuOpen(!menuOpen);
                                 }}
@@ -1958,7 +2030,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     {!isOwnPost && isAdmin && (
                                         <>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                            {userSuspendedStatus !== true && (
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                            )}
+                                            {userSuspendedStatus === true && (
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>🛡️ Unsuspend from quests</MenuItem>
+                                            )}
                                         </>
                                     )}
                                 </MenuDropdown>,
@@ -2102,6 +2179,19 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         {isSuspending ? 'Suspending...' : 'Suspend'}
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {confirmUnsuspend && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
+                                        {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
                                 </ConfirmButtons>
                             </div>
                         </BlockConfirmMessage>

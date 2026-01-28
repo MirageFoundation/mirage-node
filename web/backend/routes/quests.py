@@ -570,6 +570,13 @@ def claim_rewards():
                     "error": "no_rewards",
                     "message": "No pending rewards to claim",
                 })
+            elif error_msg == "insufficient_pool_balance":
+                log_event(rid, "rewards.claim.insufficient_funds", owner=owner)
+                return jsonify({
+                    "success": False,
+                    "error": "insufficient_funds",
+                    "message": "Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.",
+                }), 503  # Service Unavailable
             else:
                 log_event(rid, "rewards.claim.failed", owner=owner, error=error_msg)
                 return jsonify({
