@@ -58,8 +58,6 @@ const ProfileView = lazyWithRetry(() => import('./views/ProfileView'));
 const NetworkView = lazyWithRetry(() => import('./views/NetworkView'));
 const SubscriptionView = lazyWithRetry(() => import('./views/SubscriptionView'));
 const ReportsView = lazyWithRetry(() => import('./views/ReportsView'));
-// REFERRALS DISABLED FOR NOW
-// const InviteView = lazyWithRetry(() => import('./views/InviteView'));
 const InboxView = lazyWithRetry(() => import('./views/InboxView'));
 const SettingsView = lazyWithRetry(() => import('./views/SettingsView'));
 const DiscoverView = lazyWithRetry(() => import('./views/DiscoverView'));
@@ -870,8 +868,6 @@ class App extends Component {
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
                                             <Route path="/network" element={<NetworkView state={this.state} />} />
-                                            {/* REFERRALS DISABLED FOR NOW */}
-                                            {/* <Route path="/invite" element={<InviteView state={this.state} />} /> */}
                                             <Route path="/server" element={<NetworkView state={this.state} />} />
                                             <Route path="/reports" element={<ReportsView state={this.state} />} />
                                             <Route path="/inbox" element={<InboxView state={this.state} />} />
