@@ -62,7 +62,6 @@ COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
 COPY shared/ /opt/mirage/shared/
-COPY referrals/ /opt/mirage/referrals/
 COPY deploy/ /opt/mirage/deploy/
 
 ## Note: We trust upstream build step to produce /opt/mirage/blockchain/bin/miraged
@@ -130,7 +129,6 @@ COPY --from=builder /opt/mirage/scripts /opt/mirage/scripts
 COPY --from=builder /opt/mirage/web/backend /opt/mirage/web/backend
 COPY --from=builder /opt/mirage/indexer /opt/mirage/indexer
 COPY --from=builder /opt/mirage/shared /opt/mirage/shared
-COPY --from=builder /opt/mirage/referrals /opt/mirage/referrals
 
 # Note: backend settings.yaml is already included in web/backend copy above
 
