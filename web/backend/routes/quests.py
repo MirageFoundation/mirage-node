@@ -240,30 +240,36 @@ def get_daily_quests():
                 continue
 
             # Calculate target for balanced_vote
-            if quest_def.get("action_type") == "balanced_vote":
-                target = (quest_def.get("target_upvotes", 0) or 0) + (quest_def.get("target_downvotes", 0) or 0)
-            else:
-                target = quest_def.get("target_count", 1)
+            quest_data = {
+                "id": quest_id,
+                "title": quest_def.get("title", ""),
+                "description": quest_def.get("description", ""),
+                "action_type": quest_def.get("action_type", ""),
+                "progress": progress,
+                "completed": completed_at is not None,
+                "rewards": quest_def.get("rewards", []),
+                # Additional requirements for display
+                "min_content_length": quest_def.get("min_content_length"),
+                "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+                "unique_target": quest_def.get("unique_target"),
+                "unique_topics_min": quest_def.get("unique_topics_min"),
+                "quality_threshold": quest_def.get("quality_threshold"),
+                "count_vote_changes": quest_def.get("count_vote_changes", True),
+            }
 
-            daily_quests.append(
-                {
-                    "id": quest_id,
-                    "title": quest_def.get("title", ""),
-                    "description": quest_def.get("description", ""),
-                    "action_type": quest_def.get("action_type", ""),
-                    "progress": progress,
-                    "target": target,
-                    "completed": completed_at is not None,
-                    "rewards": quest_def.get("rewards", []),
-                    # Additional requirements for display
-                    "min_content_length": quest_def.get("min_content_length"),
-                    "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
-                    "unique_target": quest_def.get("unique_target"),
-                    "unique_topics_min": quest_def.get("unique_topics_min"),
-                    "quality_threshold": quest_def.get("quality_threshold"),
-                    "count_vote_changes": quest_def.get("count_vote_changes", True),
-                }
-            )
+            if quest_def.get("action_type") == "balanced_vote":
+                target_up = quest_def.get("target_upvotes", 0) or 0
+                target_down = quest_def.get("target_downvotes", 0) or 0
+                quest_data["target"] = target_up + target_down
+                # Include breakdown for balanced_vote quests
+                quest_data["upvotes"] = progress_meta.get("upvotes", 0)
+                quest_data["downvotes"] = progress_meta.get("downvotes", 0)
+                quest_data["target_upvotes"] = target_up
+                quest_data["target_downvotes"] = target_down
+            else:
+                quest_data["target"] = quest_def.get("target_count", 1)
+
+            daily_quests.append(quest_data)
 
         multiplier = _get_user_reward_multiplier(owner, ts)
 

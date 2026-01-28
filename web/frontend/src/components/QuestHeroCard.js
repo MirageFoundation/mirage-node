@@ -278,6 +278,25 @@ const ProgressText = styled.div`
     font-variant-numeric: tabular-nums;
 `;
 
+const BalancedProgressText = styled.div`
+    font-size: 0.45rem;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+`;
+
+const BalancedProgressRow = styled.span`
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    color: ${({ $met, theme }) => $met 
+        ? '#22c55e' 
+        : pickThemeColor(theme, 'subtleText')};
+    font-weight: ${({ $met }) => $met ? '600' : '400'};
+`;
+
 const CheckMark = styled.div`
     width: 1.1rem;
     height: 1.1rem;
@@ -796,9 +815,20 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                     $completed={quest.completed}
                                                 />
                                             </ProgressBar>
-                                            <ProgressText>
-                                                {quest.progress}/{quest.target}
-                                            </ProgressText>
+                                            {quest.action_type === 'balanced_vote' && quest.target_upvotes !== undefined ? (
+                                                <BalancedProgressText title={`Need ${quest.target_upvotes} upvotes and ${quest.target_downvotes} downvotes`}>
+                                                    <BalancedProgressRow $met={(quest.upvotes || 0) >= quest.target_upvotes}>
+                                                        ↑{quest.upvotes || 0}/{quest.target_upvotes}
+                                                    </BalancedProgressRow>
+                                                    <BalancedProgressRow $met={(quest.downvotes || 0) >= quest.target_downvotes}>
+                                                        ↓{quest.downvotes || 0}/{quest.target_downvotes}
+                                                    </BalancedProgressRow>
+                                                </BalancedProgressText>
+                                            ) : (
+                                                <ProgressText>
+                                                    {quest.progress}/{quest.target}
+                                                </ProgressText>
+                                            )}
                                         </ProgressContainer>
                                     </>
                                 )}
