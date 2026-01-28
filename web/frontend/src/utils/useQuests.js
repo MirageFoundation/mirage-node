@@ -261,8 +261,17 @@ export function usePendingRewards() {
             }
         } catch (err) {
             console.error('Failed to claim rewards:', err);
-            setError(err.message || 'Failed to claim rewards');
-            return { success: false, error: err.message };
+            // Try to parse JSON error from HTTP error message (e.g., "HTTP 503: {...}")
+            let errorCode = err.message;
+            try {
+                const jsonMatch = err.message?.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    const parsed = JSON.parse(jsonMatch[0]);
+                    errorCode = parsed.error || parsed.message || err.message;
+                }
+            } catch (_) { /* ignore parse errors */ }
+            setError(errorCode || 'Failed to claim rewards');
+            return { success: false, error: errorCode };
         } finally {
             setClaiming(false);
         }

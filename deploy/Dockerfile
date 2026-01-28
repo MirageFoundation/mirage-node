@@ -76,6 +76,9 @@ ENV PYTHONPATH=/opt/mirage
 ENV BACKEND_HOST=127.0.0.1
 ENV BACKEND_PORT=5000
 ENV TERM=xterm-256color
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONIOENCODING=utf-8
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
@@ -152,6 +155,7 @@ COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/depl
 
 # Setup scripts
 COPY --from=builder /opt/mirage/deploy/setup_orchestrator.py /opt/mirage/deploy/setup_orchestrator.py
+COPY --from=builder /opt/mirage/deploy/setup_rewards_pool.py /opt/mirage/deploy/setup_rewards_pool.py
 
 # Set working directory
 WORKDIR /opt/mirage

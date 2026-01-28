@@ -689,6 +689,13 @@ class App extends Component {
                 return { posts: updatedPosts, deletedPosts };
             }
 
+            // If blocked flag is set, remove the post from state entirely (client-side hide)
+            if (updated.blocked) {
+                const updatedPosts = { ...prevState.posts };
+                delete updatedPosts[postId];
+                return { posts: updatedPosts };
+            }
+
             return {
                 posts: {
                     ...prevState.posts,
