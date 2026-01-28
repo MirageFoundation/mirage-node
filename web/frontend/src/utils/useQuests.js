@@ -40,7 +40,7 @@ export function useQuests() {
 
             // Fetch daily quests
             const dailyResponse = await Api.get('/rewards/daily', { owner: userAddress });
-            
+
             // Check if quests system is disabled
             if (dailyResponse.disabled) {
                 setDisabled(true);
@@ -49,9 +49,9 @@ export function useQuests() {
                 setLoading(false);
                 return;
             }
-            
+
             setDisabled(false);
-            
+
             if (dailyResponse.suspended) {
                 setSuspended(true);
                 setSuspensionInfo(dailyResponse.suspension || null);
@@ -60,7 +60,7 @@ export function useQuests() {
             } else {
                 setSuspended(false);
                 const newQuests = dailyResponse.daily_quests || [];
-                
+
                 // Merge updates to preserve stable references - only update progress/completed
                 setDailyQuests(prev => {
                     if (prev.length === 0 || prev.length !== newQuests.length) {
@@ -107,7 +107,7 @@ export function useQuests() {
             } else {
                 setFlashQuest(null);
             }
-            
+
             setInitialLoadDone(true);
         } catch (err) {
             console.error('Failed to fetch quests:', err);
@@ -119,7 +119,7 @@ export function useQuests() {
 
     useEffect(() => {
         fetchQuests(false); // Initial load
-        
+
         // Refresh every 5 minutes (silent refresh)
         const interval = setInterval(() => fetchQuests(true), 5 * 60 * 1000);
 
@@ -144,18 +144,18 @@ export function useQuests() {
     // Update countdown timer for daily reset
     useEffect(() => {
         if (secondsUntilReset <= 0) return;
-        
+
         const interval = setInterval(() => {
             setSecondsUntilReset(prev => Math.max(0, prev - 1));
         }, 1000);
-        
+
         return () => clearInterval(interval);
     }, [secondsUntilReset]);
 
     // Update countdown timer for flash quest
     useEffect(() => {
         if (!flashQuest || flashQuest.seconds_remaining <= 0) return;
-        
+
         const interval = setInterval(() => {
             setFlashQuest(prev => {
                 if (!prev) return prev;
@@ -167,7 +167,7 @@ export function useQuests() {
                 return { ...prev, seconds_remaining: newRemaining };
             });
         }, 1000);
-        
+
         return () => clearInterval(interval);
     }, [flashQuest?.id]); // Only re-run when flash quest changes
 
@@ -214,7 +214,7 @@ export function usePendingRewards() {
             setError(null);
 
             const response = await Api.get('/rewards/pending', { owner: userAddress });
-            
+
             if (response.suspended) {
                 setSuspended(true);
                 setPendingRewards([]);
@@ -246,7 +246,7 @@ export function usePendingRewards() {
             setError(null);
 
             const response = await Api.post('/rewards/claim', { owner: userAddress });
-            
+
             if (response.success) {
                 // Refresh rewards after successful claim
                 await fetchRewards();
@@ -279,7 +279,7 @@ export function usePendingRewards() {
 
     useEffect(() => {
         fetchRewards();
-        
+
         // Refresh every 2 minutes
         const interval = setInterval(fetchRewards, 2 * 60 * 1000);
 
