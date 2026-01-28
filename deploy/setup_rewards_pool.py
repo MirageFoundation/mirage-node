@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -513,9 +514,56 @@ def configure_backend(address: str) -> None:
     if changed:
         ok(f"Configuration saved to {BACKEND_ENV}")
         print()
-        warn("Restart the backend service to apply changes")
+        confirm = input("  Restart backend service to apply changes? [Y/n]: ").strip().lower()
+        if confirm != "n":
+            restart_backend()
+        else:
+            warn("Restart the backend service manually to apply changes")
     else:
         print("  No changes made.")
+
+
+def restart_backend() -> None:
+    """Restart the backend service in tmux."""
+    print()
+    print("  Restarting backend service...")
+    
+    # Kill existing gunicorn processes
+    try:
+        subprocess.run(
+            ["pkill", "-TERM", "-f", "gunicorn.*factory:app"],
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(1)
+    except Exception:
+        pass
+    
+    # Restart in tmux
+    try:
+        result = subprocess.run(
+            ["tmux", "send-keys", "-t", "mirage:backend", "C-c"],
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(1)
+        
+        # Start backend again
+        ROOT_DIR = Path("/opt/mirage")
+        subprocess.run(
+            [
+                "tmux", "send-keys", "-t", "mirage:backend",
+                f"BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH={ROOT_DIR} python3 -m gunicorn -c gunicorn_config.py 'factory:app'",
+                "C-m"
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        ok("Backend service restarted")
+    except Exception as e:
+        warn(f"Could not restart backend automatically: {e}")
+        print("  Restart manually with: tmux send-keys -t mirage:backend 'C-c'")
+        print("  Then restart gunicorn in that window")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
