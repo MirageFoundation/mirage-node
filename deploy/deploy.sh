@@ -686,8 +686,8 @@ stability_check() {
     elif [ "$st" = "running" ]; then
       if docker exec mirage echo ready >/dev/null 2>&1; then
         consec=$((consec+1))
-        echo "  -> Docker exec successful (need 3 consecutive)"
-        if [ "$consec" -ge 3 ]; then
+        echo "  -> Docker exec successful (need 5 consecutive)"
+        if [ "$consec" -ge 5 ]; then
           echo "  -> Container is stable!"
           return 0
         fi
@@ -726,8 +726,8 @@ for i in $(seq 1 60); do
   elif [ "$st" = "running" ]; then
     if docker exec mirage echo ready >/dev/null 2>&1; then
       consec=$((consec+1))
-      echo "  -> Docker exec successful (need 3 consecutive)"
-      if [ "$consec" -ge 3 ]; then
+      echo "  -> Docker exec successful (need 5 consecutive)"
+      if [ "$consec" -ge 5 ]; then
         echo "  -> Container is stable!"
         exit 0
       fi

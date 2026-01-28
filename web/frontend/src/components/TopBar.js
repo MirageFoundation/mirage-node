@@ -4,7 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
 import Button from "./Button";
-import { formatMirageCompact } from "../utils/formatters";
+import { formatMirageBalance } from "../utils/formatters";
 
 const UserControls = styled.div`
     display: flex;
@@ -89,8 +89,8 @@ const TabletNavItem = styled(Link)`
 
     &:hover {
         background: ${({ $active }) => $active
-            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-            : 'rgba(102, 126, 234, 0.15)'};
+        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        : 'rgba(102, 126, 234, 0.15)'};
         border-color: ${({ $active }) => $active ? 'transparent' : 'rgba(102, 126, 234, 0.3)'};
     }
 `;
@@ -520,9 +520,9 @@ function TopBar({ state }) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                 />
-                {hasPublicKey && userBalance > 0 && (
+                {hasPublicKey && (
                     <BalanceDisplay title="Your MIRAGE balance">
-                        <BalanceAmount>{formatMirageCompact(userBalance)}</BalanceAmount>
+                        <BalanceAmount>{formatMirageBalance(userBalance)}</BalanceAmount>
                         <BalanceLabel>MIRAGE</BalanceLabel>
                     </BalanceDisplay>
                 )}
