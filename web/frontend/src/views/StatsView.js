@@ -280,11 +280,11 @@ export default function StatsView() {
     const fetchRewardHistory = useCallback(async (offset = 0, append = false) => {
         setPayoutsLoading(true);
         try {
-            const data = await Api.get('rewards/history', { 
-                offset, 
-                limit: 50 
+            const data = await Api.get('rewards/history', {
+                offset,
+                limit: 50
             }, { timeoutMs: 30000 });
-            
+
             if (append) {
                 setPayouts(prev => [...prev, ...(data.rewards || [])]);
             } else {
@@ -1132,9 +1132,6 @@ export default function StatsView() {
                                 <>
                                     <SectionTitle>
                                         Reward Pool Status
-                                        <SectionInfoIcon data-tooltip="Current status of the rewards pool and payout system.">
-                                            ?
-                                        </SectionInfoIcon>
                                     </SectionTitle>
                                     <SummaryBox>
                                         <SummaryItem>
@@ -1155,9 +1152,6 @@ export default function StatsView() {
 
                                     <SectionTitle>
                                         Overall Statistics
-                                        <SectionInfoIcon data-tooltip="Cumulative reward statistics across all users.">
-                                            ?
-                                        </SectionInfoIcon>
                                     </SectionTitle>
                                     <SummaryBox>
                                         <SummaryItem>
@@ -1180,9 +1174,6 @@ export default function StatsView() {
 
                                     <SectionTitle>
                                         Per-User Breakdown
-                                        <SectionInfoIcon data-tooltip="Click on a user row to expand and see detailed stats.">
-                                            ?
-                                        </SectionInfoIcon>
                                     </SectionTitle>
                                     <SectionNote>Showing {rewardsData.users?.length || 0} users who have earned rewards. Click to expand.</SectionNote>
                                     <ValueBox style={{ padding: 0, overflow: 'auto' }}>
@@ -1199,7 +1190,7 @@ export default function StatsView() {
                                                 {rewardsData.users && rewardsData.users.length > 0 ? (
                                                     rewardsData.users.map((user, idx) => (
                                                         <React.Fragment key={idx}>
-                                                            <tr 
+                                                            <tr
                                                                 onClick={() => setExpandedUsers(prev => ({ ...prev, [user.address]: !prev[user.address] }))}
                                                                 style={{ cursor: 'pointer', background: expandedUsers[user.address] ? 'rgba(102, 126, 234, 0.1)' : 'transparent' }}
                                                             >
@@ -1275,15 +1266,12 @@ export default function StatsView() {
 
                                     <SectionTitle style={{ marginTop: '1.5rem' }}>
                                         Reward History
-                                        <SectionInfoIcon data-tooltip="All rewards earned, newest first. Green = claimed, orange = pending.">
-                                            ?
-                                        </SectionInfoIcon>
                                     </SectionTitle>
-                                    
+
                                     {payouts.length > 0 ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                             {payouts.map((reward, idx) => (
-                                                <div 
+                                                <div
                                                     key={idx}
                                                     style={{
                                                         display: 'flex',
@@ -1314,7 +1302,7 @@ export default function StatsView() {
                                                     </div>
                                                 </div>
                                             ))}
-                                            
+
                                             {payoutsHasMore && (
                                                 <button
                                                     onClick={() => fetchRewardHistory(payouts.length, true)}

@@ -7,10 +7,6 @@ import styled, { keyframes, css } from 'styled-components';
 import { useQuests, usePendingRewards } from '../utils/useQuests';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
-// DEBUG IMPORTS - TEMPORARY - REMOVE BEFORE PRODUCTION
-import Api from '../lib/api';
-import Storage from '../utils/Storage';
-// END DEBUG IMPORTS
 
 const pickThemeColor = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -586,34 +582,6 @@ const CollapseButton = styled.button`
     }
 `;
 
-// ==========================================================================
-// DEBUG STYLED COMPONENT - TEMPORARY - REMOVE BEFORE PRODUCTION
-// ==========================================================================
-const DebugCompleteButton = styled.button`
-    background: #ef4444;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 0.5rem;
-    font-weight: 600;
-    cursor: pointer;
-    margin-left: 8px;
-    flex-shrink: 0;
-    
-    &:hover {
-        background: #dc2626;
-    }
-    
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-`;
-// ==========================================================================
-// END DEBUG STYLED COMPONENT
-// ==========================================================================
-
 export default function QuestHeroCard({ collapsed = false, onToggleCollapse, size = 'large' }) {
     const {
         dailyQuests,
@@ -673,62 +641,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         setShowCelebration(false);
     }, []);
 
-    // ==========================================================================
-    // DEBUG HANDLER - TEMPORARY - REMOVE BEFORE PRODUCTION
-    // ==========================================================================
-    const [debugCompleting, setDebugCompleting] = useState(null);
-
-    const handleDebugComplete = useCallback(async (questId) => {
-        const owner = Storage.load('publicKey', '');
-        if (!owner) {
-            console.error('[DEBUG] No user address found');
-            return;
-        }
-
-        setDebugCompleting(questId);
-        try {
-            const result = await Api.post('/debug/quest/complete', { owner, quest_id: questId });
-            console.log('[DEBUG] Quest complete result:', result);
-            if (result.success) {
-                // Refresh quests and rewards
-                refreshQuests();
-                refreshRewards();
-            }
-        } catch (err) {
-            console.error('[DEBUG] Failed to complete quest:', err);
-        } finally {
-            setDebugCompleting(null);
-        }
-    }, [refreshQuests, refreshRewards]);
-
-    const [debugResetting, setDebugResetting] = useState(false);
-
-    const handleDebugReset = useCallback(async () => {
-        const owner = Storage.load('publicKey', '');
-        if (!owner) {
-            console.error('[DEBUG] No user address found');
-            return;
-        }
-
-        setDebugResetting(true);
-        try {
-            const result = await Api.post('/debug/quest/reset', { owner });
-            console.log('[DEBUG] Quest reset result:', result);
-            if (result.success) {
-                // Refresh quests and rewards
-                refreshQuests();
-                refreshRewards();
-            }
-        } catch (err) {
-            console.error('[DEBUG] Failed to reset quests:', err);
-        } finally {
-            setDebugResetting(false);
-        }
-    }, [refreshQuests, refreshRewards]);
-    // ==========================================================================
-    // END DEBUG HANDLER
-    // ==========================================================================
-
     // If quests system is disabled, don't render anything
     if (questsDisabled) {
         return null;
@@ -784,7 +696,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                         </div>
                         {questsSuspensionInfo?.suspended_until && (
                             <div style={{ fontSize: '0.6rem', fontWeight: 600, marginTop: '0.2rem' }}>
-                                {questsSuspensionInfo.suspended_until > 4000000000 
+                                {questsSuspensionInfo.suspended_until > 4000000000
                                     ? 'Permanent suspension'
                                     : `Until: ${new Date(questsSuspensionInfo.suspended_until * 1000).toISOString().replace('T', ' ').replace('Z', 'Z')}`
                                 }
@@ -888,15 +800,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 {quest.progress}/{quest.target}
                                             </ProgressText>
                                         </ProgressContainer>
-                                        {/* DEBUG BUTTON - TEMPORARY - REMOVE BEFORE PRODUCTION */}
-                                        <DebugCompleteButton
-                                            onClick={() => handleDebugComplete(quest.id)}
-                                            disabled={debugCompleting === quest.id}
-                                            title="DEBUG: Instantly complete this quest"
-                                        >
-                                            {debugCompleting === quest.id ? '...' : 'DEBUG'}
-                                        </DebugCompleteButton>
-                                        {/* END DEBUG BUTTON */}
                                     </>
                                 )}
                             </QuestItem>
@@ -960,15 +863,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                             </LoyaltyBonusText>
                         </div>
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                            {/* DEBUG BUTTON - TEMPORARY - REMOVE BEFORE PRODUCTION */}
-                            <DebugCompleteButton
-                                onClick={handleDebugReset}
-                                disabled={debugResetting}
-                                title="DEBUG: Reset quests and get new random ones"
-                            >
-                                {debugResetting ? '...' : 'RESET'}
-                            </DebugCompleteButton>
-                            {/* END DEBUG BUTTON */}
                             <ClaimButton
                                 onClick={handleClaim}
                                 disabled={!hasClaimableRewards || claiming || !claimingAvailable}
