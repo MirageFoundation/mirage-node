@@ -34,11 +34,12 @@ from routes.core import get_user_level
 
 quests_bp = Blueprint("quests", __name__)
 
-# Number of daily quests to assign per user
-DAILY_QUESTS_COUNT = 2
-
-# Quest system enabled flag
+# Quest system configuration (from environment)
 QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
+DAILY_QUESTS_COUNT = int(os.environ.get("DAILY_QUESTS_COUNT", "2"))
+FLASH_QUESTS_COUNT = int(os.environ.get("FLASH_QUESTS_COUNT", "1"))
+FLASH_QUEST_MIN_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MIN_INTERVAL_HOURS", "5"))
+FLASH_QUEST_MAX_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MAX_INTERVAL_HOURS", "7"))
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -98,6 +99,89 @@ def _is_user_suspended(owner: str, ts: int) -> bool:
             if not row:
                 return False
             return row[0] > ts
+
+
+def _get_next_flash_time(owner: str) -> int:
+    """Get the timestamp when user can receive their next flash quest."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT next_flash_at FROM user_quest_state WHERE LOWER(owner) = LOWER(%s)", (owner,))
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+
+def _set_next_flash_time(owner: str, next_ts: int) -> None:
+    """Set when the user can receive their next flash quest."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_quest_state (owner, next_flash_at)
+                VALUES (%s, %s)
+                ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
+                """,
+                (owner, next_ts)
+            )
+
+
+def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Assign a flash quest if eligible. Returns the quest data or None."""
+    if not flash_defs:
+        return None
+
+    # Check if user already has an active flash quest
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM user_flash_quests
+                WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
+                LIMIT 1
+                """,
+                (owner, ts)
+            )
+            if cur.fetchone():
+                return None  # Already has an active quest
+
+    # Check if enough time has passed since last flash quest
+    next_flash_at = _get_next_flash_time(owner)
+    if ts < next_flash_at:
+        return None
+
+    # Select a random flash quest template
+    template_id = random.choice(list(flash_defs.keys()))
+    template = flash_defs[template_id]
+
+    # Calculate duration based on time_window_minutes (default 60 min)
+    duration_seconds = (template.get("time_window_minutes") or 60) * 60
+    ends_at = ts + duration_seconds
+
+    # Insert the flash quest
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
+                VALUES (%s, %s, %s, %s, 0, '{}')
+                """,
+                (owner, template_id, ts, ends_at)
+            )
+
+    # Schedule next flash quest (random interval between MIN and MAX hours)
+    next_interval_seconds = random.randint(
+        FLASH_QUEST_MIN_INTERVAL_HOURS * 3600,
+        FLASH_QUEST_MAX_INTERVAL_HOURS * 3600
+    )
+    _set_next_flash_time(owner, ts + next_interval_seconds)
+
+    return {
+        "template_id": template_id,
+        "starts_at": ts,
+        "ends_at": ends_at,
+        "progress": 0,
+        "progress_meta": {},
+        "completed_at": None,
+    }
 
 
 def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
@@ -341,6 +425,26 @@ def get_flash_quests():
                     (owner, ts),
                 )
                 row = cur.fetchone()
+
+        # If no active flash quest, try to assign one
+        if not row:
+            assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
+            if assigned:
+                # Re-query the newly assigned quest
+                with connect_db() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
+                            FROM user_flash_quests
+                            WHERE LOWER(owner) = LOWER(%s)
+                              AND ends_at > %s
+                            ORDER BY starts_at DESC
+                            LIMIT 1
+                            """,
+                            (owner, ts),
+                        )
+                        row = cur.fetchone()
 
         if not row:
             return jsonify(
