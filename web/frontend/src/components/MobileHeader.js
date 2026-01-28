@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import Storage from '../utils/Storage';
+import { formatMirageBalance } from '../utils/formatters';
 
 const MobileHeaderContainer = styled.div`
     display: none;
@@ -65,6 +67,13 @@ const MobileBrandText = styled.div`
                 6px 2px 15px rgba(255, 255, 255, 0.25);
         }
     }
+`;
+
+const MobileRightSection = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
 `;
 
 const MobileSearchWrapper = styled.div`
@@ -179,11 +188,75 @@ const MobileBrandDivider = styled.div`
     margin-top: 0.5rem;
 `;
 
+const MobileBalanceDisplay = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.55rem;
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-radius: 14px;
+    flex-shrink: 0;
+    transform: ${({ $hidden }) => $hidden ? 'scale(0.8)' : 'scale(1)'};
+    opacity: ${({ $hidden }) => $hidden ? 0 : 1};
+    transition: transform 0.2s ease, opacity 0.15s ease;
+`;
+
+const MobileBalanceAmount = styled.span`
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+`;
+
+const MobileBalanceLabel = styled.span`
+    font-size: 0.6rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+`;
+
 const MobileHeader = () => {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState('');
     const [searchExpanded, setSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
+
+    const publicKey = Storage.load('publicKey', '');
+    const hasPublicKey = !!publicKey;
+
+    const [userBalance, setUserBalance] = useState(() => {
+        const stored = Storage.load('user_balance', '0');
+        return Number(stored) || 0;
+    });
+
+    // Track user balance changes
+    useEffect(() => {
+        if (!hasPublicKey) {
+            setUserBalance(0);
+            return;
+        }
+
+        const checkBalance = () => {
+            const stored = Storage.load('user_balance', '0');
+            setUserBalance(Number(stored) || 0);
+        };
+
+        // Poll for changes (TransactionHandler updates this)
+        const interval = setInterval(checkBalance, 2000);
+
+        // Also listen for storage events (cross-tab sync)
+        const handleStorage = (e) => {
+            if (e.key === 'user_balance') {
+                setUserBalance(Number(e.newValue) || 0);
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('storage', handleStorage);
+        };
+    }, [hasPublicKey]);
 
     const handleSearchKeyDown = (e) => {
         if (e.key === 'Enter' && searchQuery.trim()) {
@@ -211,17 +284,25 @@ const MobileHeader = () => {
         <MobileHeaderContainer>
             <MobileHeaderRow>
                 <MobileBrandText $hidden={searchExpanded} onClick={() => { window.location.href = '/home'; }}>MIRAGE</MobileBrandText>
-                <MobileSearchWrapper>
-                    <MobileSearchButton
-                        onClick={handleSearchOpen}
-                        aria-label="Search"
-                        $hidden={searchExpanded}
-                    >
-                        <svg viewBox="0 0 24 24">
-                            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                        </svg>
-                    </MobileSearchButton>
-                </MobileSearchWrapper>
+                <MobileRightSection>
+                    {hasPublicKey && (
+                        <MobileBalanceDisplay $hidden={searchExpanded} title="Your MIRAGE balance">
+                            <MobileBalanceAmount>{formatMirageBalance(userBalance)}</MobileBalanceAmount>
+                            <MobileBalanceLabel>MIRAGE</MobileBalanceLabel>
+                        </MobileBalanceDisplay>
+                    )}
+                    <MobileSearchWrapper>
+                        <MobileSearchButton
+                            onClick={handleSearchOpen}
+                            aria-label="Search"
+                            $hidden={searchExpanded}
+                        >
+                            <svg viewBox="0 0 24 24">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                            </svg>
+                        </MobileSearchButton>
+                    </MobileSearchWrapper>
+                </MobileRightSection>
                 <MobileSearchInputWrapper $expanded={searchExpanded}>
                     <MobileSearchInput
                         ref={searchInputRef}
