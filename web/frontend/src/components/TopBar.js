@@ -4,11 +4,40 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
 import Button from "./Button";
+import { formatMirageCompact } from "../utils/formatters";
 
 const UserControls = styled.div`
     display: flex;
     align-items: center;
     gap: 0.75rem;
+`;
+
+const BalanceDisplay = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.85rem;
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-radius: 18px;
+    flex-shrink: 0;
+
+    @media (max-width: 800px) {
+        padding: 0.45rem 0.7rem;
+    }
+`;
+
+const BalanceAmount = styled.span`
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+`;
+
+const BalanceLabel = styled.span`
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
 const TabletLogo = styled(Link)`
@@ -304,6 +333,10 @@ function TopBar({ state }) {
         }
     });
     const [searchQuery, setSearchQuery] = useState('');
+    const [userBalance, setUserBalance] = useState(() => {
+        const stored = Storage.load('user_balance', '0');
+        return Number(stored) || 0;
+    });
     const menuRef = useRef(null);
     const mountedRef = useRef(true);
 
@@ -417,6 +450,35 @@ function TopBar({ state }) {
         setMenuOpen(false);
     }, [pathname]);
 
+    // Track user balance changes
+    useEffect(() => {
+        if (!hasPublicKey) {
+            setUserBalance(0);
+            return;
+        }
+
+        const checkBalance = () => {
+            const stored = Storage.load('user_balance', '0');
+            setUserBalance(Number(stored) || 0);
+        };
+
+        // Poll for changes (TransactionHandler updates this)
+        const interval = setInterval(checkBalance, 2000);
+
+        // Also listen for storage events (cross-tab sync)
+        const handleStorage = (e) => {
+            if (e.key === 'user_balance') {
+                setUserBalance(Number(e.newValue) || 0);
+            }
+        };
+        window.addEventListener('storage', handleStorage);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('storage', handleStorage);
+        };
+    }, [hasPublicKey]);
+
     const getInitials = (name) => {
         if (!name) return '?';
         let str = String(name).trim();
@@ -468,6 +530,12 @@ function TopBar({ state }) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                 />
+                {hasPublicKey && userBalance > 0 && (
+                    <BalanceDisplay title="Your MIRAGE balance">
+                        <BalanceAmount>{formatMirageCompact(userBalance)}</BalanceAmount>
+                        <BalanceLabel>MIRAGE</BalanceLabel>
+                    </BalanceDisplay>
+                )}
                 {showAuthButton && (
                     <Button to="/create_account" variant="secondary" size="pill">Sign in / Create account</Button>
                 )}
