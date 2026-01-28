@@ -9,6 +9,7 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 import { useTabs } from "../utils/useTabs";
+import Storage from "../utils/Storage";
 
 // Tier names and colors (same as SubscriptionView)
 const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];
@@ -258,7 +259,7 @@ const TierCount = styled.span`
     font-size: 0.8rem;
 `;
 
-const VALID_TABS = ['overview', 'signups', 'subscribers', 'accounts'];
+const VALID_TABS = ['overview', 'signups', 'subscribers', 'accounts', 'rewards'];
 
 export default function StatsView() {
     const location = useLocation();
@@ -267,30 +268,66 @@ export default function StatsView() {
     const [signupsData, setSignupsData] = useState(null);
     const [subscribersData, setSubscribersData] = useState(null);
     const [accountsData, setAccountsData] = useState(null);
+    const [rewardsData, setRewardsData] = useState(null);
+    const [expandedUsers, setExpandedUsers] = useState({});
+    const [payouts, setPayouts] = useState([]);
+    const [payoutsHasMore, setPayoutsHasMore] = useState(false);
+    const [payoutsLoading, setPayoutsLoading] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+
+    // Fetch reward history with pagination
+    const fetchRewardHistory = useCallback(async (offset = 0, append = false) => {
+        setPayoutsLoading(true);
+        try {
+            const data = await Api.get('rewards/history', { 
+                offset, 
+                limit: 50 
+            }, { timeoutMs: 30000 });
+            
+            if (append) {
+                setPayouts(prev => [...prev, ...(data.rewards || [])]);
+            } else {
+                setPayouts(data.rewards || []);
+            }
+            setPayoutsHasMore(data.has_more || false);
+        } catch (err) {
+            console.error('Failed to load reward history:', err);
+        } finally {
+            setPayoutsLoading(false);
+        }
+    }, []);
 
     // Fetch data based on active tab
     const fetchData = useCallback(async (tab) => {
         setLoading(true);
         setError(null);
         try {
-            const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
-            if (tab === 'overview') {
-                setStats(data);
-            } else if (tab === 'signups') {
-                setSignupsData(data);
-            } else if (tab === 'subscribers') {
-                setSubscribersData(data);
-            } else if (tab === 'accounts') {
-                setAccountsData(data);
+            if (tab === 'rewards') {
+                // Rewards tab - public endpoint
+                const data = await Api.get('rewards/stats', {}, { timeoutMs: 30000 });
+                setRewardsData(data);
+                // Also fetch initial reward history
+                setPayouts([]);
+                fetchRewardHistory(0, false);
+            } else {
+                const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
+                if (tab === 'overview') {
+                    setStats(data);
+                } else if (tab === 'signups') {
+                    setSignupsData(data);
+                } else if (tab === 'subscribers') {
+                    setSubscribersData(data);
+                } else if (tab === 'accounts') {
+                    setAccountsData(data);
+                }
             }
         } catch (err) {
             setError(err.message || 'Failed to load stats');
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [fetchRewardHistory]);
 
     useEffect(() => {
         fetchData(activeTab);
@@ -417,6 +454,9 @@ export default function StatsView() {
                                 <ClickableTab $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
                                     Accounts
                                 </ClickableTab>
+                                <ClickableTab $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
+                                    Rewards
+                                </ClickableTab>
                             </TabsRow>
                             <ContainerBody>
                                 {loading && !error && (
@@ -505,6 +545,9 @@ export default function StatsView() {
                             </ClickableTab>
                             <ClickableTab $active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')}>
                                 Accounts
+                            </ClickableTab>
+                            <ClickableTab $active={activeTab === 'rewards'} onClick={() => setActiveTab('rewards')}>
+                                Rewards
                             </ClickableTab>
                         </TabsRow>
                         <ContainerBody>
@@ -1081,6 +1124,222 @@ export default function StatsView() {
                                             </tbody>
                                         </Table>
                                     </ValueBox>
+                                </>
+                            )}
+
+                            {/* Rewards Tab */}
+                            {activeTab === 'rewards' && rewardsData && (
+                                <>
+                                    <SectionTitle>
+                                        Reward Pool Status
+                                        <SectionInfoIcon data-tooltip="Current status of the rewards pool and payout system.">
+                                            ?
+                                        </SectionInfoIcon>
+                                    </SectionTitle>
+                                    <SummaryBox>
+                                        <SummaryItem>
+                                            <SummaryValue $color={rewardsData.summary?.payouts_enabled ? '#22c55e' : '#ef4444'}>
+                                                {rewardsData.summary?.payouts_enabled ? 'Active' : 'Disabled'}
+                                            </SummaryValue>
+                                            <SummaryLabel>Payouts</SummaryLabel>
+                                        </SummaryItem>
+                                        <SummaryItem>
+                                            <SummaryValue>{formatMirage(rewardsData.summary?.pool_balance || 0)}</SummaryValue>
+                                            <SummaryLabel>Pool (MIRAGE)</SummaryLabel>
+                                        </SummaryItem>
+                                        <SummaryItem>
+                                            <SummaryValue>{formatMirage(rewardsData.summary?.daily_rate || 0)}</SummaryValue>
+                                            <SummaryLabel>Daily (7d avg)</SummaryLabel>
+                                        </SummaryItem>
+                                    </SummaryBox>
+
+                                    <SectionTitle>
+                                        Overall Statistics
+                                        <SectionInfoIcon data-tooltip="Cumulative reward statistics across all users.">
+                                            ?
+                                        </SectionInfoIcon>
+                                    </SectionTitle>
+                                    <SummaryBox>
+                                        <SummaryItem>
+                                            <SummaryValue>{formatMirage(rewardsData.summary?.total_amount || 0)}</SummaryValue>
+                                            <SummaryLabel>MIRAGE Earned</SummaryLabel>
+                                        </SummaryItem>
+                                        <SummaryItem>
+                                            <SummaryValue $color="#22c55e">{formatMirage(rewardsData.summary?.claimed_amount || 0)}</SummaryValue>
+                                            <SummaryLabel>MIRAGE Claimed</SummaryLabel>
+                                        </SummaryItem>
+                                        <SummaryItem>
+                                            <SummaryValue $color="#f59e0b">{formatMirage(rewardsData.summary?.pending_amount || 0)}</SummaryValue>
+                                            <SummaryLabel>MIRAGE Pending</SummaryLabel>
+                                        </SummaryItem>
+                                        <SummaryItem>
+                                            <SummaryValue>{rewardsData.summary?.total_rewards || 0}</SummaryValue>
+                                            <SummaryLabel>Reward Count</SummaryLabel>
+                                        </SummaryItem>
+                                    </SummaryBox>
+
+                                    <SectionTitle>
+                                        Per-User Breakdown
+                                        <SectionInfoIcon data-tooltip="Click on a user row to expand and see detailed stats.">
+                                            ?
+                                        </SectionInfoIcon>
+                                    </SectionTitle>
+                                    <SectionNote>Showing {rewardsData.users?.length || 0} users who have earned rewards. Click to expand.</SectionNote>
+                                    <ValueBox style={{ padding: 0, overflow: 'auto' }}>
+                                        <Table>
+                                            <thead>
+                                                <tr>
+                                                    <Th style={{ width: '30px' }}></Th>
+                                                    <Th>User</Th>
+                                                    <Th style={{ textAlign: 'right' }}>Earned</Th>
+                                                    <Th style={{ textAlign: 'right' }}>Per Day</Th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {rewardsData.users && rewardsData.users.length > 0 ? (
+                                                    rewardsData.users.map((user, idx) => (
+                                                        <React.Fragment key={idx}>
+                                                            <tr 
+                                                                onClick={() => setExpandedUsers(prev => ({ ...prev, [user.address]: !prev[user.address] }))}
+                                                                style={{ cursor: 'pointer', background: expandedUsers[user.address] ? 'rgba(102, 126, 234, 0.1)' : 'transparent' }}
+                                                            >
+                                                                <Td style={{ width: '30px', textAlign: 'center', color: '#888' }}>
+                                                                    {expandedUsers[user.address] ? '▼' : '▶'}
+                                                                </Td>
+                                                                <Td>
+                                                                    <UserCell>
+                                                                        <AvatarPlaceholder>?</AvatarPlaceholder>
+                                                                        <div>
+                                                                            <UserLink to={`/profile?address=${user.address}`} onClick={e => e.stopPropagation()}>
+                                                                                {user.username || truncateAddress(user.address)}
+                                                                            </UserLink>
+                                                                            {user.username && (
+                                                                                <div>
+                                                                                    <AddressText>{truncateAddress(user.address)}</AddressText>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    </UserCell>
+                                                                </Td>
+                                                                <Td style={{ textAlign: 'right' }}>
+                                                                    <Mono style={{ fontWeight: 'bold' }}>{formatMirage(user.total_earned)}</Mono>
+                                                                </Td>
+                                                                <Td style={{ textAlign: 'right' }}>
+                                                                    <Mono style={{ color: '#888' }}>{formatMirage(user.earnings_per_day)}</Mono>
+                                                                </Td>
+                                                            </tr>
+                                                            {expandedUsers[user.address] && (
+                                                                <tr>
+                                                                    <Td colSpan={4} style={{ background: 'rgba(102, 126, 234, 0.05)', padding: '1rem' }}>
+                                                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem' }}>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>Claimed</div>
+                                                                                <Mono style={{ color: '#22c55e', fontWeight: 'bold' }}>{formatMirage(user.claimed_amount)} MIRAGE</Mono>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>Pending</div>
+                                                                                <Mono style={{ color: '#f59e0b', fontWeight: 'bold' }}>{formatMirage(user.pending_amount)} MIRAGE</Mono>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>Reward Count</div>
+                                                                                <Mono>{user.reward_count} ({user.claimed_count} claimed, {user.pending_count} pending)</Mono>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>First Reward</div>
+                                                                                <Mono>{user.first_reward_at ? formatDateShort(user.first_reward_at) : 'N/A'}</Mono>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>Last Reward</div>
+                                                                                <Mono>{user.last_reward_at ? formatDateShort(user.last_reward_at) : 'N/A'}</Mono>
+                                                                            </div>
+                                                                            <div>
+                                                                                <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>Account Created</div>
+                                                                                <Mono>{user.account_created_at ? formatDateShort(user.account_created_at) : 'N/A'}</Mono>
+                                                                            </div>
+                                                                        </div>
+                                                                    </Td>
+                                                                </tr>
+                                                            )}
+                                                        </React.Fragment>
+                                                    ))
+                                                ) : (
+                                                    <tr>
+                                                        <Td colSpan={4} style={{ textAlign: 'center', color: '#888' }}>
+                                                            No reward data found.
+                                                        </Td>
+                                                    </tr>
+                                                )}
+                                            </tbody>
+                                        </Table>
+                                    </ValueBox>
+
+                                    <SectionTitle style={{ marginTop: '1.5rem' }}>
+                                        Reward History
+                                        <SectionInfoIcon data-tooltip="All rewards earned, newest first. Green = claimed, orange = pending.">
+                                            ?
+                                        </SectionInfoIcon>
+                                    </SectionTitle>
+                                    
+                                    {payouts.length > 0 ? (
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                            {payouts.map((reward, idx) => (
+                                                <div 
+                                                    key={idx}
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.75rem',
+                                                        padding: '0.5rem 0.75rem',
+                                                        background: reward.claimed ? 'rgba(34, 197, 94, 0.05)' : 'rgba(245, 158, 11, 0.05)',
+                                                        borderRadius: '6px',
+                                                        borderLeft: `3px solid ${reward.claimed ? '#22c55e' : '#f59e0b'}`,
+                                                    }}
+                                                >
+                                                    <div style={{ flex: '0 0 auto', minWidth: '80px' }}>
+                                                        <Mono style={{ color: reward.claimed ? '#22c55e' : '#f59e0b', fontWeight: 'bold', fontSize: '0.85rem' }}>
+                                                            +{formatMirage(reward.amount)}
+                                                        </Mono>
+                                                    </div>
+                                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                                        <UserLink to={`/profile?address=${reward.address}`} style={{ fontWeight: 500 }}>
+                                                            {reward.username || truncateAddress(reward.address)}
+                                                        </UserLink>
+                                                        <div style={{ fontSize: '0.7rem', color: '#888', marginTop: '0.15rem' }}>
+                                                            {reward.reason}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ flex: '0 0 auto', fontSize: '0.7rem', color: '#666', textAlign: 'right' }}>
+                                                        {formatDateShort(reward.created_at)}
+                                                        {reward.claimed && <div style={{ color: '#22c55e', fontSize: '0.6rem' }}>claimed</div>}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            
+                                            {payoutsHasMore && (
+                                                <button
+                                                    onClick={() => fetchRewardHistory(payouts.length, true)}
+                                                    disabled={payoutsLoading}
+                                                    style={{
+                                                        padding: '0.75rem',
+                                                        background: 'transparent',
+                                                        border: '1px dashed #444',
+                                                        borderRadius: '6px',
+                                                        color: '#888',
+                                                        cursor: payoutsLoading ? 'wait' : 'pointer',
+                                                        fontSize: '0.8rem',
+                                                    }}
+                                                >
+                                                    {payoutsLoading ? 'Loading...' : 'Load more'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    ) : payoutsLoading ? (
+                                        <ValueBox style={{ textAlign: 'center', padding: '2rem' }}>
+                                            <LoadingSpinner style={{ margin: '0 auto' }} />
+                                        </ValueBox>
+                                    ) : (
+                                        <SectionNote>No rewards recorded yet.</SectionNote>
+                                    )}
                                 </>
                             )}
                         </ContainerBody>
