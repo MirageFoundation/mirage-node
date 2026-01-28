@@ -1277,9 +1277,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     });
     const [cardSize, setCardSize] = useState(() => {
         try {
-            return Storage.load('card_size', 'large');
+            return Storage.load('card_size', 'compact');
         } catch (_) {
-            return 'large';
+            return 'compact';
         }
     });
     const handleCardSizeChange = (newSize) => {

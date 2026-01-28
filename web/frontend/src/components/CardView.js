@@ -944,9 +944,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     });
     const [cardSize, setCardSize] = useState(() => {
         try {
-            return Storage.load('card_size', 'large');
+            return Storage.load('card_size', 'compact');
         } catch (_) {
-            return 'large';
+            return 'compact';
         }
     });
     const menuRef = useRef(null);
@@ -984,7 +984,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 }
                 const val = Storage.load('blur_sensitive_media', true);
                 setBlurSensitiveMedia(val === false ? false : true);
-                const size = Storage.load('card_size', 'large');
+                const size = Storage.load('card_size', 'compact');
                 setCardSize(size);
             } catch (_) { }
         };
