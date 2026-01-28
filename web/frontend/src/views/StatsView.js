@@ -355,8 +355,8 @@ export default function StatsView() {
 
     const formatMirage = (umirage) => {
         if (!umirage && umirage !== 0) return '0';
-        const mirage = umirage / 1_000_000;
-        return mirage.toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 0 });
+        const mirage = Math.round(umirage / 1_000_000);
+        return mirage.toLocaleString();
     };
 
     const getDAUTrend = () => {
@@ -1149,7 +1149,7 @@ export default function StatsView() {
                                         </SummaryItem>
                                         <SummaryItem>
                                             <SummaryValue>{formatMirage(rewardsData.summary?.daily_rate || 0)}</SummaryValue>
-                                            <SummaryLabel>Daily (7d avg)</SummaryLabel>
+                                            <SummaryLabel>Earned/Day (7d avg)</SummaryLabel>
                                         </SummaryItem>
                                     </SummaryBox>
 
