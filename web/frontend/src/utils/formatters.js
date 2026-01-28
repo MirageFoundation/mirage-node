@@ -77,15 +77,16 @@ export function formatMirageBalance(umirage) {
 
     // >= 1M: show with "M" and 3 significant digits
     if (mirage >= 1_000_000) {
-        if (mirage >= 100) {
+        const millions = mirage / 1_000_000;
+        if (millions >= 100) {
             // 100M+: no decimals (e.g., "100M", "123M")
-            return `${Math.round(mirage)}M`;
-        } else if (mirage >= 10) {
+            return `${Math.round(millions)}M`;
+        } else if (millions >= 10) {
             // 10M-99.9M: 1 decimal (e.g., "10.0M", "99.9M")
-            return `${mirage.toFixed(1)}M`;
+            return `${millions.toFixed(1)}M`;
         } else {
             // 1M-9.99M: 2 decimals (e.g., "1.00M", "9.99M")
-            return `${mirage.toFixed(2)}M`;
+            return `${millions.toFixed(2)}M`;
         }
     }
 
