@@ -39,7 +39,7 @@ export function useQuests() {
             setError(null);
 
             // Fetch daily quests
-            const dailyResponse = await Api.get('/quests/daily', { owner: userAddress });
+            const dailyResponse = await Api.get('/rewards/daily', { owner: userAddress });
             
             // Check if quests system is disabled
             if (dailyResponse.disabled) {
@@ -83,7 +83,7 @@ export function useQuests() {
             }
 
             // Fetch flash quest
-            const flashResponse = await Api.get('/quests/flash', { owner: userAddress });
+            const flashResponse = await Api.get('/rewards/flash', { owner: userAddress });
             console.log('[useQuests] Flash quest response:', flashResponse);
             if (!flashResponse.suspended && flashResponse.flash_quest) {
                 const newFlash = flashResponse.flash_quest;
@@ -333,7 +333,7 @@ export function useAchievements() {
             setLoading(true);
             setError(null);
 
-            const response = await Api.get('/achievements', { owner: userAddress });
+            const response = await Api.get('/rewards/achievements', { owner: userAddress });
             setAchievements(response.achievements || []);
         } catch (err) {
             console.error('Failed to fetch achievements:', err);

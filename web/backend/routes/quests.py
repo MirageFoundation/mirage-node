@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-"""Quest and Achievement API endpoints.
+"""Quest and Rewards API endpoints.
 
 User endpoints:
-- GET /api/quests/daily: Get user's daily quest status
-- GET /api/quests/flash: Get active flash quests and user progress
-- GET /api/achievements: Get all achievements with unlock status
+- GET /api/rewards/daily: Get user's daily quest status
+- GET /api/rewards/flash: Get active flash quests and user progress
+- GET /api/rewards/achievements: Get all achievements with unlock status
 - GET /api/rewards/pending: Get user's pending/claimable rewards
 - POST /api/rewards/claim: Claim pending rewards
+- GET /api/rewards/stats: Get reward statistics (public)
+- GET /api/rewards/history: Get reward history (public)
 
 Admin endpoints (require level >= 100):
 - POST /api/admin/rewards/suspend: Suspend rewards for a user
@@ -169,7 +171,7 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
             return selected_ids
 
 
-@quests_bp.route("/api/quests/daily", methods=["GET"])
+@quests_bp.route("/api/rewards/daily", methods=["GET"])
 def get_daily_quests():
     """Get user's daily quest status.
     
@@ -277,7 +279,7 @@ def get_daily_quests():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/quests/flash", methods=["GET"])
+@quests_bp.route("/api/rewards/flash", methods=["GET"])
 def get_flash_quests():
     """Get active flash quests and user progress.
     
@@ -378,7 +380,7 @@ def get_flash_quests():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/achievements", methods=["GET"])
+@quests_bp.route("/api/rewards/achievements", methods=["GET"])
 def get_achievements():
     """Get all achievements with unlock status.
     
@@ -979,4 +981,188 @@ def admin_list_suspensions():
         return jsonify({"suspensions": suspensions})
     except Exception as e:
         log_event(rid, "admin.suspensions.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/rewards/stats", methods=["GET"])
+def reward_stats():
+    """Get comprehensive reward statistics (public).
+    
+    Returns:
+    - summary: Overall stats (total earned, claimed, pending, pool balance)
+    - users: Per-user breakdown with earnings data
+    """
+    rid = next_request_id()
+    log_event(rid, "rewards.stats.begin")
+    
+    try:
+        ts = int(time.time())
+        
+        # Get pool balance
+        distributor = get_distributor()
+        pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
+        
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Get overall stats
+                cur.execute("""
+                    SELECT 
+                        COUNT(*) as total_rewards,
+                        COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                        COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
+                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as total_amount,
+                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
+                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                        MIN(created_at) as first_reward_at,
+                        MAX(created_at) as last_reward_at
+                    FROM pending_rewards
+                """)
+                summary_row = cur.fetchone()
+                
+                summary = {
+                    "total_rewards": summary_row[0] or 0,
+                    "claimed_count": summary_row[1] or 0,
+                    "pending_count": summary_row[2] or 0,
+                    "total_amount": summary_row[3] or 0,
+                    "claimed_amount": summary_row[4] or 0,
+                    "pending_amount": summary_row[5] or 0,
+                    "first_reward_at": summary_row[6],
+                    "last_reward_at": summary_row[7],
+                    "pool_balance": pool_balance,
+                    "payouts_enabled": distributor.is_configured(),
+                }
+                
+                # Calculate daily rate (last 7 days)
+                week_ago = ts - (7 * 86400)
+                cur.execute("""
+                    SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0)
+                    FROM pending_rewards
+                    WHERE created_at >= %s
+                """, (week_ago,))
+                week_total = cur.fetchone()[0] or 0
+                summary["daily_rate"] = week_total // 7
+                
+                # Get per-user stats
+                cur.execute("""
+                    SELECT 
+                        pr.owner,
+                        p.username,
+                        COUNT(*) as reward_count,
+                        COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                        COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
+                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as total_earned,
+                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
+                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                        MIN(pr.created_at) as first_reward_at,
+                        MAX(pr.created_at) as last_reward_at,
+                        p.created_at as account_created_at
+                    FROM pending_rewards pr
+                    LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                    GROUP BY pr.owner, p.username, p.created_at
+                    ORDER BY total_earned DESC
+                """)
+                user_rows = cur.fetchall()
+                
+                users = []
+                for row in user_rows:
+                    owner = row[0]
+                    first_reward_at = row[8]
+                    last_reward_at = row[9]
+                    total_earned = row[5] or 0
+                    
+                    # Calculate earnings per day
+                    if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
+                        days_active = max(1, (last_reward_at - first_reward_at) // 86400)
+                        earnings_per_day = total_earned // days_active
+                    else:
+                        earnings_per_day = total_earned  # Single day
+                    
+                    users.append({
+                        "address": owner,
+                        "username": row[1],
+                        "reward_count": row[2] or 0,
+                        "claimed_count": row[3] or 0,
+                        "pending_count": row[4] or 0,
+                        "total_earned": total_earned,
+                        "claimed_amount": row[6] or 0,
+                        "pending_amount": row[7] or 0,
+                        "first_reward_at": first_reward_at,
+                        "last_reward_at": last_reward_at,
+                        "account_created_at": row[10],
+                        "earnings_per_day": earnings_per_day,
+                    })
+                
+        log_event(rid, "rewards.stats.ok", user_count=len(users))
+        return jsonify({
+            "summary": summary,
+            "users": users,
+        })
+    except Exception as e:
+        log_event(rid, "rewards.stats.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/rewards/history", methods=["GET"])
+def reward_history():
+    """Get paginated list of all rewards (public).
+    
+    Query params:
+    - offset: Pagination offset (default 0)
+    - limit: Number of items to return (default 50, max 100)
+    
+    Returns:
+    - rewards: List of reward records
+    - has_more: Whether there are more records
+    """
+    rid = next_request_id()
+    log_event(rid, "rewards.history.begin")
+    
+    try:
+        offset = int(request.args.get("offset", 0))
+        limit = min(int(request.args.get("limit", 50)), 100)
+        
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Get all rewards with pagination (newest first)
+                cur.execute("""
+                    SELECT 
+                        pr.owner,
+                        p.username,
+                        pr.reward_type,
+                        pr.reward_data,
+                        pr.reason,
+                        pr.created_at,
+                        pr.claimed_at
+                    FROM pending_rewards pr
+                    LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                    ORDER BY pr.created_at DESC
+                    LIMIT %s OFFSET %s
+                """, (limit + 1, offset))  # Fetch one extra to check if there's more
+                reward_rows = cur.fetchall()
+                
+                has_more = len(reward_rows) > limit
+                if has_more:
+                    reward_rows = reward_rows[:limit]
+                
+                rewards = []
+                for row in reward_rows:
+                    reward_data = row[3] if isinstance(row[3], dict) else {}
+                    rewards.append({
+                        "address": row[0],
+                        "username": row[1],
+                        "type": row[2],
+                        "amount": reward_data.get("amount", 0),
+                        "reason": row[4],
+                        "created_at": row[5],
+                        "claimed_at": row[6],
+                        "claimed": row[6] is not None,
+                    })
+        
+        log_event(rid, "rewards.history.ok", count=len(rewards), offset=offset)
+        return jsonify({
+            "rewards": rewards,
+            "has_more": has_more,
+        })
+    except Exception as e:
+        log_event(rid, "rewards.history.err", error=str(e))
         return jsonify({"error": str(e)}), 500
