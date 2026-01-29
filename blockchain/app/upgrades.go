@@ -20,6 +20,20 @@ const (
 	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
 )
 
+const (
+	sdkBloatUpgradeName = "v1.10.1-sdk-bloat"
+)
+
+var sdkBloatDeletedStores = []string{
+	"authz",
+	"feegrant",
+	"group",
+	"epochs",
+	"mint",
+	"circuit",
+	"evidence",
+}
+
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
 	// Add more upgrade handlers as needed
@@ -975,6 +989,23 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.1-sdk-bloat: Remove unused SDK modules and delete their stores.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		sdkBloatUpgradeName,
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.1-sdk-bloat...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.1-sdk-bloat complete - unused SDK modules removed")
 			return toVM, nil
 		},
 	)
