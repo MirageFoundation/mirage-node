@@ -1,6 +1,27 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
+import Storage from '../utils/Storage';
+import { formatMirageBalance } from '../utils/formatters';
+
+const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
+
+const resolveOptimisticDelta = (currentBalance) => {
+    const payload = Storage.load(OPTIMISTIC_CLAIM_KEY, null);
+    if (!payload || typeof payload !== 'object') return 0;
+    const delta = Number(payload.delta_umirage);
+    const base = Number(payload.base_umirage);
+    const expiresAt = Number(payload.expires_at_ms);
+    if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    if (Number.isFinite(currentBalance) && Number.isFinite(base) && currentBalance !== base) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    return delta;
+};
 
 const MobileHeaderContainer = styled.div`
     display: none;
@@ -65,6 +86,13 @@ const MobileBrandText = styled.div`
                 6px 2px 15px rgba(255, 255, 255, 0.25);
         }
     }
+`;
+
+const MobileRightSection = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
 `;
 
 const MobileSearchWrapper = styled.div`
@@ -179,11 +207,104 @@ const MobileBrandDivider = styled.div`
     margin-top: 0.5rem;
 `;
 
+const MobileBalanceDisplay = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.55rem;
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-radius: 14px;
+    flex-shrink: 0;
+    transform: ${({ $hidden }) => $hidden ? 'scale(0.8)' : 'scale(1)'};
+    opacity: ${({ $hidden }) => $hidden ? 0 : 1};
+    transition: transform 0.2s ease, opacity 0.15s ease;
+`;
+
+const MobileBalanceAmount = styled.span`
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+`;
+
+const MobileBalanceLabel = styled.span`
+    font-size: 0.6rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+`;
+
 const MobileHeader = () => {
     const navigate = useNavigate();
     const [searchQuery, setSearchQuery] = useState('');
     const [searchExpanded, setSearchExpanded] = useState(false);
     const searchInputRef = useRef(null);
+
+    const publicKey = Storage.load('publicKey', '');
+    const hasPublicKey = !!publicKey;
+
+    const [userBalance, setUserBalance] = useState(() => {
+        const stored = Storage.load('user_balance', null);
+        if (stored === null) return null; // Not loaded yet
+        return Number(stored) || 0;
+    });
+    const [optimisticDeltaUmirage, setOptimisticDeltaUmirage] = useState(0);
+
+    // Track user balance changes
+    useEffect(() => {
+        if (!hasPublicKey) {
+            setUserBalance(null);
+            setOptimisticDeltaUmirage(0);
+            Storage.remove(OPTIMISTIC_CLAIM_KEY);
+            return;
+        }
+
+        const applyBalanceUpdate = (storedValue) => {
+            if (storedValue === null || storedValue === undefined) {
+                setUserBalance(null);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const balance = Number(storedValue);
+            if (!Number.isFinite(balance)) {
+                setUserBalance(0);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const optimisticDelta = resolveOptimisticDelta(balance);
+            setUserBalance(balance);
+            setOptimisticDeltaUmirage(optimisticDelta);
+        };
+
+        const checkBalance = () => {
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return; // Not loaded yet, keep showing "~"
+            applyBalanceUpdate(stored);
+        };
+
+        // Poll for changes (TransactionHandler updates this)
+        const interval = setInterval(checkBalance, 2000);
+
+        // Also listen for storage events (cross-tab sync)
+        const handleStorage = (e) => {
+            if (e.key === 'user_balance') {
+                applyBalanceUpdate(e.newValue);
+            }
+        };
+        const handleOptimisticUpdate = () => {
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return;
+            applyBalanceUpdate(stored);
+        };
+        window.addEventListener('storage', handleStorage);
+        window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('storage', handleStorage);
+            window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
+        };
+    }, [hasPublicKey]);
 
     const handleSearchKeyDown = (e) => {
         if (e.key === 'Enter' && searchQuery.trim()) {
@@ -207,21 +328,31 @@ const MobileHeader = () => {
         setSearchQuery('');
     };
 
+    const displayBalance = userBalance === null ? null : userBalance + optimisticDeltaUmirage;
+
     return (
         <MobileHeaderContainer>
             <MobileHeaderRow>
                 <MobileBrandText $hidden={searchExpanded} onClick={() => { window.location.href = '/home'; }}>MIRAGE</MobileBrandText>
-                <MobileSearchWrapper>
-                    <MobileSearchButton
-                        onClick={handleSearchOpen}
-                        aria-label="Search"
-                        $hidden={searchExpanded}
-                    >
-                        <svg viewBox="0 0 24 24">
-                            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                        </svg>
-                    </MobileSearchButton>
-                </MobileSearchWrapper>
+                <MobileRightSection>
+                    {hasPublicKey && (
+                        <MobileBalanceDisplay $hidden={searchExpanded} title="Your MIRAGE balance">
+                            <MobileBalanceAmount>{displayBalance === null ? '~' : formatMirageBalance(displayBalance)}</MobileBalanceAmount>
+                            <MobileBalanceLabel>MIRAGE</MobileBalanceLabel>
+                        </MobileBalanceDisplay>
+                    )}
+                    <MobileSearchWrapper>
+                        <MobileSearchButton
+                            onClick={handleSearchOpen}
+                            aria-label="Search"
+                            $hidden={searchExpanded}
+                        >
+                            <svg viewBox="0 0 24 24">
+                                <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
+                            </svg>
+                        </MobileSearchButton>
+                    </MobileSearchWrapper>
+                </MobileRightSection>
                 <MobileSearchInputWrapper $expanded={searchExpanded}>
                     <MobileSearchInput
                         ref={searchInputRef}

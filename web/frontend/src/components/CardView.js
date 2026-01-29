@@ -492,15 +492,15 @@ const BlockConfirmMessage = styled.div`
     background-color: rgba(251, 191, 36, 0.1);
     border: 1px solid #f59e0b;
     border-radius: 3px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0.5rem 0.5rem 0;
+    padding: 0.4rem 0.75rem;
+    margin: 0.6rem 0 0.25rem 0;
     color: #f59e0b;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 0.4rem;
 `;
 
 const ConfirmButtons = styled.div`
@@ -906,7 +906,22 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const navigate = useNavigate();
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(false);
+    const [isSuspending, setIsSuspending] = useState(false);
+    const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
+    const [suspendSuccess, setSuspendSuccess] = useState(null); // success message or null
+    const [confirmUnsuspend, setConfirmUnsuspend] = useState(false);
+    const [isUnsuspending, setIsUnsuspending] = useState(false);
+    const [userSuspendedStatus, setUserSuspendedStatus] = useState(null); // null = unknown, true/false = known
+    const [followOverride, setFollowOverride] = useState(null);
+    const [topicFollowOverride, setTopicFollowOverride] = useState(null);
+    const [confirmDonate, setConfirmDonate] = useState(false);
+    const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
+    const [isDonating, setIsDonating] = useState(false);
+    const [donateMessage, setDonateMessage] = useState(null); // { type, message }
     const [shareCopied, setShareCopied] = useState(false);
+    const [confirmBlockPost, setConfirmBlockPost] = useState(false);
+    const [confirmBlockUser, setConfirmBlockUser] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
@@ -929,9 +944,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     });
     const [cardSize, setCardSize] = useState(() => {
         try {
-            return Storage.load('card_size', 'large');
+            return Storage.load('card_size', 'compact');
         } catch (_) {
-            return 'large';
+            return 'compact';
         }
     });
     const menuRef = useRef(null);
@@ -942,7 +957,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, []);
 
     // Determine hide flag first, but do not return before hooks
-    const hideTeaser = (!post || post.deleted || typeof post.title !== 'string' || post.title.trim() === '' || typeof post.topic !== 'string' || post.topic.trim() === '');
+    const hideTeaser = (!post || post.deleted || post.blocked || typeof post.title !== 'string' || post.title.trim() === '' || typeof post.topic !== 'string' || post.topic.trim() === '');
 
     // Ownership and admin checks for menu visibility
     const publicKeyStr = String(state?.publicKey || '').trim();
@@ -969,7 +984,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 }
                 const val = Storage.load('blur_sensitive_media', true);
                 setBlurSensitiveMedia(val === false ? false : true);
-                const size = Storage.load('card_size', 'large');
+                const size = Storage.load('card_size', 'compact');
                 setCardSize(size);
             } catch (_) { }
         };
@@ -1001,7 +1016,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, [post && post.post_id]);
 
     const handleDeletePost = () => {
+        setMenuOpen(false);
         if (!post || !post.post_id) return;
+        setConfirmSuspendQuests(false);
+        setSuspendSuccess(null);
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
         setConfirmDelete(true);
     };
 
@@ -1030,6 +1053,122 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const cancelDeletePost = () => {
         setConfirmDelete(false);
         setIsDeleting(false);
+    };
+
+    const handleSuspendFromQuests = () => {
+        setMenuOpen(false);
+        if (!post || !post.user_id) return;
+        setConfirmDelete(false);
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
+        setConfirmSuspendQuests(true);
+    };
+
+    const confirmSuspendFromQuests = async () => {
+        console.log('confirmSuspendFromQuests called', { post: post?.user_id, suspendDuration });
+        if (!post || !post.user_id) {
+            console.log('No post or user_id');
+            return;
+        }
+        const adminAddress = Storage.load('publicKey', '');
+        if (!adminAddress) {
+            console.log('No admin address');
+            return;
+        }
+
+        setIsSuspending(true);
+        try {
+            console.log('Making API call to suspend', { adminAddress, target: post.user_id, duration_days: suspendDuration });
+            const response = await Api.post('/admin/rewards/suspend', {
+                admin: adminAddress,
+                target: post.user_id,
+                duration_days: suspendDuration,  // 0 = permanent
+                reason: 'Attempting to game the quest system',
+            });
+            console.log('Suspend response:', response);
+            if (response.success) {
+                const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
+                setConfirmSuspendQuests(false);
+                setUserSuspendedStatus(true); // Update status after successful suspend
+                setSuspendSuccess(`User suspended from quests ${durationText}`);
+                setTimeout(() => setSuspendSuccess(null), 4000);
+            } else {
+                alert(`Failed to suspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmSuspendQuests(false);
+            }
+        } catch (err) {
+            console.error('Suspend error:', err);
+            alert(`Error suspending user: ${err.message || 'Unknown error'}`);
+            setConfirmSuspendQuests(false);
+        }
+        setIsSuspending(false);
+        setSuspendDuration(7); // Reset to default
+    };
+
+    const cancelSuspendFromQuests = () => {
+        setConfirmSuspendQuests(false);
+        setIsSuspending(false);
+    };
+
+    const fetchUserSuspensionStatus = async (userId) => {
+        if (!userId) return;
+        try {
+            const response = await Api.get(`/rewards/pending?owner=${encodeURIComponent(userId)}`);
+            setUserSuspendedStatus(response.suspended === true);
+        } catch (err) {
+            console.error('Error fetching suspension status:', err);
+            setUserSuspendedStatus(null);
+        }
+    };
+
+    const handleUnsuspendFromQuests = () => {
+        setMenuOpen(false);
+        if (!post || !post.user_id) return;
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setDonateMessage(null);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(true);
+    };
+
+    const confirmUnsuspendFromQuests = async () => {
+        if (!post || !post.user_id) return;
+        const adminAddress = Storage.load('publicKey', '');
+        if (!adminAddress) {
+            alert('You must be logged in');
+            return;
+        }
+
+        setIsUnsuspending(true);
+        try {
+            const response = await Api.post('/admin/rewards/unsuspend', {
+                admin: adminAddress,
+                target: post.user_id,
+            });
+            if (response.success) {
+                setConfirmUnsuspend(false);
+                setUserSuspendedStatus(false); // Update status after successful unsuspend
+                setSuspendSuccess('User unsuspended from quests');
+                setTimeout(() => setSuspendSuccess(null), 4000);
+            } else {
+                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmUnsuspend(false);
+            }
+        } catch (err) {
+            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
+            setConfirmUnsuspend(false);
+        }
+        setIsUnsuspending(false);
+    };
+
+    const cancelUnsuspendFromQuests = () => {
+        setConfirmUnsuspend(false);
+        setIsUnsuspending(false);
     };
 
     // Close menu when clicking outside
@@ -1067,40 +1206,128 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleDonate = () => {
         setMenuOpen(false);
-        if (!post || !post.post_id) return;
-        const targetPostId = post.post_id;
-        markViewPostOpenedFromFeed();
-        navigate(`/view_post?post_id=${encodeURIComponent(targetPostId)}`);
+        if (!post || !post.user_id) return;
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setSuspendSuccess(null);
+        setDonateMessage(null);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
+        setDonateAmountRaw("10000");
+        setConfirmDonate(true);
+    };
+
+    const formatDonateAmount = (value) => {
+        const digits = String(value || "").replace(/[^\d]/g, "");
+        if (!digits) return "";
+        return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    };
+
+
+    const confirmDonateAction = async () => {
+        if (!post || !post.user_id) return;
+        setIsDonating(true);
+        const amount = parseInt(String(donateAmountRaw || "").replace(/[^\d]/g, ""), 10);
+        if (isNaN(amount) || amount < 10000) {
+            setDonateMessage({ type: 'error', message: 'Minimum donation is 10,000 MIRAGE' });
+            setTimeout(() => setDonateMessage(null), 5000);
+            setIsDonating(false);
+            return;
+        }
+        try {
+            const result = await tx.sendTokens(post.user_id, amount);
+            if (result.success) {
+                setDonateMessage({ type: 'success', message: `Successfully sent ${amount} MIRAGE!` });
+                setConfirmDonate(false);
+                setTimeout(() => setDonateMessage(null), 5000);
+            } else {
+                setDonateMessage({ type: 'error', message: `Failed: ${result.error || 'Unknown error'}` });
+                setTimeout(() => setDonateMessage(null), 5000);
+            }
+        } catch (error) {
+            setDonateMessage({ type: 'error', message: `Error: ${error.message || error}` });
+            setTimeout(() => setDonateMessage(null), 5000);
+        }
+        setIsDonating(false);
+    };
+
+    const cancelDonate = () => {
+        setConfirmDonate(false);
     };
 
     const handleBlockPost = () => {
         setMenuOpen(false);
         if (!post || !post.post_id) return;
-        const blockedPosts = Storage.load('blocked_posts', []);
-        if (!blockedPosts.includes(post.post_id)) {
-            blockedPosts.push(post.post_id);
-            Storage.save('blocked_posts', blockedPosts);
-            if (updatePost) {
-                updatePost(post.post_id, { blocked: true });
+        // Close any open confirmation dialogs
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
+        setConfirmBlockPost(true);
+    };
+
+    const confirmBlockPostAction = async () => {
+        if (!post || !post.post_id) return;
+        setConfirmBlockPost(false);
+        try {
+            const result = await tx.blockPost(post.post_id);
+            if (result.success) {
+                if (updatePost) {
+                    updatePost(post.post_id, { blocked: true });
+                }
+            } else {
+                alert(`Failed to block post: ${result.error || 'Unknown error'}`);
             }
+        } catch (err) {
+            alert(`Error blocking post: ${err.message || 'Unknown error'}`);
         }
+    };
+
+    const cancelBlockPost = () => {
+        setConfirmBlockPost(false);
     };
 
     const handleBlockUser = () => {
         setMenuOpen(false);
-        if (!post || !post.author) return;
-        const blockedUsers = Storage.load('blocked_users', []);
-        const authorAddress = String(post.author).toLowerCase();
-        if (!blockedUsers.includes(authorAddress)) {
-            blockedUsers.push(authorAddress);
-            Storage.save('blocked_users', blockedUsers);
+        if (!post || (!post.user_id && !post.author)) return;
+        // Close any open confirmation dialogs
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setConfirmBlockPost(false);
+        setConfirmUnsuspend(false);
+        setConfirmBlockUser(true);
+    };
+
+    const confirmBlockUserAction = async () => {
+        if (!post || (!post.user_id && !post.author)) return;
+        const authorAddress = post.user_id || post.author;
+        setConfirmBlockUser(false);
+        try {
+            const result = await tx.blockUser(authorAddress);
+            if (result.success) {
+                // User blocked on blockchain - hide post immediately
+                if (updatePost) {
+                    updatePost(post.post_id, { blocked: true });
+                }
+            } else {
+                alert(`Failed to block user: ${result.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            alert(`Error blocking user: ${err.message || 'Unknown error'}`);
         }
+    };
+
+    const cancelBlockUser = () => {
+        setConfirmBlockUser(false);
     };
 
     const handleFollowUser = async () => {
         setMenuOpen(false);
-        if (!post || !post.author) return;
-        const authorAddress = post.author;
+        if (!post || (!post.user_id && !post.author)) return;
+        const authorAddress = post.user_id || post.author;
         const viewerAddress = Storage.load('publicKey', '');
         if (!viewerAddress || viewerAddress === 'guest') {
             alert('Please log in to follow users');
@@ -1108,6 +1335,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
         try {
             await follow(viewerAddress, authorAddress);
+            setFollowOverride(true);
             if (updatePost) {
                 updatePost(post.post_id, {});
             }
@@ -1118,14 +1346,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleUnfollowUser = async () => {
         setMenuOpen(false);
-        if (!post || !post.author) return;
-        const authorAddress = post.author;
+        if (!post || (!post.user_id && !post.author)) return;
+        const authorAddress = post.user_id || post.author;
         const viewerAddress = Storage.load('publicKey', '');
         if (!viewerAddress || viewerAddress === 'guest') {
             return;
         }
         try {
             await unfollow(viewerAddress, authorAddress);
+            setFollowOverride(false);
             if (updatePost) {
                 updatePost(post.post_id, {});
             }
@@ -1145,6 +1374,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
         try {
             await subscribe(viewerAddress, topic);
+            setTopicFollowOverride(true);
         } catch (err) {
             alert(`Error following topic: ${err.message || 'Unknown error'}`);
         }
@@ -1160,6 +1390,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
         try {
             await unsubscribe(viewerAddress, topic);
+            setTopicFollowOverride(false);
         } catch (err) {
             alert(`Error unfollowing topic: ${err.message || 'Unknown error'}`);
         }
@@ -1167,9 +1398,21 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     // Check if user follow/block state
     const viewerAddress = Storage.load('publicKey', '');
-    const authorAddress = post && post.author ? String(post.author).toLowerCase() : '';
-    const isFollowingAuthor = authorAddress && viewerAddress && viewerAddress !== 'guest' ? isFollowing(viewerAddress, authorAddress) : false;
-    const isSubscribedToTopic = post && post.topic && viewerAddress && viewerAddress !== 'guest' ? isSubscribed(viewerAddress, post.topic) : false;
+    const authorAddress = post && (post.user_id || post.author) ? String(post.user_id || post.author).toLowerCase() : '';
+    const computedIsFollowing = authorAddress && viewerAddress && viewerAddress !== 'guest'
+        ? isFollowing(viewerAddress, authorAddress)
+        : false;
+    const isFollowingAuthor = followOverride !== null ? followOverride : computedIsFollowing;
+    const computedIsSubscribed = post && post.topic && viewerAddress && viewerAddress !== 'guest'
+        ? isSubscribed(viewerAddress, post.topic)
+        : false;
+    const isSubscribedToTopic = topicFollowOverride !== null ? topicFollowOverride : computedIsSubscribed;
+
+    const postTopic = post?.topic;
+    useEffect(() => {
+        setFollowOverride(null);
+        setTopicFollowOverride(null);
+    }, [authorAddress, viewerAddress, postTopic]);
 
     // Robust elapsed formatter: treat missing/invalid timestamps as "0s"
     const ts = Number(post && post.timestamp);
@@ -1739,6 +1982,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             top: rect.bottom + 4,
                                             left: rect.right - 180 // 180 is min-width of dropdown
                                         });
+                                        // Fetch suspension status for admins
+                                        if (isAdmin && post?.user_id) {
+                                            setUserSuspendedStatus(null); // Reset while loading
+                                            fetchUserSuspensionStatus(post.user_id);
+                                        }
                                     }
                                     setMenuOpen(!menuOpen);
                                 }}
@@ -1762,22 +2010,34 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">Delete post</MenuItem>
                                         </>
                                     )}
-                                    {!isOwnPost && isAdmin && (
-                                        <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Admin delete</MenuItem>
-                                    )}
                                     {!isOwnPost && (
                                         <>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); isFollowingAuthor ? handleUnfollowUser() : handleFollowUser(); }}>
                                                 {isFollowingAuthor ? 'Unfollow user' : 'Follow user'}
                                             </MenuItem>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
-                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
                                         </>
                                     )}
                                     <MenuItem onClick={(e) => { e.stopPropagation(); isSubscribedToTopic ? handleUnfollowTopic() : handleFollowTopic(); }}>
                                         {isSubscribedToTopic ? 'Unfollow topic' : 'Follow topic'}
                                     </MenuItem>
+                                    {!isOwnPost && (
+                                        <>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
+                                        </>
+                                    )}
+                                    {!isOwnPost && isAdmin && (
+                                        <>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
+                                            {userSuspendedStatus !== true && (
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                            )}
+                                            {userSuspendedStatus === true && (
+                                                <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>🛡️ Unsuspend from quests</MenuItem>
+                                            )}
+                                        </>
+                                    )}
                                 </MenuDropdown>,
                                 document.body
                             )}
@@ -1860,16 +2120,160 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             link copied to clipboard
                         </ShareSuccessMessage>
                     )}
+                    {confirmBlockPost && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block this post?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmBlockPostAction}>
+                                        Block
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {confirmBlockUser && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block {post?.username || 'this user'}?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmBlockUserAction}>
+                                        Block
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
                     {confirmDelete && (
                         <BlockConfirmMessage>
-                            <span>⚠ Confirm delete post? This action cannot be undone.</span>
-                            <ConfirmButtons>
-                                <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
-                                    Delete
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
-                            </ConfirmButtons>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>⚠ Mark post as deleted?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
+                                        Delete
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
                         </BlockConfirmMessage>
+                    )}
+                    {confirmSuspendQuests && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
+                                <select
+                                    value={suspendDuration}
+                                    onChange={(e) => setSuspendDuration(Number(e.target.value))}
+                                    style={{ padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid #d97706', background: '#fef3c7', color: '#92400e', fontWeight: 500 }}
+                                >
+                                    <option value={1}>1 day</option>
+                                    <option value={3}>3 days</option>
+                                    <option value={7}>7 days</option>
+                                    <option value={30}>30 days</option>
+                                    <option value={0}>Permanent</option>
+                                </select>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
+                                        {isSuspending ? 'Suspending...' : 'Suspend'}
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelSuspendFromQuests}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {confirmUnsuspend && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
+                                        {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {suspendSuccess && (
+                        <div style={{
+                            background: 'rgba(34, 197, 94, 0.1)',
+                            border: '1px solid #22c55e',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: '#16a34a',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>✓</span>
+                            {suspendSuccess}
+                        </div>
+                    )}
+                    {confirmDonate && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>
+                                    💰 Donate to {post?.username || post?.user_id?.substring(0, 12) + '...'}:
+                                </span>
+                                <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    background: 'rgba(255, 255, 255, 0.6)',
+                                    border: '1px solid rgba(148, 163, 184, 0.55)',
+                                    borderRadius: '8px',
+                                    padding: '0.2rem 0.5rem',
+                                    minWidth: '10rem',
+                                }}>
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={formatDonateAmount(donateAmountRaw)}
+                                        onChange={(e) => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))}
+                                        placeholder="10,000"
+                                        style={{
+                                            flex: 1,
+                                            minWidth: '6rem',
+                                            background: 'transparent',
+                                            border: 'none',
+                                            outline: 'none',
+                                            color: 'inherit',
+                                            fontSize: '0.8rem',
+                                            fontWeight: 700,
+                                            textAlign: 'right',
+                                        }}
+                                    />
+                                    <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
+                                </div>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
+                                        {isDonating ? 'Sending...' : 'Send'}
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {donateMessage && (
+                        <div style={{
+                            background: donateMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                            border: donateMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: donateMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>{donateMessage.type === 'success' ? '✓' : '⚠'}</span>
+                            {donateMessage.message}
+                        </div>
                     )}
                     {showContent && post.content && (
                         <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} />

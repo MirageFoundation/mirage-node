@@ -53,6 +53,7 @@ from indexer.settings import (
     COMMUNITY_VOTE_MAX_POSTS,
     COMMUNITY_VOTE_BOOST_MULTIPLIER,
 )
+from indexer.quest_tracker import QuestTracker
 import re
 import socket
 import ipaddress
@@ -97,6 +98,7 @@ class MessageProcessor:
         self.chain = chain_client
         self.log_yaml = log_yaml_fn
         self.iso_timestamp = iso_timestamp_fn
+        self.quest_tracker = QuestTracker(db_manager)
 
     def process_core_message(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Process a core message."""
@@ -276,6 +278,31 @@ class MessageProcessor:
                 },
             )
 
+        # Track quest progress for new posts/comments (not edits)
+        if not existing and owner:
+            try:
+                # Determine action type: root post or comment
+                action_type = "comment" if target else "post"
+                self.quest_tracker.update_progress(
+                    owner,
+                    action_type,
+                    ts,
+                    topic=root_topic,
+                    content_length=len(content),
+                    root_post_id=root_post_id,
+                )
+                # Also track unique_topic_post for root posts
+                if not target and root_topic:
+                    self.quest_tracker.update_progress(
+                        owner,
+                        "unique_topic_post",
+                        ts,
+                        topic=root_topic,
+                        content_length=len(content),
+                    )
+            except Exception as e:
+                logger.warning("Quest progress tracking failed for post %s: %s", txhash, e)
+
     def _handle_vote(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgVote."""
         parsed = MsgVote()
@@ -391,6 +418,14 @@ class MessageProcessor:
         # Check for previous vote to handle vote changes correctly
         previous_vote = self.db.get_vote_by_owner_target(owner, target)
         prev_vote = previous_vote[1] if previous_vote else 0.0
+        logger.info(
+            "Vote processing: owner=%s target=%s new_direction=%s previous_vote_exists=%s prev_vote_value=%s",
+            owner[:12] if owner else None,
+            target[:12] if target else None,
+            raw_direction,
+            previous_vote is not None,
+            prev_vote,
+        )
 
         # Calculate user_weight based on vote direction:
         # - UPVOTES always count at full tier weight (1.0 for free, higher for subscribers)
@@ -523,6 +558,45 @@ class MessageProcessor:
 
         # Persist both the user vote and the weighted contribution.
         self.db.upsert_vote(txhash, owner, ts, target, user_vote, user_weight, paid)
+
+        # Track quest progress for votes
+        if owner and raw_direction != 0:
+            try:
+                # A vote is only a "change" if there was a non-zero previous vote.
+                # If user unvoted (set to 0) first, then votes again, that's a NEW vote.
+                is_vote_change = previous_vote is not None and prev_vote != 0
+                logger.info(
+                    "Vote quest tracking: owner=%s target=%s direction=%s previous_vote=%s prev_vote=%s is_vote_change=%s",
+                    owner[:12] if owner else None,
+                    target[:12] if target else None,
+                    raw_direction,
+                    previous_vote is not None,
+                    prev_vote,
+                    is_vote_change,
+                )
+                self.quest_tracker.update_progress(
+                    owner,
+                    "vote",
+                    ts,
+                    target=target,
+                    target_owner=target_author,
+                    target_topic=root_topic,
+                    vote_direction=raw_direction,
+                    vote_is_change=is_vote_change,
+                )
+                # Also track balanced_vote action type
+                self.quest_tracker.update_progress(
+                    owner,
+                    "balanced_vote",
+                    ts,
+                    target=target,
+                    target_owner=target_author,
+                    target_topic=root_topic,
+                    vote_direction=raw_direction,
+                    vote_is_change=is_vote_change,
+                )
+            except Exception as e:
+                logger.warning("Quest progress tracking failed for vote %s: %s", txhash, e)
 
         # Build detailed vote log
         vote_log = {

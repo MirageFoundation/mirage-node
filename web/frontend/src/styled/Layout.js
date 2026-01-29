@@ -109,13 +109,18 @@ export const ModernPostFeed = styled.div`
     margin: 0 auto;
     padding: 0 0.75rem;
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: var(--card-gap, 0.5rem);
 
     @media (max-width: 1000px) {
         padding: 0 0.25rem;
+        gap: 0.4rem;
     }
 
     @media (max-width: 600px) {
         padding: 0 0 0 0;
+        gap: var(--card-gap-mobile, 0.35rem);
     }
 `;
 
@@ -132,11 +137,9 @@ export const PostGrid = styled.div`
     display: flex;
     flex-direction: column;
     gap: var(--card-gap, 1.25rem);
-    margin-top: var(--card-margin-top, 1.25rem);
 
     @media (max-width: 600px) {
         gap: var(--card-gap-mobile, 0.5rem);
-        margin-top: var(--card-margin-top-mobile, 0.5rem);
     }
 `;
 

@@ -5,6 +5,7 @@ import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
+import QuestHeroCard from "../components/QuestHeroCard";
 import styled from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
 import { sortPosts } from '../utils/SortPosts.js';
@@ -191,7 +192,7 @@ const InviteOnlyHeroButtons = styled.div`
 
 // Mobile header branding for home/following feeds
 
-// Invite-only banner - permanent, non-dismissable
+// Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
 const InviteOnlyBanner = styled.div`
     background: ${({ theme }) => theme?.name === 'light'
         ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(99, 102, 241, 0.1) 100%)'
@@ -199,27 +200,23 @@ const InviteOnlyBanner = styled.div`
     border: 2px solid ${({ theme }) => theme?.name === 'light'
         ? 'rgba(59, 130, 246, 0.5)'
         : 'rgba(96, 165, 250, 0.6)'};
-    border-radius: 10px;
-    padding: 0.75rem 1rem;
+    border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
+    padding: ${({ $size }) => $size === 'compact' ? '0.4rem 0.6rem' : '0.6rem 0.9rem'};
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    flex-direction: column;
+    gap: ${({ $size }) => $size === 'compact' ? '0.25rem' : '0.35rem'};
     box-shadow: ${({ theme }) => theme?.name === 'light'
         ? '0 0 12px rgba(59, 130, 246, 0.2)'
         : '0 0 15px rgba(96, 165, 250, 0.25)'};
 
     @media (max-width: 1000px) {
-        border-radius: 8px;
-        padding: 0.6rem 0.85rem;
+        border-radius: ${({ $size }) => $size === 'compact' ? '6px' : '8px'};
+        padding: ${({ $size }) => $size === 'compact' ? '0.35rem 0.5rem' : '0.5rem 0.75rem'};
     }
 
     @media (max-width: 768px) {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 0.6rem;
         border-radius: 6px;
-        padding: 0.5rem 0.7rem;
+        padding: 0.4rem 0.6rem;
     }
 `;
 
@@ -229,6 +226,32 @@ const InviteBannerContent = styled.div`
     gap: 0.2rem;
     flex: 1;
     min-width: 0;
+`;
+
+const InviteBannerContentWrapper = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+
+    @media (max-width: 768px) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+    }
+`;
+
+const InviteBannerTextContent = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1;
+    min-width: 0;
+    padding-right: 3rem;
+
+    @media (max-width: 768px) {
+        padding-right: 0;
+    }
 `;
 
 const InviteBannerTitle = styled.div`
@@ -325,6 +348,29 @@ const InviteBannerCount = styled.span`
 
     @media (max-width: 1000px) {
         font-size: 0.5rem;
+    }
+`;
+
+// Collapse button for hero cards
+const CollapseButton = styled.button`
+    background: transparent;
+    border: none;
+    color: ${({ theme }) => pickThemeColor(theme, 'subtleText')};
+    font-size: 0.65rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 12px;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    &:hover {
+        color: ${({ theme }) => pickThemeColor(theme, 'text')};
+        background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(0, 0, 0, 0.05)'
+        : 'rgba(255, 255, 255, 0.05)'};
     }
 `;
 
@@ -502,7 +548,6 @@ const InviteNoCodesText = styled.div`
 
 // Home feed info card for logged-in users
 const HomeFeedInfoCard = styled.div`
-    margin-top: ${({ $size }) => $size === 'compact' ? '0.5rem' : 'var(--card-gap, 1rem)'};
     background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(139, 92, 246, 0.06) 100%);
     border: 1px solid rgba(99, 102, 241, 0.2);
     border-radius: ${({ $size }) => $size === 'compact' ? '8px' : '10px'};
@@ -519,7 +564,6 @@ const HomeFeedInfoCard = styled.div`
     @media (max-width: 768px) {
         border-radius: 6px;
         padding: 0.4rem 0.6rem;
-        margin-top: var(--card-gap-mobile, 0.5rem);
     }
 `;
 
@@ -1233,9 +1277,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     });
     const [cardSize, setCardSize] = useState(() => {
         try {
-            return Storage.load('card_size', 'large');
+            return Storage.load('card_size', 'compact');
         } catch (_) {
-            return 'large';
+            return 'compact';
         }
     });
     const handleCardSizeChange = (newSize) => {
@@ -1312,6 +1356,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [inviteCodes, setInviteCodes] = useState([]);
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
+
+    // Collapse state for hero cards (persisted)
+    const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
+        try { return Storage.load('invite_banner_collapsed', false); } catch (_) { return false; }
+    });
+    const [questCardCollapsed, setQuestCardCollapsed] = useState(() => {
+        try { return Storage.load('quest_card_collapsed', false); } catch (_) { return false; }
+    });
+    const toggleInviteBanner = () => {
+        const next = !inviteBannerCollapsed;
+        setInviteBannerCollapsed(next);
+        try { Storage.save('invite_banner_collapsed', next); } catch (_) { }
+    };
+    const toggleQuestCard = () => {
+        const next = !questCardCollapsed;
+        setQuestCardCollapsed(next);
+        try { Storage.save('quest_card_collapsed', next); } catch (_) { }
+    };
 
     // Fetch invite codes for logged-in users
     useEffect(() => {
@@ -2543,22 +2605,45 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
                         {/* Invite-only banner - permanent, shown to all logged-in users on home/following feeds */}
                         {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
-                            <InviteOnlyBanner role="region" aria-label="Invite-only announcement">
-                                <InviteBannerContent>
-                                    <InviteBannerTitle>
-                                        <InviteBannerEmoji>✨</InviteBannerEmoji> Exclusive Beta Community
-                                    </InviteBannerTitle>
-                                    <InviteBannerDescription>
-                                        Mirage is now invite-only — because great conversations require great people!<DesktopBr />
-                                        {' '}{availableCodeCount > 0
-                                            ? "But don't fret, we've given you some invite codes for your friends. Use them wisely."
-                                            : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
-                                    </InviteBannerDescription>
-                                </InviteBannerContent>
-                                <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
-                                    {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
-                                </InviteBannerButton>
+                            <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
+                                <HomeFeedHeaderRow>
+                                    <HomeFeedInfoTitle>
+                                        <HomeFeedInfoEmoji>✨</HomeFeedInfoEmoji> Invite Codes
+                                        {inviteBannerCollapsed && (
+                                            <span style={{ fontWeight: 'normal' }}>
+                                                {' '}{availableCodeCount === 0 ? '— None available' : `— ${availableCodeCount} ${availableCodeCount === 1 ? 'code' : 'codes'} left`}
+                                            </span>
+                                        )}
+                                    </HomeFeedInfoTitle>
+                                    <CollapseButton onClick={toggleInviteBanner}>
+                                        {inviteBannerCollapsed ? 'Show' : 'Hide'}
+                                    </CollapseButton>
+                                </HomeFeedHeaderRow>
+                                {!inviteBannerCollapsed && (
+                                    <InviteBannerContentWrapper>
+                                        <InviteBannerTextContent>
+                                            <HomeFeedInfoDescription>
+                                                Mirage is now invite-only — because great conversations require great people!
+                                                {' '}{availableCodeCount > 0
+                                                    ? "But don't fret, we've given you some invite codes for your friends. Use them wisely."
+                                                    : "Unfortunately, you're out of invite codes. But don't worry, we might drop some more soon. Stay tuned!"}
+                                            </HomeFeedInfoDescription>
+                                        </InviteBannerTextContent>
+                                        <InviteBannerButton onClick={handleOpenInviteModal} disabled={availableCodeCount === 0}>
+                                            {availableCodeCount > 0 ? <>Share Invite Code <InviteBannerCount>({availableCodeCount} left)</InviteBannerCount></> : 'No Codes Left'}
+                                        </InviteBannerButton>
+                                    </InviteBannerContentWrapper>
+                                )}
                             </InviteOnlyBanner>
+                        )}
+
+                        {/* Quest hero card - shown to logged-in users on home/following feeds */}
+                        {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
+                            <QuestHeroCard
+                                collapsed={questCardCollapsed}
+                                onToggleCollapse={toggleQuestCard}
+                                size={cardSize}
+                            />
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}
