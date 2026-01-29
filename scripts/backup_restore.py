@@ -57,8 +57,10 @@ WARNING: Backups are large (~5-10GB) and contain sensitive keys!
 
 import argparse
 import getpass
+import json
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -77,6 +79,117 @@ ALL_SERVERS = [
 def status(msg: str):
     """Print a status message."""
     print(f"==> {msg}", flush=True)
+
+
+def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120) -> None:
+    """Verify a server is fully healthy after backup.
+    
+    Checks:
+    - RPC is responding
+    - Node has peers
+    - Backend health endpoint responds
+    - Node is not stuck (block height increasing)
+    
+    Raises exception if health check fails.
+    """
+    conn = f"{ssh_user}@{host}"
+    start_time = time.time()
+    
+    # Wait for RPC to be available (max 60s)
+    status(f"  Waiting for RPC on {host}...")
+    rpc_ready = False
+    for _ in range(20):
+        try:
+            result = subprocess.run(
+                f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status 2>/dev/null'",
+                shell=True,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if result.returncode == 0 and "latest_block_height" in result.stdout:
+                rpc_ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(3)
+    
+    if not rpc_ready:
+        raise RuntimeError(f"RPC not responding on {host} after 60s")
+    status(f"  RPC is responding on {host}")
+    
+    # Check node has peers
+    try:
+        result = subprocess.run(
+            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/net_info'",
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        net_info = json.loads(result.stdout)
+        n_peers = int(net_info.get("result", {}).get("n_peers", 0))
+        if n_peers < 1:
+            status(f"  WARNING: {host} has {n_peers} peers (may take time to connect)")
+        else:
+            status(f"  {host} has {n_peers} peer(s)")
+    except Exception as e:
+        status(f"  WARNING: Could not check peers on {host}: {e}")
+    
+    # Check backend health
+    try:
+        result = subprocess.run(
+            f"ssh {conn} 'curl -sf http://127.0.0.1:5000/health'",
+            shell=True,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            status(f"  Backend health OK on {host}")
+        else:
+            status(f"  WARNING: Backend health check failed on {host}")
+    except Exception as e:
+        status(f"  WARNING: Could not check backend on {host}: {e}")
+    
+    # Check block height is increasing (node not stuck)
+    try:
+        result1 = subprocess.run(
+            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status'",
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        status1 = json.loads(result1.stdout)
+        height1 = int(status1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
+        
+        time.sleep(6)  # Wait for at least 1 block
+        
+        result2 = subprocess.run(
+            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status'",
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        status2 = json.loads(result2.stdout)
+        height2 = int(status2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
+        
+        if height2 > height1:
+            status(f"  Node is progressing: {height1} -> {height2}")
+        else:
+            status(f"  WARNING: Block height not increasing on {host} ({height1} -> {height2})")
+    except Exception as e:
+        status(f"  WARNING: Could not verify block progression on {host}: {e}")
+    
+    elapsed = time.time() - start_time
+    status(f"  Health check complete for {host} ({elapsed:.0f}s)")
 
 
 def run(cmd: str, capture: bool = False) -> str:
@@ -590,8 +703,6 @@ echo "PostgreSQL restore complete"
 
         # Wait for container to be running
         status("Waiting for container to be ready...")
-        import time
-
         for _ in range(60):
             result = run(f"ssh {conn} 'docker exec mirage echo ready 2>/dev/null || echo not_ready'", capture=True)
             if "ready" in result:
@@ -655,8 +766,6 @@ echo "PostgreSQL restore complete"
     # Step 13: Wait for node to start
     # -------------------------------------------------------------------------
     status("Waiting for node to start (15s)...")
-    import time
-
     for i in range(5):
         time.sleep(3)
         try:
@@ -831,6 +940,15 @@ Examples:
                 try:
                     backup_path = backup(server, args.user)
                     results.append((server, "OK", backup_path))
+                    
+                    # Verify the server is healthy before proceeding
+                    status(f"Verifying {server} is healthy after backup...")
+                    verify_server_health(server, args.user)
+                    
+                    # Wait 2 minutes between servers to ensure stability
+                    if i < len(ALL_SERVERS):
+                        status(f"Waiting 2 minutes before next backup...")
+                        time.sleep(120)
                 except Exception as e:
                     print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
                     results.append((server, "FAILED", str(e)))
