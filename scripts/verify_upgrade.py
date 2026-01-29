@@ -6,6 +6,8 @@ This script is intentionally "no hand-waving":
 - It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
+- It checks that critical CLI commands are exposed.
+- It can optionally verify genesis export with --export-check (stops node, runs export, restarts).
 - It shows status of ALL registered upgrades.
 
 NOTE: This does NOT submit transactions or mutate chain state.
@@ -20,6 +22,8 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+import tempfile
+import time
 from typing import Any
 import urllib.error
 import urllib.request
@@ -79,6 +83,48 @@ def _find_miraged() -> str:
         if os.path.exists(c) and os.access(c, os.X_OK):
             return c
     return "miraged"
+
+
+def _resolve_node_home(home_dir: Path) -> Path:
+    # Home can be either ~/.mirage (base) or ~/.mirage/node (node home).
+    return home_dir if home_dir.name == "node" else home_dir / "node"
+
+
+def _is_miraged_running() -> bool:
+    try:
+        p = subprocess.run(["pgrep", "-f", "miraged start"], capture_output=True, text=True, check=False)
+        return p.returncode == 0
+    except Exception:
+        return False
+
+
+def _stop_miraged() -> bool:
+    if not _is_miraged_running():
+        return False
+    subprocess.run(["pkill", "-TERM", "-f", "miraged start"], check=False)
+    for _ in range(30):
+        if not _is_miraged_running():
+            return True
+        time.sleep(1)
+    subprocess.run(["pkill", "-KILL", "-f", "miraged start"], check=False)
+    return not _is_miraged_running()
+
+
+def _restart_miraged(node_home: Path) -> bool:
+    # Prefer tmux session if present
+    try:
+        if subprocess.run(["tmux", "has-session", "-t", "mirage"], check=False).returncode == 0:
+            cmd = f'miraged start --home "{node_home}"'
+            subprocess.run(["tmux", "send-keys", "-t", "mirage:node", cmd, "C-m"], check=False)
+            return True
+    except Exception:
+        pass
+    # Fallback: start in background
+    try:
+        subprocess.Popen(["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
 
 
 def _run_json(cmd: list[str]) -> dict:
@@ -485,6 +531,67 @@ def check_sdk_modules_restored(miraged: str, failures: list[str], warnings: list
         else:
             print(f"   [WARN] tx {mod}: command missing")
             warnings.append(f"tx {mod} command missing after restore (verify module wiring)")
+
+
+def check_export_command(miraged: str, home_dir: Path, failures: list[str]) -> None:
+    """Ensure export command is available and produces genesis (stops/starts node)."""
+    print("\n-> Checking genesis export (stopping node)...")
+    node_home = _resolve_node_home(home_dir)
+    try:
+        genesis_path = node_home / "config" / "genesis.json"
+        if not genesis_path.exists():
+            failures.append(f"export failed: missing genesis at {genesis_path}")
+            print("   [FAIL] export failed (missing genesis)")
+            return
+        cmd = [miraged, "export", "--home", str(node_home)]
+        was_running = _is_miraged_running()
+        if was_running:
+            stopped = _stop_miraged()
+            if not stopped:
+                failures.append("export failed: could not stop miraged")
+                print("   [FAIL] export failed (could not stop miraged)")
+                return
+        with tempfile.NamedTemporaryFile(prefix="mirage-export-", suffix=".json") as tmp:
+            cmd = cmd + ["--output-document", tmp.name]
+            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            if p.returncode != 0:
+                err = p.stderr.strip()
+                if "failed to initialize database" in err or "resource temporarily unavailable" in err:
+                    msg = "export failed: database locked (stop miraged or use a stopped data copy)"
+                    print("   [FAIL] export failed (database locked)")
+                    failures.append(msg)
+                    return
+                print("   [FAIL] export failed")
+                failures.append(f"export failed: {err}")
+                return
+            tmp.flush()
+            tmp.seek(0)
+            raw = tmp.read()
+            if not raw.strip():
+                print("   [FAIL] export output is empty")
+                failures.append("export output is empty")
+                return
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                print("   [FAIL] export output is not UTF-8")
+                failures.append("export output is not UTF-8")
+                return
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as err:
+                print("   [FAIL] export output is not JSON")
+                failures.append(f"export output is not JSON: {err}")
+                return
+            print("   [OK] export succeeded")
+        if was_running:
+            restarted = _restart_miraged(node_home)
+            if not restarted:
+                failures.append("export check failed: could not restart miraged")
+                print("   [FAIL] export check failed (could not restart miraged)")
+                return
+    except Exception as e:
+        failures.append(f"export command check failed: {e}")
 
 
 def fetch_core_params(miraged: str, rpc: str) -> dict:
@@ -1063,7 +1170,7 @@ def check_deploy_migrations(home_dir: Path, failures: list[str], warnings: list[
 
 def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[str], warnings: list[str]) -> None:
     print("\n-> Checking local config...")
-    cfg_dir = home_dir / "node" / "config"
+    cfg_dir = _resolve_node_home(home_dir) / "config"
 
     app_toml = cfg_dir / "app.toml"
     if app_toml.exists():
@@ -1121,6 +1228,7 @@ def main() -> int:
     parser.add_argument("--phase", choices=["pre", "post"], default="post", help="pre=plan exists, post=applied")
     parser.add_argument("--upgrade", default=UPGRADE_NAME, help=f"Upgrade name to verify (default: {UPGRADE_NAME})")
     parser.add_argument("--list-all", action="store_true", help="List status of all registered upgrades")
+    parser.add_argument("--export-check", action="store_true", help="Stop node, run export, restart")
     args = parser.parse_args()
 
     rpc = args.node.rstrip("/")
@@ -1155,6 +1263,9 @@ def main() -> int:
     
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
+
+    if args.export_check:
+        check_export_command(miraged, home_dir, failures)
 
     if "restore-sdk" in upgrade_name and args.phase == "post":
         check_sdk_modules_restored(miraged, failures, warnings)
