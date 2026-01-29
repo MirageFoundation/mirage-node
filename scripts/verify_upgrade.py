@@ -26,7 +26,7 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.4-sdk-bloat"
+UPGRADE_NAME = "v1.10.3-sdk-bloat"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.10"
 
@@ -53,7 +53,7 @@ ALL_UPGRADES = [
     "v1.9.7-bridge-replay",
     "v1.9.9-retention",
     "v1.10.0-remove-ibc",
-    "v1.10.4-sdk-bloat",
+    "v1.10.3-sdk-bloat",
 ]
 
 
