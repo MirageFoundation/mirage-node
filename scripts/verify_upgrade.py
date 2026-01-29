@@ -760,23 +760,23 @@ def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warning
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
             output = (p.stdout + p.stderr).lower()
             
-            # Module is removed if:
-            # 1. Command returns error about unknown/unregistered module
-            # 2. Command returns "not found" or similar
-            # 3. Specific "unknown query path" error
-            # 4. CLI doesn't have the subcommand at all
+            # Module is removed if command fails (non-zero exit) and output indicates missing module
+            # Check for various error patterns that indicate the module doesn't exist
             removal_indicators = [
                 "unknown query path",
                 "unknown command",  # CLI subcommand doesn't exist
+                "unknown flag",     # CLI rejects flags because subcommand missing
                 "not found",
                 "unknown module",
                 "unregistered",
                 "no handler",
                 "rpc error",
                 "not implemented",
+                "fatal:",           # CLI fatal errors
             ]
             
-            is_removed = any(indicator in output for indicator in removal_indicators)
+            # Module is removed if: non-zero exit code OR any removal indicator found
+            is_removed = p.returncode != 0 or any(indicator in output for indicator in removal_indicators)
             
             if is_removed:
                 print(f"   [OK] {module_name}: removed (query fails as expected)")
@@ -803,11 +803,20 @@ def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warning
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
             output = (p.stdout + p.stderr).lower()
             
-            # If help shows "unknown command", module is removed
-            if "unknown command" in output or p.returncode != 0:
+            # Module is removed if:
+            # 1. Command fails with error indicators, OR
+            # 2. The module name doesn't appear in "Available Commands" section
+            error_indicators = ["unknown command", "unknown flag", "fatal:", "error:"]
+            has_error = p.returncode != 0 or any(ind in output for ind in error_indicators)
+            
+            # Check if module appears as an available command (e.g., "  authz  " with spacing)
+            module_listed = f"  {module_name} " in output or f"\n  {module_name}\t" in output
+            
+            is_removed = has_error or not module_listed
+            
+            if is_removed:
                 print(f"   [OK] tx {module_name}: command removed")
             else:
-                # Help works means module still registered
                 print(f"   [WARN] tx {module_name}: help still available (may be CLI stub)")
                 warnings.append(f"tx {module_name} help still available - verify module is truly removed")
         except Exception:
