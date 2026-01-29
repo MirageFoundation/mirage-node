@@ -73,3 +73,7 @@ REWARD_MULTIPLIER_MAX = 5.0  # Maximum multiplier (mature accounts get 5x)
 
 # Daily reward cap (in umirage, 0 = no cap)
 DAILY_REWARD_CAP = 0
+
+# ========== Moderation Settings ==========
+# Show all posts, regardless of whether they are marked as deleted
+IGNORE_DELETIONS = False
