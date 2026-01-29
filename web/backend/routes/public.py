@@ -3912,7 +3912,23 @@ def get_reports():
         return jsonify({"error": str(e)}), 500
 
 
-def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users: set[str] = None):
+def _fetch_post(
+    cur,
+    txhash: str,
+    blocked_posts: set[str] = None,
+    blocked_users: set[str] = None,
+    use_stored_counts: bool = False,
+):
+    """Fetch a single post with aggregates.
+    
+    Args:
+        cur: Database cursor
+        txhash: Post ID
+        blocked_posts: Set of blocked post IDs to filter
+        blocked_users: Set of blocked user addresses to filter
+        use_stored_counts: If True, use stored comment_count instead of computing
+                          via recursive CTE. Faster but doesn't exclude blocked content.
+    """
     if blocked_posts is None:
         blocked_posts = set()
     if blocked_users is None:
@@ -3935,7 +3951,8 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
                CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                COALESCE(p.edited_at, 0) as edited_at,
                COALESCE(p.thumbnail_url, '') as thumbnail,
-               COALESCE(pr.level, 0) as author_level
+               COALESCE(pr.level, 0) as author_level,
+               COALESCE(p.comment_count, 0) as comment_count
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -3960,6 +3977,7 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
     edited_at_val = int(row[12] or 0) if len(row) > 12 else 0
     thumbnail_val = (row[13] or "") if len(row) > 13 else ""
     author_level_val = int(row[14]) if len(row) > 14 and row[14] else 0
+    stored_comment_count = int(row[15]) if len(row) > 15 and row[15] else 0
 
     # Filter if post ID is blocked
     if pid in blocked_posts:
@@ -3985,9 +4003,13 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
         )
     points = cur.fetchone()[0] or 0
 
-    # Count comments excluding blocked posts and posts from blocked users
+    # Count comments: use stored count or compute dynamically
     all_blocked = blocked_posts | blocked_users
-    if all_blocked:
+    if use_stored_counts or not all_blocked:
+        # Use stored count when requested or when no blocking filters apply
+        comments = stored_comment_count
+    else:
+        # Compute visible-only count excluding blocked posts/users
         blocked_placeholders = ",".join(["%s"] * len(all_blocked))
         cur.execute(
             f"""
@@ -4002,19 +4024,7 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
             """,
             [pid] + list(all_blocked) + list(all_blocked),
         )
-    else:
-        cur.execute(
-            f"""
-            WITH RECURSIVE subtree(tx) AS (
-                SELECT txhash FROM posts WHERE COALESCE(target,'') = %s {_deleted_filter_bare()}
-                UNION ALL
-                SELECT p.txhash FROM posts p JOIN subtree s ON p.target = s.tx {deleted_clause}
-            )
-            SELECT COUNT(1) FROM subtree
-            """,
-            (pid,),
-        )
-    comments = int(cur.fetchone()[0] or 0)
+        comments = int(cur.fetchone()[0] or 0)
     # Opportunistic backfill for a single post if needed
     try:
         if row and len(row) > 10:
@@ -4053,33 +4063,203 @@ def _fetch_post(cur, txhash: str, blocked_posts: set[str] = None, blocked_users:
     }
 
 
-def _fetch_children_recursive(
-    cur, parent_tx: str, blocked_posts: set[str] = None, blocked_users: set[str] = None, max_depth: int = 6
-):
-    if blocked_posts is None:
-        blocked_posts = set()
-    if blocked_users is None:
-        blocked_users = set()
-    if max_depth <= 0:
-        return []
-    deleted_clause = _deleted_filter_bare()
+def _fetch_comment_tree_batch(
+    cur,
+    root_id: str,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    max_depth: int = 6,
+) -> tuple[dict | None, list[dict]]:
+    """
+    Fetch root post and entire comment subtree in batch queries.
+    Returns (root_dict, children_list) where children_list is the top-level children
+    with nested 'children' arrays. Returns (None, []) if root not found or blocked.
+    """
+    deleted_clause = _deleted_filter()
+    root_id_lower = root_id.lower()
+
+    # Step 1: Fetch the entire subtree (root + all descendants up to max_depth) in one recursive CTE
+    # We include depth to enforce max_depth, and filter deleted posts in the CTE.
+    # Blocked posts/users are filtered in Python to allow proper subtree pruning.
     cur.execute(
-        f"SELECT txhash FROM posts WHERE COALESCE(target, '') = %s {deleted_clause} ORDER BY created_at ASC",
-        (parent_tx,),
+        f"""
+        WITH RECURSIVE subtree AS (
+            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+                   COALESCE(p.tag, '') as tag,
+                   COALESCE(p.root_topic, p.topic, '') as root_topic,
+                   COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
+                   COALESCE(p.target, '') as target,
+                   COALESCE(p.thumbnail_url, '') as thumbnail,
+                   CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
+                   COALESCE(p.edited_at, 0) as edited_at,
+                   0 as depth
+            FROM posts p
+            WHERE LOWER(p.txhash) = %s {deleted_clause}
+            UNION ALL
+            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content,
+                   COALESCE(p.tag, '') as tag,
+                   COALESCE(p.root_topic, p.topic, '') as root_topic,
+                   COALESCE(p.root_post_id, p.txhash, '') as root_post_id,
+                   COALESCE(p.target, '') as target,
+                   COALESCE(p.thumbnail_url, '') as thumbnail,
+                   CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
+                   COALESCE(p.edited_at, 0) as edited_at,
+                   s.depth + 1 as depth
+            FROM posts p
+            JOIN subtree s ON LOWER(p.target) = LOWER(s.txhash)
+            WHERE s.depth < %s {deleted_clause}
+        )
+        SELECT st.txhash, st.owner, st.created_at, st.topic, st.title, st.content,
+               st.tag, st.root_topic, st.root_post_id, st.target, st.thumbnail,
+               st.edited, st.edited_at, st.depth,
+               COALESCE(pr.username, '') as username,
+               COALESCE(pr.level, 0) as author_level
+        FROM subtree st
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
+        ORDER BY st.depth ASC, st.created_at ASC
+        """,
+        (root_id_lower, max_depth),
     )
-    out = []
-    for (child_tx,) in cur.fetchall():
-        child = _fetch_post(cur, child_tx, blocked_posts, blocked_users)
-        if child:
-            child["children"] = _fetch_children_recursive(
-                cur, child["post_id"], blocked_posts, blocked_users, max_depth - 1
+    rows = cur.fetchall()
+
+    if not rows:
+        return None, []
+
+    # Build a dict of all posts keyed by post_id, filtering blocked posts/users
+    all_posts: dict[str, dict] = {}
+    blocked_ids: set[str] = set()  # Track which IDs are blocked (so we prune their subtrees)
+
+    for row in rows:
+        pid = (row[0] or "").lower()
+        owner = (row[1] or "").lower()
+        created_at = row[2]
+        topic_val = row[3]
+        title_val = row[4]
+        content_val = row[5]
+        tag_val = (row[6] or "").strip()
+        root_topic_val = (row[7] or "").strip()
+        root_post_id_val = (row[8] or "").strip().lower()
+        target_val = (row[9] or "").strip().lower()
+        thumbnail_val = (row[10] or "")
+        edited_flag = bool(row[11])
+        edited_at_val = int(row[12] or 0)
+        depth = int(row[13])
+        username_val = row[14] or ""
+        author_level_val = int(row[15]) if row[15] else 0
+
+        # Skip if this post or its owner is blocked
+        if pid in blocked_posts or owner in blocked_users:
+            blocked_ids.add(pid)
+            continue
+
+        # Skip if parent is blocked (prune subtree)
+        if target_val and target_val in blocked_ids:
+            blocked_ids.add(pid)
+            continue
+
+        all_posts[pid] = {
+            "post_id": pid,
+            "target": target_val,
+            "user_id": owner,
+            "username": username_val,
+            "author_level": author_level_val,
+            "timestamp": int(created_at) if created_at is not None else None,
+            "topic": topic_val,
+            "root_topic": root_topic_val,
+            "root_post_id": root_post_id_val,
+            "title": title_val,
+            "content": content_val,
+            "tag": tag_val,
+            "edited": edited_flag,
+            "edited_at": edited_at_val,
+            "thumbnail": thumbnail_val,
+            "points": 0,  # Will be populated later
+            "comments": 0,  # Will be computed from tree
+            "children": [],
+            "user_vote": 0,
+            "user_weight": 0.0,
+            "_depth": depth,  # Internal, removed before return
+        }
+
+    # Check if root exists after filtering
+    if root_id_lower not in all_posts:
+        return None, []
+
+    # Step 2: Batch fetch vote totals for all posts
+    post_ids = list(all_posts.keys())
+    if post_ids:
+        if blocked_users:
+            # Exclude votes from blocked users
+            blocked_ph = ",".join(["%s"] * len(blocked_users))
+            ph = ",".join(["%s"] * len(post_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
+                FROM votes
+                WHERE LOWER(target) IN ({ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
+                GROUP BY LOWER(target)
+                """,
+                post_ids + list(blocked_users),
             )
-            out.append(child)
-    return out
+        else:
+            ph = ",".join(["%s"] * len(post_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
+                FROM votes
+                WHERE LOWER(target) IN ({ph})
+                GROUP BY LOWER(target)
+                """,
+                post_ids,
+            )
+        for tgt, pts in cur.fetchall():
+            if tgt and tgt in all_posts:
+                all_posts[tgt]["points"] = float(pts) if pts else 0
+
+    # Step 3: Build the tree structure in memory
+    # Group children by their target (parent)
+    children_by_parent: dict[str, list[dict]] = {}
+    for pid, post in all_posts.items():
+        target = post["target"]
+        if target and target in all_posts:
+            if target not in children_by_parent:
+                children_by_parent[target] = []
+            children_by_parent[target].append(post)
+
+    # Attach children to parents (already sorted by created_at from query)
+    for parent_id, kids in children_by_parent.items():
+        if parent_id in all_posts:
+            all_posts[parent_id]["children"] = kids
+
+    # Step 4: Compute visible-only comment counts via post-order traversal
+    def count_descendants(node: dict) -> int:
+        """Count all descendants (recursive). Updates node['comments'] and returns total."""
+        total = 0
+        for child in node.get("children", []):
+            total += 1 + count_descendants(child)
+        node["comments"] = total
+        return total
+
+    root = all_posts[root_id_lower]
+    count_descendants(root)
+
+    # Step 5: Clean up internal fields
+    for post in all_posts.values():
+        post.pop("_depth", None)
+
+    # Extract top-level children (direct replies to root)
+    top_children = root.pop("children", [])
+    root["children"] = []  # Root returns with empty children array (frontend expects this)
+
+    return root, top_children
 
 
 @public_bp.route("/api/get_comments")
 def get_comments():
+    rid = next_request_id()
+    t_start = time.time()
+
     post_id = request.args.get("post_id", type=str)
     address = request.args.get("address", default="", type=str)
     if not post_id:
@@ -4087,16 +4267,37 @@ def get_comments():
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
+
+        t_blocked = time.time()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
-        root = _fetch_post(cur, post_id, blocked_posts, blocked_users)
+        t_blocked_ms = (time.time() - t_blocked) * 1000
+
+        t_tree = time.time()
+        root, children = _fetch_comment_tree_batch(
+            cur, post_id, blocked_posts, blocked_users, max_depth=6
+        )
+        t_tree_ms = (time.time() - t_tree) * 1000
+
         if not root:
             conn.close()
+            log_event(rid, "get_comments.not_found", post_id=post_id[:16])
             return jsonify({"error": "Post not found"}), 404
-        children = _fetch_children_recursive(cur, root["post_id"], blocked_posts, blocked_users, max_depth=6)
+
+        # Count total nodes for logging
+        def count_nodes(nodes):
+            total = 0
+            for n in nodes:
+                total += 1
+                if n.get("children"):
+                    total += count_nodes(n["children"])
+            return total
+
+        node_count = 1 + count_nodes(children)  # root + all children
 
         # Load viewer's votes and user_weight contributions for root and all children
         viewer_lower = (address or "").strip().lower()
+        t_votes = time.time()
         if viewer_lower and viewer_lower != "guest":
             all_post_ids = [root["post_id"]]
 
@@ -4130,18 +4331,7 @@ def get_comments():
                             apply_votes(n["children"])
 
                 apply_votes(children)
-        else:
-            root["user_vote"] = 0
-            root["user_weight"] = 0.0
-
-            def zero_votes(nodes):
-                for n in nodes:
-                    n["user_vote"] = 0
-                    n["user_weight"] = 0.0
-                    if n.get("children"):
-                        zero_votes(n["children"])
-
-            zero_votes(children)
+        t_votes_ms = (time.time() - t_votes) * 1000
 
         # Add inbox timestamp for notification badge (only if user is logged in)
         resp = {"root": root, "children": children}
@@ -4151,8 +4341,23 @@ def get_comments():
                 resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
+
+        total_ms = (time.time() - t_start) * 1000
+        log_event(
+            rid,
+            "get_comments.ok",
+            post_id=post_id[:16],
+            nodes=node_count,
+            blocked_posts=len(blocked_posts),
+            blocked_users=len(blocked_users),
+            blocked_ms=round(t_blocked_ms, 1),
+            tree_ms=round(t_tree_ms, 1),
+            votes_ms=round(t_votes_ms, 1),
+            total_ms=round(total_ms, 1),
+        )
         return jsonify(resp)
     except Exception as e:
+        log_event(rid, "get_comments.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 

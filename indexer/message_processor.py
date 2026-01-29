@@ -48,6 +48,7 @@ from indexer.settings import (
     COMMUNITY_VOTE_BASELINE,
     COMMUNITY_VOTE_MAX_TOPIC_VOTES,
     COMMUNITY_VOTE_MIN_NET_VOTES,
+    IGNORE_DELETIONS,
     COMMUNITY_VOTE_MATURITY_DAYS,
     COMMUNITY_VOTE_MIN_ROOT_POSTS,
     COMMUNITY_VOTE_MAX_POSTS,
@@ -230,6 +231,13 @@ class MessageProcessor:
                 self.db.update_user_topic_stats(owner, root_topic, 0, root_post_id, is_new_vote=False, post_increment=1)
             except Exception:
                 logger.exception("Failed to update user_topic_stats post_count for %s", txhash)
+
+        # Increment comment_count for all ancestors when a new comment is indexed
+        if not existing and target:
+            try:
+                self.db.increment_ancestor_comment_counts(target)
+            except Exception:
+                logger.exception("Failed to increment ancestor comment_counts for %s", txhash)
 
         # Update topic safety stats for root posts only
         try:
@@ -1064,6 +1072,11 @@ class MessageProcessor:
 
             if not owner or not target:
                 logger.warning("Rejected delete: missing owner or target")
+                return
+
+            # Check if deletions are disabled by node config
+            if IGNORE_DELETIONS:
+                logger.info("Ignoring delete for target %s (IGNORE_DELETIONS=True)", target)
                 return
 
             # Check authorization: governance > admin > owner
