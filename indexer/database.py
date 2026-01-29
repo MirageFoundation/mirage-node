@@ -58,13 +58,15 @@ class DatabaseManager:
                         thumbnail_url TEXT,
                         tag TEXT NOT NULL DEFAULT '',
                         root_topic TEXT,
-                        root_post_id TEXT
+                        root_post_id TEXT,
+                        comment_count INTEGER NOT NULL DEFAULT 0
                     )
                     """
                 )
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS tag TEXT NOT NULL DEFAULT ''")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_topic TEXT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_post_id TEXT")
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_owner_lower ON posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_target_lower ON posts(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_txhash_lower ON posts(LOWER(txhash))")
@@ -1604,14 +1606,76 @@ class DatabaseManager:
         """Delete a post. If owner is None, admin delete."""
         with self._connect() as conn:
             with conn.cursor() as cur:
+                # Fetch parent and current subtree size before deleting
+                cur.execute(
+                    "SELECT target, comment_count, deleted FROM posts WHERE LOWER(txhash) = LOWER(%s)",
+                    (target,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return 0
+                parent_id = row[0] if row[0] else None
+                subtree_count = int(row[1] or 0)
+                was_deleted = bool(row[2])
+                if was_deleted:
+                    return 0
+
                 if owner is None:
-                    cur.execute("UPDATE posts SET deleted = TRUE WHERE txhash = %s", (target,))
+                    cur.execute(
+                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND deleted = FALSE",
+                        (target,),
+                    )
                 else:
                     cur.execute(
-                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND LOWER(owner) = LOWER(%s)",
+                        "UPDATE posts SET deleted = TRUE WHERE txhash = %s AND LOWER(owner) = LOWER(%s) AND deleted = FALSE",
                         (target, owner),
                     )
-                return cur.rowcount
+                deleted_count = cur.rowcount
+                # Decrement comment_count for all ancestors if post was deleted
+                if deleted_count > 0 and parent_id:
+                    # Remove this post + its descendants from ancestor counts
+                    self._update_ancestor_comment_counts(cur, parent_id, delta=-(1 + subtree_count))
+                return deleted_count
+
+    def increment_ancestor_comment_counts(self, target_post_id: str) -> None:
+        """Increment comment_count for all ancestors of a new comment.
+        
+        Called when a new comment is indexed. target_post_id is the parent post
+        that the new comment is replying to.
+        """
+        if not target_post_id:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                self._update_ancestor_comment_counts(cur, target_post_id, delta=1)
+
+    def _update_ancestor_comment_counts(self, cur, post_id: str, delta: int) -> None:
+        """Update comment_count for all ancestors of a post by delta.
+        
+        Walks up the parent chain and adjusts comment_count.
+        For new comments: delta=+1 (increment)
+        For deleted posts: delta=-1 (decrement)
+        """
+        if not post_id or delta == 0:
+            return
+        # Walk up the chain and update the post and its ancestors
+        visited = set()
+        current = post_id
+        while current and current not in visited:
+            visited.add(current)
+            cur.execute(
+                """
+                UPDATE posts 
+                SET comment_count = GREATEST(0, comment_count + %s)
+                WHERE LOWER(txhash) = LOWER(%s) AND deleted = FALSE
+                RETURNING target
+                """,
+                (delta, current),
+            )
+            row = cur.fetchone()
+            if not row:
+                break
+            current = row[0] if row[0] else None
 
     def get_user_level(self, owner: str) -> int:
         """Get user level."""
