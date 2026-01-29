@@ -18,6 +18,10 @@ import (
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 
+	"mirage/docs"
+	corekeeper "mirage/x/core/keeper"
+	coretypes "mirage/x/core/types"
+
 	errorsmod "cosmossdk.io/errors"
 	abci "github.com/cometbft/cometbft/abci/types"
 	dbm "github.com/cosmos/cosmos-db"
@@ -52,9 +56,6 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"mirage/docs"
-	corekeeper "mirage/x/core/keeper"
-	coretypes "mirage/x/core/types"
 )
 
 const (
@@ -263,16 +264,16 @@ func New(
 						}
 					}
 					switch m.(type) {
-				case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-					*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
-					*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-					*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-					*coretypes.MsgBridgeBurn:
-					containsMeta = true
+					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+						*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
+						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+						*coretypes.MsgBridgeBurn:
+						containsMeta = true
 					}
 				}
 
@@ -292,13 +293,13 @@ func New(
 				if err != nil {
 					return ctx1, err
 				}
-				
+
 				// 2. Timeout (Cheap check)
 				ctx2, err := timeout.AnteHandle(ctx1, tx, simulate, terminator)
 				if err != nil {
 					return ctx2, err
 				}
-				
+
 				// 3. Gas/Size Limit (Cheap check - prevents large txs)
 				ctx3, err := gasSize.AnteHandle(ctx2, tx, simulate, terminator)
 				if err != nil {
