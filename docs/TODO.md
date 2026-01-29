@@ -7,14 +7,17 @@ These notes are meant to turn the themes below into an execution order with expl
 - For each item below, list expected wins (bug surface reduction, deploy simplicity, runtime performance) and clear exit criteria.
 - This prevents large refactors from drifting without a finish line.
 
-### 1. SDK bloat removal (if we do it, do it first)
+### 1. SDK bloat removal ✅ COMPLETED (v1.10.3-sdk-bloat)
 - Rationale: lowest coupling to application logic; reduces attack surface, binary size, build time, and upgrade complexity.
-- Risk: module removal can have hidden dependencies (genesis, app wiring, CLI, testnet configs).
-- Dependency flow:
-  - Inventory module usage in `app.go`, genesis, and any CLI wiring.
-  - Remove "pure bloat" modules first (authz, feegrant, group, epochs, vesting, mint, circuit, evidence).
-  - Run full chain build + local docker boot to confirm no hidden wiring remains.
-- Expected outcome: leaner binary, fewer upgrade paths, fewer config knobs.
+- **Status: DONE** — Merged to prod, tagged v1.10.4
+- Removed modules: authz, feegrant, group, epochs, vesting, mint, circuit, evidence
+- Changes:
+  - `app_config.go`: removed module configs, BeginBlockers, EndBlockers, InitGenesis entries
+  - `app.go`: removed keepers and depinject bindings
+  - `genesis.json`: removed genesis state for all 8 modules
+  - `upgrades.go`: added `v1.10.3-sdk-bloat` upgrade handler with store deletion
+  - `verify_upgrade.py`: added SDK bloat removal verification
+- Outcome: leaner binary, fewer upgrade paths, fewer config knobs
 
 ### 2. Protobuf code generation in Python (reduce schema drift)
 - Rationale: this is the largest current source of subtle correctness drift.
@@ -90,19 +93,19 @@ Cleaner separation between "what happened" and "current state"
 
 
 
-## Cosmos SDK Bloat Analysis
+## Cosmos SDK Bloat Analysis ✅ COMPLETED
 
-### Pure Bloat (0 actual usage) - REMOVE
-- `authz` - permission delegation, never used
-- `feegrant` - fee payment delegation, never used  
-- `group` - on-chain DAO/multisig, never used
-- `epochs` - scheduled hooks, never used
-- `vesting` - token lockups, never used
-- `mint` - SDK inflation minting, never used (we do custom minting via bank)
-- `circuit` - emergency shutdown, never used
-- `evidence` - double-sign evidence, never used
+### Pure Bloat (0 actual usage) - ✅ REMOVED in v1.10.3-sdk-bloat
+- ~~`authz`~~ - permission delegation, never used
+- ~~`feegrant`~~ - fee payment delegation, never used  
+- ~~`group`~~ - on-chain DAO/multisig, never used
+- ~~`epochs`~~ - scheduled hooks, never used
+- ~~`vesting`~~ - token lockups, never used
+- ~~`mint`~~ - SDK inflation minting, never used (we do custom minting via bank)
+- ~~`circuit`~~ - emergency shutdown, never used
+- ~~`evidence`~~ - double-sign evidence, never used
 
-### Actually Needed
+### Actually Needed (kept)
 - `auth` - accounts, signatures
 - `bank` - balances, mint/burn (heavily used)
 - `staking` - validator set (delegation disabled via ante)
@@ -111,12 +114,12 @@ Cleaner separation between "what happened" and "current state"
 - `genutil` - genesis init
 - `consensus` - required by SDK
 
-### Partially Used (infrastructure only)
+### Partially Used (infrastructure only, kept)
 - `params` - legacy, only for subspaces
 - `slashing` - only in export.go and PunishValidator
 - `distribution` - only in export.go
 
 ### Summary
-- 8 modules are pure bloat
-- ~7 modules actually needed
+- ~~8 modules are pure bloat~~ → All removed
+- ~7 modules actually needed → Kept
 
