@@ -6,6 +6,9 @@ import { useState, useEffect, useCallback } from 'react';
 import Api from '../lib/api';
 import Storage from './Storage';
 
+const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
+const OPTIMISTIC_CLAIM_TTL_MS = 45000;
+
 /**
  * Hook to fetch and manage daily quest data.
  * 
@@ -24,35 +27,6 @@ export function useQuests() {
     const [initialLoadDone, setInitialLoadDone] = useState(false);
 
     const userAddress = Storage.load('publicKey', '');
-
-    // Helper to get MIRAGE reward from quest rewards array
-    const getQuestMirageReward = (rewards) => {
-        if (!rewards) return 0;
-        const mirageReward = rewards.find(r => r.type === 'mirage');
-        return mirageReward ? (mirageReward.amount || 0) : 0;
-    };
-
-    // Helper to detect newly completed quests and optimistically update balance
-    const checkNewlyCompletedQuests = useCallback((prevQuests, newQuests, multiplier) => {
-        if (!prevQuests || prevQuests.length === 0) return;
-        
-        newQuests.forEach(newQ => {
-            if (!newQ.completed) return;
-            const prevQ = prevQuests.find(p => p.id === newQ.id);
-            // Quest is newly completed if it wasn't completed before
-            if (prevQ && !prevQ.completed && newQ.completed) {
-                const reward = getQuestMirageReward(newQ.rewards);
-                const rewardWithMultiplier = Math.round(reward * multiplier);
-                if (rewardWithMultiplier > 0) {
-                    // Optimistically add reward to balance (in umirage)
-                    const currentBalance = Number(Storage.load('user_balance', '0')) || 0;
-                    const newBalance = currentBalance + (rewardWithMultiplier * 1_000_000);
-                    Storage.save('user_balance', String(newBalance));
-                    console.log(`[useQuests] Quest "${newQ.title}" completed! Optimistically added ${rewardWithMultiplier} MIRAGE to balance`);
-                }
-            }
-        });
-    }, []);
 
     const fetchQuests = useCallback(async (isRefresh = false) => {
         if (!userAddress) {
@@ -93,18 +67,13 @@ export function useQuests() {
                 // Merge updates to preserve stable references - only update progress/completed
                 setDailyQuests(prev => {
                     if (prev.length === 0 || prev.length !== newQuests.length) {
-                        // Check for newly completed quests on initial load vs cached
-                        checkNewlyCompletedQuests(prev, newQuests, dailyResponse.reward_multiplier || 1);
                         return newQuests;
                     }
                     // Check if quest IDs match (same quests, just updated progress)
                     const sameQuests = prev.every((q, i) => q.id === newQuests[i]?.id);
                     if (!sameQuests) {
-                        checkNewlyCompletedQuests(prev, newQuests, dailyResponse.reward_multiplier || 1);
                         return newQuests;
                     }
-                    // Check for newly completed quests and optimistically update balance
-                    checkNewlyCompletedQuests(prev, newQuests, dailyResponse.reward_multiplier || 1);
                     // Update only progress and completed fields
                     return prev.map((q, i) => ({
                         ...q,
@@ -128,17 +97,6 @@ export function useQuests() {
                     if (!prev || prev.id !== newFlash.id) {
                         console.log('[useQuests] Flash quest replaced (different ID)');
                         return newFlash;
-                    }
-                    // Check if flash quest is newly completed
-                    if (!prev.completed && newFlash.completed) {
-                        const reward = getQuestMirageReward(newFlash.rewards);
-                        const rewardWithMultiplier = Math.round(reward * (dailyResponse.reward_multiplier || 1));
-                        if (rewardWithMultiplier > 0) {
-                            const currentBalance = Number(Storage.load('user_balance', '0')) || 0;
-                            const newBalance = currentBalance + (rewardWithMultiplier * 1_000_000);
-                            Storage.save('user_balance', String(newBalance));
-                            console.log(`[useQuests] Flash quest "${newFlash.title}" completed! Optimistically added ${rewardWithMultiplier} MIRAGE to balance`);
-                        }
                     }
                     // Same flash quest, update progress/completed/seconds_remaining
                     console.log('[useQuests] Flash quest merged - progress:', prev.progress, '->', newFlash.progress);
@@ -248,6 +206,26 @@ export function usePendingRewards() {
 
     const userAddress = Storage.load('publicKey', '');
 
+    const setOptimisticClaimBalance = useCallback((umirageAmount) => {
+        const amount = Number(umirageAmount);
+        if (!Number.isFinite(amount) || amount <= 0) return;
+        const deltaUmirage = Math.round(amount);
+        const baseRaw = Storage.load('user_balance', null);
+        const baseNum = Number(baseRaw);
+        const payload = {
+            delta_umirage: deltaUmirage,
+            base_umirage: Number.isFinite(baseNum) ? baseNum : null,
+            expires_at_ms: Date.now() + OPTIMISTIC_CLAIM_TTL_MS,
+        };
+        Storage.save(OPTIMISTIC_CLAIM_KEY, payload);
+        console.log('[usePendingRewards] Optimistic claim balance set', payload);
+    }, []);
+
+    const clearOptimisticClaimBalance = useCallback((reason) => {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        console.log(`[usePendingRewards] Optimistic claim balance cleared: ${reason}`);
+    }, []);
+
     const fetchRewards = useCallback(async () => {
         if (!userAddress) {
             setLoading(false);
@@ -289,6 +267,10 @@ export function usePendingRewards() {
         try {
             setClaiming(true);
             setError(null);
+            setOptimisticClaimBalance(totalAfterMultiplier);
+            try {
+                window.dispatchEvent(new CustomEvent('optimisticBalanceUpdate'));
+            } catch (_) { }
 
             const response = await Api.post('/rewards/claim', { owner: userAddress });
 
@@ -301,11 +283,13 @@ export function usePendingRewards() {
                     txHash: response.tx_hash,
                 };
             } else {
+                clearOptimisticClaimBalance('claim_failed');
                 setError(response.error || 'Claim failed');
                 return { success: false, error: response.error };
             }
         } catch (err) {
             console.error('Failed to claim rewards:', err);
+            clearOptimisticClaimBalance('claim_error');
             // Try to parse JSON error from HTTP error message (e.g., "HTTP 503: {...}")
             let errorCode = err.message;
             try {
@@ -320,7 +304,7 @@ export function usePendingRewards() {
         } finally {
             setClaiming(false);
         }
-    }, [userAddress, claiming, totalAfterMultiplier, fetchRewards]);
+    }, [userAddress, claiming, totalAfterMultiplier, fetchRewards, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
 
     useEffect(() => {
         fetchRewards();

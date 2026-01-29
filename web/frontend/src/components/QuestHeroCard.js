@@ -558,7 +558,7 @@ function getQuestRequirements(quest) {
     }
     if (quest.time_spacing_minutes) {
         const mins = quest.time_spacing_minutes;
-        reqs.push(mins >= 60 ? `Min ${mins / 60} hour${mins >= 120 ? 's' : ''} between each` : `Min ${mins} min between each`);
+        reqs.push(mins >= 60 ? `Min ${mins / 60} hour${mins >= 120 ? 's' : ''} between each` : `Min ${mins} minute${mins === 1 ? '' : 's'} between each`);
     }
     if (quest.unique_target) {
         reqs.push('Must be different targets');

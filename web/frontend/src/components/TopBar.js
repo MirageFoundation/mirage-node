@@ -6,6 +6,25 @@ import Storage from "../utils/Storage";
 import Button from "./Button";
 import { formatMirageBalance } from "../utils/formatters";
 
+const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
+
+const resolveOptimisticDelta = (currentBalance) => {
+    const payload = Storage.load(OPTIMISTIC_CLAIM_KEY, null);
+    if (!payload || typeof payload !== 'object') return 0;
+    const delta = Number(payload.delta_umirage);
+    const base = Number(payload.base_umirage);
+    const expiresAt = Number(payload.expires_at_ms);
+    if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    if (Number.isFinite(currentBalance) && Number.isFinite(base) && currentBalance !== base) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    return delta;
+};
+
 const UserControls = styled.div`
     display: flex;
     align-items: center;
@@ -328,6 +347,7 @@ function TopBar({ state }) {
         if (stored === null) return null; // Not loaded yet
         return Number(stored) || 0;
     });
+    const [optimisticDeltaUmirage, setOptimisticDeltaUmirage] = useState(0);
     const menuRef = useRef(null);
     const mountedRef = useRef(true);
 
@@ -445,13 +465,32 @@ function TopBar({ state }) {
     useEffect(() => {
         if (!hasPublicKey) {
             setUserBalance(null);
+            setOptimisticDeltaUmirage(0);
+            Storage.remove(OPTIMISTIC_CLAIM_KEY);
             return;
         }
+
+        const applyBalanceUpdate = (storedValue) => {
+            if (storedValue === null || storedValue === undefined) {
+                setUserBalance(null);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const balance = Number(storedValue);
+            if (!Number.isFinite(balance)) {
+                setUserBalance(0);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const optimisticDelta = resolveOptimisticDelta(balance);
+            setUserBalance(balance);
+            setOptimisticDeltaUmirage(optimisticDelta);
+        };
 
         const checkBalance = () => {
             const stored = Storage.load('user_balance', null);
             if (stored === null) return; // Not loaded yet, keep showing "~"
-            setUserBalance(Number(stored) || 0);
+            applyBalanceUpdate(stored);
         };
 
         // Poll for changes (TransactionHandler updates this)
@@ -460,14 +499,21 @@ function TopBar({ state }) {
         // Also listen for storage events (cross-tab sync)
         const handleStorage = (e) => {
             if (e.key === 'user_balance') {
-                setUserBalance(Number(e.newValue) || 0);
+                applyBalanceUpdate(e.newValue);
             }
         };
+        const handleOptimisticUpdate = () => {
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return;
+            applyBalanceUpdate(stored);
+        };
         window.addEventListener('storage', handleStorage);
+        window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
 
         return () => {
             clearInterval(interval);
             window.removeEventListener('storage', handleStorage);
+            window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
         };
     }, [hasPublicKey]);
 
@@ -511,6 +557,8 @@ function TopBar({ state }) {
         return pathname === path;
     };
 
+    const displayBalance = userBalance === null ? null : userBalance + optimisticDeltaUmirage;
+
     return (
         <SearchContainer>
             <SearchRow>
@@ -524,7 +572,7 @@ function TopBar({ state }) {
                 />
                 {hasPublicKey && (
                     <BalanceDisplay title="Your MIRAGE balance">
-                        <BalanceAmount>{userBalance === null ? '~' : formatMirageBalance(userBalance)}</BalanceAmount>
+                        <BalanceAmount>{displayBalance === null ? '~' : formatMirageBalance(displayBalance)}</BalanceAmount>
                         <BalanceLabel>MIRAGE</BalanceLabel>
                     </BalanceDisplay>
                 )}
