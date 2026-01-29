@@ -26,7 +26,7 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.3-sdk-bloat"
+UPGRADE_NAME = "v1.10.4-restore-sdk"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.10"
 
@@ -46,14 +46,15 @@ ALL_UPGRADES = [
     "v1.9.1-seq-fix",
     "v1.9.1-query-fix",
     "v1.9.2-bridge-fee-endblock",
-    "v1.10.0-bridge-refactor",
     "v1.9.3-bridge-fee-burn",
     "v1.9.4-bridge-attestor-fix",
     "v1.9.5-bridge-no-pow",
     "v1.9.7-bridge-replay",
     "v1.9.9-retention",
+    "v1.10.0-bridge-refactor",
     "v1.10.0-remove-ibc",
     "v1.10.3-sdk-bloat",
+    "v1.10.4-restore-sdk",
 ]
 
 
@@ -450,6 +451,42 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, upgrade_name: str, f
             print(f"   [OK] upgrade plan: {name}")
 
 
+def check_sdk_modules_restored(miraged: str, failures: list[str], warnings: list[str]) -> None:
+    """Verify that SDK modules removed in v1.10.3-sdk-bloat are present again."""
+    print("\n-> Checking SDK modules restored...")
+
+    query_modules = ["authz", "feegrant", "group", "epochs", "circuit", "evidence", "mint"]
+    tx_modules = ["authz", "feegrant", "group"]
+
+    try:
+        q_help = subprocess.run([miraged, "q", "--help"], capture_output=True, text=True, check=False)
+        q_output = (q_help.stdout + q_help.stderr).lower()
+    except Exception as e:
+        failures.append(f"cannot run '{miraged} q --help': {e}")
+        return
+
+    for mod in query_modules:
+        if f"\n  {mod}" in q_output or f"\n\t{mod}" in q_output or f"  {mod} " in q_output:
+            print(f"   [OK] q {mod}: command present")
+        else:
+            print(f"   [FAIL] q {mod}: command missing")
+            failures.append(f"SDK module '{mod}' not present in query commands")
+
+    try:
+        tx_help = subprocess.run([miraged, "tx", "--help"], capture_output=True, text=True, check=False)
+        tx_output = (tx_help.stdout + tx_help.stderr).lower()
+    except Exception as e:
+        warnings.append(f"cannot run '{miraged} tx --help': {e}")
+        return
+
+    for mod in tx_modules:
+        if f"\n  {mod}" in tx_output or f"\n\t{mod}" in tx_output or f"  {mod} " in tx_output:
+            print(f"   [OK] tx {mod}: command present")
+        else:
+            print(f"   [WARN] tx {mod}: command missing")
+            warnings.append(f"tx {mod} command missing after restore (verify module wiring)")
+
+
 def fetch_core_params(miraged: str, rpc: str) -> dict:
     return _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
 
@@ -734,98 +771,6 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
     except Exception as e:
         print(f"   [FAIL] current_difficulty: {e}")
         failures.append(f"core difficulty invalid: {e}")
-
-
-def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
-    """Verify that SDK bloat modules were successfully removed."""
-    print("\n-> Checking SDK bloat modules removed...")
-    
-    # Modules that should be removed and their query commands
-    removed_modules = [
-        ("authz", [miraged, "q", "authz", "grants", "--node", rpc]),
-        ("feegrant", [miraged, "q", "feegrant", "grants", "--node", rpc]),
-        ("group", [miraged, "q", "group", "groups", "--node", rpc]),
-        ("mint", [miraged, "q", "mint", "params", "--node", rpc]),
-        ("evidence", [miraged, "q", "evidence", "--node", rpc]),
-    ]
-    
-    # These modules don't have query commands or are harder to check:
-    # - epochs: custom module, may not have standard query
-    # - circuit: circuit breaker, may not have standard query
-    # - vesting: account types only, no separate store/query
-    
-    all_removed = True
-    for module_name, cmd in removed_modules:
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            output = (p.stdout + p.stderr).lower()
-            
-            # Module is removed if command fails (non-zero exit) and output indicates missing module
-            # Check for various error patterns that indicate the module doesn't exist
-            removal_indicators = [
-                "unknown query path",
-                "unknown command",  # CLI subcommand doesn't exist
-                "unknown flag",     # CLI rejects flags because subcommand missing
-                "not found",
-                "unknown module",
-                "unregistered",
-                "no handler",
-                "rpc error",
-                "not implemented",
-                "fatal:",           # CLI fatal errors
-            ]
-            
-            # Module is removed if: non-zero exit code OR any removal indicator found
-            is_removed = p.returncode != 0 or any(indicator in output for indicator in removal_indicators)
-            
-            if is_removed:
-                print(f"   [OK] {module_name}: removed (query fails as expected)")
-            else:
-                # Module might still exist - this is a failure
-                print(f"   [FAIL] {module_name}: still queryable!")
-                failures.append(f"SDK bloat module '{module_name}' was not removed - query still works")
-                all_removed = False
-        except Exception as e:
-            # Exception likely means module is gone
-            print(f"   [OK] {module_name}: removed (command error: {e})")
-    
-    # Also check that these modules are NOT in the app state via genesis
-    # (This is a secondary check)
-    print("\n   Checking module help commands don't exist...")
-    help_checks = [
-        ("authz", [miraged, "tx", "authz", "--help"]),
-        ("feegrant", [miraged, "tx", "feegrant", "--help"]),
-        ("group", [miraged, "tx", "group", "--help"]),
-    ]
-    
-    for module_name, cmd in help_checks:
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            output = (p.stdout + p.stderr).lower()
-            
-            # Module is removed if:
-            # 1. Command fails with error indicators, OR
-            # 2. The module name doesn't appear in "Available Commands" section
-            error_indicators = ["unknown command", "unknown flag", "fatal:", "error:"]
-            has_error = p.returncode != 0 or any(ind in output for ind in error_indicators)
-            
-            # Check if module appears as an available command (e.g., "  authz  " with spacing)
-            module_listed = f"  {module_name} " in output or f"\n  {module_name}\t" in output
-            
-            is_removed = has_error or not module_listed
-            
-            if is_removed:
-                print(f"   [OK] tx {module_name}: command removed")
-            else:
-                print(f"   [WARN] tx {module_name}: help still available (may be CLI stub)")
-                warnings.append(f"tx {module_name} help still available - verify module is truly removed")
-        except Exception:
-            print(f"   [OK] tx {module_name}: command removed")
-    
-    if all_removed:
-        print("\n   [OK] All SDK bloat modules verified as removed")
-    else:
-        print("\n   [FAIL] Some SDK bloat modules still present!")
 
 
 def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
@@ -1211,9 +1156,8 @@ def main() -> int:
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
 
-    # For v1.10.3-sdk-bloat upgrade, verify modules were removed
-    if "sdk-bloat" in upgrade_name and args.phase == "post":
-        check_sdk_bloat_removed(miraged, rpc, failures, warnings)
+    if "restore-sdk" in upgrade_name and args.phase == "post":
+        check_sdk_modules_restored(miraged, failures, warnings)
 
     try:
         core = fetch_core_params(miraged, rpc)

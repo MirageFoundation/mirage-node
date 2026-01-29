@@ -33,6 +33,9 @@
                 }
             ]
         },
+        "authz": {
+            "authorization": []
+        },
         "bank": {
             "params": {
                 "send_enabled": [],
@@ -90,6 +93,10 @@
                 }
             ],
             "send_enabled": []
+        },
+        "circuit": {
+            "account_permissions": [],
+            "disabled_type_urls": []
         },
         "consensus": null,
         "core": {
@@ -271,6 +278,52 @@
             "delegator_starting_infos": [],
             "validator_slash_events": []
         },
+        "epochs": {
+            "epochs": [
+                {
+                    "identifier": "day",
+                    "start_time": "0001-01-01T00:00:00Z",
+                    "duration": "86400s",
+                    "current_epoch": "0",
+                    "current_epoch_start_time": "0001-01-01T00:00:00Z",
+                    "epoch_counting_started": false,
+                    "current_epoch_start_height": "0"
+                },
+                {
+                    "identifier": "hour",
+                    "start_time": "0001-01-01T00:00:00Z",
+                    "duration": "3600s",
+                    "current_epoch": "0",
+                    "current_epoch_start_time": "0001-01-01T00:00:00Z",
+                    "epoch_counting_started": false,
+                    "current_epoch_start_height": "0"
+                },
+                {
+                    "identifier": "minute",
+                    "start_time": "0001-01-01T00:00:00Z",
+                    "duration": "60s",
+                    "current_epoch": "0",
+                    "current_epoch_start_time": "0001-01-01T00:00:00Z",
+                    "epoch_counting_started": false,
+                    "current_epoch_start_height": "0"
+                },
+                {
+                    "identifier": "week",
+                    "start_time": "0001-01-01T00:00:00Z",
+                    "duration": "604800s",
+                    "current_epoch": "0",
+                    "current_epoch_start_time": "0001-01-01T00:00:00Z",
+                    "epoch_counting_started": false,
+                    "current_epoch_start_height": "0"
+                }
+            ]
+        },
+        "evidence": {
+            "evidence": []
+        },
+        "feegrant": {
+            "allowances": []
+        },
         "genutil": {
             "gen_txs": [
                 {
@@ -377,6 +430,16 @@
             },
             "constitution": ""
         },
+        "group": {
+            "group_seq": "0",
+            "groups": [],
+            "group_members": [],
+            "group_policy_seq": "0",
+            "group_policies": [],
+            "proposal_seq": "0",
+            "proposals": [],
+            "votes": []
+        },
         "ibc": {
             "client_genesis": {
                 "clients": [],
@@ -440,6 +503,20 @@
                 }
             }
         },
+        "mint": {
+            "minter": {
+                "inflation": "0.000000000000000000",
+                "annual_provisions": "0.000000000000000000"
+            },
+            "params": {
+                "mint_denom": "umirage",
+                "inflation_rate_change": "0.000000000000000000",
+                "inflation_max": "0.000000000000000000",
+                "inflation_min": "0.000000000000000000",
+                "goal_bonded": "0.670000000000000000",
+                "blocks_per_year": "10512000"
+            }
+        },
         "params": null,
         "runtime": null,
         "slashing": {
@@ -479,7 +556,8 @@
             },
             "total_escrowed": []
         },
-        "upgrade": {}
+        "upgrade": {},
+        "vesting": {}
     },
     "consensus": {
         "params": {
