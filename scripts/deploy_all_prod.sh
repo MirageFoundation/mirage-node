@@ -60,10 +60,10 @@ fi
 # Hard-coded production hosts
 SSH_USER="${SSH_USER:-root}"
 HOSTS=(
-  "mirage.talk"
   "mirage.vote"
   "146.190.108.140"
   "139.59.9.96"  
+  "mirage.talk"
 )
 
 # Get image tag info
