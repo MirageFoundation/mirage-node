@@ -1,3 +1,52 @@
+## Review Notes: Suggested Order and Rationale
+
+These notes are meant to turn the themes below into an execution order with explicit rationale, risks, and dependency flow.
+
+### 0. Baseline: measure and confirm intent (short, 1-2 days)
+- Confirm the intended outcomes for each effort: why we are doing it, and what success looks like.
+- For each item below, list expected wins (bug surface reduction, deploy simplicity, runtime performance) and clear exit criteria.
+- This prevents large refactors from drifting without a finish line.
+
+### 1. SDK bloat removal (if we do it, do it first)
+- Rationale: lowest coupling to application logic; reduces attack surface, binary size, build time, and upgrade complexity.
+- Risk: module removal can have hidden dependencies (genesis, app wiring, CLI, testnet configs).
+- Dependency flow:
+  - Inventory module usage in `app.go`, genesis, and any CLI wiring.
+  - Remove "pure bloat" modules first (authz, feegrant, group, epochs, vesting, mint, circuit, evidence).
+  - Run full chain build + local docker boot to confirm no hidden wiring remains.
+- Expected outcome: leaner binary, fewer upgrade paths, fewer config knobs.
+
+### 2. Protobuf code generation in Python (reduce schema drift)
+- Rationale: this is the largest current source of subtle correctness drift.
+- Dependency flow:
+  - Introduce generated Python types for protobufs (buf/protoc).
+  - Replace `datatypes.py` dynamic definitions with generated types.
+  - Verify parity via a small set of serialization tests (same message bytes for Go/Python).
+- Expected outcome: a single schema source of truth and fewer manual edits.
+
+### 3. Clarify chain vs indexer enforcement (delete, ownership semantics)
+- Rationale: security and correctness semantics are user-facing and need clarity.
+- Options (choose one and document clearly):
+  - Enforce ownership on-chain and reject invalid deletes.
+  - Keep on-chain permissive but mark as "request" and surface state clearly to users.
+- Expected outcome: users cannot misunderstand a "successful" on-chain tx that becomes a no-op.
+
+### 4. Indexer event sourcing (if we need long-term audit/replay)
+- Rationale: enables replay/rebuild, simplifies debugging, and improves recovery.
+- This is larger than it looks: impacts schema, storage, backfill tooling, and query layer.
+- Only start after protobuf generation is stable, so we don't create duplicated systems.
+
+### 5. Language consolidation (Go indexer and backend)
+- Rationale: big architectural change, but also the biggest disruption.
+- Prereq: protobuf generation is in place and the SDK bloat is already resolved.
+- Sequence:
+  - Start with one service (indexer or backend), not both at once.
+  - Define cross-service API contracts first.
+  - Port in thin slices and keep data models mirrored until the cutover.
+- Expected outcome: reduce cross-language serialization drift and improve type safety.
+
+---
+
 1. Language Consistency: Go Everywhere
 Current: Go (chain, orchestrator) + Python (indexer, backend) + JavaScript (frontend)
 The problem: The canonical serialization must be byte-identical across Go, Python, and JavaScript. This is a maintenance nightmare and a source of subtle bugs. Three separate implementations of uvarint, encStr, encBytes, field ordering...

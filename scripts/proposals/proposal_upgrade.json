@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.10.0-remove-ibc",
+                "name": "v1.10.3-sdk-bloat",
                 "height": "T+50",
-                "info": "Remove IBC/Osmosis support"
+                "info": "Remove unused SDK modules"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.10.0-remove-ibc",
-    "summary": "Removes IBC and Osmosis bridge support from Mirage.\n\nChanges:\n- Removes all IBC module integration (transfer, client, connection, channel)\n- Removes Osmosis from bridge_chains configuration\n- Removes MsgIBCTransfer message type\n- Renames MsgMintTo to MsgMintTokens (field: recipient → target)\n- Adds MsgBurnTokens for governance-controlled token burns\n- Cleans up Hermes relayer tooling and configs\n\nThe Solana attested bridge remains fully functional.\n\nBINARY REQUIREMENT: All validators must update to v1.10.0 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.10.3-sdk-bloat",
+    "summary": "Removes unused Cosmos SDK modules to reduce binary size and attack surface.\n\nRemoved modules:\n- authz (permission delegation)\n- feegrant (fee payment delegation)\n- group (on-chain DAO/multisig)\n- epochs (scheduled hooks)\n- mint (SDK inflation minting - we use custom minting via core module)\n- circuit (emergency shutdown)\n- evidence (double-sign evidence)\n\nThis upgrade deletes the KV stores for these modules. The chain will fail to start if validators run the new binary before the upgrade height.\n\nBINARY REQUIREMENT: All validators must update to v1.10.3 binary BEFORE the upgrade height.",
     "expedited": true
 }
