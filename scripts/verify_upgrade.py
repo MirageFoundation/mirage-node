@@ -736,6 +736,87 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
         failures.append(f"core difficulty invalid: {e}")
 
 
+def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
+    """Verify that SDK bloat modules were successfully removed."""
+    print("\n-> Checking SDK bloat modules removed...")
+    
+    # Modules that should be removed and their query commands
+    removed_modules = [
+        ("authz", [miraged, "q", "authz", "grants", "--node", rpc]),
+        ("feegrant", [miraged, "q", "feegrant", "grants", "--node", rpc]),
+        ("group", [miraged, "q", "group", "groups", "--node", rpc]),
+        ("mint", [miraged, "q", "mint", "params", "--node", rpc]),
+        ("evidence", [miraged, "q", "evidence", "--node", rpc]),
+    ]
+    
+    # These modules don't have query commands or are harder to check:
+    # - epochs: custom module, may not have standard query
+    # - circuit: circuit breaker, may not have standard query
+    # - vesting: account types only, no separate store/query
+    
+    all_removed = True
+    for module_name, cmd in removed_modules:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            output = (p.stdout + p.stderr).lower()
+            
+            # Module is removed if:
+            # 1. Command returns error about unknown/unregistered module
+            # 2. Command returns "not found" or similar
+            # 3. Specific "unknown query path" error
+            removal_indicators = [
+                "unknown query path",
+                "not found",
+                "unknown module",
+                "unregistered",
+                "no handler",
+                "rpc error",
+                "not implemented",
+            ]
+            
+            is_removed = any(indicator in output for indicator in removal_indicators)
+            
+            if is_removed:
+                print(f"   [OK] {module_name}: removed (query fails as expected)")
+            else:
+                # Module might still exist - this is a failure
+                print(f"   [FAIL] {module_name}: still queryable!")
+                failures.append(f"SDK bloat module '{module_name}' was not removed - query still works")
+                all_removed = False
+        except Exception as e:
+            # Exception likely means module is gone
+            print(f"   [OK] {module_name}: removed (command error: {e})")
+    
+    # Also check that these modules are NOT in the app state via genesis
+    # (This is a secondary check)
+    print("\n   Checking module help commands don't exist...")
+    help_checks = [
+        ("authz", [miraged, "tx", "authz", "--help"]),
+        ("feegrant", [miraged, "tx", "feegrant", "--help"]),
+        ("group", [miraged, "tx", "group", "--help"]),
+    ]
+    
+    for module_name, cmd in help_checks:
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            output = (p.stdout + p.stderr).lower()
+            
+            # If help shows "unknown command", module is removed
+            if "unknown command" in output or p.returncode != 0:
+                print(f"   [OK] tx {module_name}: command removed")
+            else:
+                # Help works means module still registered
+                print(f"   [WARN] tx {module_name}: help still available (may be CLI stub)")
+                warnings.append(f"tx {module_name} help still available - verify module is truly removed")
+        except Exception:
+            print(f"   [OK] tx {module_name}: command removed")
+    
+    if all_removed:
+        print("\n   [OK] All SDK bloat modules verified as removed")
+    else:
+        print("\n   [FAIL] Some SDK bloat modules still present!")
+
+
 def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
     """Check that Python protobuf definitions are complete and importable."""
     print("\n-> Checking Python protobuf definitions...")
@@ -1118,6 +1199,10 @@ def main() -> int:
     
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
+
+    # For v1.10.3-sdk-bloat upgrade, verify modules were removed
+    if "sdk-bloat" in upgrade_name and args.phase == "post":
+        check_sdk_bloat_removed(miraged, rpc, failures, warnings)
 
     try:
         core = fetch_core_params(miraged, rpc)
