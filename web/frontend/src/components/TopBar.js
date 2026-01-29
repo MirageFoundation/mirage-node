@@ -4,11 +4,59 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
 import Button from "./Button";
+import { formatMirageBalance } from "../utils/formatters";
+
+const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
+
+const resolveOptimisticDelta = (currentBalance) => {
+    const payload = Storage.load(OPTIMISTIC_CLAIM_KEY, null);
+    if (!payload || typeof payload !== 'object') return 0;
+    const delta = Number(payload.delta_umirage);
+    const base = Number(payload.base_umirage);
+    const expiresAt = Number(payload.expires_at_ms);
+    if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    if (Number.isFinite(currentBalance) && Number.isFinite(base) && currentBalance !== base) {
+        Storage.remove(OPTIMISTIC_CLAIM_KEY);
+        return 0;
+    }
+    return delta;
+};
 
 const UserControls = styled.div`
     display: flex;
     align-items: center;
     gap: 0.75rem;
+`;
+
+const BalanceDisplay = styled.div`
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.85rem;
+    background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    border-radius: 18px;
+    flex-shrink: 0;
+
+    @media (max-width: 800px) {
+        padding: 0.45rem 0.7rem;
+    }
+`;
+
+const BalanceAmount = styled.span`
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+`;
+
+const BalanceLabel = styled.span`
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
 const TabletLogo = styled(Link)`
@@ -60,8 +108,8 @@ const TabletNavItem = styled(Link)`
 
     &:hover {
         background: ${({ $active }) => $active
-            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-            : 'rgba(102, 126, 234, 0.15)'};
+        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+        : 'rgba(102, 126, 234, 0.15)'};
         border-color: ${({ $active }) => $active ? 'transparent' : 'rgba(102, 126, 234, 0.3)'};
     }
 `;
@@ -241,16 +289,6 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
             >
                 Network
             </MenuItem>
-            {/* REFERRALS DISABLED FOR NOW
-            {(window.location.hostname === 'mirage.talk' || window.location.hostname === 'localhost') && (
-                <MenuItem
-                    to="/invite"
-                    onClick={() => handleItemClick('/invite')}
-                >
-                    Invite &amp; Earn
-                </MenuItem>
-            )}
-            */}
             {isAdmin && (
                 <>
                     <MenuDivider />
@@ -304,6 +342,12 @@ function TopBar({ state }) {
         }
     });
     const [searchQuery, setSearchQuery] = useState('');
+    const [userBalance, setUserBalance] = useState(() => {
+        const stored = Storage.load('user_balance', null);
+        if (stored === null) return null; // Not loaded yet
+        return Number(stored) || 0;
+    });
+    const [optimisticDeltaUmirage, setOptimisticDeltaUmirage] = useState(0);
     const menuRef = useRef(null);
     const mountedRef = useRef(true);
 
@@ -417,6 +461,62 @@ function TopBar({ state }) {
         setMenuOpen(false);
     }, [pathname]);
 
+    // Track user balance changes
+    useEffect(() => {
+        if (!hasPublicKey) {
+            setUserBalance(null);
+            setOptimisticDeltaUmirage(0);
+            Storage.remove(OPTIMISTIC_CLAIM_KEY);
+            return;
+        }
+
+        const applyBalanceUpdate = (storedValue) => {
+            if (storedValue === null || storedValue === undefined) {
+                setUserBalance(null);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const balance = Number(storedValue);
+            if (!Number.isFinite(balance)) {
+                setUserBalance(0);
+                setOptimisticDeltaUmirage(0);
+                return;
+            }
+            const optimisticDelta = resolveOptimisticDelta(balance);
+            setUserBalance(balance);
+            setOptimisticDeltaUmirage(optimisticDelta);
+        };
+
+        const checkBalance = () => {
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return; // Not loaded yet, keep showing "~"
+            applyBalanceUpdate(stored);
+        };
+
+        // Poll for changes (TransactionHandler updates this)
+        const interval = setInterval(checkBalance, 2000);
+
+        // Also listen for storage events (cross-tab sync)
+        const handleStorage = (e) => {
+            if (e.key === 'user_balance') {
+                applyBalanceUpdate(e.newValue);
+            }
+        };
+        const handleOptimisticUpdate = () => {
+            const stored = Storage.load('user_balance', null);
+            if (stored === null) return;
+            applyBalanceUpdate(stored);
+        };
+        window.addEventListener('storage', handleStorage);
+        window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('storage', handleStorage);
+            window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
+        };
+    }, [hasPublicKey]);
+
     const getInitials = (name) => {
         if (!name) return '?';
         let str = String(name).trim();
@@ -457,6 +557,8 @@ function TopBar({ state }) {
         return pathname === path;
     };
 
+    const displayBalance = userBalance === null ? null : userBalance + optimisticDeltaUmirage;
+
     return (
         <SearchContainer>
             <SearchRow>
@@ -468,6 +570,12 @@ function TopBar({ state }) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
                 />
+                {hasPublicKey && (
+                    <BalanceDisplay title="Your MIRAGE balance">
+                        <BalanceAmount>{displayBalance === null ? '~' : formatMirageBalance(displayBalance)}</BalanceAmount>
+                        <BalanceLabel>MIRAGE</BalanceLabel>
+                    </BalanceDisplay>
+                )}
                 {showAuthButton && (
                     <Button to="/create_account" variant="secondary" size="pill">Sign in / Create account</Button>
                 )}

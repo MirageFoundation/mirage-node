@@ -62,7 +62,6 @@ COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
 COPY shared/ /opt/mirage/shared/
-COPY referrals/ /opt/mirage/referrals/
 COPY deploy/ /opt/mirage/deploy/
 
 ## Note: We trust upstream build step to produce /opt/mirage/blockchain/bin/miraged
@@ -71,11 +70,14 @@ COPY deploy/ /opt/mirage/deploy/
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV PATH=/usr/local/bin:/usr/bin:/bin
+ENV PATH=/opt/mirage/blockchain/bin:/usr/local/bin:/usr/bin:/bin
 ENV PYTHONPATH=/opt/mirage
 ENV BACKEND_HOST=127.0.0.1
 ENV BACKEND_PORT=5000
 ENV TERM=xterm-256color
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+ENV PYTHONIOENCODING=utf-8
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y \
@@ -127,7 +129,6 @@ COPY --from=builder /opt/mirage/scripts /opt/mirage/scripts
 COPY --from=builder /opt/mirage/web/backend /opt/mirage/web/backend
 COPY --from=builder /opt/mirage/indexer /opt/mirage/indexer
 COPY --from=builder /opt/mirage/shared /opt/mirage/shared
-COPY --from=builder /opt/mirage/referrals /opt/mirage/referrals
 
 # Note: backend settings.yaml is already included in web/backend copy above
 
@@ -152,6 +153,7 @@ COPY --from=builder /opt/mirage/deploy/enable_validator_mode.sh /opt/mirage/depl
 
 # Setup scripts
 COPY --from=builder /opt/mirage/deploy/setup_orchestrator.py /opt/mirage/deploy/setup_orchestrator.py
+COPY --from=builder /opt/mirage/deploy/setup_rewards_pool.py /opt/mirage/deploy/setup_rewards_pool.py
 
 # Set working directory
 WORKDIR /opt/mirage

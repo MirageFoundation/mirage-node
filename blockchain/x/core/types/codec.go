@@ -47,5 +47,9 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMintedResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
+
+	// Register legacy message types for backwards compatibility (decoding old gov proposals)
+	// MsgMintTo was renamed to MsgMintTokens - we need to decode old proposals that used it
+	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgMintTo{})
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }

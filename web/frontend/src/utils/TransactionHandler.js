@@ -1341,12 +1341,17 @@ class TransactionHandler {
         this._statusStartTime = Date.now();
 
         let hadFailure = false;
+        let hadQuestAction = false; // Track if any quest-relevant actions were processed
         while (this.transactions.length > 0) {
             // Get the next transaction  
             const queued = this.transactions.shift() || {};
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
             const { _resolve: _ignored, _followKey: _ignored2, ...transaction } = queued;
             this.processedTransactions += 1;
+            // Track quest-relevant actions
+            if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
+                hadQuestAction = true;
+            }
 
 
             let last_block_hash = "";
@@ -1533,6 +1538,10 @@ class TransactionHandler {
                     const elapsedTime = ((Date.now() - this.startTime) / 1000).toFixed(1);
                     updateNotification(`Transaction submitted (took ${elapsedTime}s)`);
                 }
+            }
+            // Dispatch event for quest-relevant actions so quest progress can refresh
+            if (hadQuestAction) {
+                window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { batch: true } }));
             }
         }
 
@@ -3434,6 +3443,13 @@ class TransactionHandler {
                     if (endpoint === 'core/vote' && txHash) {
                         const target = (transaction && transaction.action === 'create_vote') ? transaction.target : null;
                         this._startVoteDetailsPoll(txHash, target);
+                    }
+
+                    // Dispatch event for quest-relevant actions so quest progress can refresh
+                    const action = transaction?.action;
+                    if (action === 'create_vote' || action === 'create_post' || action === 'create_comment') {
+                        console.log('[TransactionHandler] Dispatching questActionCompleted for action:', action);
+                        window.dispatchEvent(new CustomEvent('questActionCompleted', { detail: { action, txHash } }));
                     }
                 } else {
                     // API returned an error in the response body (not an exception)

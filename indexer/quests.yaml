@@ -1,0 +1,300 @@
+# Mirage Quest and Achievement Definitions
+#
+# Reward type definitions:
+# - type: "mirage" - MIRAGE tokens (amount in MIRAGE, not umirage)
+# - type: "icon" - Unlockable profile icon (future)
+# - type: "badge" - Achievement badge displayed on profile (future)
+# - type: "frame" - Profile frame/border (future)
+#
+# Quest parameters:
+# - action_type: The type of action that progresses this quest
+# - target_count: Number of actions needed to complete
+# - time_spacing_minutes: Minimum minutes between counted actions
+# - min_content_length: Minimum character count for posts/comments
+# - unique_target: Require unique targets (no voting same post twice)
+# - unique_topics_min: Minimum number of unique topics for votes
+# - allow_self: Whether self-interactions count (default: true)
+# - count_vote_changes: Whether changing a vote counts (default: false)
+# - quality_threshold: Minimum upvotes/score required
+# - unique_root_post: Comments must be on distinct root posts
+
+daily_quests:
+  - id: active_poster
+    title: "Active Poster"
+    description: "Create 5 posts, each at least 1 hour apart"
+    action_type: post
+    target_count: 5
+    time_spacing_minutes: 60
+    min_content_length: 120
+    rewards:
+      - type: mirage
+        amount: 1000
+
+  - id: quality_creator
+    title: "Quality Creator"
+    description: "Create a post that gets 10+ upvotes"
+    action_type: upvotes_received
+    target_count: 1
+    quality_threshold: 10
+    min_content_length: 120
+    rewards:
+      - type: mirage
+        amount: 2500
+
+  - id: engaged_commenter
+    title: "Engaged Commenter"
+    description: "Create a comment that gets 5+ upvotes"
+    action_type: comment_upvotes_received
+    target_count: 1
+    quality_threshold: 5
+    min_content_length: 5
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 1500
+
+  - id: community_curator
+    title: "Community Curator"
+    description: "Vote on 15 different posts, each at least 5 minutes apart"
+    action_type: vote
+    target_count: 15
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 1500
+
+  - id: balanced_voter
+    title: "Balanced Voter"
+    description: "Give 5 upvotes and 5 downvotes, each at least 5 minutes apart"
+    action_type: balanced_vote
+    target_upvotes: 5
+    target_downvotes: 5
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 1250
+
+  - id: topic_explorer
+    title: "Topic Explorer"
+    description: "Post in 3 different topics, each at least 1 hour apart"
+    action_type: unique_topic_post
+    target_count: 3
+    min_content_length: 30
+    time_spacing_minutes: 60
+    unique_topic: true
+    rewards:
+      - type: mirage
+        amount: 1000
+
+  - id: casual_poster
+    title: "Casual Poster"
+    description: "Create 2 posts today"
+    action_type: post
+    target_count: 2
+    min_content_length: 50
+    rewards:
+      - type: mirage
+        amount: 400
+
+  - id: conversation_contributor
+    title: "Conversation Contributor"
+    description: "Leave 5 comments on different posts"
+    action_type: comment
+    target_count: 5
+    min_content_length: 20
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 600
+
+  - id: quick_curator
+    title: "Quick Curator"
+    description: "Vote on 5 different posts"
+    action_type: vote
+    target_count: 5
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 300
+
+  - id: thoughtful_commenter
+    title: "Thoughtful Commenter"
+    description: "Leave 3 detailed comments (50+ chars each)"
+    action_type: comment
+    target_count: 3
+    min_content_length: 50
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 500
+
+  - id: daily_voter
+    title: "Daily Voter"
+    description: "Vote on 10 different posts"
+    action_type: vote
+    target_count: 10
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 500
+
+flash_quest_templates:
+  # Easy quests (small payouts, quick to complete)
+  - id: quick_vote
+    title: "Quick Vote"
+    description: "Vote on 3 different posts in the next 10 minutes"
+    action_type: vote
+    target_count: 3
+    time_window_minutes: 10
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 200
+
+  - id: first_comment
+    title: "First Comment"
+    description: "Leave a comment in the next 5 minutes"
+    action_type: comment
+    target_count: 1
+    time_window_minutes: 5
+    min_content_length: 20
+    rewards:
+      - type: mirage
+        amount: 100
+
+  - id: speed_voter
+    title: "Speed Voter"
+    description: "Vote on 5 different posts in the next 15 minutes"
+    action_type: vote
+    target_count: 5
+    time_window_minutes: 15
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 200
+
+  - id: quick_post
+    title: "Quick Post"
+    description: "Create a post in the next 10 minutes"
+    action_type: post
+    target_count: 1
+    time_window_minutes: 10
+    min_content_length: 50
+    rewards:
+      - type: mirage
+        amount: 250
+
+  - id: mini_commenter
+    title: "Mini Commenter"
+    description: "Leave 3 comments in the next 20 minutes"
+    action_type: comment
+    target_count: 3
+    time_window_minutes: 20
+    min_content_length: 15
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 450
+
+  - id: double_vote
+    title: "Double Vote"
+    description: "Vote on 2 different posts in the next 5 minutes"
+    action_type: vote
+    target_count: 2
+    time_window_minutes: 5
+    unique_target: true
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 100
+
+  # Medium quests (moderate payouts)
+  - id: comment_blitz
+    title: "Comment Blitz"
+    description: "Create 5 lengthy comments in the next hour, each 10 minutes apart"
+    action_type: comment
+    target_count: 5
+    time_spacing_minutes: 10
+    time_window_minutes: 60
+    quality_threshold: 0  # must not be negative
+    min_content_length: 30
+    unique_root_post: true
+    rewards:
+      - type: mirage
+        amount: 1500
+
+  - id: voting_spree
+    title: "Voting Spree"
+    description: "Vote on 15 different posts in the next 3 hours"
+    action_type: vote
+    target_count: 15
+    time_window_minutes: 180
+    time_spacing_minutes: 5
+    unique_target: true
+    unique_topics_min: 3
+    allow_self: false
+    count_vote_changes: false
+    rewards:
+      - type: mirage
+        amount: 2500
+
+achievements:
+  - id: first_viral
+    title: "First Viral Post"
+    description: "Have a post reach 50+ upvotes"
+    action_type: upvotes_received
+    target_count: 1
+    quality_threshold: 50
+    rewards:
+      - type: mirage
+        amount: 100000
+    badge_icon: "🔥"
+
+  - id: conversation_starter
+    title: "Conversation Starter"
+    description: "Have a post receive 20+ comments"
+    action_type: comments_received
+    target_count: 1
+    quality_threshold: 20
+    rewards:
+      - type: mirage
+        amount: 50000
+    badge_icon: "💬"
+
+  - id: trusted_member
+    title: "Trusted Member"
+    description: "Have 10 comments reach 5+ upvotes"
+    action_type: quality_comments
+    target_count: 10
+    quality_threshold: 5
+    rewards:
+      - type: mirage
+        amount: 75000
+    badge_icon: "⭐"
+
+  - id: topic_pioneer
+    title: "Topic Pioneer"
+    description: "Be the first to post in a new topic"
+    action_type: first_topic_post
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 20000
+    badge_icon: "🏴"

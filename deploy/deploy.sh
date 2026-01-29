@@ -644,12 +644,13 @@ else
 fi
 
 # Set hostname: prefer DOMAIN, fallback to MONIKER
-# Docker hostnames support dots (RFC 1123), so we only strip protocol prefixes and replace slashes/colons
+# Replace dots with dashes for tmux compatibility (tmux names can't have periods)
 if [ -n "$DOMAIN_VALUE" ]; then
-  HOSTNAME_ARG="--hostname $DOMAIN_VALUE"
+  CLEAN_HOSTNAME=$(echo "$DOMAIN_VALUE" | tr '.' '-')
+  HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 elif [ -n "$MONIKER_VALUE" ] && [ "$MONIKER_VALUE" != "mirage-node" ]; then
   MONIKER_ARG="-e MONIKER=\"$MONIKER_VALUE\""
-  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr '/:' '-')
+  CLEAN_HOSTNAME=$(echo "$MONIKER_VALUE" | sed 's|https\?://||' | tr './:' '-')
   HOSTNAME_ARG="--hostname $CLEAN_HOSTNAME"
 fi
 
@@ -685,8 +686,8 @@ stability_check() {
     elif [ "$st" = "running" ]; then
       if docker exec mirage echo ready >/dev/null 2>&1; then
         consec=$((consec+1))
-        echo "  -> Docker exec successful (need 3 consecutive)"
-        if [ "$consec" -ge 3 ]; then
+        echo "  -> Docker exec successful (need 5 consecutive)"
+        if [ "$consec" -ge 5 ]; then
           echo "  -> Container is stable!"
           return 0
         fi
@@ -725,8 +726,8 @@ for i in $(seq 1 60); do
   elif [ "$st" = "running" ]; then
     if docker exec mirage echo ready >/dev/null 2>&1; then
       consec=$((consec+1))
-      echo "  -> Docker exec successful (need 3 consecutive)"
-      if [ "$consec" -ge 3 ]; then
+      echo "  -> Docker exec successful (need 5 consecutive)"
+      if [ "$consec" -ge 5 ]; then
         echo "  -> Container is stable!"
         exit 0
       fi
@@ -766,11 +767,15 @@ if [ "$MODE" = "update" ]; then
   fi
 fi
 
-# Run host-side rate limiting setup - remote only
+# Run host-side security setup - remote only
 if [ "$LOCAL_MODE" -eq 0 ]; then
   echo "==> Running host rate limiting setup..."
   run_scp "$SCRIPT_DIR/enable_rate_limiting.sh" "$REMOTE:/tmp/enable_rate_limiting.sh"
   run_ssh "chmod +x /tmp/enable_rate_limiting.sh && /tmp/enable_rate_limiting.sh && rm /tmp/enable_rate_limiting.sh"
+  
+  echo "==> Running host fail2ban setup..."
+  run_scp "$SCRIPT_DIR/enable_fail2ban.sh" "$REMOTE:/tmp/enable_fail2ban.sh"
+  run_ssh "chmod +x /tmp/enable_fail2ban.sh && /tmp/enable_fail2ban.sh && rm /tmp/enable_fail2ban.sh"
 fi
 
 if [ "$LOCAL_MODE" -eq 1 ]; then

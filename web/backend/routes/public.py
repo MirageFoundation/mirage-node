@@ -1892,10 +1892,10 @@ def get_user_blocked():
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
             # Blocked posts
-            cur.execute("SELECT post_id FROM blocked_posts WHERE LOWER(owner)=LOWER(%s)", (addr,))
+            cur.execute("SELECT target FROM blocked_posts WHERE LOWER(owner)=LOWER(%s)", (addr,))
             blocked_posts = [row[0] for row in cur.fetchall()]
             # Blocked users
-            cur.execute("SELECT blocked FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
+            cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
             blocked_users = [row[0] for row in cur.fetchall()]
             conn.close()
         except Exception:
