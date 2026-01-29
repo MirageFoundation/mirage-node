@@ -21,7 +21,7 @@ const (
 )
 
 const (
-	sdkBloatUpgradeName = "v1.10.1-sdk-bloat"
+	sdkBloatUpgradeName = "v1.10.4-sdk-bloat"
 )
 
 var sdkBloatDeletedStores = []string{
@@ -993,19 +993,19 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.10.1-sdk-bloat: Remove unused SDK modules and delete their stores.
+	// v1.10.4-sdk-bloat: Remove unused SDK modules and delete their stores.
 	app.UpgradeKeeper.SetUpgradeHandler(
 		sdkBloatUpgradeName,
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.10.1-sdk-bloat...")
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-sdk-bloat...")
 
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, err
 			}
 
-			sdkCtx.Logger().Info("Upgrade to v1.10.1-sdk-bloat complete - unused SDK modules removed")
+			sdkCtx.Logger().Info("Upgrade to v1.10.4-sdk-bloat complete - unused SDK modules removed")
 			return toVM, nil
 		},
 	)
