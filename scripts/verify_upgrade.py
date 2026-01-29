@@ -764,8 +764,10 @@ def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warning
             # 1. Command returns error about unknown/unregistered module
             # 2. Command returns "not found" or similar
             # 3. Specific "unknown query path" error
+            # 4. CLI doesn't have the subcommand at all
             removal_indicators = [
                 "unknown query path",
+                "unknown command",  # CLI subcommand doesn't exist
                 "not found",
                 "unknown module",
                 "unregistered",
