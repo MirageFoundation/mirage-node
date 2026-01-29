@@ -16,7 +16,6 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	circuitkeeper "cosmossdk.io/x/circuit/keeper"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
-	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"mirage/docs"
 	corekeeper "mirage/x/core/keeper"
@@ -362,18 +361,8 @@ func New(
 	// Register upgrade handlers
 	app.RegisterUpgradeHandlers()
 
-	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
-	if err != nil {
-		panic(err)
-	}
-
-	if upgradeInfo.Name == sdkRestoreUpgradeName && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
-		app.SetStoreLoader(
-			upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storetypes.StoreUpgrades{
-				Added: sdkRestoreAddedStores,
-			}),
-		)
-	}
+	// NOTE: No StoreUpgrades needed - all module stores already exist with their data.
+	// The v1.10.4-restore-sdk upgrade just re-enables modules that were soft-removed.
 
 	/****  Module Options ****/
 

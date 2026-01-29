@@ -95,13 +95,18 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     conn = f"{ssh_user}@{host}"
     start_time = time.time()
     
+    rpc_status_url = "http://127.0.0.1/chain/rpc/status"
+    rpc_net_info_url = "http://127.0.0.1/chain/rpc/net_info"
+    backend_health_url = "http://127.0.0.1:5000/health"
+
     # Wait for RPC to be available (max 60s)
     status(f"  Waiting for RPC on {host}...")
+    status(f"  DEBUG: RPC status URL is {rpc_status_url}")
     rpc_ready = False
     for _ in range(20):
         try:
             result = subprocess.run(
-                f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status 2>/dev/null'",
+                f"ssh {conn} 'curl -sf {rpc_status_url} 2>/dev/null'",
                 shell=True,
                 check=False,
                 capture_output=True,
@@ -121,8 +126,9 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     
     # Check node has peers
     try:
+        status(f"  DEBUG: RPC net_info URL is {rpc_net_info_url}")
         result = subprocess.run(
-            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/net_info'",
+            f"ssh {conn} 'curl -sf {rpc_net_info_url}'",
             shell=True,
             check=True,
             capture_output=True,
@@ -140,8 +146,9 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     
     # Check backend health
     try:
+        status(f"  DEBUG: Backend health URL is {backend_health_url}")
         result = subprocess.run(
-            f"ssh {conn} 'curl -sf http://127.0.0.1:5000/health'",
+            f"ssh {conn} 'curl -sf {backend_health_url}'",
             shell=True,
             check=False,
             capture_output=True,
@@ -158,7 +165,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     # Check block height is increasing (node not stuck)
     try:
         result1 = subprocess.run(
-            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status'",
+            f"ssh {conn} 'curl -sf {rpc_status_url}'",
             shell=True,
             check=True,
             capture_output=True,
@@ -171,7 +178,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
         time.sleep(6)  # Wait for at least 1 block
         
         result2 = subprocess.run(
-            f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status'",
+            f"ssh {conn} 'curl -sf {rpc_status_url}'",
             shell=True,
             check=True,
             capture_output=True,
@@ -770,7 +777,7 @@ echo "PostgreSQL restore complete"
         time.sleep(3)
         try:
             result = subprocess.run(
-                f"ssh {conn} 'curl -sf http://127.0.0.1:26657/status'",
+                f"ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/status'",
                 shell=True,
                 check=False,
                 capture_output=True,
@@ -790,9 +797,9 @@ echo "PostgreSQL restore complete"
     status(f"Restore complete on {target_host}")
     print("\nVerification commands:")
     print(f"  # Check peers:")
-    print(f"  ssh {conn} 'docker exec mirage curl -sf http://127.0.0.1:26657/net_info | jq .result.n_peers'")
+    print(f"  ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/net_info | jq .result.n_peers'")
     print(f"  # Check sync status:")
-    print(f"  ssh {conn} 'docker exec mirage curl -sf http://127.0.0.1:26657/status | jq .result.sync_info'")
+    print(f"  ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/status | jq .result.sync_info'")
     print(f"  # Check backend health:")
     print(f"  ssh {conn} 'docker exec mirage curl -sf http://127.0.0.1:5000/health'")
 

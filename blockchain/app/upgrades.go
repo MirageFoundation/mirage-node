@@ -6,16 +6,9 @@ import (
 	"time"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
-	circuittypes "cosmossdk.io/x/circuit/types"
-	evidencetypes "cosmossdk.io/x/evidence/types"
-	feegrant "cosmossdk.io/x/feegrant"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
-	authz "github.com/cosmos/cosmos-sdk/x/authz"
-	epochstypes "github.com/cosmos/cosmos-sdk/x/epochs/types"
-	"github.com/cosmos/cosmos-sdk/x/group"
-	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 
 	coretypes "mirage/x/core/types"
 )
@@ -28,16 +21,6 @@ const (
 
 	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
-
-var sdkRestoreAddedStores = []string{
-	authz.ModuleName,
-	feegrant.ModuleName,
-	group.ModuleName,
-	epochstypes.ModuleName,
-	minttypes.ModuleName,
-	circuittypes.ModuleName,
-	evidencetypes.ModuleName,
-}
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
@@ -998,28 +981,21 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.10.4-restore-sdk: Restore SDK modules removed in v1.10.3-sdk-bloat
+	// v1.10.4-restore-sdk: Restore SDK modules that were soft-removed in v1.10.3-sdk-bloat
+	// These modules were excluded from the app but their store data was preserved.
+	// We just run migrations normally - stores will load their existing state.
 	app.UpgradeKeeper.SetUpgradeHandler(
 		sdkRestoreUpgradeName,
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
 			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-restore-sdk...")
 
-			// Force InitGenesis for restored modules by removing them from fromVM
-			// This is necessary because the stores were deleted and need to be re-initialized
-			restoredModules := []string{
-				"authz", "feegrant", "group", "epochs", "mint", "circuit", "evidence",
-			}
-			for _, mod := range restoredModules {
-				delete(fromVM, mod)
-			}
-
+			// Just run migrations normally - modules will load their existing store data
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, err
 			}
 
-			// NOTE: RunMigrations will call InitGenesis for any module missing from fromVM.
 			sdkCtx.Logger().Info("Upgrade to v1.10.4-restore-sdk complete - SDK modules restored")
 			return toVM, nil
 		},
