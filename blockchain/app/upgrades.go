@@ -1005,6 +1005,15 @@ func (app *App) RegisterUpgradeHandlers() {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
 			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-restore-sdk...")
 
+			// Force InitGenesis for restored modules by removing them from fromVM
+			// This is necessary because the stores were deleted and need to be re-initialized
+			restoredModules := []string{
+				"authz", "feegrant", "group", "epochs", "mint", "circuit", "evidence",
+			}
+			for _, mod := range restoredModules {
+				delete(fromVM, mod)
+			}
+
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, err
