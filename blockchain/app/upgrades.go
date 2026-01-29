@@ -6,9 +6,16 @@ import (
 	"time"
 
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
+	circuittypes "cosmossdk.io/x/circuit/types"
+	evidencetypes "cosmossdk.io/x/evidence/types"
+	feegrant "cosmossdk.io/x/feegrant"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
+	authz "github.com/cosmos/cosmos-sdk/x/authz"
+	epochstypes "github.com/cosmos/cosmos-sdk/x/epochs/types"
+	"github.com/cosmos/cosmos-sdk/x/group"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 
 	coretypes "mirage/x/core/types"
 )
@@ -18,20 +25,18 @@ const (
 	retentionBlocks         = int64(201600)
 	retentionBlockTimeSecs  = int64(3)
 	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
+
+	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
 
-const (
-	sdkBloatUpgradeName = "v1.10.3-sdk-bloat"
-)
-
-var sdkBloatDeletedStores = []string{
-	"authz",
-	"feegrant",
-	"group",
-	"epochs",
-	"mint",
-	"circuit",
-	"evidence",
+var sdkRestoreAddedStores = []string{
+	authz.ModuleName,
+	feegrant.ModuleName,
+	group.ModuleName,
+	epochstypes.ModuleName,
+	minttypes.ModuleName,
+	circuittypes.ModuleName,
+	evidencetypes.ModuleName,
 }
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
@@ -993,19 +998,20 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.10.3-sdk-bloat: Remove unused SDK modules and delete their stores.
+	// v1.10.4-restore-sdk: Restore SDK modules removed in v1.10.3-sdk-bloat
 	app.UpgradeKeeper.SetUpgradeHandler(
-		sdkBloatUpgradeName,
+		sdkRestoreUpgradeName,
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.10.3-sdk-bloat...")
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-restore-sdk...")
 
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, err
 			}
 
-			sdkCtx.Logger().Info("Upgrade to v1.10.3-sdk-bloat complete - unused SDK modules removed")
+			// NOTE: RunMigrations will call InitGenesis for any module missing from fromVM.
+			sdkCtx.Logger().Info("Upgrade to v1.10.4-restore-sdk complete - SDK modules restored")
 			return toVM, nil
 		},
 	)
