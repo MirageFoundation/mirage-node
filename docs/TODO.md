@@ -41,33 +41,4 @@ Cleaner separation between "what happened" and "current state"
 
 
 
-## Cosmos SDK Bloat Analysis
-
-### Pure Bloat (0 actual usage) - REMOVE
-- `authz` - permission delegation, never used
-- `feegrant` - fee payment delegation, never used  
-- `group` - on-chain DAO/multisig, never used
-- `epochs` - scheduled hooks, never used
-- `vesting` - token lockups, never used
-- `mint` - SDK inflation minting, never used (we do custom minting via bank)
-- `circuit` - emergency shutdown, never used
-- `evidence` - double-sign evidence, never used
-
-### Actually Needed
-- `auth` - accounts, signatures
-- `bank` - balances, mint/burn (heavily used)
-- `staking` - validator set (delegation disabled via ante)
-- `gov` - admin operations (params, setlevel, punish, mint)
-- `upgrade` - chain upgrades (13+ handlers)
-- `genutil` - genesis init
-- `consensus` - required by SDK
-
-### Partially Used (infrastructure only)
-- `params` - legacy, only for subspaces
-- `slashing` - only in export.go and PunishValidator
-- `distribution` - only in export.go
-
-### Summary
-- 8 modules are pure bloat
-- ~7 modules actually needed
 
