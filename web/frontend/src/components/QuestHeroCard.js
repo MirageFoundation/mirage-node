@@ -766,6 +766,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const [showCelebration, setShowCelebration] = useState(false);
     const [claimedAmount, setClaimedAmount] = useState(0);
+    const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
     const [claimError, setClaimError] = useState(null);
 
     // Debug state (localhost only)
@@ -853,7 +854,12 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             const mirageReward = result.rewards?.find(r => r.type === 'mirage');
             const amount = mirageReward?.amount || 0;
 
+            // Find invite code rewards
+            const inviteCodeReward = result.rewards?.find(r => r.type === 'invite_code');
+            const inviteCodesCount = inviteCodeReward?.count || 0;
+
             setClaimedAmount(amount);
+            setClaimedInviteCodes(inviteCodesCount);
             setShowCelebration(true);
 
             // Refresh data
@@ -1116,13 +1122,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                 $hasRewards={hasClaimableRewards && claimingAvailable}
                                 title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
-                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 
-                                    (totalAfterMultiplier > 0 && pendingInviteCodes > 0 
-                                        ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE + ${pendingInviteCodes} Code${pendingInviteCodes > 1 ? 's' : ''}`
-                                        : totalAfterMultiplier > 0 
-                                            ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE`
-                                            : `Claim ${pendingInviteCodes} Invite Code${pendingInviteCodes > 1 ? 's' : ''}`)
-                                    : 'Complete Quests'}
+                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 'Claim Rewards' : 'Complete Quests'}
                             </ClaimButton>
                         </div>
                     </ClaimSection>
@@ -1255,9 +1255,16 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     <CelebrationContent onClick={e => e.stopPropagation()}>
                         <CelebrationEmoji>🎉</CelebrationEmoji>
                         <CelebrationTitle>Rewards Claimed!</CelebrationTitle>
-                        <CelebrationAmount>
-                            +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
-                        </CelebrationAmount>
+                        {claimedAmount > 0 && (
+                            <CelebrationAmount>
+                                +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
+                            </CelebrationAmount>
+                        )}
+                        {claimedInviteCodes > 0 && (
+                            <CelebrationAmount style={{ fontSize: claimedAmount > 0 ? '1.5rem' : '2.5rem' }}>
+                                +{claimedInviteCodes} Invite Code{claimedInviteCodes > 1 ? 's' : ''}
+                            </CelebrationAmount>
+                        )}
                         <CelebrationClose onClick={closeCelebration}>
                             Awesome!
                         </CelebrationClose>
