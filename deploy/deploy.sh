@@ -526,7 +526,7 @@ else
     run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
   else
     echo "==> Pulling image on remote: $DEPLOY_IMAGE"
-    run_ssh "docker pull -q '$DEPLOY_IMAGE'"
+    ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
   fi
 fi
 
