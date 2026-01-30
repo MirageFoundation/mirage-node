@@ -382,18 +382,35 @@ class RewardDistributor:
                     }
                 )
 
-        # Mark all rewards as claimed
-        reward_ids = [r["id"] for r in mirage_rewards] + [r["id"] for r in cosmetic_rewards]
-        if reward_ids:
-            with connect_db() as conn:
-                with conn.cursor() as cur:
+        # Mark all rewards as claimed and store payout amounts
+        mirage_ids = [r["id"] for r in mirage_rewards]
+        cosmetic_ids = [r["id"] for r in cosmetic_rewards]
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # For MIRAGE rewards, calculate and store per-reward payout amounts
+                if mirage_ids:
+                    for reward in mirage_rewards:
+                        # Each reward gets its share of the multiplier
+                        reward_payout = int(reward["amount"] * multiplier)
+                        cur.execute(
+                            """
+                            UPDATE pending_rewards
+                            SET claimed_at = %s, payout_amount = %s
+                            WHERE id = %s
+                            """,
+                            (ts, reward_payout, reward["id"]),
+                        )
+
+                # Cosmetic rewards don't have payout amounts
+                if cosmetic_ids:
                     cur.execute(
                         """
                         UPDATE pending_rewards
                         SET claimed_at = %s
                         WHERE id = ANY(%s)
                         """,
-                        (ts, reward_ids),
+                        (ts, cosmetic_ids),
                     )
 
         return result

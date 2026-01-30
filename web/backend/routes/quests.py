@@ -984,14 +984,20 @@ def reward_stats():
         with connect_db() as conn:
             with conn.cursor() as cur:
                 # Get overall stats
+                # For claimed rewards, use payout_amount (actual amount with multiplier)
+                # For pending rewards, use base amount from reward_data
                 cur.execute(
                     """
                     SELECT 
                         COUNT(*) as total_rewards,
                         COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
                         COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
-                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as total_amount,
-                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
+                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                            COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                        ELSE 0 END), 0) as total_amount,
+                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
+                            COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                        ELSE 0 END), 0) as claimed_amount,
                         COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
                         MIN(created_at) as first_reward_at,
                         MAX(created_at) as last_reward_at
@@ -1013,11 +1019,13 @@ def reward_stats():
                     "payouts_enabled": distributor.is_configured(),
                 }
 
-                # Calculate daily rate (last 7 days)
+                # Calculate daily rate (last 7 days) - use actual payout amounts
                 week_ago = ts - (7 * 86400)
                 cur.execute(
                     """
-                    SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0)
+                    SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0)
                     FROM pending_rewards
                     WHERE created_at >= %s
                 """,
@@ -1026,7 +1034,7 @@ def reward_stats():
                 week_total = cur.fetchone()[0] or 0
                 summary["daily_rate"] = week_total // 7
 
-                # Get per-user stats
+                # Get per-user stats - use actual payout amounts for claimed rewards
                 cur.execute(
                     """
                     SELECT 
@@ -1035,8 +1043,12 @@ def reward_stats():
                         COUNT(*) as reward_count,
                         COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
                         COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
-                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as total_earned,
-                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
+                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN 
+                            COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                        ELSE 0 END), 0) as total_earned,
+                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN 
+                            COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                        ELSE 0 END), 0) as claimed_amount,
                         COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
                         MIN(pr.created_at) as first_reward_at,
                         MAX(pr.created_at) as last_reward_at,
@@ -1123,7 +1135,8 @@ def reward_history():
                         pr.reward_data,
                         pr.reason,
                         pr.created_at,
-                        pr.claimed_at
+                        pr.claimed_at,
+                        pr.payout_amount
                     FROM pending_rewards pr
                     LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
                     ORDER BY pr.created_at DESC
@@ -1140,12 +1153,16 @@ def reward_history():
                 rewards = []
                 for row in reward_rows:
                     reward_data = row[3] if isinstance(row[3], dict) else {}
+                    base_amount = reward_data.get("amount", 0)
+                    payout_amount = row[7]  # Actual amount paid (with multiplier)
+                    # Use payout_amount if claimed, otherwise base_amount
+                    display_amount = payout_amount if payout_amount is not None else base_amount
                     rewards.append(
                         {
                             "address": row[0],
                             "username": row[1],
                             "type": row[2],
-                            "amount": reward_data.get("amount", 0),
+                            "amount": display_amount,
                             "reason": row[4],
                             "created_at": row[5],
                             "claimed_at": row[6],
