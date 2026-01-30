@@ -535,6 +535,8 @@ function getQuestIcon(actionType) {
         'upvotes_received': '⭐',
         'comment_upvotes_received': '🌟',
         'unique_topic_post': '🗺️',
+        'invite_recruit': '👥',
+        'claim_only': '🎁',
     };
     return icons[actionType] || '🎯';
 }
@@ -546,6 +548,30 @@ function getQuestMirageReward(rewards) {
     if (!rewards || !Array.isArray(rewards)) return 0;
     const mirageReward = rewards.find(r => r.type === 'mirage');
     return mirageReward?.amount || 0;
+}
+
+/**
+ * Get reward display text for a quest (handles MIRAGE and invite_code rewards)
+ */
+function getQuestRewardDisplay(rewards, rewardMultiplier) {
+    if (!rewards || !Array.isArray(rewards)) return null;
+    
+    const mirageReward = rewards.find(r => r.type === 'mirage');
+    const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
+    
+    if (inviteCodeReward) {
+        const count = inviteCodeReward.amount || 1;
+        return `+${count} Invite Code${count > 1 ? 's' : ''}`;
+    }
+    
+    if (mirageReward) {
+        const amount = mirageReward.amount || 0;
+        const applyMultiplier = mirageReward.apply_multiplier !== false;
+        const displayAmount = applyMultiplier ? Math.round(amount * rewardMultiplier) : amount;
+        return `+${displayAmount.toLocaleString()} MIRAGE`;
+    }
+    
+    return null;
 }
 
 /**
@@ -791,7 +817,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     <QuestName $completed={quest.completed}>
                                         {quest.title}
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
-                                            +{Math.round(getQuestMirageReward(quest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                            {getQuestRewardDisplay(quest.rewards, rewardMultiplier)}
                                         </QuestReward>
                                     </QuestName>
                                     <QuestDescription>{quest.description}</QuestDescription>
@@ -846,7 +872,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             FLASH
                                         </span>
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
-                                            +{Math.round(getQuestMirageReward(flashQuest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                            {getQuestRewardDisplay(flashQuest.rewards, rewardMultiplier)}
                                         </QuestReward>
                                     </QuestName>
                                     <QuestDescription>

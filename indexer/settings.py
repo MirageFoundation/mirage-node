@@ -66,6 +66,10 @@ DAILY_QUESTS_COUNT = 2  # Number of random daily quests per user
 FLASH_QUEST_MIN_INTERVAL_HOURS = 5  # Minimum hours between flash quests
 FLASH_QUEST_MAX_INTERVAL_HOURS = 7  # Maximum hours between flash quests
 
+# Special quest gating
+INVITE_RECRUIT_CHANCE = 0.30  # 30% daily chance for invite_recruit quest (if user has unused codes)
+INVITE_EARNER_QUEST_INTERVAL = 15  # invite_earner quest appears every N completed quests
+
 # Reward multiplier (account age-based)
 REWARD_MULTIPLIER_DAYS = 30  # Days to reach max multiplier
 REWARD_MULTIPLIER_MIN = 1.0  # Minimum multiplier (new accounts get 1x)
