@@ -606,15 +606,18 @@ function getQuestRequirements(quest) {
 
 const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
 
-// Check if running on localhost
-function isLocalhost() {
-    const h = window.location.hostname;
-    if (h === 'localhost' || h === '127.0.0.1') return true;
-    if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(h)) return true;
-    return false;
-}
+// ==========================================================================
+// DEBUG UTILITIES - DISABLED BY DEFAULT
+// Uncomment when enabling debug panel (see BACKEND_DEBUG in backend.env)
+// ==========================================================================
+// function isLocalhost() {
+//     const h = window.location.hostname;
+//     if (h === 'localhost' || h === '127.0.0.1') return true;
+//     if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(h)) return true;
+//     return false;
+// }
 
-// Debug panel styled components
+// Debug panel styled components (kept for easy re-enable)
 const DebugPanel = styled.div`
     margin-top: 0.5rem;
     padding: 0.5rem;
@@ -769,81 +772,82 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
     const [claimError, setClaimError] = useState(null);
 
-    // Debug state (localhost only)
-    const [showDebug, setShowDebug] = useState(false);
-    const [debugInfo, setDebugInfo] = useState(null);
-    const [debugLoading, setDebugLoading] = useState(false);
-    const [targetCompletedCount, setTargetCompletedCount] = useState('');
-
     const userAddress = Storage.load('publicKey', '');
-    const isDebugAvailable = isLocalhost();
 
-    // Fetch debug info
-    const fetchDebugInfo = useCallback(async () => {
-        if (!userAddress || !isDebugAvailable) return;
-        setDebugLoading(true);
-        try {
-            const data = await Api.get('/rewards/debug', { owner: userAddress });
-            setDebugInfo(data);
-            setTargetCompletedCount(String(data.completed_count || 0));
-        } catch (e) {
-            console.error('Failed to fetch debug info:', e);
-        } finally {
-            setDebugLoading(false);
-        }
-    }, [userAddress, isDebugAvailable]);
-
-    // Debug actions
-    const debugCompleteQuest = useCallback(async (questId) => {
-        if (!userAddress) return;
-        try {
-            await Api.post('/rewards/debug/complete', { owner: userAddress, quest_id: questId });
-            await fetchDebugInfo();
-            refreshQuests();
-            refreshRewards();
-        } catch (e) {
-            console.error('Failed to complete quest:', e);
-        }
-    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
-
-    const debugResetQuests = useCallback(async () => {
-        if (!userAddress) return;
-        setDebugLoading(true);
-        try {
-            await Api.post('/rewards/debug/reset', { owner: userAddress });
-            // refreshQuests will re-assign quests via /api/quests/daily
-            refreshQuests();
-            refreshRewards();
-            // Wait for quests to be re-assigned, then refresh debug info
-            setTimeout(async () => {
-                await fetchDebugInfo();
-                setDebugLoading(false);
-            }, 500);
-        } catch (e) {
-            console.error('Failed to reset quests:', e);
-            setDebugLoading(false);
-        }
-    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
-
-    const debugSetCompletedCount = useCallback(async () => {
-        if (!userAddress) return;
-        const count = parseInt(targetCompletedCount, 10);
-        if (isNaN(count) || count < 0) return;
-        try {
-            await Api.post('/rewards/debug/set_completed', { owner: userAddress, count });
-            await fetchDebugInfo();
-            refreshQuests();
-        } catch (e) {
-            console.error('Failed to set completed count:', e);
-        }
-    }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
-
-    // Load debug info when debug panel is shown
-    useEffect(() => {
-        if (showDebug && isDebugAvailable) {
-            fetchDebugInfo();
-        }
-    }, [showDebug, isDebugAvailable, fetchDebugInfo]);
+    // ==========================================================================
+    // DEBUG PANEL - DISABLED BY DEFAULT
+    // To enable: set BACKEND_DEBUG=true in deploy/templates/env/backend.env
+    // Backend will reject requests anyway if BACKEND_DEBUG is false.
+    // Uncomment the block below to show the debug UI.
+    // ==========================================================================
+    // const [showDebug, setShowDebug] = useState(false);
+    // const [debugInfo, setDebugInfo] = useState(null);
+    // const [debugLoading, setDebugLoading] = useState(false);
+    // const [targetCompletedCount, setTargetCompletedCount] = useState('');
+    // const isDebugAvailable = isLocalhost();
+    //
+    // const fetchDebugInfo = useCallback(async () => {
+    //     if (!userAddress || !isDebugAvailable) return;
+    //     setDebugLoading(true);
+    //     try {
+    //         const data = await Api.get('/rewards/debug', { owner: userAddress });
+    //         setDebugInfo(data);
+    //         setTargetCompletedCount(String(data.completed_count || 0));
+    //     } catch (e) {
+    //         console.error('Failed to fetch debug info:', e);
+    //     } finally {
+    //         setDebugLoading(false);
+    //     }
+    // }, [userAddress, isDebugAvailable]);
+    //
+    // const debugCompleteQuest = useCallback(async (questId) => {
+    //     if (!userAddress) return;
+    //     try {
+    //         await Api.post('/rewards/debug/complete', { owner: userAddress, quest_id: questId });
+    //         await fetchDebugInfo();
+    //         refreshQuests();
+    //         refreshRewards();
+    //     } catch (e) {
+    //         console.error('Failed to complete quest:', e);
+    //     }
+    // }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+    //
+    // const debugResetQuests = useCallback(async () => {
+    //     if (!userAddress) return;
+    //     setDebugLoading(true);
+    //     try {
+    //         await Api.post('/rewards/debug/reset', { owner: userAddress });
+    //         refreshQuests();
+    //         refreshRewards();
+    //         setTimeout(async () => {
+    //             await fetchDebugInfo();
+    //             setDebugLoading(false);
+    //         }, 500);
+    //     } catch (e) {
+    //         console.error('Failed to reset quests:', e);
+    //         setDebugLoading(false);
+    //     }
+    // }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+    //
+    // const debugSetCompletedCount = useCallback(async () => {
+    //     if (!userAddress) return;
+    //     const count = parseInt(targetCompletedCount, 10);
+    //     if (isNaN(count) || count < 0) return;
+    //     try {
+    //         await Api.post('/rewards/debug/set_completed', { owner: userAddress, count });
+    //         await fetchDebugInfo();
+    //         refreshQuests();
+    //     } catch (e) {
+    //         console.error('Failed to set completed count:', e);
+    //     }
+    // }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
+    //
+    // useEffect(() => {
+    //     if (showDebug && isDebugAvailable) {
+    //         fetchDebugInfo();
+    //     }
+    // }, [showDebug, isDebugAvailable, fetchDebugInfo]);
+    // ==========================================================================
 
     const handleClaim = useCallback(async () => {
         setClaimError(null);
@@ -1138,18 +1142,20 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     </ClaimErrorMessage>
                 )}
 
-                {/* Debug panel (localhost only) */}
+                {/* ==========================================================================
+                   DEBUG PANEL - DISABLED BY DEFAULT
+                   To enable: set BACKEND_DEBUG=true in deploy/templates/env/backend.env
+                   and uncomment this block + the state/functions above.
+                   Backend rejects requests anyway if BACKEND_DEBUG is false.
+                   ==========================================================================
                 {!collapsed && isDebugAvailable && (
                     <div style={{ marginTop: '0.5rem' }}>
                         <DebugButton onClick={() => setShowDebug(!showDebug)}>
                             {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
                         </DebugButton>
-                        
                         {showDebug && (
                             <DebugPanel>
-                                <DebugTitle>
-                                    🔧 Quest Debug Panel (localhost only)
-                                </DebugTitle>
+                                <DebugTitle>🔧 Quest Debug Panel (localhost only)</DebugTitle>
                                 {debugLoading ? (
                                     <div>Loading...</div>
                                 ) : debugInfo ? (
@@ -1162,7 +1168,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             <DebugLabel>Unused Invite Codes:</DebugLabel>
                                             <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
                                         </DebugRow>
-                                        
                                         <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
                                             <DebugLabel>invite_recruit:</DebugLabel>
                                             <DebugRow>
@@ -1175,7 +1180,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 </DebugValue>
                                             </DebugRow>
                                         </div>
-                                        
                                         <div style={{ marginTop: '0.3rem' }}>
                                             <DebugLabel>invite_earner:</DebugLabel>
                                             <DebugRow>
@@ -1190,7 +1194,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 </DebugValue>
                                             </DebugRow>
                                         </div>
-                                        
                                         <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
                                             <DebugLabel>Today's Quests:</DebugLabel>
                                             {debugInfo.today_quests?.map(q => (
@@ -1210,7 +1213,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 </DebugQuestRow>
                                             ))}
                                         </div>
-                                        
                                         <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
                                             <DebugLabel>Set completed count:</DebugLabel>
                                             <DebugRow>
@@ -1225,7 +1227,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 </DebugButton>
                                             </DebugRow>
                                         </div>
-                                        
                                         <DebugButtonGroup>
                                             <DebugButton $variant="danger" onClick={debugResetQuests}>
                                                 Reset Today's Quests
@@ -1242,6 +1243,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                         )}
                     </div>
                 )}
+                ========================================================================== */}
             </QuestCardContainer>
 
             {/* Celebration overlay */}
