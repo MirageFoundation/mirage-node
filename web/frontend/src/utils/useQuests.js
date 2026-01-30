@@ -24,6 +24,7 @@ export function useQuests() {
     const [suspended, setSuspended] = useState(false);
     const [suspensionInfo, setSuspensionInfo] = useState(null);
     const [disabled, setDisabled] = useState(false);
+    const [debug, setDebug] = useState(false);
     const [initialLoadDone, setInitialLoadDone] = useState(false);
 
     const userAddress = Storage.load('publicKey', '');
@@ -47,6 +48,7 @@ export function useQuests() {
             // Check if quests system is disabled
             if (dailyResponse.disabled) {
                 setDisabled(true);
+                setDebug(dailyResponse.debug === true);
                 setDailyQuests([]);
                 setFlashQuest(null);
                 setLoading(false);
@@ -54,6 +56,7 @@ export function useQuests() {
             }
 
             setDisabled(false);
+            setDebug(dailyResponse.debug === true);
 
             if (dailyResponse.suspended) {
                 setSuspended(true);
@@ -184,6 +187,7 @@ export function useQuests() {
         suspended,
         suspensionInfo,
         disabled,
+        debug,
         refresh: fetchQuests,
     };
 }

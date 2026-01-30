@@ -407,6 +407,7 @@ def get_daily_quests():
                 "daily_quests": [],
                 "seconds_until_reset": 0,
                 "reward_multiplier": 1,
+                "debug": BACKEND_DEBUG,
             }
         )
 
@@ -428,6 +429,7 @@ def get_daily_quests():
                     "daily_quests": [],
                     "seconds_until_reset": _get_seconds_until_reset(ts),
                     "reward_multiplier": 1.0,
+                    "debug": BACKEND_DEBUG,
                 }
             )
 
@@ -509,6 +511,7 @@ def get_daily_quests():
                 "daily_quests": daily_quests,
                 "seconds_until_reset": _get_seconds_until_reset(ts),
                 "reward_multiplier": round(multiplier, 4),
+                "debug": BACKEND_DEBUG,
             }
         )
     except Exception as e:
