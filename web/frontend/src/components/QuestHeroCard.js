@@ -757,6 +757,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const {
         totalAfterMultiplier,
+        pendingInviteCodes,
         claiming,
         claimRewards,
         claimingAvailable,
@@ -971,7 +972,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         );
     }
 
-    const hasClaimableRewards = totalAfterMultiplier > 0;
+    const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
     const completedCount = dailyQuests.filter(q => q.completed).length;
 
     return (
@@ -1115,7 +1116,13 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                 $hasRewards={hasClaimableRewards && claimingAvailable}
                                 title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
-                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE` : 'Complete Quests'}
+                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 
+                                    (totalAfterMultiplier > 0 && pendingInviteCodes > 0 
+                                        ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE + ${pendingInviteCodes} Code${pendingInviteCodes > 1 ? 's' : ''}`
+                                        : totalAfterMultiplier > 0 
+                                            ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE`
+                                            : `Claim ${pendingInviteCodes} Invite Code${pendingInviteCodes > 1 ? 's' : ''}`)
+                                    : 'Complete Quests'}
                             </ClaimButton>
                         </div>
                     </ClaimSection>
@@ -1152,28 +1159,29 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                         </DebugRow>
                                         
                                         <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
-                                            <DebugLabel>invite_recruit eligibility:</DebugLabel>
+                                            <DebugLabel>invite_recruit:</DebugLabel>
                                             <DebugRow>
-                                                <span>Roll: {debugInfo.invite_recruit?.roll} (need &lt; {debugInfo.invite_recruit?.threshold})</span>
-                                                <DebugValue style={{ color: debugInfo.invite_recruit?.eligible ? '#22c55e' : '#ef4444' }}>
-                                                    {debugInfo.invite_recruit?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
+                                                <span>
+                                                    Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} | 
+                                                    Chance: {debugInfo.invite_recruit?.chance}
+                                                </span>
+                                                <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                    {debugInfo.invite_recruit?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
                                                 </DebugValue>
                                             </DebugRow>
                                         </div>
                                         
                                         <div style={{ marginTop: '0.3rem' }}>
-                                            <DebugLabel>invite_earner eligibility:</DebugLabel>
+                                            <DebugLabel>invite_earner:</DebugLabel>
                                             <DebugRow>
                                                 <span>
                                                     Earned: {debugInfo.invite_earner?.completed || 0} | 
                                                     Next milestone: {debugInfo.invite_earner?.next_milestone}
-                                                    {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''}
+                                                    {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
+                                                    Chance: {debugInfo.invite_earner?.chance}
                                                 </span>
-                                            </DebugRow>
-                                            <DebugRow>
-                                                <span>Roll: {debugInfo.invite_earner?.roll} (need &lt; {debugInfo.invite_earner?.threshold})</span>
-                                                <DebugValue style={{ color: debugInfo.invite_earner?.eligible ? '#22c55e' : '#ef4444' }}>
-                                                    {debugInfo.invite_earner?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
+                                                <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                    {debugInfo.invite_earner?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
                                                 </DebugValue>
                                             </DebugRow>
                                         </div>
