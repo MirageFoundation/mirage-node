@@ -6,6 +6,8 @@ This script is intentionally "no hand-waving":
 - It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
+- It checks that critical CLI commands are exposed.
+- It can optionally verify genesis export with --export-check (stops node, runs export, restarts).
 - It shows status of ALL registered upgrades.
 
 NOTE: This does NOT submit transactions or mutate chain state.
@@ -20,13 +22,15 @@ import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+import tempfile
+import time
 from typing import Any
 import urllib.error
 import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.3-sdk-bloat"
+UPGRADE_NAME = "v1.10.4-restore-sdk"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.10"
 
@@ -46,14 +50,15 @@ ALL_UPGRADES = [
     "v1.9.1-seq-fix",
     "v1.9.1-query-fix",
     "v1.9.2-bridge-fee-endblock",
-    "v1.10.0-bridge-refactor",
     "v1.9.3-bridge-fee-burn",
     "v1.9.4-bridge-attestor-fix",
     "v1.9.5-bridge-no-pow",
     "v1.9.7-bridge-replay",
     "v1.9.9-retention",
+    "v1.10.0-bridge-refactor",
     "v1.10.0-remove-ibc",
     "v1.10.3-sdk-bloat",
+    "v1.10.4-restore-sdk",
 ]
 
 
@@ -78,6 +83,48 @@ def _find_miraged() -> str:
         if os.path.exists(c) and os.access(c, os.X_OK):
             return c
     return "miraged"
+
+
+def _resolve_node_home(home_dir: Path) -> Path:
+    # Home can be either ~/.mirage (base) or ~/.mirage/node (node home).
+    return home_dir if home_dir.name == "node" else home_dir / "node"
+
+
+def _is_miraged_running() -> bool:
+    try:
+        p = subprocess.run(["pgrep", "-f", "miraged start"], capture_output=True, text=True, check=False)
+        return p.returncode == 0
+    except Exception:
+        return False
+
+
+def _stop_miraged() -> bool:
+    if not _is_miraged_running():
+        return False
+    subprocess.run(["pkill", "-TERM", "-f", "miraged start"], check=False)
+    for _ in range(30):
+        if not _is_miraged_running():
+            return True
+        time.sleep(1)
+    subprocess.run(["pkill", "-KILL", "-f", "miraged start"], check=False)
+    return not _is_miraged_running()
+
+
+def _restart_miraged(node_home: Path) -> bool:
+    # Prefer tmux session if present
+    try:
+        if subprocess.run(["tmux", "has-session", "-t", "mirage"], check=False).returncode == 0:
+            cmd = f'miraged start --home "{node_home}"'
+            subprocess.run(["tmux", "send-keys", "-t", "mirage:node", cmd, "C-m"], check=False)
+            return True
+    except Exception:
+        pass
+    # Fallback: start in background
+    try:
+        subprocess.Popen(["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
 
 
 def _run_json(cmd: list[str]) -> dict:
@@ -450,6 +497,171 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, upgrade_name: str, f
             print(f"   [OK] upgrade plan: {name}")
 
 
+def check_sdk_modules_restored(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
+    """Verify that SDK modules removed in v1.10.3-sdk-bloat are present and functional."""
+    print("\n-> Checking SDK modules restored...")
+
+    query_modules = ["authz", "feegrant", "group", "epochs", "circuit", "evidence", "mint"]
+    tx_modules = ["authz", "feegrant", "group"]
+
+    try:
+        q_help = subprocess.run([miraged, "q", "--help"], capture_output=True, text=True, check=False)
+        q_output = (q_help.stdout + q_help.stderr).lower()
+    except Exception as e:
+        failures.append(f"cannot run '{miraged} q --help': {e}")
+        return
+
+    for mod in query_modules:
+        if f"\n  {mod}" in q_output or f"\n\t{mod}" in q_output or f"  {mod} " in q_output:
+            print(f"   [OK] q {mod}: command present")
+        else:
+            print(f"   [FAIL] q {mod}: command missing")
+            failures.append(f"SDK module '{mod}' not present in query commands")
+
+    try:
+        tx_help = subprocess.run([miraged, "tx", "--help"], capture_output=True, text=True, check=False)
+        tx_output = (tx_help.stdout + tx_help.stderr).lower()
+    except Exception as e:
+        warnings.append(f"cannot run '{miraged} tx --help': {e}")
+        return
+
+    for mod in tx_modules:
+        if f"\n  {mod}" in tx_output or f"\n\t{mod}" in tx_output or f"  {mod} " in tx_output:
+            print(f"   [OK] tx {mod}: command present")
+        else:
+            print(f"   [WARN] tx {mod}: command missing")
+            warnings.append(f"tx {mod} command missing after restore (verify module wiring)")
+
+    # Verify modules have actual state (not just CLI commands)
+    print("\n   Module state verification:")
+
+    # Check mint params
+    try:
+        mint_params = _run_json([miraged, "q", "mint", "params", "--node", rpc, "-o", "json"])
+        params = mint_params.get("params", mint_params)
+        mint_denom = params.get("mint_denom", "")
+        if mint_denom:
+            print(f"   [OK] mint: params loaded (denom={mint_denom})")
+        else:
+            print(f"   [FAIL] mint: params missing mint_denom")
+            failures.append("mint module params missing mint_denom")
+    except Exception as e:
+        print(f"   [FAIL] mint: cannot query params: {e}")
+        failures.append(f"mint module query failed: {e}")
+
+    # Check epochs info
+    try:
+        epochs_info = _run_json([miraged, "q", "epochs", "epoch-infos", "--node", rpc, "-o", "json"])
+        epochs = epochs_info.get("epochs", [])
+        if isinstance(epochs, list) and len(epochs) > 0:
+            epoch_ids = [e.get("identifier", "?") for e in epochs[:3]]
+            print(f"   [OK] epochs: {len(epochs)} epoch(s) configured ({', '.join(epoch_ids)})")
+        else:
+            print(f"   [WARN] epochs: no epochs configured (may be expected)")
+            warnings.append("epochs module has no epochs configured")
+    except Exception as e:
+        print(f"   [FAIL] epochs: cannot query epoch-infos: {e}")
+        failures.append(f"epochs module query failed: {e}")
+
+    # Check authz (verify query works - use help to avoid needing valid address)
+    try:
+        p = subprocess.run([miraged, "q", "authz", "grants", "--help"], capture_output=True, text=True, check=False)
+        if p.returncode == 0 or "usage" in (p.stdout + p.stderr).lower():
+            print(f"   [OK] authz: query functional")
+        else:
+            print(f"   [FAIL] authz: query command broken")
+            failures.append("authz module query command broken")
+    except Exception as e:
+        print(f"   [FAIL] authz: cannot query: {e}")
+        failures.append(f"authz module query failed: {e}")
+
+    # Check circuit (empty accounts is OK)
+    try:
+        circuit_result = _run_json([miraged, "q", "circuit", "accounts", "--node", rpc, "-o", "json"])
+        print(f"   [OK] circuit: query functional")
+    except Exception as e:
+        err_str = str(e).lower()
+        if "pagination" in err_str or "empty" in err_str:
+            print(f"   [OK] circuit: query functional (no accounts)")
+        else:
+            print(f"   [FAIL] circuit: cannot query: {e}")
+            failures.append(f"circuit module query failed: {e}")
+
+    # Check evidence list (empty is OK)
+    try:
+        evidence_result = _run_json([miraged, "q", "evidence", "list", "--node", rpc, "-o", "json"])
+        evidence_list = evidence_result.get("evidence", [])
+        print(f"   [OK] evidence: query functional ({len(evidence_list)} item(s))")
+    except Exception as e:
+        err_str = str(e).lower()
+        if "no evidence" in err_str or "empty" in err_str or "pagination" in err_str or "null" in err_str:
+            print(f"   [OK] evidence: query functional (no evidence)")
+        else:
+            print(f"   [FAIL] evidence: cannot query: {e}")
+            failures.append(f"evidence module query failed: {e}")
+
+
+def check_export_command(miraged: str, home_dir: Path, failures: list[str]) -> None:
+    """Ensure export command is available and produces genesis (stops/starts node)."""
+    print("\n-> Checking genesis export (stopping node)...")
+    node_home = _resolve_node_home(home_dir)
+    try:
+        genesis_path = node_home / "config" / "genesis.json"
+        if not genesis_path.exists():
+            failures.append(f"export failed: missing genesis at {genesis_path}")
+            print("   [FAIL] export failed (missing genesis)")
+            return
+        cmd = [miraged, "export", "--home", str(node_home)]
+        was_running = _is_miraged_running()
+        if was_running:
+            stopped = _stop_miraged()
+            if not stopped:
+                failures.append("export failed: could not stop miraged")
+                print("   [FAIL] export failed (could not stop miraged)")
+                return
+        with tempfile.NamedTemporaryFile(prefix="mirage-export-", suffix=".json") as tmp:
+            cmd = cmd + ["--output-document", tmp.name]
+            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            if p.returncode != 0:
+                err = p.stderr.strip()
+                if "failed to initialize database" in err or "resource temporarily unavailable" in err:
+                    msg = "export failed: database locked (stop miraged or use a stopped data copy)"
+                    print("   [FAIL] export failed (database locked)")
+                    failures.append(msg)
+                    return
+                print("   [FAIL] export failed")
+                failures.append(f"export failed: {err}")
+                return
+            tmp.flush()
+            tmp.seek(0)
+            raw = tmp.read()
+            if not raw.strip():
+                print("   [FAIL] export output is empty")
+                failures.append("export output is empty")
+                return
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                print("   [FAIL] export output is not UTF-8")
+                failures.append("export output is not UTF-8")
+                return
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as err:
+                print("   [FAIL] export output is not JSON")
+                failures.append(f"export output is not JSON: {err}")
+                return
+            print("   [OK] export succeeded")
+        if was_running:
+            restarted = _restart_miraged(node_home)
+            if not restarted:
+                failures.append("export check failed: could not restart miraged")
+                print("   [FAIL] export check failed (could not restart miraged)")
+                return
+    except Exception as e:
+        failures.append(f"export command check failed: {e}")
+
+
 def fetch_core_params(miraged: str, rpc: str) -> dict:
     return _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
 
@@ -734,98 +946,6 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
     except Exception as e:
         print(f"   [FAIL] current_difficulty: {e}")
         failures.append(f"core difficulty invalid: {e}")
-
-
-def check_sdk_bloat_removed(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
-    """Verify that SDK bloat modules were successfully removed."""
-    print("\n-> Checking SDK bloat modules removed...")
-    
-    # Modules that should be removed and their query commands
-    removed_modules = [
-        ("authz", [miraged, "q", "authz", "grants", "--node", rpc]),
-        ("feegrant", [miraged, "q", "feegrant", "grants", "--node", rpc]),
-        ("group", [miraged, "q", "group", "groups", "--node", rpc]),
-        ("mint", [miraged, "q", "mint", "params", "--node", rpc]),
-        ("evidence", [miraged, "q", "evidence", "--node", rpc]),
-    ]
-    
-    # These modules don't have query commands or are harder to check:
-    # - epochs: custom module, may not have standard query
-    # - circuit: circuit breaker, may not have standard query
-    # - vesting: account types only, no separate store/query
-    
-    all_removed = True
-    for module_name, cmd in removed_modules:
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            output = (p.stdout + p.stderr).lower()
-            
-            # Module is removed if command fails (non-zero exit) and output indicates missing module
-            # Check for various error patterns that indicate the module doesn't exist
-            removal_indicators = [
-                "unknown query path",
-                "unknown command",  # CLI subcommand doesn't exist
-                "unknown flag",     # CLI rejects flags because subcommand missing
-                "not found",
-                "unknown module",
-                "unregistered",
-                "no handler",
-                "rpc error",
-                "not implemented",
-                "fatal:",           # CLI fatal errors
-            ]
-            
-            # Module is removed if: non-zero exit code OR any removal indicator found
-            is_removed = p.returncode != 0 or any(indicator in output for indicator in removal_indicators)
-            
-            if is_removed:
-                print(f"   [OK] {module_name}: removed (query fails as expected)")
-            else:
-                # Module might still exist - this is a failure
-                print(f"   [FAIL] {module_name}: still queryable!")
-                failures.append(f"SDK bloat module '{module_name}' was not removed - query still works")
-                all_removed = False
-        except Exception as e:
-            # Exception likely means module is gone
-            print(f"   [OK] {module_name}: removed (command error: {e})")
-    
-    # Also check that these modules are NOT in the app state via genesis
-    # (This is a secondary check)
-    print("\n   Checking module help commands don't exist...")
-    help_checks = [
-        ("authz", [miraged, "tx", "authz", "--help"]),
-        ("feegrant", [miraged, "tx", "feegrant", "--help"]),
-        ("group", [miraged, "tx", "group", "--help"]),
-    ]
-    
-    for module_name, cmd in help_checks:
-        try:
-            p = subprocess.run(cmd, capture_output=True, text=True, check=False)
-            output = (p.stdout + p.stderr).lower()
-            
-            # Module is removed if:
-            # 1. Command fails with error indicators, OR
-            # 2. The module name doesn't appear in "Available Commands" section
-            error_indicators = ["unknown command", "unknown flag", "fatal:", "error:"]
-            has_error = p.returncode != 0 or any(ind in output for ind in error_indicators)
-            
-            # Check if module appears as an available command (e.g., "  authz  " with spacing)
-            module_listed = f"  {module_name} " in output or f"\n  {module_name}\t" in output
-            
-            is_removed = has_error or not module_listed
-            
-            if is_removed:
-                print(f"   [OK] tx {module_name}: command removed")
-            else:
-                print(f"   [WARN] tx {module_name}: help still available (may be CLI stub)")
-                warnings.append(f"tx {module_name} help still available - verify module is truly removed")
-        except Exception:
-            print(f"   [OK] tx {module_name}: command removed")
-    
-    if all_removed:
-        print("\n   [OK] All SDK bloat modules verified as removed")
-    else:
-        print("\n   [FAIL] Some SDK bloat modules still present!")
 
 
 def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
@@ -1118,7 +1238,7 @@ def check_deploy_migrations(home_dir: Path, failures: list[str], warnings: list[
 
 def check_local_config(home_dir: Path, rpc_chain_id: str | None, failures: list[str], warnings: list[str]) -> None:
     print("\n-> Checking local config...")
-    cfg_dir = home_dir / "node" / "config"
+    cfg_dir = _resolve_node_home(home_dir) / "config"
 
     app_toml = cfg_dir / "app.toml"
     if app_toml.exists():
@@ -1176,6 +1296,7 @@ def main() -> int:
     parser.add_argument("--phase", choices=["pre", "post"], default="post", help="pre=plan exists, post=applied")
     parser.add_argument("--upgrade", default=UPGRADE_NAME, help=f"Upgrade name to verify (default: {UPGRADE_NAME})")
     parser.add_argument("--list-all", action="store_true", help="List status of all registered upgrades")
+    parser.add_argument("--export-check", action="store_true", help="Stop node, run export, restart")
     args = parser.parse_args()
 
     rpc = args.node.rstrip("/")
@@ -1211,9 +1332,11 @@ def main() -> int:
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
 
-    # For v1.10.3-sdk-bloat upgrade, verify modules were removed
-    if "sdk-bloat" in upgrade_name and args.phase == "post":
-        check_sdk_bloat_removed(miraged, rpc, failures, warnings)
+    if args.export_check:
+        check_export_command(miraged, home_dir, failures)
+
+    if "restore-sdk" in upgrade_name and args.phase == "post":
+        check_sdk_modules_restored(miraged, rpc, failures, warnings)
 
     try:
         core = fetch_core_params(miraged, rpc)

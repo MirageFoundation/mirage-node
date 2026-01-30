@@ -18,21 +18,9 @@ const (
 	retentionBlocks         = int64(201600)
 	retentionBlockTimeSecs  = int64(3)
 	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
-)
 
-const (
-	sdkBloatUpgradeName = "v1.10.3-sdk-bloat"
+	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
-
-var sdkBloatDeletedStores = []string{
-	"authz",
-	"feegrant",
-	"group",
-	"epochs",
-	"mint",
-	"circuit",
-	"evidence",
-}
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
 func (app *App) RegisterUpgradeHandlers() {
@@ -993,19 +981,22 @@ func (app *App) RegisterUpgradeHandlers() {
 		},
 	)
 
-	// v1.10.3-sdk-bloat: Remove unused SDK modules and delete their stores.
+	// v1.10.4-restore-sdk: Restore SDK modules that were soft-removed in v1.10.3-sdk-bloat
+	// These modules were excluded from the app but their store data was preserved.
+	// We just run migrations normally - stores will load their existing state.
 	app.UpgradeKeeper.SetUpgradeHandler(
-		sdkBloatUpgradeName,
+		sdkRestoreUpgradeName,
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
 			sdkCtx := sdk.UnwrapSDKContext(ctx)
-			sdkCtx.Logger().Info("Starting upgrade to v1.10.3-sdk-bloat...")
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-restore-sdk...")
 
+			// Just run migrations normally - modules will load their existing store data
 			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
 			if err != nil {
 				return nil, err
 			}
 
-			sdkCtx.Logger().Info("Upgrade to v1.10.3-sdk-bloat complete - unused SDK modules removed")
+			sdkCtx.Logger().Info("Upgrade to v1.10.4-restore-sdk complete - SDK modules restored")
 			return toVM, nil
 		},
 	)
