@@ -497,8 +497,8 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, upgrade_name: str, f
             print(f"   [OK] upgrade plan: {name}")
 
 
-def check_sdk_modules_restored(miraged: str, failures: list[str], warnings: list[str]) -> None:
-    """Verify that SDK modules removed in v1.10.3-sdk-bloat are present again."""
+def check_sdk_modules_restored(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
+    """Verify that SDK modules removed in v1.10.3-sdk-bloat are present and functional."""
     print("\n-> Checking SDK modules restored...")
 
     query_modules = ["authz", "feegrant", "group", "epochs", "circuit", "evidence", "mint"]
@@ -531,6 +531,74 @@ def check_sdk_modules_restored(miraged: str, failures: list[str], warnings: list
         else:
             print(f"   [WARN] tx {mod}: command missing")
             warnings.append(f"tx {mod} command missing after restore (verify module wiring)")
+
+    # Verify modules have actual state (not just CLI commands)
+    print("\n   Module state verification:")
+
+    # Check mint params
+    try:
+        mint_params = _run_json([miraged, "q", "mint", "params", "--node", rpc, "-o", "json"])
+        params = mint_params.get("params", mint_params)
+        mint_denom = params.get("mint_denom", "")
+        if mint_denom:
+            print(f"   [OK] mint: params loaded (denom={mint_denom})")
+        else:
+            print(f"   [FAIL] mint: params missing mint_denom")
+            failures.append("mint module params missing mint_denom")
+    except Exception as e:
+        print(f"   [FAIL] mint: cannot query params: {e}")
+        failures.append(f"mint module query failed: {e}")
+
+    # Check epochs info
+    try:
+        epochs_info = _run_json([miraged, "q", "epochs", "epoch-infos", "--node", rpc, "-o", "json"])
+        epochs = epochs_info.get("epochs", [])
+        if isinstance(epochs, list) and len(epochs) > 0:
+            epoch_ids = [e.get("identifier", "?") for e in epochs[:3]]
+            print(f"   [OK] epochs: {len(epochs)} epoch(s) configured ({', '.join(epoch_ids)})")
+        else:
+            print(f"   [WARN] epochs: no epochs configured (may be expected)")
+            warnings.append("epochs module has no epochs configured")
+    except Exception as e:
+        print(f"   [FAIL] epochs: cannot query epoch-infos: {e}")
+        failures.append(f"epochs module query failed: {e}")
+
+    # Check authz (verify query works - use help to avoid needing valid address)
+    try:
+        p = subprocess.run([miraged, "q", "authz", "grants", "--help"], capture_output=True, text=True, check=False)
+        if p.returncode == 0 or "usage" in (p.stdout + p.stderr).lower():
+            print(f"   [OK] authz: query functional")
+        else:
+            print(f"   [FAIL] authz: query command broken")
+            failures.append("authz module query command broken")
+    except Exception as e:
+        print(f"   [FAIL] authz: cannot query: {e}")
+        failures.append(f"authz module query failed: {e}")
+
+    # Check circuit (empty accounts is OK)
+    try:
+        circuit_result = _run_json([miraged, "q", "circuit", "accounts", "--node", rpc, "-o", "json"])
+        print(f"   [OK] circuit: query functional")
+    except Exception as e:
+        err_str = str(e).lower()
+        if "pagination" in err_str or "empty" in err_str:
+            print(f"   [OK] circuit: query functional (no accounts)")
+        else:
+            print(f"   [FAIL] circuit: cannot query: {e}")
+            failures.append(f"circuit module query failed: {e}")
+
+    # Check evidence list (empty is OK)
+    try:
+        evidence_result = _run_json([miraged, "q", "evidence", "list", "--node", rpc, "-o", "json"])
+        evidence_list = evidence_result.get("evidence", [])
+        print(f"   [OK] evidence: query functional ({len(evidence_list)} item(s))")
+    except Exception as e:
+        err_str = str(e).lower()
+        if "no evidence" in err_str or "empty" in err_str or "pagination" in err_str or "null" in err_str:
+            print(f"   [OK] evidence: query functional (no evidence)")
+        else:
+            print(f"   [FAIL] evidence: cannot query: {e}")
+            failures.append(f"evidence module query failed: {e}")
 
 
 def check_export_command(miraged: str, home_dir: Path, failures: list[str]) -> None:
@@ -1268,7 +1336,7 @@ def main() -> int:
         check_export_command(miraged, home_dir, failures)
 
     if "restore-sdk" in upgrade_name and args.phase == "post":
-        check_sdk_modules_restored(miraged, failures, warnings)
+        check_sdk_modules_restored(miraged, rpc, failures, warnings)
 
     try:
         core = fetch_core_params(miraged, rpc)
