@@ -17,6 +17,7 @@ Admin endpoints (require level >= 100):
 - GET /api/admin/rewards/suspensions: List all suspended users
 """
 
+import hashlib
 import json
 import os
 import random
@@ -40,6 +41,10 @@ DAILY_QUESTS_COUNT = int(os.environ.get("DAILY_QUESTS_COUNT", "2"))
 FLASH_QUESTS_COUNT = int(os.environ.get("FLASH_QUESTS_COUNT", "1"))
 FLASH_QUEST_MIN_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MIN_INTERVAL_HOURS", "5"))
 FLASH_QUEST_MAX_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MAX_INTERVAL_HOURS", "7"))
+
+# Special quest gating
+INVITE_RECRUIT_CHANCE = float(os.environ.get("INVITE_RECRUIT_CHANCE", "0.30"))
+INVITE_EARNER_QUEST_INTERVAL = int(os.environ.get("INVITE_EARNER_QUEST_INTERVAL", "15"))
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -120,7 +125,7 @@ def _set_next_flash_time(owner: str, next_ts: int) -> None:
                 VALUES (%s, %s)
                 ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
                 """,
-                (owner, next_ts)
+                (owner, next_ts),
             )
 
 
@@ -138,7 +143,7 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
                 WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
                 LIMIT 1
                 """,
-                (owner, ts)
+                (owner, ts),
             )
             if cur.fetchone():
                 return None  # Already has an active quest
@@ -164,14 +169,11 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
                 INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
                 VALUES (%s, %s, %s, %s, 0, '{}')
                 """,
-                (owner, template_id, ts, ends_at)
+                (owner, template_id, ts, ends_at),
             )
 
     # Schedule next flash quest (random interval between MIN and MAX hours)
-    next_interval_seconds = random.randint(
-        FLASH_QUEST_MIN_INTERVAL_HOURS * 3600,
-        FLASH_QUEST_MAX_INTERVAL_HOURS * 3600
-    )
+    next_interval_seconds = random.randint(FLASH_QUEST_MIN_INTERVAL_HOURS * 3600, FLASH_QUEST_MAX_INTERVAL_HOURS * 3600)
     _set_next_flash_time(owner, ts + next_interval_seconds)
 
     return {
@@ -207,11 +209,58 @@ def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
             }
 
 
-def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any]) -> List[str]:
+def _has_unused_invite_codes(owner: str) -> bool:
+    """Check if user has at least one unused invite code."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM invite_codes
+                WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
+                LIMIT 1
+                """,
+                (owner,),
+            )
+            return cur.fetchone() is not None
+
+
+def _get_completed_quest_count(owner: str) -> int:
+    """Get total number of completed quests for a user."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                """,
+                (owner,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+
+def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
+    """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
+    seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
+    seed_hash = hashlib.sha256(seed_str.encode()).hexdigest()
+    # Use first 8 hex chars as seed (32 bits)
+    seed_int = int(seed_hash[:8], 16)
+    rng = random.Random(seed_int)
+    return rng.random()
+
+
+def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any], special_defs: Dict[str, Any] = None) -> List[str]:
     """Assign daily quests to a user if they don't have any for today.
+
+    Includes special quest gating logic:
+    - invite_recruit: 30% chance if user has unused invite codes
+    - invite_earner: appears every N completed quests
 
     Returns the list of assigned quest IDs.
     """
+    if special_defs is None:
+        special_defs = {}
+
     with connect_db() as conn:
         with conn.cursor() as cur:
             # Check if user already has quests for today
@@ -227,16 +276,41 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
             if existing:
                 return existing
 
-            # No quests assigned yet - assign random ones
-            if not daily_defs:
-                return []
+            # No quests assigned yet - check special quests first
+            quest_ids = []
+            special_quest_assigned = False
 
-            available_ids = list(daily_defs.keys())
-            count = min(DAILY_QUESTS_COUNT, len(available_ids))
-            selected_ids = random.sample(available_ids, count)
+            # Check for invite_recruit eligibility (30% roll if user has unused codes)
+            if not special_quest_assigned and "invite_recruit" in special_defs:
+                if _has_unused_invite_codes(owner):
+                    roll = _deterministic_roll(owner, day_utc, "invite_recruit")
+                    log_event(None, "quest.invite_recruit.roll", owner=owner, roll=round(roll, 3), threshold=INVITE_RECRUIT_CHANCE)
+                    if roll < INVITE_RECRUIT_CHANCE:
+                        quest_ids.append("invite_recruit")
+                        special_quest_assigned = True
+                        log_event(None, "quest.invite_recruit.assigned", owner=owner)
+
+            # Check for invite_earner eligibility (every N completed quests)
+            if not special_quest_assigned and "invite_earner" in special_defs:
+                completed_count = _get_completed_quest_count(owner)
+                if completed_count > 0 and completed_count % INVITE_EARNER_QUEST_INTERVAL == 0:
+                    quest_ids.append("invite_earner")
+                    special_quest_assigned = True
+                    log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
+
+            # Fill remaining slots with random daily quests
+            if not daily_defs:
+                return quest_ids
+
+            remaining_slots = DAILY_QUESTS_COUNT - len(quest_ids)
+            if remaining_slots > 0:
+                available_ids = list(daily_defs.keys())
+                count = min(remaining_slots, len(available_ids))
+                selected_ids = random.sample(available_ids, count)
+                quest_ids.extend(selected_ids)
 
             # Insert initial progress records
-            for quest_id in selected_ids:
+            for quest_id in quest_ids:
                 cur.execute(
                     """
                     INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
@@ -246,7 +320,7 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
                     (owner, day_utc, quest_id),
                 )
 
-            return selected_ids
+            return quest_ids
 
 
 @quests_bp.route("/api/rewards/daily", methods=["GET"])
@@ -294,9 +368,10 @@ def get_daily_quests():
         # Load quest definitions
         defs = _load_quest_definitions()
         daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
 
         # Assign quests if user doesn't have any for today
-        _assign_daily_quests_if_needed(owner, day_utc, daily_defs)
+        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs)
 
         # Get user's assigned quests for today
         with connect_db() as conn:
@@ -312,6 +387,9 @@ def get_daily_quests():
                 )
                 rows = cur.fetchall()
 
+        # Merge daily_defs and special_defs for lookup
+        all_defs = {**daily_defs, **special_defs}
+
         daily_quests = []
         for row in rows:
             quest_id = row[0]
@@ -319,7 +397,7 @@ def get_daily_quests():
             progress_meta = row[2] if isinstance(row[2], dict) else {}
             completed_at = row[3]
 
-            quest_def = daily_defs.get(quest_id, {})
+            quest_def = all_defs.get(quest_id, {})
             if not quest_def:
                 continue
 
@@ -607,7 +685,8 @@ def get_pending_rewards():
                 rows = cur.fetchall()
 
         pending_rewards = []
-        total_mirage = 0
+        total_mirage_with_multiplier = 0
+        total_mirage_no_multiplier = 0
 
         for row in rows:
             reward_data = row[2] if isinstance(row[2], dict) else {}
@@ -621,9 +700,17 @@ def get_pending_rewards():
             pending_rewards.append(reward)
 
             if row[1] == "mirage":
-                total_mirage += reward_data.get("amount", 0)
+                amount = reward_data.get("amount", 0)
+                apply_multiplier = reward_data.get("apply_multiplier", True)
+                if apply_multiplier:
+                    total_mirage_with_multiplier += amount
+                else:
+                    total_mirage_no_multiplier += amount
 
         multiplier = _get_user_reward_multiplier(owner, ts)
+        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+        # Apply multiplier only to rewards that allow it
+        total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 
         # Check if claiming is available
         distributor = get_distributor()
@@ -635,7 +722,7 @@ def get_pending_rewards():
                 "suspended": False,
                 "pending_rewards": pending_rewards,
                 "total_mirage": total_mirage,
-                "total_mirage_after_multiplier": int(total_mirage * multiplier),
+                "total_mirage_after_multiplier": total_mirage_after_multiplier,
                 "reward_multiplier": round(multiplier, 4),
                 "claiming_available": claiming_available,
             }

@@ -11,6 +11,7 @@ Handles:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -77,6 +78,7 @@ class QuestTracker:
         self.daily_quests: list[QuestDefinition] = []
         self.flash_templates: list[QuestDefinition] = []
         self.achievements: list[QuestDefinition] = []
+        self.special_quests: list[QuestDefinition] = []  # Special quests with custom gating
         self._load_definitions()
     
     def _load_definitions(self) -> None:
@@ -103,10 +105,15 @@ class QuestTracker:
             for q in data.get("achievements", []):
                 self.achievements.append(QuestDefinition(**q))
             
+            # Load special quests (excluded from random pool, have custom gating)
+            for q in data.get("special_quests", []):
+                self.special_quests.append(QuestDefinition(**q))
+            
             logger.info(
                 f"Loaded {len(self.daily_quests)} daily quests, "
                 f"{len(self.flash_templates)} flash templates, "
-                f"{len(self.achievements)} achievements"
+                f"{len(self.achievements)} achievements, "
+                f"{len(self.special_quests)} special quests"
             )
         except Exception as e:
             logger.error(f"Failed to load quest definitions: {e}")
@@ -195,15 +202,82 @@ class QuestTracker:
                 )
                 return [row[0] for row in cur.fetchall()]
     
+    def _has_unused_invite_codes(self, owner: str) -> bool:
+        """Check if user has at least one unused invite code."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1 FROM invite_codes
+                    WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
+                    LIMIT 1
+                    """,
+                    (owner,)
+                )
+                return cur.fetchone() is not None
+    
+    def _get_completed_quest_count(self, owner: str) -> int:
+        """Get total number of completed quests for a user."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,)
+                )
+                row = cur.fetchone()
+                return row[0] if row else 0
+    
+    def _deterministic_roll(self, owner: str, day_utc: int, roll_type: str) -> float:
+        """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
+        seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
+        seed_hash = hashlib.sha256(seed_str.encode()).hexdigest()
+        # Use first 8 hex chars as seed (32 bits)
+        seed_int = int(seed_hash[:8], 16)
+        rng = random.Random(seed_int)
+        return rng.random()
+    
     def _assign_daily_quests(self, owner: str, day_utc: int) -> list[str]:
-        """Assign random daily quests to a user for the day."""
+        """Assign random daily quests to a user for the day, including special quest gating."""
         if not self.daily_quests:
             return []
         
-        # Select random quests
-        count = min(settings.DAILY_QUESTS_COUNT, len(self.daily_quests))
-        selected = random.sample(self.daily_quests, count)
-        quest_ids = [q.id for q in selected]
+        quest_ids = []
+        special_quest_assigned = False
+        
+        # Check for invite_recruit eligibility (30% roll if user has unused codes)
+        if not special_quest_assigned and self._has_unused_invite_codes(owner):
+            roll = self._deterministic_roll(owner, day_utc, "invite_recruit")
+            logger.debug(f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.INVITE_RECRUIT_CHANCE})")
+            if roll < settings.INVITE_RECRUIT_CHANCE:
+                # Find invite_recruit in special quests
+                invite_recruit = next((q for q in self.special_quests if q.id == "invite_recruit"), None)
+                if invite_recruit:
+                    quest_ids.append(invite_recruit.id)
+                    special_quest_assigned = True
+                    logger.info(f"Assigned special quest invite_recruit to {owner} (roll passed)")
+        
+        # Check for invite_earner eligibility (every N completed quests)
+        if not special_quest_assigned:
+            completed_count = self._get_completed_quest_count(owner)
+            interval = settings.INVITE_EARNER_QUEST_INTERVAL
+            if completed_count > 0 and completed_count % interval == 0:
+                # Check if user already got invite_earner for this milestone
+                # We track this by checking if they've completed this many quests since last invite_earner
+                invite_earner = next((q for q in self.special_quests if q.id == "invite_earner"), None)
+                if invite_earner:
+                    quest_ids.append(invite_earner.id)
+                    special_quest_assigned = True
+                    logger.info(f"Assigned special quest invite_earner to {owner} (completed {completed_count} quests)")
+        
+        # Fill remaining slots with random daily quests
+        remaining_slots = settings.DAILY_QUESTS_COUNT - len(quest_ids)
+        if remaining_slots > 0 and self.daily_quests:
+            count = min(remaining_slots, len(self.daily_quests))
+            selected = random.sample(self.daily_quests, count)
+            quest_ids.extend([q.id for q in selected])
         
         # Insert initial progress records
         with self.db._connect() as conn:
@@ -230,6 +304,9 @@ class QuestTracker:
             if q.id == quest_id:
                 return q
         for q in self.achievements:
+            if q.id == quest_id:
+                return q
+        for q in self.special_quests:
             if q.id == quest_id:
                 return q
         return None
@@ -554,7 +631,8 @@ class QuestTracker:
                 if reward_type == "mirage":
                     # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
                     amount_umirage = reward.get("amount", 0) * 1_000_000
-                    reward_data = {"amount": amount_umirage}
+                    apply_multiplier = reward.get("apply_multiplier", True)
+                    reward_data = {"amount": amount_umirage, "apply_multiplier": apply_multiplier}
                 else:
                     reward_data = {"id": reward.get("id")}
                 
@@ -745,7 +823,11 @@ class QuestTracker:
                 if reward_type == "mirage":
                     # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
                     amount_umirage = reward.get("amount", 0) * 1_000_000
-                    reward_data = {"amount": amount_umirage}
+                    apply_multiplier = reward.get("apply_multiplier", True)
+                    reward_data = {"amount": amount_umirage, "apply_multiplier": apply_multiplier}
+                elif reward_type == "invite_code":
+                    # Invite code rewards are handled at claim time
+                    reward_data = {"amount": reward.get("amount", 1)}
                 else:
                     reward_data = {"id": reward.get("id")}
                 
@@ -819,7 +901,8 @@ class QuestTracker:
                 if reward_type == "mirage":
                     # YAML stores MIRAGE, DB stores umirage (1 MIRAGE = 1,000,000 umirage)
                     amount_umirage = reward.get("amount", 0) * 1_000_000
-                    reward_data = {"amount": amount_umirage}
+                    apply_multiplier = reward.get("apply_multiplier", True)
+                    reward_data = {"amount": amount_umirage, "apply_multiplier": apply_multiplier}
                 else:
                     reward_data = {"id": reward.get("id")}
                 

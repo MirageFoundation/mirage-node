@@ -110,6 +110,114 @@ def _query_chain_profile_full(addr: str) -> dict | None:
     return None
 
 
+def _get_utc_julian_day(ts: int) -> int:
+    """Convert Unix timestamp to UTC Julian day number."""
+    return 2440588 + (ts // 86400)
+
+
+def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
+    """
+    Process invite quest completion when a new user sets their username.
+    
+    Checks if:
+    1. New user used an invite code
+    2. Referrer has invite_recruit quest assigned for today and not completed
+    
+    If both conditions are met:
+    - Marks referrer's invite_recruit quest as completed
+    - Creates pending reward for referrer (10k MIRAGE, no multiplier)
+    - Creates invite_referred quest for new user (completed) with pending reward
+    """
+    now_ts = int(time.time())
+    day_utc = _get_utc_julian_day(now_ts)
+    
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            # Step 1: Find the invite code used by this new user
+            cur.execute(
+                """
+                SELECT owner, code FROM invite_codes
+                WHERE LOWER(used_by) = LOWER(%s)
+                ORDER BY used_at DESC
+                LIMIT 1
+                """,
+                (new_user_addr,)
+            )
+            invite_row = cur.fetchone()
+            
+            if not invite_row:
+                log_event(rid, "invite_quest.no_invite_code", new_user=new_user_addr)
+                return
+            
+            referrer_addr, invite_code = invite_row
+            referrer_addr = referrer_addr.lower()
+            log_event(rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code)
+            
+            # Step 2: Check if referrer has invite_recruit quest for today, not completed
+            cur.execute(
+                """
+                SELECT quest_id, completed_at FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
+                """,
+                (referrer_addr, day_utc)
+            )
+            quest_row = cur.fetchone()
+            
+            if not quest_row:
+                log_event(rid, "invite_quest.referrer_no_quest", referrer=referrer_addr, day_utc=day_utc)
+                return
+            
+            _, completed_at = quest_row
+            if completed_at is not None:
+                log_event(rid, "invite_quest.referrer_quest_already_completed", referrer=referrer_addr)
+                return
+            
+            log_event(rid, "invite_quest.completing", referrer=referrer_addr, new_user=new_user_addr)
+            
+            # Step 3: Mark referrer's invite_recruit quest as completed
+            cur.execute(
+                """
+                UPDATE user_daily_quests
+                SET progress = 1, completed_at = %s
+                WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
+                """,
+                (now_ts, referrer_addr, day_utc)
+            )
+            
+            # Step 4: Insert pending reward for referrer (10k MIRAGE = 10,000,000,000 umirage)
+            reward_amount_umirage = 10000 * 1_000_000  # 10k MIRAGE
+            cur.execute(
+                """
+                INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                VALUES (%s, 'mirage', %s, 'quest:invite_recruit', %s)
+                """,
+                (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts)
+            )
+            log_event(rid, "invite_quest.referrer_reward_created", referrer=referrer_addr, amount=reward_amount_umirage)
+            
+            # Step 5: Insert invite_referred quest for new user (already completed)
+            cur.execute(
+                """
+                INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
+                VALUES (%s, %s, 'invite_referred', 1, '{}', %s)
+                ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+                """,
+                (new_user_addr, day_utc, now_ts)
+            )
+            
+            # Step 6: Insert pending reward for new user (10k MIRAGE)
+            cur.execute(
+                """
+                INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                VALUES (%s, 'mirage', %s, 'quest:invite_referred', %s)
+                """,
+                (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts)
+            )
+            log_event(rid, "invite_quest.referee_reward_created", new_user=new_user_addr, amount=reward_amount_umirage)
+            
+            log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
+
+
 def _hex_to_bytes(s: str) -> bytes:
     """Convert hex string to bytes for envelope_block_hash."""
     try:
@@ -493,6 +601,12 @@ def core_set_username():
                     log_event(rid, "set_username.referral_recorded", user=user_addr, referrer=referrer)
                 except Exception as ref_err:
                     log_event(rid, "set_username.referral_error", error=str(ref_err))
+
+        # Check for invite quest completion (referrer has invite_recruit, new user used their code)
+        try:
+            _process_invite_quest_completion(rid, user_addr.lower())
+        except Exception as invite_err:
+            log_event(rid, "set_username.invite_quest_error", error=str(invite_err))
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
