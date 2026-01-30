@@ -284,17 +284,26 @@ def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
     return rng.random()
 
 
-def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any], special_defs: Dict[str, Any] = None) -> List[str]:
+def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any], special_defs: Dict[str, Any] = None, use_random_rolls: bool = False) -> List[str]:
     """Assign daily quests to a user if they don't have any for today.
 
     Includes special quest gating logic:
     - invite_recruit: 30% chance if user has unused invite codes
-    - invite_earner: appears every N completed quests
+    - invite_earner: appears every N completed quests + 30% roll
+
+    Args:
+        use_random_rolls: If True, use random.random() instead of deterministic rolls (for localhost testing)
 
     Returns the list of assigned quest IDs.
     """
     if special_defs is None:
         special_defs = {}
+
+    def get_roll(roll_type: str) -> float:
+        """Get roll value - random on localhost, deterministic in production."""
+        if use_random_rolls:
+            return random.random()
+        return _deterministic_roll(owner, day_utc, roll_type)
 
     with connect_db() as conn:
         with conn.cursor() as cur:
@@ -318,7 +327,7 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
             # Check for invite_recruit eligibility (30% roll if user has unused codes)
             if not special_quest_assigned and "invite_recruit" in special_defs:
                 if _has_unused_invite_codes(owner):
-                    roll = _deterministic_roll(owner, day_utc, "invite_recruit")
+                    roll = get_roll("invite_recruit")
                     log_event(None, "quest.invite_recruit.roll", owner=owner, roll=round(roll, 3), threshold=INVITE_RECRUIT_CHANCE)
                     if roll < INVITE_RECRUIT_CHANCE:
                         quest_ids.append("invite_recruit")
@@ -327,11 +336,17 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
 
             # Check for invite_earner eligibility (every N completed quests + 30% roll)
             if not special_quest_assigned and "invite_earner" in special_defs:
-                if _is_invite_earner_eligible(owner, day_utc):
-                    completed_count = _get_completed_quest_count(owner)
-                    quest_ids.append("invite_earner")
-                    special_quest_assigned = True
-                    log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
+                # Check milestone first
+                completed_count = _get_completed_quest_count(owner)
+                invite_earner_completed = _get_invite_earner_completed_count(owner)
+                next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                if completed_count >= next_milestone:
+                    roll = get_roll("invite_earner")
+                    log_event(None, "quest.invite_earner.roll", owner=owner, roll=round(roll, 3), threshold=INVITE_EARNER_CHANCE)
+                    if roll < INVITE_EARNER_CHANCE:
+                        quest_ids.append("invite_earner")
+                        special_quest_assigned = True
+                        log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
 
             # Fill remaining slots with random daily quests
             if not daily_defs:
@@ -406,7 +421,8 @@ def get_daily_quests():
         special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
 
         # Assign quests if user doesn't have any for today
-        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs)
+        # Use random rolls on localhost for easier testing
+        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
         # Get user's assigned quests for today
         with connect_db() as conn:
@@ -1633,57 +1649,3 @@ def debug_set_completed_count():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/rewards/debug/force_assign", methods=["POST"])
-def debug_force_assign_quest():
-    """Force assign a special quest (bypasses eligibility checks). Localhost only.
-
-    Body:
-    - owner: User address (required)
-    - quest_id: Quest ID to assign (invite_recruit, invite_earner)
-    """
-    if not _is_localhost():
-        return jsonify({"error": "debug endpoints only available on localhost"}), 403
-
-    rid = next_request_id()
-    log_event(rid, "debug.quests.force_assign.begin")
-
-    try:
-        data = request.get_json(force=True) or {}
-        owner = str(data.get("owner", "")).strip().lower()
-        quest_id = str(data.get("quest_id", "")).strip()
-
-        if not owner:
-            return jsonify({"error": "owner required"}), 400
-        if quest_id not in ("invite_recruit", "invite_earner"):
-            return jsonify({"error": "quest_id must be invite_recruit or invite_earner"}), 400
-
-        ts = int(time.time())
-        day_utc = _get_utc_julian_day(ts)
-
-        with connect_db() as conn:
-            with conn.cursor() as cur:
-                # Check if quest already assigned for today
-                cur.execute(
-                    """
-                    SELECT 1 FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
-                    """,
-                    (owner, day_utc, quest_id),
-                )
-                if cur.fetchone():
-                    return jsonify({"error": f"{quest_id} already assigned for today"}), 400
-
-                # Insert the quest
-                cur.execute(
-                    """
-                    INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
-                    VALUES (%s, %s, %s, 0, '{}')
-                    """,
-                    (owner, day_utc, quest_id),
-                )
-
-        log_event(rid, "debug.quests.force_assign.ok", owner=owner, quest_id=quest_id)
-        return jsonify({"success": True, "quest_id": quest_id})
-    except Exception as e:
-        log_event(rid, "debug.quests.force_assign.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
