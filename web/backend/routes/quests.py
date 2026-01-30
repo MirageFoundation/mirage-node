@@ -1366,7 +1366,14 @@ def debug_quests_info():
                 invite_recruit_eligible = unused_invite_codes > 0 and invite_recruit_roll < INVITE_RECRUIT_CHANCE
 
                 # Check invite_earner eligibility
-                invite_earner_completed = _get_invite_earner_completed_count(owner)
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                invite_earner_completed = cur.fetchone()[0] or 0
                 invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
                 invite_earner_eligible = completed_count >= invite_earner_next_milestone
 
