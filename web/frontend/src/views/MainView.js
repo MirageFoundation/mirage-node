@@ -1389,7 +1389,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             } catch (_) { }
         };
         loadInviteCodes();
-        return () => { cancelled = true; };
+
+        // Listen for invite codes updates (e.g., when claimed from quests)
+        const handleInviteCodesUpdated = () => {
+            loadInviteCodes();
+        };
+        window.addEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
+
+        return () => {
+            cancelled = true;
+            window.removeEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
+        };
     }, [isLoggedIn, viewerAddress]);
 
     // Get next available invite code
