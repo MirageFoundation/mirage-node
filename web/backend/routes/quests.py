@@ -44,7 +44,8 @@ FLASH_QUEST_MAX_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MAX_INTERVAL_HO
 
 # Special quest gating
 INVITE_RECRUIT_CHANCE = float(os.environ.get("INVITE_RECRUIT_CHANCE", "0.30"))
-INVITE_EARNER_QUEST_INTERVAL = int(os.environ.get("INVITE_EARNER_QUEST_INTERVAL", "15"))
+INVITE_EARNER_QUEST_INTERVAL = int(os.environ.get("INVITE_EARNER_QUEST_INTERVAL", "10"))
+INVITE_EARNER_CHANCE = float(os.environ.get("INVITE_EARNER_CHANCE", "0.30"))
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -254,16 +255,23 @@ def _get_invite_earner_completed_count(owner: str) -> int:
             return row[0] if row else 0
 
 
-def _is_invite_earner_eligible(owner: str) -> bool:
+def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
     """Check if user is eligible for invite_earner quest.
     
-    User is eligible if their completed_count >= (invite_earner_completed + 1) * interval.
-    This handles the case where they pass through a milestone without getting the quest.
+    User is eligible if:
+    1. completed_count >= (invite_earner_completed + 1) * interval
+    2. 30% daily roll passes
     """
     completed_count = _get_completed_quest_count(owner)
     invite_earner_completed = _get_invite_earner_completed_count(owner)
     next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
-    return completed_count >= next_milestone
+    
+    if completed_count < next_milestone:
+        return False
+    
+    # 30% daily roll
+    roll = _deterministic_roll(owner, day_utc, "invite_earner")
+    return roll < INVITE_EARNER_CHANCE
 
 
 def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
@@ -317,9 +325,9 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
                         special_quest_assigned = True
                         log_event(None, "quest.invite_recruit.assigned", owner=owner)
 
-            # Check for invite_earner eligibility (every N completed quests)
+            # Check for invite_earner eligibility (every N completed quests + 30% roll)
             if not special_quest_assigned and "invite_earner" in special_defs:
-                if _is_invite_earner_eligible(owner):
+                if _is_invite_earner_eligible(owner, day_utc):
                     completed_count = _get_completed_quest_count(owner)
                     quest_ids.append("invite_earner")
                     special_quest_assigned = True
@@ -1375,7 +1383,9 @@ def debug_quests_info():
                 )
                 invite_earner_completed = cur.fetchone()[0] or 0
                 invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
-                invite_earner_eligible = completed_count >= invite_earner_next_milestone
+                invite_earner_milestone_reached = completed_count >= invite_earner_next_milestone
+                invite_earner_roll = _deterministic_roll(owner, day_utc, "invite_earner")
+                invite_earner_eligible = invite_earner_milestone_reached and invite_earner_roll < INVITE_EARNER_CHANCE
 
         log_event(rid, "debug.quests.info.ok", owner=owner)
         return jsonify(
@@ -1394,6 +1404,9 @@ def debug_quests_info():
                     "interval": INVITE_EARNER_QUEST_INTERVAL,
                     "completed": invite_earner_completed,
                     "next_milestone": invite_earner_next_milestone,
+                    "milestone_reached": invite_earner_milestone_reached,
+                    "roll": round(invite_earner_roll, 4),
+                    "threshold": INVITE_EARNER_CHANCE,
                     "eligible": invite_earner_eligible,
                 },
             }
