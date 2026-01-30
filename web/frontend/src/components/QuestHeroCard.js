@@ -808,9 +808,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         if (!userAddress) return;
         try {
             await Api.post('/debug/quests/reset', { owner: userAddress });
-            await fetchDebugInfo();
+            // refreshQuests will re-assign quests via /api/quests/daily
             refreshQuests();
             refreshRewards();
+            // Wait for quests to be re-assigned, then refresh debug info
+            setTimeout(() => fetchDebugInfo(), 500);
         } catch (e) {
             console.error('Failed to reset quests:', e);
         }
