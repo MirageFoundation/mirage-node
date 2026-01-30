@@ -2,11 +2,13 @@
  * QuestHeroCard - Displays daily quests, progress, and claimable rewards
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { useQuests, usePendingRewards } from '../utils/useQuests';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
+import Api from '../lib/api';
+import Storage from '../utils/Storage';
 
 const pickThemeColor = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -604,6 +606,118 @@ function getQuestRequirements(quest) {
 
 const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
 
+// Check if running on localhost
+function isLocalhost() {
+    const h = window.location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1') return true;
+    if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(h)) return true;
+    return false;
+}
+
+// Debug panel styled components
+const DebugPanel = styled.div`
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(239, 68, 68, 0.1)'
+        : 'rgba(239, 68, 68, 0.15)'};
+    border: 1px dashed rgba(239, 68, 68, 0.5);
+    border-radius: 6px;
+    font-size: 0.55rem;
+`;
+
+const DebugTitle = styled.div`
+    font-weight: 700;
+    color: #ef4444;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+`;
+
+const DebugRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.15rem 0;
+    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+`;
+
+const DebugLabel = styled.span`
+    opacity: 0.7;
+`;
+
+const DebugValue = styled.span`
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+`;
+
+const DebugButton = styled.button`
+    background: ${({ $variant }) => 
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
+        $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
+        'rgba(59, 130, 246, 0.2)'};
+    border: 1px solid ${({ $variant }) => 
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)' :
+        $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
+        'rgba(59, 130, 246, 0.5)'};
+    color: ${({ $variant }) => 
+        $variant === 'danger' ? '#ef4444' :
+        $variant === 'success' ? '#22c55e' :
+        '#3b82f6'};
+    font-size: 0.5rem;
+    font-weight: 600;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover:not(:disabled) {
+        opacity: 0.8;
+        transform: scale(1.02);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+
+const DebugButtonGroup = styled.div`
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    margin-top: 0.3rem;
+`;
+
+const DebugInput = styled.input`
+    width: 50px;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.5rem;
+    border: 1px solid rgba(59, 130, 246, 0.5);
+    border-radius: 4px;
+    background: ${({ theme }) => theme?.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
+    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+    text-align: center;
+
+    &:focus {
+        outline: none;
+        border-color: #3b82f6;
+    }
+`;
+
+const DebugQuestRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.2rem 0.3rem;
+    margin: 0.15rem 0;
+    background: ${({ theme }) => theme?.name === 'light' 
+        ? 'rgba(0,0,0,0.03)' 
+        : 'rgba(255,255,255,0.03)'};
+    border-radius: 4px;
+`;
+
 // Collapse button
 const CollapseButton = styled.button`
     background: transparent;
@@ -652,6 +766,75 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     const [showCelebration, setShowCelebration] = useState(false);
     const [claimedAmount, setClaimedAmount] = useState(0);
     const [claimError, setClaimError] = useState(null);
+
+    // Debug state (localhost only)
+    const [showDebug, setShowDebug] = useState(false);
+    const [debugInfo, setDebugInfo] = useState(null);
+    const [debugLoading, setDebugLoading] = useState(false);
+    const [targetCompletedCount, setTargetCompletedCount] = useState('');
+
+    const userAddress = Storage.load('publicKey', '');
+    const isDebugAvailable = isLocalhost();
+
+    // Fetch debug info
+    const fetchDebugInfo = useCallback(async () => {
+        if (!userAddress || !isDebugAvailable) return;
+        setDebugLoading(true);
+        try {
+            const data = await Api.get('/debug/quests', { owner: userAddress });
+            setDebugInfo(data);
+            setTargetCompletedCount(String(data.completed_count || 0));
+        } catch (e) {
+            console.error('Failed to fetch debug info:', e);
+        } finally {
+            setDebugLoading(false);
+        }
+    }, [userAddress, isDebugAvailable]);
+
+    // Debug actions
+    const debugCompleteQuest = useCallback(async (questId) => {
+        if (!userAddress) return;
+        try {
+            await Api.post('/debug/quests/complete', { owner: userAddress, quest_id: questId });
+            await fetchDebugInfo();
+            refreshQuests();
+            refreshRewards();
+        } catch (e) {
+            console.error('Failed to complete quest:', e);
+        }
+    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+
+    const debugResetQuests = useCallback(async () => {
+        if (!userAddress) return;
+        try {
+            await Api.post('/debug/quests/reset', { owner: userAddress });
+            await fetchDebugInfo();
+            refreshQuests();
+            refreshRewards();
+        } catch (e) {
+            console.error('Failed to reset quests:', e);
+        }
+    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+
+    const debugSetCompletedCount = useCallback(async () => {
+        if (!userAddress) return;
+        const count = parseInt(targetCompletedCount, 10);
+        if (isNaN(count) || count < 0) return;
+        try {
+            await Api.post('/debug/quests/set_completed', { owner: userAddress, count });
+            await fetchDebugInfo();
+            refreshQuests();
+        } catch (e) {
+            console.error('Failed to set completed count:', e);
+        }
+    }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
+
+    // Load debug info when debug panel is shown
+    useEffect(() => {
+        if (showDebug && isDebugAvailable) {
+            fetchDebugInfo();
+        }
+    }, [showDebug, isDebugAvailable, fetchDebugInfo]);
 
     const handleClaim = useCallback(async () => {
         setClaimError(null);
@@ -934,6 +1117,104 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     <ClaimErrorMessage>
                         ⚠️ {claimError}
                     </ClaimErrorMessage>
+                )}
+
+                {/* Debug panel (localhost only) */}
+                {!collapsed && isDebugAvailable && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                        <DebugButton onClick={() => setShowDebug(!showDebug)}>
+                            {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
+                        </DebugButton>
+                        
+                        {showDebug && (
+                            <DebugPanel>
+                                <DebugTitle>
+                                    🔧 Quest Debug Panel (localhost only)
+                                </DebugTitle>
+                                
+                                {debugLoading ? (
+                                    <div>Loading...</div>
+                                ) : debugInfo ? (
+                                    <>
+                                        <DebugRow>
+                                            <DebugLabel>Total Completed Quests:</DebugLabel>
+                                            <DebugValue>{debugInfo.completed_count}</DebugValue>
+                                        </DebugRow>
+                                        <DebugRow>
+                                            <DebugLabel>Unused Invite Codes:</DebugLabel>
+                                            <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
+                                        </DebugRow>
+                                        
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>invite_recruit eligibility:</DebugLabel>
+                                            <DebugRow>
+                                                <span>Roll: {debugInfo.invite_recruit?.roll} (need &lt; {debugInfo.invite_recruit?.threshold})</span>
+                                                <DebugValue style={{ color: debugInfo.invite_recruit?.eligible ? '#22c55e' : '#ef4444' }}>
+                                                    {debugInfo.invite_recruit?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
+                                                </DebugValue>
+                                            </DebugRow>
+                                        </div>
+                                        
+                                        <div style={{ marginTop: '0.3rem' }}>
+                                            <DebugLabel>invite_earner eligibility:</DebugLabel>
+                                            <DebugRow>
+                                                <span>Next at: {debugInfo.invite_earner?.next_at} completed</span>
+                                                <DebugValue style={{ color: debugInfo.invite_earner?.eligible ? '#22c55e' : '#ef4444' }}>
+                                                    {debugInfo.invite_earner?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
+                                                </DebugValue>
+                                            </DebugRow>
+                                        </div>
+                                        
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>Today's Quests:</DebugLabel>
+                                            {debugInfo.today_quests?.map(q => (
+                                                <DebugQuestRow key={q.quest_id}>
+                                                    <span>
+                                                        {q.quest_id} ({q.progress})
+                                                        {q.completed && ' ✓'}
+                                                    </span>
+                                                    {!q.completed && (
+                                                        <DebugButton 
+                                                            $variant="success"
+                                                            onClick={() => debugCompleteQuest(q.quest_id)}
+                                                        >
+                                                            Complete
+                                                        </DebugButton>
+                                                    )}
+                                                </DebugQuestRow>
+                                            ))}
+                                        </div>
+                                        
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>Set completed count:</DebugLabel>
+                                            <DebugRow>
+                                                <DebugInput
+                                                    type="number"
+                                                    value={targetCompletedCount}
+                                                    onChange={e => setTargetCompletedCount(e.target.value)}
+                                                    min="0"
+                                                />
+                                                <DebugButton onClick={debugSetCompletedCount}>
+                                                    Set Count
+                                                </DebugButton>
+                                            </DebugRow>
+                                        </div>
+                                        
+                                        <DebugButtonGroup>
+                                            <DebugButton $variant="danger" onClick={debugResetQuests}>
+                                                Reset Today's Quests
+                                            </DebugButton>
+                                            <DebugButton onClick={fetchDebugInfo}>
+                                                Refresh Debug
+                                            </DebugButton>
+                                        </DebugButtonGroup>
+                                    </>
+                                ) : (
+                                    <div>No debug info available</div>
+                                )}
+                            </DebugPanel>
+                        )}
+                    </div>
                 )}
             </QuestCardContainer>
 
