@@ -1756,8 +1756,8 @@ def get_user_status():
         except Exception:
             pass
 
-        # Query chain for real-time subscription data
-        chain_profile = _query_chain_profile(addr)
+        # Query chain for real-time subscription data (use full gRPC query to get level)
+        chain_profile = _query_chain_profile_full(addr)
         if chain_profile:
             if chain_profile.get("level") is not None:
                 user_level = int(chain_profile["level"])
