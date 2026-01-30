@@ -2767,6 +2767,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                     Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
                                 </InviteOnlyHeroDescription>
                                 <InviteOnlyHeroDescription>
+                                    <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Learn more about our mission</a>
+                                </InviteOnlyHeroDescription>
+                                <InviteOnlyHeroDescription>
                                     Have an invite code? Join the community today.
                                 </InviteOnlyHeroDescription>
                                 <InviteOnlyHeroButtons>
