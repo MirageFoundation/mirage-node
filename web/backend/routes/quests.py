@@ -1305,7 +1305,7 @@ def _is_localhost() -> bool:
     return host in ("localhost", "127.0.0.1") or host.startswith("192.168.") or host.startswith("10.")
 
 
-@quests_bp.route("/api/debug/quests", methods=["GET"])
+@quests_bp.route("/api/rewards/debug", methods=["GET"])
 def debug_quests_info():
     """Get quest debug info for a user. Localhost only.
 
@@ -1403,7 +1403,7 @@ def debug_quests_info():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/debug/quests/complete", methods=["POST"])
+@quests_bp.route("/api/rewards/debug/complete", methods=["POST"])
 def debug_complete_quest():
     """Instantly complete a quest. Localhost only.
 
@@ -1497,7 +1497,7 @@ def debug_complete_quest():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/debug/quests/reset", methods=["POST"])
+@quests_bp.route("/api/rewards/debug/reset", methods=["POST"])
 def debug_reset_quests():
     """Reset today's quests for a user. Localhost only.
 
@@ -1539,7 +1539,7 @@ def debug_reset_quests():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/debug/quests/set_completed", methods=["POST"])
+@quests_bp.route("/api/rewards/debug/set_completed", methods=["POST"])
 def debug_set_completed_count():
     """Set the completed quest count by adding fake completed quests. Localhost only.
 

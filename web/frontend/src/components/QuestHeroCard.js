@@ -781,7 +781,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         if (!userAddress || !isDebugAvailable) return;
         setDebugLoading(true);
         try {
-            const data = await Api.get('/debug/quests', { owner: userAddress });
+            const data = await Api.get('/rewards/debug', { owner: userAddress });
             setDebugInfo(data);
             setTargetCompletedCount(String(data.completed_count || 0));
         } catch (e) {
@@ -795,7 +795,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     const debugCompleteQuest = useCallback(async (questId) => {
         if (!userAddress) return;
         try {
-            await Api.post('/debug/quests/complete', { owner: userAddress, quest_id: questId });
+            await Api.post('/rewards/debug/complete', { owner: userAddress, quest_id: questId });
             await fetchDebugInfo();
             refreshQuests();
             refreshRewards();
@@ -808,7 +808,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         if (!userAddress) return;
         setDebugLoading(true);
         try {
-            await Api.post('/debug/quests/reset', { owner: userAddress });
+            await Api.post('/rewards/debug/reset', { owner: userAddress });
             // refreshQuests will re-assign quests via /api/quests/daily
             refreshQuests();
             refreshRewards();
@@ -828,7 +828,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         const count = parseInt(targetCompletedCount, 10);
         if (isNaN(count) || count < 0) return;
         try {
-            await Api.post('/debug/quests/set_completed', { owner: userAddress, count });
+            await Api.post('/rewards/debug/set_completed', { owner: userAddress, count });
             await fetchDebugInfo();
             refreshQuests();
         } catch (e) {
