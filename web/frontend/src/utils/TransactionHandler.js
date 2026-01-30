@@ -2518,6 +2518,11 @@ class TransactionHandler {
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                 };
+                // Include invite_code if present (for recruit quest completion)
+                if (transaction.invite_code) {
+                    toRelay.invite_code = transaction.invite_code;
+                    console.log('[InviteCode] Added invite_code to set_username request:', transaction.invite_code);
+                }
                 // Include referrer if present (for referral system)
                 try {
                     const referrer = localStorage.getItem('referrer_address');

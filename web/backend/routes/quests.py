@@ -18,6 +18,7 @@ Admin endpoints (require level >= 100):
 """
 
 import hashlib
+import ipaddress
 import json
 import os
 import random
@@ -34,6 +35,9 @@ from routes.core import get_user_level
 
 
 quests_bp = Blueprint("quests", __name__)
+
+# Backend debug switch (default false; must be explicitly enabled)
+BACKEND_DEBUG = os.environ.get("BACKEND_DEBUG", "").lower() == "true"
 
 # Quest system configuration (from environment)
 QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
@@ -1339,10 +1343,29 @@ def reward_history():
 # ==================== Debug Endpoints (localhost only) ====================
 
 
+def _is_private_or_loopback_ip(ip: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return parsed.is_private or parsed.is_loopback
+
+
+def _is_debug_enabled() -> bool:
+    return BACKEND_DEBUG and _is_localhost()
+
+
 def _is_localhost() -> bool:
-    """Check if request is from localhost."""
-    host = request.host.split(":")[0]
-    return host in ("localhost", "127.0.0.1") or host.startswith("192.168.") or host.startswith("10.")
+    """Check if request is from localhost/private network."""
+    remote_ip = request.remote_addr or ""
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        forwarded_ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+        if not forwarded_ips:
+            return False
+        if any(not _is_private_or_loopback_ip(ip) for ip in forwarded_ips):
+            return False
+    return _is_private_or_loopback_ip(remote_ip)
 
 
 @quests_bp.route("/api/rewards/debug", methods=["GET"])
@@ -1352,7 +1375,7 @@ def debug_quests_info():
     Query params:
     - owner: User address (required)
     """
-    if not _is_localhost():
+    if not _is_debug_enabled():
         return jsonify({"error": "debug endpoints only available on localhost"}), 403
 
     rid = next_request_id()
@@ -1455,7 +1478,7 @@ def debug_complete_quest():
     - owner: User address (required)
     - quest_id: Quest ID to complete (required)
     """
-    if not _is_localhost():
+    if not _is_debug_enabled():
         return jsonify({"error": "debug endpoints only available on localhost"}), 403
 
     rid = next_request_id()
@@ -1548,7 +1571,7 @@ def debug_reset_quests():
     Body:
     - owner: User address (required)
     """
-    if not _is_localhost():
+    if not _is_debug_enabled():
         return jsonify({"error": "debug endpoints only available on localhost"}), 403
 
     rid = next_request_id()
@@ -1591,7 +1614,7 @@ def debug_set_completed_count():
     - owner: User address (required)
     - count: Target completed count (required)
     """
-    if not _is_localhost():
+    if not _is_debug_enabled():
         return jsonify({"error": "debug endpoints only available on localhost"}), 403
 
     rid = next_request_id()
