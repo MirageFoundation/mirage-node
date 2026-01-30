@@ -231,13 +231,17 @@ class QuestTracker:
                 return row[0] if row else 0
 
     def _get_invite_earner_completed_count(self, owner: str) -> int:
-        """Get total number of completed invite_earner quests for a user."""
+        """Get total number of completed invite_earner quests for a user.
+        
+        Counts claimed invite_code rewards from invite_earner quests, which is more
+        reliable than counting quest completions (which can be reset via debug panel).
+        """
         with self.db._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT COUNT(*) FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                    SELECT COUNT(*) FROM pending_rewards
+                    WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
                     """,
                     (owner,)
                 )
@@ -410,6 +414,15 @@ class QuestTracker:
         
         # Check if enough time has passed
         next_flash_at = self._get_next_flash_time(owner)
+        
+        # New user check: if no next_flash_at record exists (returns 0),
+        # initialize it with minimum interval delay so new users don't get flash quests immediately
+        if next_flash_at == 0:
+            initial_delay = settings.FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
+            self._set_next_flash_time(owner, ts + initial_delay)
+            logger.info(f"New user {owner}: initialized flash quest delay to {initial_delay}s")
+            return None
+        
         if ts < next_flash_at:
             return None
         

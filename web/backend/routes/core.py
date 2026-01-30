@@ -602,6 +602,29 @@ def core_set_username():
                 except Exception as ref_err:
                     log_event(rid, "set_username.referral_error", error=str(ref_err))
 
+        # Mark invite code as used (if provided) - this must happen BEFORE quest completion check
+        invite_code = str(data.get("invite_code", "")).strip().upper()
+        if invite_code and len(invite_code) == 9 and invite_code[4] == "-":
+            try:
+                now_ts = int(time.time())
+                with connect_db() as conn:
+                    with conn.cursor() as cur:
+                        # Only mark as used if it exists and is not already used
+                        cur.execute(
+                            """
+                            UPDATE invite_codes 
+                            SET used_by = %s, used_at = %s 
+                            WHERE UPPER(code) = %s AND used_by IS NULL
+                            """,
+                            (user_addr.lower(), now_ts, invite_code),
+                        )
+                        if cur.rowcount > 0:
+                            log_event(rid, "set_username.invite_code_used", code=invite_code, user=user_addr)
+                        else:
+                            log_event(rid, "set_username.invite_code_already_used_or_invalid", code=invite_code)
+            except Exception as ic_err:
+                log_event(rid, "set_username.invite_code_error", error=str(ic_err))
+
         # Check for invite quest completion (referrer has invite_recruit, new user used their code)
         try:
             _process_invite_quest_completion(rid, user_addr.lower())
