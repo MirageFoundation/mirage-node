@@ -865,6 +865,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             // Refresh data
             refreshQuests();
             refreshRewards();
+
+            // If invite codes were claimed, notify other components to refresh
+            if (inviteCodesCount > 0) {
+                window.dispatchEvent(new CustomEvent('inviteCodesUpdated'));
+            }
         } else {
             // Handle specific errors with user-friendly messages
             if (result.error === 'insufficient_funds') {

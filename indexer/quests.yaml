@@ -310,7 +310,6 @@ special_quests:
     rewards:
       - type: mirage
         amount: 10000
-        apply_multiplier: false
 
   # Referee quest: auto-assigned (completed) when new user joins via invite code
   - id: invite_referred
