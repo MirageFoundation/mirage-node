@@ -71,14 +71,12 @@ func TestStoreLoaderWithExistingStore(t *testing.T) {
 	require.Equal(t, int64(0), app3.LastBlockHeight())
 }
 
-// TestUpgradeHandlerRegistered verifies that the v1.10.4-restore-sdk upgrade
-// handler is properly registered and doesn't use StoreUpgrades.Added
-func TestUpgradeHandlerRegistered(t *testing.T) {
+// TestUpgradeHandlersRegistered verifies that key upgrade handlers are registered
+func TestUpgradeHandlersRegistered(t *testing.T) {
 	db := dbm.NewMemDB()
 	app := New(log.NewNopLogger(), db, nil, false, MockAppOptions{}, baseapp.SetChainID("mirage-test"))
 	require.NoError(t, app.Load(true))
 	
-	// Check that the upgrade handler is registered
-	hasHandler := app.UpgradeKeeper.HasHandler("v1.10.4-restore-sdk")
-	require.True(t, hasHandler, "v1.10.4-restore-sdk upgrade handler should be registered")
+	// Check that upgrade handlers are registered (sampling a few key ones)
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.10.0-remove-ibc"), "v1.10.0-remove-ibc upgrade handler should be registered")
 }

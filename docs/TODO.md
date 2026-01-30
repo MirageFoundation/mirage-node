@@ -1,14 +1,3 @@
-### NOTE: SDK bloat removal reverted
-- v1.10.3-sdk-bloat was applied on-chain, but we are restoring SDK modules.
-- New upgrade: v1.10.4-restore-sdk (re-adds authz, feegrant, group, epochs, circuit, evidence, vesting, mint).
-
-### TODO: Remove v1.10.4-restore-sdk store detection code
-- After v1.10.4-restore-sdk upgrade is complete on all chains (production + testnets), remove:
-  - The store detection logic in `app.go` (lines ~365-400) that checks for missing stores
-  - The `sdkRestoreUpgradeName` constant and its upgrade handler in `upgrades.go`
-- This code handles the edge case where local testnets from v1.10.3 backups have stores at version 0
-- Once all chains have upgraded past this point, the code is dead weight
-
 1. Language Consistency: Go Everywhere
 Current: Go (chain, orchestrator) + Python (indexer, backend) + JavaScript (frontend)
 The problem: The canonical serialization must be byte-identical across Go, Python, and JavaScript. This is a maintenance nightmare and a source of subtle bugs. Three separate implementations of uvarint, encStr, encBytes, field ordering...
