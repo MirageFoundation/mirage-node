@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.10.3-sdk-bloat",
+                "name": "v1.10.4-restore-sdk",
                 "height": "T+50",
-                "info": "Remove unused SDK modules"
+                "info": "Restore SDK modules removed in v1.10.3-sdk-bloat"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.10.3-sdk-bloat",
-    "summary": "Removes unused Cosmos SDK modules to reduce binary size and attack surface.\n\nRemoved modules:\n- authz (permission delegation)\n- feegrant (fee payment delegation)\n- group (on-chain DAO/multisig)\n- epochs (scheduled hooks)\n- mint (SDK inflation minting - we use custom minting via core module)\n- circuit (emergency shutdown)\n- evidence (double-sign evidence)\n\nThis upgrade deletes the KV stores for these modules. The chain will fail to start if validators run the new binary before the upgrade height.\n\nBINARY REQUIREMENT: All validators must update to v1.10.3 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.10.4-restore-sdk",
+    "summary": "Restores SDK modules removed in v1.10.3-sdk-bloat.\n\nModules restored:\n- authz\n- feegrant\n- group\n- epochs\n- circuit\n- evidence\n- vesting\n- mint\n\nChanges:\n- Re-adds module wiring and keepers in the app\n- Adds module stores at upgrade height\n- Initializes default genesis state for restored modules\n\nBINARY REQUIREMENT: All validators must update to v1.10.4 binary BEFORE the upgrade height.",
     "expedited": true
 }

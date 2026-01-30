@@ -81,6 +81,12 @@ def get_local_miraged_path() -> str:
 FAUCET_ACCOUNT = "faucet"
 VALIDATOR_ACCOUNT = "validator"
 
+
+def get_submission_account() -> str:
+    """Get the account to use for proposal submission.
+    For local mode, use validator since backups don't have faucet."""
+    return VALIDATOR_ACCOUNT if _is_local_mode else FAUCET_ACCOUNT
+
 # RPC endpoints
 LOCAL_RPC_ENDPOINT = "http://127.0.0.1:26657"
 REMOTE_RPC_ENDPOINT = "http://159.203.114.27:26657"
@@ -709,20 +715,21 @@ def main():
 
     log_debug(f"Will vote with: {validator_accounts}")
 
-    # Check faucet key and balance
-    if not key_exists(FAUCET_ACCOUNT):
-        print(f"Enter seed for '{FAUCET_ACCOUNT}' (for submission): ", end="", flush=True)
-        faucet_seed = getpass.getpass("").strip()
-        if not faucet_seed:
-            print("ERROR: Faucet seed required", file=sys.stderr)
+    # Check submission account key and balance
+    submission_account = get_submission_account()
+    if not key_exists(submission_account):
+        print(f"Enter seed for '{submission_account}' (for submission): ", end="", flush=True)
+        submission_seed = getpass.getpass("").strip()
+        if not submission_seed:
+            print("ERROR: Submission account seed required", file=sys.stderr)
             return 1
-        import_key_from_seed(FAUCET_ACCOUNT, faucet_seed)
+        import_key_from_seed(submission_account, submission_seed)
     else:
-        faucet_addr_result = run_miraged_cmd(
+        submission_addr_result = run_miraged_cmd(
             [
                 "keys",
                 "show",
-                FAUCET_ACCOUNT,
+                submission_account,
                 "-a",
                 "--keyring-backend",
                 get_keyring_backend(),
@@ -730,10 +737,10 @@ def main():
                 get_keyring_home(),
             ]
         )
-        if faucet_addr_result.returncode == 0:
-            faucet_addr = faucet_addr_result.stdout.strip()
+        if submission_addr_result.returncode == 0:
+            submission_addr = submission_addr_result.stdout.strip()
             try:
-                balance_result = query_json_rpc(rpc_endpoint, ["q", "bank", "balances", faucet_addr])
+                balance_result = query_json_rpc(rpc_endpoint, ["q", "bank", "balances", submission_addr])
                 balances = balance_result.get("balances", [])
 
                 if proposal_json is None:
@@ -752,12 +759,12 @@ def main():
 
                 if balances:
                     amt_int = int(balances[0].get("amount", "0"))
-                    log_debug(f"Faucet balance: {amt_int/1_000_000:,.2f} MIRAGE, need: {total_needed/1_000_000:,.2f}")
+                    log_debug(f"Submission account balance: {amt_int/1_000_000:,.2f} MIRAGE, need: {total_needed/1_000_000:,.2f}")
                     if amt_int < total_needed:
-                        info(f"ERROR: Insufficient faucet balance ({amt_int/1_000_000:,.2f} < {total_needed/1_000_000:,.2f} MIRAGE)")
+                        info(f"ERROR: Insufficient balance ({amt_int/1_000_000:,.2f} < {total_needed/1_000_000:,.2f} MIRAGE)")
                         return 1
                 else:
-                    info(f"ERROR: Faucet account has no balance")
+                    info(f"ERROR: Submission account has no balance")
                     return 1
             except Exception as e:
                 log(f"Balance check error: {e}")
@@ -853,7 +860,7 @@ def main():
         "submit-proposal",
         proposal_path_for_cmd,
         "--from",
-        FAUCET_ACCOUNT,
+        get_submission_account(),
         "--keyring-backend",
         get_keyring_backend(),
         "--home",
@@ -1064,7 +1071,7 @@ def main():
                 str(proposal_id),
                 f"{additional_needed}umirage",
                 "--from",
-                FAUCET_ACCOUNT,
+                get_submission_account(),
                 "--keyring-backend",
                 get_keyring_backend(),
                 "--home",

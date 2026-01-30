@@ -14,8 +14,13 @@ import (
 	"cosmossdk.io/depinject"
 	"cosmossdk.io/log"
 	storetypes "cosmossdk.io/store/types"
+	circuitkeeper "cosmossdk.io/x/circuit/keeper"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
+
+	"mirage/docs"
+	corekeeper "mirage/x/core/keeper"
+	coretypes "mirage/x/core/types"
 
 	errorsmod "cosmossdk.io/errors"
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -37,6 +42,7 @@ import (
 	authkeeper "github.com/cosmos/cosmos-sdk/x/auth/keeper"
 	authsims "github.com/cosmos/cosmos-sdk/x/auth/simulation"
 	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	authzkeeper "github.com/cosmos/cosmos-sdk/x/authz/keeper"
 	bankkeeper "github.com/cosmos/cosmos-sdk/x/bank/keeper"
 	consensuskeeper "github.com/cosmos/cosmos-sdk/x/consensus/keeper"
 	distrkeeper "github.com/cosmos/cosmos-sdk/x/distribution/keeper"
@@ -44,14 +50,12 @@ import (
 	genutiltypes "github.com/cosmos/cosmos-sdk/x/genutil/types"
 	govkeeper "github.com/cosmos/cosmos-sdk/x/gov/keeper"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	mintkeeper "github.com/cosmos/cosmos-sdk/x/mint/keeper"
 	paramskeeper "github.com/cosmos/cosmos-sdk/x/params/keeper"
 	paramstypes "github.com/cosmos/cosmos-sdk/x/params/types"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"mirage/docs"
-	corekeeper "mirage/x/core/keeper"
-	coretypes "mirage/x/core/types"
 )
 
 const (
@@ -88,10 +92,13 @@ type App struct {
 	BankKeeper            bankkeeper.Keeper
 	StakingKeeper         *stakingkeeper.Keeper
 	SlashingKeeper        slashingkeeper.Keeper
+	MintKeeper            mintkeeper.Keeper
 	DistrKeeper           distrkeeper.Keeper
 	GovKeeper             *govkeeper.Keeper
 	UpgradeKeeper         *upgradekeeper.Keeper
+	AuthzKeeper           authzkeeper.Keeper
 	ConsensusParamsKeeper consensuskeeper.Keeper
+	CircuitBreakerKeeper  circuitkeeper.Keeper
 	ParamsKeeper          paramskeeper.Keeper
 	CoreKeeper            corekeeper.Keeper
 
@@ -175,10 +182,13 @@ func New(
 		&app.BankKeeper,
 		&app.StakingKeeper,
 		&app.SlashingKeeper,
+		&app.MintKeeper,
 		&app.DistrKeeper,
 		&app.GovKeeper,
 		&app.UpgradeKeeper,
+		&app.AuthzKeeper,
 		&app.ConsensusParamsKeeper,
+		&app.CircuitBreakerKeeper,
 		&app.ParamsKeeper,
 		&app.CoreKeeper,
 	); err != nil {
@@ -254,16 +264,16 @@ func New(
 						}
 					}
 					switch m.(type) {
-				case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-					*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
-					*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-					*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-					*coretypes.MsgBridgeBurn:
-					containsMeta = true
+					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+						*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
+						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+						*coretypes.MsgBridgeBurn:
+						containsMeta = true
 					}
 				}
 
@@ -283,13 +293,13 @@ func New(
 				if err != nil {
 					return ctx1, err
 				}
-				
+
 				// 2. Timeout (Cheap check)
 				ctx2, err := timeout.AnteHandle(ctx1, tx, simulate, terminator)
 				if err != nil {
 					return ctx2, err
 				}
-				
+
 				// 3. Gas/Size Limit (Cheap check - prevents large txs)
 				ctx3, err := gasSize.AnteHandle(ctx2, tx, simulate, terminator)
 				if err != nil {
@@ -352,17 +362,43 @@ func New(
 	// Register upgrade handlers
 	app.RegisterUpgradeHandlers()
 
+	// For v1.10.4-restore-sdk upgrade: handle stores that may or may not exist.
+	// - Production: stores have data (soft-removed in v1.10.3 but data preserved) → don't use Added
+	// - Local testnet from v1.10.3 backup: stores have version 0 → need Added
+	//
+	// We check if store data exists by looking for IAVL tree nodes in the database.
+	// Store data is prefixed with "s/k:{storeName}/" in the database.
 	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
-	if err != nil {
-		panic(err)
-	}
+	if err == nil && upgradeInfo.Name == sdkRestoreUpgradeName && upgradeInfo.Height > 0 {
+		// Modules removed in v1.10.3-sdk-bloat, restored in v1.10.4-restore-sdk
+		potentialStores := []string{
+			"mint", "epochs", "authz", "circuit", "evidence", "feegrant", "group",
+		}
 
-	if upgradeInfo.Name == sdkBloatUpgradeName && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
-		app.SetStoreLoader(
-			upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storetypes.StoreUpgrades{
-				Deleted: sdkBloatDeletedStores,
-			}),
-		)
+		// Check which stores have data in the database
+		var storesToAdd []string
+		for _, storeName := range potentialStores {
+			// Check if store has any IAVL nodes by looking for the store prefix
+			prefix := []byte("s/k:" + storeName + "/")
+			iter, iterErr := db.Iterator(prefix, append(prefix[:len(prefix)-1], prefix[len(prefix)-1]+1))
+			hasData := false
+			if iterErr == nil {
+				hasData = iter.Valid()
+				iter.Close()
+			}
+			if !hasData {
+				storesToAdd = append(storesToAdd, storeName)
+			}
+		}
+
+		if len(storesToAdd) > 0 {
+			logger.Info("v1.10.4-restore-sdk: Adding stores without data in DB", "stores", storesToAdd)
+			app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storetypes.StoreUpgrades{
+				Added: storesToAdd,
+			}))
+		} else {
+			logger.Info("v1.10.4-restore-sdk: All stores have data, no StoreUpgrades needed")
+		}
 	}
 
 	/****  Module Options ****/
