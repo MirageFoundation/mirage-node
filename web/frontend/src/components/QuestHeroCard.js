@@ -1168,7 +1168,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                 <span>
                                                     Earned: {debugInfo.invite_earner?.completed || 0} | 
                                                     Next milestone: {debugInfo.invite_earner?.next_milestone}
+                                                    {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''}
                                                 </span>
+                                            </DebugRow>
+                                            <DebugRow>
+                                                <span>Roll: {debugInfo.invite_earner?.roll} (need &lt; {debugInfo.invite_earner?.threshold})</span>
                                                 <DebugValue style={{ color: debugInfo.invite_earner?.eligible ? '#22c55e' : '#ef4444' }}>
                                                     {debugInfo.invite_earner?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
                                                 </DebugValue>
