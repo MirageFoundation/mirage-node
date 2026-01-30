@@ -207,15 +207,6 @@ function CreateAccountView({ state, setCredentials }) {
         }
     };
 
-    // Mark invite code as used after successful account creation
-    const markInviteCodeUsed = async (code, newUserAddress) => {
-        try {
-            await Api.post('use_invite_code', { code, used_by: newUserAddress }, { timeoutMs: 10000 });
-        } catch (_) {
-            // Best effort - don't fail account creation if this fails
-        }
-    };
-
     // Function to initialize account (use imported seed or generate new)
     const initializeAccount = (existingSeed = null) => {
         // Preserve referrer before clearing storage
@@ -337,7 +328,8 @@ function CreateAccountView({ state, setCredentials }) {
                 // Do not persist publicKey until confirmation
             } catch (_) { }
             // Defer to tx facade for PoW + relay
-            const result = await tx.createUser(usernameFinal);
+            // Pass invite code so backend marks it as used atomically with account creation
+            const result = await tx.createUser(usernameFinal, codeClean);
             if (!result || !result.success) {
                 const msg = String((result && result.error) || "Submit failed");
                 if (/insufficient funds/i.test(msg)) {
@@ -377,8 +369,7 @@ function CreateAccountView({ state, setCredentials }) {
                 if (!pollResult.success) {
                     throw new Error(pollResult.error_details?.message || 'transaction rejected');
                 }
-                // Mark invite code as used (best effort, don't fail if this errors)
-                await markInviteCodeUsed(codeClean, publicKey);
+                // Invite code is now marked as used by the backend in the set_username call
                 // Navigate to welcome FIRST (before setCredentials triggers useEffect redirect to /profile)
                 const finalUsername = `Anon-${base}`;
                 try { Storage.remove('username_pending'); } catch (_) { }

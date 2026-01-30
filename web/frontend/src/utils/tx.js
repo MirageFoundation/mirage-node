@@ -92,9 +92,9 @@ export async function cacheConfigData(data) {
 }
 
 // Transactional actions
-export async function createUser(username) {
+export async function createUser(username, inviteCode = "") {
     const h = await getHandler();
-    return h.createUser(username);
+    return h.createUser(username, inviteCode);
 }
 
 export async function setUsername(username) {

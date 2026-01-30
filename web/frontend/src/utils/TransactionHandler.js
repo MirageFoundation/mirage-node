@@ -286,9 +286,10 @@ class TransactionHandler {
 
     /**
      * @param {string} usernameRaw
+     * @param {string} [inviteCode] - Optional invite code used for account creation
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
-    async createUser(usernameRaw) {
+    async createUser(usernameRaw, inviteCode = "") {
         try {
             const seedPhrase = Storage.load("seedPhrase", "");
             const publicKey = Storage.load("publicKey", "");
@@ -319,6 +320,8 @@ class TransactionHandler {
                 pow_difficulty: pow_difficulty >>> 0,
                 // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
                 timestamp: Math.max(0, Date.now() - 15000),
+                // Include invite code if provided (backend marks it as used)
+                invite_code: inviteCode || "",
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);

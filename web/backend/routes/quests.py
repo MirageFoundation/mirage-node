@@ -151,6 +151,14 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
 
     # Check if enough time has passed since last flash quest
     next_flash_at = _get_next_flash_time(owner)
+    
+    # New user check: if no next_flash_at record exists (returns 0), 
+    # initialize it with minimum interval delay so new users don't get flash quests immediately
+    if next_flash_at == 0:
+        initial_delay = FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
+        _set_next_flash_time(owner, ts + initial_delay)
+        return None
+    
     if ts < next_flash_at:
         return None
 
@@ -241,13 +249,17 @@ def _get_completed_quest_count(owner: str) -> int:
 
 
 def _get_invite_earner_completed_count(owner: str) -> int:
-    """Get total number of completed invite_earner quests for a user."""
+    """Get total number of completed invite_earner quests for a user.
+    
+    Counts claimed invite_code rewards from invite_earner quests, which is more
+    reliable than counting quest completions (which can be reset via debug panel).
+    """
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COUNT(*) FROM user_daily_quests
-                WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                SELECT COUNT(*) FROM pending_rewards
+                WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
                 """,
                 (owner,),
             )
@@ -1394,10 +1406,11 @@ def debug_quests_info():
                 invite_recruit_assigned = any(q["quest_id"] == "invite_recruit" for q in today_quests)
 
                 # Check invite_earner eligibility (milestone-based)
+                # Count claimed invite_code rewards (more reliable than quest completions)
                 cur.execute(
                     """
-                    SELECT COUNT(*) FROM user_daily_quests
-                    WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                    SELECT COUNT(*) FROM pending_rewards
+                    WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
                     """,
                     (owner,),
                 )
