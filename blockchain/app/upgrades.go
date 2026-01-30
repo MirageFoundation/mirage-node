@@ -15,9 +15,11 @@ import (
 
 const (
 	// 201600 blocks = 7 days at 3s/block
-	retentionBlocks        = int64(201600)
-	retentionBlockTimeSecs = int64(3)
-	retentionDuration      = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
+	retentionBlocks         = int64(201600)
+	retentionBlockTimeSecs  = int64(3)
+	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
+
+	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
 
 // RegisterUpgradeHandlers registers all upgrade handlers for the chain
@@ -974,8 +976,47 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.10.0-remove-ibc: Osmosis not in bridge_chains, no changes needed")
 			}
 
-		sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
-		return toVM, nil
-	},
-)
+			sdkCtx.Logger().Info("Upgrade to v1.10.0-remove-ibc complete - IBC support removed")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.4-restore-sdk: Restore SDK modules that were soft-removed in v1.10.3-sdk-bloat
+	// These modules were excluded from the app but their store data was preserved.
+	// We just run migrations normally - stores will load their existing state.
+	app.UpgradeKeeper.SetUpgradeHandler(
+		sdkRestoreUpgradeName,
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.4-restore-sdk...")
+
+			// Just run migrations normally - modules will load their existing store data
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.4-restore-sdk complete - SDK modules restored")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.5: Cleanup one-time upgrade code from app.go
+	// - Removed store loader logic for v1.10.4-restore-sdk (no longer needed after upgrade ran)
+	// - No state migration needed, binary-only change
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.5",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.5...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.5 complete - cleanup of one-time upgrade code")
+			return toVM, nil
+		},
+	)
 }
