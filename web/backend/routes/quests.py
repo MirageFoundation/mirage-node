@@ -1267,3 +1267,317 @@ def reward_history():
     except Exception as e:
         log_event(rid, "rewards.history.err", error=str(e))
         return jsonify({"error": str(e)}), 500
+
+
+# ==================== Debug Endpoints (localhost only) ====================
+
+
+def _is_localhost() -> bool:
+    """Check if request is from localhost."""
+    host = request.host.split(":")[0]
+    return host in ("localhost", "127.0.0.1") or host.startswith("192.168.") or host.startswith("10.")
+
+
+@quests_bp.route("/api/debug/quests", methods=["GET"])
+def debug_quests_info():
+    """Get quest debug info for a user. Localhost only.
+
+    Query params:
+    - owner: User address (required)
+    """
+    if not _is_localhost():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.info.begin")
+
+    try:
+        owner = (request.args.get("owner") or "").strip().lower()
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Get total completed quests count
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                completed_count = cur.fetchone()[0] or 0
+
+                # Get today's quests
+                cur.execute(
+                    """
+                    SELECT quest_id, progress, completed_at FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    """,
+                    (owner, day_utc),
+                )
+                today_quests = [
+                    {"quest_id": row[0], "progress": row[1], "completed": row[2] is not None}
+                    for row in cur.fetchall()
+                ]
+
+                # Check invite_recruit eligibility
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM invite_codes
+                    WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
+                    """,
+                    (owner,),
+                )
+                unused_invite_codes = cur.fetchone()[0] or 0
+
+                # Calculate invite_recruit roll
+                invite_recruit_roll = _deterministic_roll(owner, day_utc, "invite_recruit")
+                invite_recruit_eligible = unused_invite_codes > 0 and invite_recruit_roll < INVITE_RECRUIT_CHANCE
+
+                # Check invite_earner eligibility
+                invite_earner_eligible = completed_count > 0 and completed_count % INVITE_EARNER_QUEST_INTERVAL == 0
+
+        log_event(rid, "debug.quests.info.ok", owner=owner)
+        return jsonify(
+            {
+                "owner": owner,
+                "day_utc": day_utc,
+                "completed_count": completed_count,
+                "today_quests": today_quests,
+                "unused_invite_codes": unused_invite_codes,
+                "invite_recruit": {
+                    "roll": round(invite_recruit_roll, 4),
+                    "threshold": INVITE_RECRUIT_CHANCE,
+                    "eligible": invite_recruit_eligible,
+                },
+                "invite_earner": {
+                    "interval": INVITE_EARNER_QUEST_INTERVAL,
+                    "next_at": ((completed_count // INVITE_EARNER_QUEST_INTERVAL) + 1) * INVITE_EARNER_QUEST_INTERVAL,
+                    "eligible": invite_earner_eligible,
+                },
+            }
+        )
+    except Exception as e:
+        log_event(rid, "debug.quests.info.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/debug/quests/complete", methods=["POST"])
+def debug_complete_quest():
+    """Instantly complete a quest. Localhost only.
+
+    Body:
+    - owner: User address (required)
+    - quest_id: Quest ID to complete (required)
+    """
+    if not _is_localhost():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.complete.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        quest_id = str(data.get("quest_id", "")).strip()
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        if not quest_id:
+            return jsonify({"error": "quest_id required"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        # Load quest definitions to get reward info
+        defs = _load_quest_definitions()
+        daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
+        all_defs = {**daily_defs, **special_defs}
+
+        quest_def = all_defs.get(quest_id)
+        if not quest_def:
+            return jsonify({"error": f"unknown quest_id: {quest_id}"}), 400
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Check if quest exists for today
+                cur.execute(
+                    """
+                    SELECT completed_at FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (owner, day_utc, quest_id),
+                )
+                row = cur.fetchone()
+
+                if not row:
+                    return jsonify({"error": f"quest {quest_id} not assigned for today"}), 400
+
+                if row[0] is not None:
+                    return jsonify({"error": f"quest {quest_id} already completed"}), 400
+
+                # Mark quest as completed
+                target = quest_def.get("target_count", 1)
+                cur.execute(
+                    """
+                    UPDATE user_daily_quests
+                    SET progress = %s, completed_at = %s
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (target, ts, owner, day_utc, quest_id),
+                )
+
+                # Add rewards
+                rewards = quest_def.get("rewards", [])
+                for reward in rewards:
+                    reward_type = reward.get("type", "mirage")
+                    if reward_type == "mirage":
+                        amount_umirage = reward.get("amount", 0) * 1_000_000
+                        apply_multiplier = reward.get("apply_multiplier", True)
+                        reward_data = {"amount": amount_umirage, "apply_multiplier": apply_multiplier}
+                    elif reward_type == "invite_code":
+                        reward_data = {"amount": reward.get("amount", 1)}
+                    else:
+                        reward_data = {"id": reward.get("id")}
+
+                    cur.execute(
+                        """
+                        INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (owner, reward_type, json.dumps(reward_data), f"quest:{quest_id}", ts),
+                    )
+
+        log_event(rid, "debug.quests.complete.ok", owner=owner, quest_id=quest_id)
+        return jsonify({"success": True, "quest_id": quest_id})
+    except Exception as e:
+        log_event(rid, "debug.quests.complete.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/debug/quests/reset", methods=["POST"])
+def debug_reset_quests():
+    """Reset today's quests for a user. Localhost only.
+
+    Body:
+    - owner: User address (required)
+    """
+    if not _is_localhost():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.reset.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Delete today's quests
+                cur.execute(
+                    """
+                    DELETE FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    """,
+                    (owner, day_utc),
+                )
+                deleted_count = cur.rowcount
+
+        log_event(rid, "debug.quests.reset.ok", owner=owner, deleted=deleted_count)
+        return jsonify({"success": True, "deleted_count": deleted_count})
+    except Exception as e:
+        log_event(rid, "debug.quests.reset.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/debug/quests/set_completed", methods=["POST"])
+def debug_set_completed_count():
+    """Set the completed quest count by adding fake completed quests. Localhost only.
+
+    Body:
+    - owner: User address (required)
+    - count: Target completed count (required)
+    """
+    if not _is_localhost():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.set_completed.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        target_count = int(data.get("count", 0))
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        if target_count < 0:
+            return jsonify({"error": "count must be >= 0"}), 400
+
+        ts = int(time.time())
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Get current completed count
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                current_count = cur.fetchone()[0] or 0
+
+                if target_count > current_count:
+                    # Add fake completed quests to reach target
+                    to_add = target_count - current_count
+                    for i in range(to_add):
+                        # Use negative day_utc values to avoid conflicts
+                        fake_day = -(i + 1 + current_count)
+                        cur.execute(
+                            """
+                            INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
+                            VALUES (%s, %s, %s, 1, '{}', %s)
+                            ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+                            """,
+                            (owner, fake_day, "debug_fake_quest", ts),
+                        )
+                elif target_count < current_count:
+                    # Delete fake quests first, then real ones if needed
+                    cur.execute(
+                        """
+                        DELETE FROM user_daily_quests
+                        WHERE LOWER(owner) = LOWER(%s) AND day_utc < 0
+                        """,
+                        (owner,),
+                    )
+
+        # Get new count
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                new_count = cur.fetchone()[0] or 0
+
+        log_event(rid, "debug.quests.set_completed.ok", owner=owner, old=current_count, new=new_count)
+        return jsonify({"success": True, "old_count": current_count, "new_count": new_count})
+    except Exception as e:
+        log_event(rid, "debug.quests.set_completed.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
