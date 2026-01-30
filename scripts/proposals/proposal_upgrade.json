@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.10.4-restore-sdk",
+                "name": "v1.10.5",
                 "height": "T+50",
-                "info": "Restore SDK modules removed in v1.10.3-sdk-bloat"
+                "info": "Cleanup one-time upgrade code from app.go"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.10.4-restore-sdk",
-    "summary": "Restores SDK modules removed in v1.10.3-sdk-bloat.\n\nModules restored:\n- authz\n- feegrant\n- group\n- epochs\n- circuit\n- evidence\n- vesting\n- mint\n\nChanges:\n- Re-adds module wiring and keepers in the app\n- Adds module stores at upgrade height\n- Initializes default genesis state for restored modules\n\nBINARY REQUIREMENT: All validators must update to v1.10.4 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.10.5",
+    "summary": "Removes one-time store loader code from app.go that was only needed for the v1.10.4-restore-sdk upgrade.\n\nNo state migration - binary-only change.\n\nBINARY REQUIREMENT: All validators must update to v1.10.5 binary BEFORE the upgrade height.",
     "expedited": true
 }
