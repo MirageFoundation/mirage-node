@@ -836,6 +836,17 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         }
     }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
 
+    const debugForceAssign = useCallback(async (questId) => {
+        if (!userAddress) return;
+        try {
+            await Api.post('/rewards/debug/force_assign', { owner: userAddress, quest_id: questId });
+            await fetchDebugInfo();
+            refreshQuests();
+        } catch (e) {
+            console.error('Failed to force assign quest:', e);
+        }
+    }, [userAddress, fetchDebugInfo, refreshQuests]);
+
     // Load debug info when debug panel is shown
     useEffect(() => {
         if (showDebug && isDebugAvailable) {
@@ -1138,7 +1149,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                 <DebugTitle>
                                     🔧 Quest Debug Panel (localhost only)
                                 </DebugTitle>
-                                
                                 {debugLoading ? (
                                     <div>Loading...</div>
                                 ) : debugInfo ? (
@@ -1177,6 +1187,18 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                     {debugInfo.invite_earner?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
                                                 </DebugValue>
                                             </DebugRow>
+                                        </div>
+                                        
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>Force assign special quest:</DebugLabel>
+                                            <DebugButtonGroup>
+                                                <DebugButton $variant="success" onClick={() => debugForceAssign('invite_recruit')}>
+                                                    + invite_recruit
+                                                </DebugButton>
+                                                <DebugButton $variant="success" onClick={() => debugForceAssign('invite_earner')}>
+                                                    + invite_earner
+                                                </DebugButton>
+                                            </DebugButtonGroup>
                                         </div>
                                         
                                         <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>

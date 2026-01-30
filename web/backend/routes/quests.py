@@ -1369,8 +1369,8 @@ def debug_quests_info():
                 )
                 unused_invite_codes = cur.fetchone()[0] or 0
 
-                # Calculate invite_recruit roll
-                invite_recruit_roll = _deterministic_roll(owner, day_utc, "invite_recruit")
+                # Calculate invite_recruit roll (random for debug - simulates what COULD happen)
+                invite_recruit_roll = random.random()
                 invite_recruit_eligible = unused_invite_codes > 0 and invite_recruit_roll < INVITE_RECRUIT_CHANCE
 
                 # Check invite_earner eligibility
@@ -1384,7 +1384,7 @@ def debug_quests_info():
                 invite_earner_completed = cur.fetchone()[0] or 0
                 invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
                 invite_earner_milestone_reached = completed_count >= invite_earner_next_milestone
-                invite_earner_roll = _deterministic_roll(owner, day_utc, "invite_earner")
+                invite_earner_roll = random.random()
                 invite_earner_eligible = invite_earner_milestone_reached and invite_earner_roll < INVITE_EARNER_CHANCE
 
         log_event(rid, "debug.quests.info.ok", owner=owner)
@@ -1630,4 +1630,60 @@ def debug_set_completed_count():
         return jsonify({"success": True, "old_count": current_count, "new_count": new_count})
     except Exception as e:
         log_event(rid, "debug.quests.set_completed.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/rewards/debug/force_assign", methods=["POST"])
+def debug_force_assign_quest():
+    """Force assign a special quest (bypasses eligibility checks). Localhost only.
+
+    Body:
+    - owner: User address (required)
+    - quest_id: Quest ID to assign (invite_recruit, invite_earner)
+    """
+    if not _is_localhost():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.force_assign.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        quest_id = str(data.get("quest_id", "")).strip()
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        if quest_id not in ("invite_recruit", "invite_earner"):
+            return jsonify({"error": "quest_id must be invite_recruit or invite_earner"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Check if quest already assigned for today
+                cur.execute(
+                    """
+                    SELECT 1 FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (owner, day_utc, quest_id),
+                )
+                if cur.fetchone():
+                    return jsonify({"error": f"{quest_id} already assigned for today"}), 400
+
+                # Insert the quest
+                cur.execute(
+                    """
+                    INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
+                    VALUES (%s, %s, %s, 0, '{}')
+                    """,
+                    (owner, day_utc, quest_id),
+                )
+
+        log_event(rid, "debug.quests.force_assign.ok", owner=owner, quest_id=quest_id)
+        return jsonify({"success": True, "quest_id": quest_id})
+    except Exception as e:
+        log_event(rid, "debug.quests.force_assign.err", error=str(e))
         return jsonify({"error": str(e)}), 500
