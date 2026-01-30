@@ -292,23 +292,25 @@ export function usePendingRewards() {
                 };
             } else {
                 clearOptimisticClaimBalance('claim_failed');
-                setError(response.error || 'Claim failed');
-                return { success: false, error: response.error };
+                setError(response.message || response.error || 'Claim failed');
+                return { success: false, error: response.error, message: response.message };
             }
         } catch (err) {
             console.error('Failed to claim rewards:', err);
             clearOptimisticClaimBalance('claim_error');
             // Try to parse JSON error from HTTP error message (e.g., "HTTP 503: {...}")
             let errorCode = err.message;
+            let errorMessage = null;
             try {
                 const jsonMatch = err.message?.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
                     const parsed = JSON.parse(jsonMatch[0]);
-                    errorCode = parsed.error || parsed.message || err.message;
+                    errorCode = parsed.error || err.message;
+                    errorMessage = parsed.message;
                 }
             } catch (_) { /* ignore parse errors */ }
-            setError(errorCode || 'Failed to claim rewards');
-            return { success: false, error: errorCode };
+            setError(errorMessage || errorCode || 'Failed to claim rewards');
+            return { success: false, error: errorCode, message: errorMessage };
         } finally {
             setClaiming(false);
         }

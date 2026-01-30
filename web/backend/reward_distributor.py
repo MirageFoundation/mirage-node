@@ -50,13 +50,13 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
     """Generate unique invite codes and insert them into the database."""
     codes = []
     now_ts = int(time.time())
-    
+
     with connect_db() as conn:
         with conn.cursor() as cur:
             # Get existing codes to avoid duplicates
             cur.execute("SELECT code FROM invite_codes")
             existing = {row[0] for row in cur.fetchall()}
-            
+
             for _ in range(count):
                 # Generate unique code
                 for attempt in range(100):
@@ -66,10 +66,10 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
                 else:
                     logger.error("Failed to generate unique invite code after 100 attempts")
                     continue
-                
+
                 existing.add(code)
                 codes.append(code)
-                
+
                 # Insert the code
                 cur.execute(
                     """
@@ -79,7 +79,7 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
                     (code, owner, now_ts),
                 )
                 logger.info(f"Generated invite code {code} for {owner}")
-    
+
     return codes
 
 
@@ -168,8 +168,17 @@ def _send_tokens_via_cli(
             logger.warning(f"miraged stderr: {result.stderr[:500]}")
 
         if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            return False, None, error_msg
+            raw_error = result.stderr or result.stdout or "Unknown error"
+            # Parse common errors into user-friendly messages
+            if "key not found" in raw_error.lower():
+                return False, None, "rewards_pool_key_not_configured"
+            if "insufficient funds" in raw_error.lower():
+                return False, None, "insufficient_pool_balance"
+            if "account sequence mismatch" in raw_error.lower():
+                return False, None, "sequence_mismatch_retry"
+            # Log the full error but return a sanitized version
+            logger.error(f"miraged tx failed: {raw_error[:500]}")
+            return False, None, "payout_transaction_failed"
 
         # Parse the JSON output to get tx_hash
         try:
