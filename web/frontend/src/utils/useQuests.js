@@ -197,6 +197,7 @@ export function usePendingRewards() {
     const [pendingRewards, setPendingRewards] = useState([]);
     const [totalMirage, setTotalMirage] = useState(0);
     const [totalAfterMultiplier, setTotalAfterMultiplier] = useState(0);
+    const [pendingInviteCodes, setPendingInviteCodes] = useState(0);
     const [rewardMultiplier, setRewardMultiplier] = useState(1);
     const [loading, setLoading] = useState(true);
     const [claiming, setClaiming] = useState(false);
@@ -243,11 +244,13 @@ export function usePendingRewards() {
                 setPendingRewards([]);
                 setTotalMirage(0);
                 setTotalAfterMultiplier(0);
+                setPendingInviteCodes(0);
             } else {
                 setSuspended(false);
                 setPendingRewards(response.pending_rewards || []);
                 setTotalMirage(response.total_mirage || 0);
                 setTotalAfterMultiplier(response.total_mirage_after_multiplier || 0);
+                setPendingInviteCodes(response.pending_invite_codes || 0);
                 setRewardMultiplier(response.reward_multiplier || 0);
                 setClaimingAvailable(response.claiming_available !== false);
             }
@@ -260,7 +263,8 @@ export function usePendingRewards() {
     }, [userAddress]);
 
     const claimRewards = useCallback(async () => {
-        if (!userAddress || claiming || totalAfterMultiplier <= 0) {
+        const hasClaimable = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+        if (!userAddress || claiming || !hasClaimable) {
             return { success: false, error: 'nothing_to_claim' };
         }
 
@@ -304,7 +308,7 @@ export function usePendingRewards() {
         } finally {
             setClaiming(false);
         }
-    }, [userAddress, claiming, totalAfterMultiplier, fetchRewards, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
+    }, [userAddress, claiming, totalAfterMultiplier, pendingInviteCodes, fetchRewards, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
 
     useEffect(() => {
         fetchRewards();
@@ -329,6 +333,7 @@ export function usePendingRewards() {
         pendingRewards,
         totalMirage,
         totalAfterMultiplier,
+        pendingInviteCodes,
         rewardMultiplier,
         loading,
         claiming,

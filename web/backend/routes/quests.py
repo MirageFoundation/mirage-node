@@ -738,6 +738,7 @@ def get_pending_rewards():
         pending_rewards = []
         total_mirage_with_multiplier = 0
         total_mirage_no_multiplier = 0
+        pending_invite_codes = 0
 
         for row in rows:
             reward_data = row[2] if isinstance(row[2], dict) else {}
@@ -757,6 +758,8 @@ def get_pending_rewards():
                     total_mirage_with_multiplier += amount
                 else:
                     total_mirage_no_multiplier += amount
+            elif row[1] == "invite_code":
+                pending_invite_codes += reward_data.get("amount", 1)
 
         multiplier = _get_user_reward_multiplier(owner, ts)
         total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
@@ -774,6 +777,7 @@ def get_pending_rewards():
                 "pending_rewards": pending_rewards,
                 "total_mirage": total_mirage,
                 "total_mirage_after_multiplier": total_mirage_after_multiplier,
+                "pending_invite_codes": pending_invite_codes,
                 "reward_multiplier": round(multiplier, 4),
                 "claiming_available": claiming_available,
             }
@@ -1385,11 +1389,11 @@ def debug_quests_info():
                 )
                 unused_invite_codes = cur.fetchone()[0] or 0
 
-                # Calculate invite_recruit roll (random for debug - simulates what COULD happen)
-                invite_recruit_roll = random.random()
-                invite_recruit_eligible = unused_invite_codes > 0 and invite_recruit_roll < INVITE_RECRUIT_CHANCE
+                # Check invite_recruit - just show if prerequisites are met (has unused codes)
+                invite_recruit_has_codes = unused_invite_codes > 0
+                invite_recruit_assigned = any(q["quest_id"] == "invite_recruit" for q in today_quests)
 
-                # Check invite_earner eligibility
+                # Check invite_earner eligibility (milestone-based)
                 cur.execute(
                     """
                     SELECT COUNT(*) FROM user_daily_quests
@@ -1400,8 +1404,7 @@ def debug_quests_info():
                 invite_earner_completed = cur.fetchone()[0] or 0
                 invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
                 invite_earner_milestone_reached = completed_count >= invite_earner_next_milestone
-                invite_earner_roll = random.random()
-                invite_earner_eligible = invite_earner_milestone_reached and invite_earner_roll < INVITE_EARNER_CHANCE
+                invite_earner_assigned = any(q["quest_id"] == "invite_earner" for q in today_quests)
 
         log_event(rid, "debug.quests.info.ok", owner=owner)
         return jsonify(
@@ -1412,18 +1415,17 @@ def debug_quests_info():
                 "today_quests": today_quests,
                 "unused_invite_codes": unused_invite_codes,
                 "invite_recruit": {
-                    "roll": round(invite_recruit_roll, 4),
-                    "threshold": INVITE_RECRUIT_CHANCE,
-                    "eligible": invite_recruit_eligible,
+                    "has_codes": invite_recruit_has_codes,
+                    "chance": f"{int(INVITE_RECRUIT_CHANCE * 100)}%",
+                    "assigned": invite_recruit_assigned,
                 },
                 "invite_earner": {
                     "interval": INVITE_EARNER_QUEST_INTERVAL,
                     "completed": invite_earner_completed,
                     "next_milestone": invite_earner_next_milestone,
                     "milestone_reached": invite_earner_milestone_reached,
-                    "roll": round(invite_earner_roll, 4),
-                    "threshold": INVITE_EARNER_CHANCE,
-                    "eligible": invite_earner_eligible,
+                    "chance": f"{int(INVITE_EARNER_CHANCE * 100)}%",
+                    "assigned": invite_earner_assigned,
                 },
             }
         )
