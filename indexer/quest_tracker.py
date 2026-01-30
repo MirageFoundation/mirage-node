@@ -229,6 +229,31 @@ class QuestTracker:
                 )
                 row = cur.fetchone()
                 return row[0] if row else 0
+
+    def _get_invite_earner_completed_count(self, owner: str) -> int:
+        """Get total number of completed invite_earner quests for a user."""
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                    """,
+                    (owner,)
+                )
+                row = cur.fetchone()
+                return row[0] if row else 0
+
+    def _is_invite_earner_eligible(self, owner: str) -> bool:
+        """Check if user is eligible for invite_earner quest.
+        
+        User is eligible if their completed_count >= (invite_earner_completed + 1) * interval.
+        This handles the case where they pass through a milestone without getting the quest.
+        """
+        completed_count = self._get_completed_quest_count(owner)
+        invite_earner_completed = self._get_invite_earner_completed_count(owner)
+        next_milestone = (invite_earner_completed + 1) * settings.INVITE_EARNER_QUEST_INTERVAL
+        return completed_count >= next_milestone
     
     def _deterministic_roll(self, owner: str, day_utc: int, roll_type: str) -> float:
         """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
@@ -261,13 +286,10 @@ class QuestTracker:
         
         # Check for invite_earner eligibility (every N completed quests)
         if not special_quest_assigned:
-            completed_count = self._get_completed_quest_count(owner)
-            interval = settings.INVITE_EARNER_QUEST_INTERVAL
-            if completed_count > 0 and completed_count % interval == 0:
-                # Check if user already got invite_earner for this milestone
-                # We track this by checking if they've completed this many quests since last invite_earner
+            if self._is_invite_earner_eligible(owner):
                 invite_earner = next((q for q in self.special_quests if q.id == "invite_earner"), None)
                 if invite_earner:
+                    completed_count = self._get_completed_quest_count(owner)
                     quest_ids.append(invite_earner.id)
                     special_quest_assigned = True
                     logger.info(f"Assigned special quest invite_earner to {owner} (completed {completed_count} quests)")

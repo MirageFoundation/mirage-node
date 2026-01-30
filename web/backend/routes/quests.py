@@ -239,6 +239,33 @@ def _get_completed_quest_count(owner: str) -> int:
             return row[0] if row else 0
 
 
+def _get_invite_earner_completed_count(owner: str) -> int:
+    """Get total number of completed invite_earner quests for a user."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND quest_id = 'invite_earner' AND completed_at IS NOT NULL
+                """,
+                (owner,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+
+def _is_invite_earner_eligible(owner: str) -> bool:
+    """Check if user is eligible for invite_earner quest.
+    
+    User is eligible if their completed_count >= (invite_earner_completed + 1) * interval.
+    This handles the case where they pass through a milestone without getting the quest.
+    """
+    completed_count = _get_completed_quest_count(owner)
+    invite_earner_completed = _get_invite_earner_completed_count(owner)
+    next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+    return completed_count >= next_milestone
+
+
 def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
     """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
     seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
@@ -292,8 +319,8 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
 
             # Check for invite_earner eligibility (every N completed quests)
             if not special_quest_assigned and "invite_earner" in special_defs:
-                completed_count = _get_completed_quest_count(owner)
-                if completed_count > 0 and completed_count % INVITE_EARNER_QUEST_INTERVAL == 0:
+                if _is_invite_earner_eligible(owner):
+                    completed_count = _get_completed_quest_count(owner)
                     quest_ids.append("invite_earner")
                     special_quest_assigned = True
                     log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
@@ -1339,7 +1366,9 @@ def debug_quests_info():
                 invite_recruit_eligible = unused_invite_codes > 0 and invite_recruit_roll < INVITE_RECRUIT_CHANCE
 
                 # Check invite_earner eligibility
-                invite_earner_eligible = completed_count > 0 and completed_count % INVITE_EARNER_QUEST_INTERVAL == 0
+                invite_earner_completed = _get_invite_earner_completed_count(owner)
+                invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                invite_earner_eligible = completed_count >= invite_earner_next_milestone
 
         log_event(rid, "debug.quests.info.ok", owner=owner)
         return jsonify(
@@ -1356,7 +1385,8 @@ def debug_quests_info():
                 },
                 "invite_earner": {
                     "interval": INVITE_EARNER_QUEST_INTERVAL,
-                    "next_at": ((completed_count // INVITE_EARNER_QUEST_INTERVAL) + 1) * INVITE_EARNER_QUEST_INTERVAL,
+                    "completed": invite_earner_completed,
+                    "next_milestone": invite_earner_next_milestone,
                     "eligible": invite_earner_eligible,
                 },
             }

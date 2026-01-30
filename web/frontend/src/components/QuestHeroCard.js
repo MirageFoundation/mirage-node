@@ -806,15 +806,20 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const debugResetQuests = useCallback(async () => {
         if (!userAddress) return;
+        setDebugLoading(true);
         try {
             await Api.post('/debug/quests/reset', { owner: userAddress });
             // refreshQuests will re-assign quests via /api/quests/daily
             refreshQuests();
             refreshRewards();
             // Wait for quests to be re-assigned, then refresh debug info
-            setTimeout(() => fetchDebugInfo(), 500);
+            setTimeout(async () => {
+                await fetchDebugInfo();
+                setDebugLoading(false);
+            }, 500);
         } catch (e) {
             console.error('Failed to reset quests:', e);
+            setDebugLoading(false);
         }
     }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
 
@@ -1160,7 +1165,10 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                         <div style={{ marginTop: '0.3rem' }}>
                                             <DebugLabel>invite_earner eligibility:</DebugLabel>
                                             <DebugRow>
-                                                <span>Next at: {debugInfo.invite_earner?.next_at} completed</span>
+                                                <span>
+                                                    Earned: {debugInfo.invite_earner?.completed || 0} | 
+                                                    Next milestone: {debugInfo.invite_earner?.next_milestone}
+                                                </span>
                                                 <DebugValue style={{ color: debugInfo.invite_earner?.eligible ? '#22c55e' : '#ef4444' }}>
                                                     {debugInfo.invite_earner?.eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE'}
                                                 </DebugValue>
