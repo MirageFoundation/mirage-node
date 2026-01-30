@@ -155,14 +155,14 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
 
     # Check if enough time has passed since last flash quest
     next_flash_at = _get_next_flash_time(owner)
-    
-    # New user check: if no next_flash_at record exists (returns 0), 
+
+    # New user check: if no next_flash_at record exists (returns 0),
     # initialize it with minimum interval delay so new users don't get flash quests immediately
     if next_flash_at == 0:
         initial_delay = FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
         _set_next_flash_time(owner, ts + initial_delay)
         return None
-    
+
     if ts < next_flash_at:
         return None
 
@@ -254,7 +254,7 @@ def _get_completed_quest_count(owner: str) -> int:
 
 def _get_invite_earner_completed_count(owner: str) -> int:
     """Get total number of completed invite_earner quests for a user.
-    
+
     Counts claimed invite_code rewards from invite_earner quests, which is more
     reliable than counting quest completions (which can be reset via debug panel).
     """
@@ -273,7 +273,7 @@ def _get_invite_earner_completed_count(owner: str) -> int:
 
 def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
     """Check if user is eligible for invite_earner quest.
-    
+
     User is eligible if:
     1. completed_count >= (invite_earner_completed + 1) * interval
     2. 30% daily roll passes
@@ -281,10 +281,10 @@ def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
     completed_count = _get_completed_quest_count(owner)
     invite_earner_completed = _get_invite_earner_completed_count(owner)
     next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
-    
+
     if completed_count < next_milestone:
         return False
-    
+
     # 30% daily roll
     roll = _deterministic_roll(owner, day_utc, "invite_earner")
     return roll < INVITE_EARNER_CHANCE
@@ -300,7 +300,13 @@ def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
     return rng.random()
 
 
-def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any], special_defs: Dict[str, Any] = None, use_random_rolls: bool = False) -> List[str]:
+def _assign_daily_quests_if_needed(
+    owner: str,
+    day_utc: int,
+    daily_defs: Dict[str, Any],
+    special_defs: Dict[str, Any] = None,
+    use_random_rolls: bool = False,
+) -> List[str]:
     """Assign daily quests to a user if they don't have any for today.
 
     Includes special quest gating logic:
@@ -344,7 +350,13 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
             if not special_quest_assigned and "invite_recruit" in special_defs:
                 if _has_unused_invite_codes(owner):
                     roll = get_roll("invite_recruit")
-                    log_event(None, "quest.invite_recruit.roll", owner=owner, roll=round(roll, 3), threshold=INVITE_RECRUIT_CHANCE)
+                    log_event(
+                        None,
+                        "quest.invite_recruit.roll",
+                        owner=owner,
+                        roll=round(roll, 3),
+                        threshold=INVITE_RECRUIT_CHANCE,
+                    )
                     if roll < INVITE_RECRUIT_CHANCE:
                         quest_ids.append("invite_recruit")
                         special_quest_assigned = True
@@ -358,7 +370,13 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
                 next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
                 if completed_count >= next_milestone:
                     roll = get_roll("invite_earner")
-                    log_event(None, "quest.invite_earner.roll", owner=owner, roll=round(roll, 3), threshold=INVITE_EARNER_CHANCE)
+                    log_event(
+                        None,
+                        "quest.invite_earner.roll",
+                        owner=owner,
+                        roll=round(roll, 3),
+                        threshold=INVITE_EARNER_CHANCE,
+                    )
                     if roll < INVITE_EARNER_CHANCE:
                         quest_ids.append("invite_earner")
                         special_quest_assigned = True
@@ -881,6 +899,42 @@ def claim_rewards():
                             "success": False,
                             "error": "insufficient_funds",
                             "message": "Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "rewards_pool_key_not_configured":
+                log_event(rid, "rewards.claim.pool_not_configured", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "pool_not_configured",
+                            "message": "Reward payouts are not yet configured. Please notify the admins.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "sequence_mismatch_retry":
+                log_event(rid, "rewards.claim.sequence_mismatch", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "retry",
+                            "message": "Transaction conflict, please try again.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "payout_transaction_failed":
+                log_event(rid, "rewards.claim.tx_failed", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "payout_failed",
+                            "message": "Payout transaction failed. Please try again or notify the admins.",
                         }
                     ),
                     503,
@@ -1413,8 +1467,7 @@ def debug_quests_info():
                     (owner, day_utc),
                 )
                 today_quests = [
-                    {"quest_id": row[0], "progress": row[1], "completed": row[2] is not None}
-                    for row in cur.fetchall()
+                    {"quest_id": row[0], "progress": row[1], "completed": row[2] is not None} for row in cur.fetchall()
                 ]
 
                 # Check invite_recruit eligibility
@@ -1688,5 +1741,3 @@ def debug_set_completed_count():
     except Exception as e:
         log_event(rid, "debug.quests.set_completed.err", error=str(e))
         return jsonify({"error": str(e)}), 500
-
-

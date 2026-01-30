@@ -293,8 +293,8 @@ const BalancedProgressRow = styled.span`
     display: flex;
     align-items: center;
     gap: 2px;
-    color: ${({ $met, theme }) => $met 
-        ? '#22c55e' 
+    color: ${({ $met, theme }) => $met
+        ? '#22c55e'
         : pickThemeColor(theme, 'subtleText')};
     font-weight: ${({ $met }) => $met ? '600' : '400'};
 `;
@@ -557,22 +557,22 @@ function getQuestMirageReward(rewards) {
  */
 function getQuestRewardDisplay(rewards, rewardMultiplier) {
     if (!rewards || !Array.isArray(rewards)) return null;
-    
+
     const mirageReward = rewards.find(r => r.type === 'mirage');
     const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
-    
+
     if (inviteCodeReward) {
         const count = inviteCodeReward.amount || 1;
         return `+${count} Invite Code${count > 1 ? 's' : ''}`;
     }
-    
+
     if (mirageReward) {
         const amount = mirageReward.amount || 0;
         const applyMultiplier = mirageReward.apply_multiplier !== false;
         const displayAmount = applyMultiplier ? Math.round(amount * rewardMultiplier) : amount;
         return `+${displayAmount.toLocaleString()} MIRAGE`;
     }
-    
+
     return null;
 }
 
@@ -645,18 +645,18 @@ const DebugValue = styled.span`
 `;
 
 const DebugButton = styled.button`
-    background: ${({ $variant }) => 
+    background: ${({ $variant }) =>
         $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
-        $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
-        'rgba(59, 130, 246, 0.2)'};
-    border: 1px solid ${({ $variant }) => 
+            $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
+                'rgba(59, 130, 246, 0.2)'};
+    border: 1px solid ${({ $variant }) =>
         $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)' :
-        $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
-        'rgba(59, 130, 246, 0.5)'};
-    color: ${({ $variant }) => 
+            $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
+                'rgba(59, 130, 246, 0.5)'};
+    color: ${({ $variant }) =>
         $variant === 'danger' ? '#ef4444' :
-        $variant === 'success' ? '#22c55e' :
-        '#3b82f6'};
+            $variant === 'success' ? '#22c55e' :
+                '#3b82f6'};
     font-size: 0.5rem;
     font-weight: 600;
     padding: 0.2rem 0.4rem;
@@ -704,8 +704,8 @@ const DebugQuestRow = styled.div`
     align-items: center;
     padding: 0.2rem 0.3rem;
     margin: 0.15rem 0;
-    background: ${({ theme }) => theme?.name === 'light' 
-        ? 'rgba(0,0,0,0.03)' 
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(0,0,0,0.03)'
         : 'rgba(255,255,255,0.03)'};
     border-radius: 4px;
 `;
@@ -858,14 +858,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 window.dispatchEvent(new CustomEvent('inviteCodesUpdated'));
             }
         } else {
-            // Handle specific errors with user-friendly messages
-            if (result.error === 'insufficient_funds') {
-                setClaimError('Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.');
-            } else if (result.error === 'no_rewards') {
-                setClaimError('No rewards to claim.');
-            } else {
-                setClaimError(result.error || 'Failed to claim rewards. Please try again later.');
-            }
+            // Show user-friendly message from backend if available, otherwise show error code
+            const errorMessage = result.message || result.error || 'Failed to claim rewards. Please try again later.';
+            setClaimError(errorMessage);
             // Clear error after 10 seconds
             setTimeout(() => setClaimError(null), 10000);
         }
@@ -1150,7 +1145,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             <DebugLabel>invite_recruit:</DebugLabel>
                                             <DebugRow>
                                                 <span>
-                                                    Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} | 
+                                                    Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} |
                                                     Chance: {debugInfo.invite_recruit?.chance}
                                                 </span>
                                                 <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
@@ -1162,7 +1157,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             <DebugLabel>invite_earner:</DebugLabel>
                                             <DebugRow>
                                                 <span>
-                                                    Earned: {debugInfo.invite_earner?.completed || 0} | 
+                                                    Earned: {debugInfo.invite_earner?.completed || 0} |
                                                     Next milestone: {debugInfo.invite_earner?.next_milestone}
                                                     {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
                                                     Chance: {debugInfo.invite_earner?.chance}
@@ -1181,7 +1176,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                                         {q.completed && ' ✓'}
                                                     </span>
                                                     {!q.completed && (
-                                                        <DebugButton 
+                                                        <DebugButton
                                                             $variant="success"
                                                             onClick={() => debugCompleteQuest(q.quest_id)}
                                                         >
