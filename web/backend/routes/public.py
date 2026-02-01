@@ -2693,27 +2693,6 @@ def get_topics():
             )
             small_topics_count = cur.fetchone()[0] or 0
 
-        # Fallback: if no topics found with min_posts filter, get all topics
-        if not rows and min_posts > 1:
-            cur.execute(
-                f"""
-                SELECT p.topic, COUNT(1) as post_count
-                FROM posts p
-                WHERE COALESCE(p.target, '') = ''
-                  AND LENGTH(COALESCE(p.title, '')) > 0
-                  AND p.topic IS NOT NULL
-                  AND LENGTH(TRIM(p.topic)) >= %s
-                  AND LENGTH(TRIM(p.topic)) <= %s
-                  {deleted_clause}
-                GROUP BY p.topic
-                HAVING COUNT(1) > 0
-                ORDER BY post_count DESC, p.topic ASC
-                LIMIT %s
-                """,
-                (min_topic, max_topic, limit),
-            )
-            rows = cur.fetchall()
-            small_topics_count = 0  # All shown, no "more" to mention
         # Opportunistic backfill for missing thumbnails
         try:
             for i, row in enumerate(rows):
@@ -2790,7 +2769,10 @@ def get_topics():
 
 @public_bp.route("/api/search_topics")
 def search_topics():
-    """Prefix-search topics with safety flags."""
+    """Search topics by substring with relevance sorting.
+
+    Sorts results by: exact match > prefix match > contains match, then by post count.
+    """
     limit = request.args.get("limit", 20, type=int)
     offset = request.args.get("offset", 0, type=int)
     limit = min(max(1, limit), 50)
@@ -2810,6 +2792,8 @@ def search_topics():
         cur = conn.cursor()
         deleted_clause = _deleted_filter()
 
+        # Search with substring match, sorted by relevance:
+        # 0 = exact match, 1 = prefix match, 2 = contains match
         cur.execute(
             f"""
             WITH topic_base AS (
@@ -2823,19 +2807,24 @@ def search_topics():
                   AND LOWER(p.topic) LIKE %s
                   {deleted_clause}
                 GROUP BY LOWER(TRIM(p.topic))
-                ORDER BY post_count DESC, topic ASC
-                LIMIT %s
-                OFFSET %s
             )
             SELECT
                 tb.topic,
                 tb.post_count,
                 COALESCE(tcs.dominant_tag, '') AS dominant_tag,
-                COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
+                COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio,
+                CASE
+                    WHEN tb.topic = %s THEN 0
+                    WHEN tb.topic LIKE %s THEN 1
+                    ELSE 2
+                END AS relevance
             FROM topic_base tb
             LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.topic
+            ORDER BY relevance ASC, post_count DESC, topic ASC
+            LIMIT %s
+            OFFSET %s
             """,
-            (min_topic, max_topic, f"{q}%", limit, offset),
+            (min_topic, max_topic, f"%{q}%", q, f"{q}%", limit, offset),
         )
 
         rows = cur.fetchall()

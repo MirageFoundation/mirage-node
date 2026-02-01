@@ -195,15 +195,6 @@ const EmptyState = styled.div`
     font-size: 0.8rem;
 `;
 
-const MoreTopicsHint = styled.div`
-    padding: 0.5rem 0.75rem;
-    font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    text-align: center;
-    font-style: italic;
-    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
-`;
-
 const CACHE_TTL_MS = 60 * 1000; // short-term cache for topics
 
 const FLAG_LABELS = {
@@ -222,7 +213,6 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
     const [topicCounts, setTopicCounts] = useState({});
     const [topicFlags, setTopicFlags] = useState({});
     const [topicDominant, setTopicDominant] = useState({});
-    const [smallTopicsCount, setSmallTopicsCount] = useState(0);
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -265,7 +255,6 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
             const age = Date.now() - new Date(cached.lastFetched).getTime();
             if (age > CACHE_TTL_MS) return false;
             applyTopics(cached.topicsWithCounts);
-            setSmallTopicsCount(cached.smallTopicsCount || 0);
             return true;
         } catch (_) {
             return false;
@@ -297,9 +286,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                 }
 
                 // Always fetch fresh from backend - it filters by min/max topic size
-                // Only show topics with >= 10 posts, but search can find smaller ones
+                // Show all topics when selecting for posting
                 try {
-                    const data = await Api.get('get_topics', { limit: 100, min_posts: 10 }, { timeoutMs: 10000 });
+                    const data = await Api.get('get_topics', { limit: 100, min_posts: 1 }, { timeoutMs: 10000 });
                     if (data && Array.isArray(data.topics)) {
                         const topicsWithCounts = data.topics
                             .filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '')
@@ -313,12 +302,10 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                         Storage.save("topics", {
                             topics: topicsWithCounts.map(t => t.topic),
                             topicsWithCounts,
-                            smallTopicsCount: data.small_topics_count || 0,
                             lastFetched: new Date().toISOString()
                         });
 
                         applyTopics(topicsWithCounts);
-                        setSmallTopicsCount(data.small_topics_count || 0);
                     }
                 } catch (_) { }
             } catch (_) { }
@@ -690,11 +677,6 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                                                     </TopicItem>
                                                 );
                                             })}
-                                            {!searchLower && smallTopicsCount > 0 && (
-                                                <MoreTopicsHint>
-                                                    and {smallTopicsCount} more topic{smallTopicsCount !== 1 ? 's' : ''} with fewer than 10 posts
-                                                </MoreTopicsHint>
-                                            )}
                                         </>
                                     )}
 

@@ -105,6 +105,16 @@ const EmptyMessage = styled.div`
     padding: 0.5rem 0;
 `;
 
+const MoreTopicsHint = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.7rem;
+    font-style: italic;
+    text-align: center;
+    padding: 0.6rem 0 0.3rem;
+    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#333'};
+    margin-top: 0.3rem;
+`;
+
 const tagColors = {
     porn: { bg: 'rgba(236, 72, 153, 0.18)', border: 'rgba(236, 72, 153, 0.50)', text: '#ec4899' },
     violence: { bg: 'rgba(185, 28, 28, 0.18)', border: 'rgba(185, 28, 28, 0.50)', text: '#b91c1c' },
@@ -132,12 +142,16 @@ export default function DiscoverView({ state }) {
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
     const [topics, setTopics] = useState([]);
     const [filteredTopics, setFilteredTopics] = useState([]);
+    const [smallTopicsCount, setSmallTopicsCount] = useState(0);
     const [searchTerm, setSearchTerm] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
     const [loading, setLoading] = useState(true);
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [hoverTopic, setHoverTopic] = useState(null);
     const { isTopicPending, formatTopicStatus } = usePendingFollows();
     const mountedRef = useRef(true);
+    const searchRequestId = useRef(0);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -147,7 +161,7 @@ export default function DiscoverView({ state }) {
     useEffect(() => {
         let alive = true;
         setLoading(true);
-        Api.get('get_topics', { limit: 200 }, { timeoutMs: 10000 })
+        Api.get('get_topics', { limit: 200, min_posts: 10 }, { timeoutMs: 10000 })
             .then((data) => {
                 if (!alive || !mountedRef.current) return;
                 if (data && Array.isArray(data.topics)) {
@@ -161,9 +175,11 @@ export default function DiscoverView({ state }) {
                         }));
                     setTopics(topicsList);
                     setFilteredTopics(topicsList);
+                    setSmallTopicsCount(data.small_topics_count || 0);
                 } else {
                     setTopics([]);
                     setFilteredTopics([]);
+                    setSmallTopicsCount(0);
                 }
                 setLoading(false);
             })
@@ -177,17 +193,63 @@ export default function DiscoverView({ state }) {
         return () => { alive = false; };
     }, []);
 
+    // Filter local topics and search API for more results
     useEffect(() => {
-        if (!searchTerm.trim()) {
+        const term = searchTerm.toLowerCase().trim().replace(/^#+/, '');
+
+        if (!term) {
             setFilteredTopics(topics);
+            setSearchResults([]);
+            setIsSearching(false);
             return;
         }
-        const term = searchTerm.toLowerCase().trim();
+
+        // Filter local topics immediately
         const filtered = topics.filter(t => {
             const topicName = String(t.topic || '').toLowerCase();
             return topicName.includes(term);
         });
         setFilteredTopics(filtered);
+
+        // Also search API for topics with < 10 posts (debounced)
+        if (term.length < 2) {
+            setSearchResults([]);
+            setIsSearching(false);
+            return;
+        }
+
+        const requestId = searchRequestId.current + 1;
+        searchRequestId.current = requestId;
+        setIsSearching(true);
+
+        const handle = setTimeout(async () => {
+            try {
+                const data = await Api.get('search_topics', { q: term, limit: 50 }, { timeoutMs: 8000 });
+                if (searchRequestId.current !== requestId || !mountedRef.current) return;
+                const results = Array.isArray(data?.topics) ? data.topics : [];
+                // Filter out topics already in the main list
+                const existingLower = new Set(topics.map(t => t.topic.toLowerCase()));
+                const newTopics = results
+                    .filter(t => t && t.topic && !existingLower.has(t.topic.toLowerCase()))
+                    .map(t => ({
+                        topic: t.topic,
+                        post_count: t.post_count || t.count || 0,
+                        comment_count: t.comment_count || 0,
+                        dominant_tag: t.dominant_tag || null,
+                        fromSearch: true
+                    }));
+                setSearchResults(newTopics);
+            } catch (_) {
+                if (searchRequestId.current === requestId) setSearchResults([]);
+            } finally {
+                if (searchRequestId.current === requestId) setIsSearching(false);
+            }
+        }, 250);
+
+        return () => {
+            searchRequestId.current += 1;
+            clearTimeout(handle);
+        };
     }, [searchTerm, topics]);
 
     useEffect(() => {
@@ -259,53 +321,112 @@ export default function DiscoverView({ state }) {
                                 <SectionTitle>Topics</SectionTitle>
                                 {loading ? (
                                     <EmptyMessage>Loading topics...</EmptyMessage>
-                                ) : filteredTopics.length === 0 ? (
+                                ) : filteredTopics.length === 0 && searchResults.length === 0 && !isSearching ? (
                                     <EmptyMessage>
                                         {searchTerm.trim() ? 'No topics match your search' : 'No topics found'}
                                     </EmptyMessage>
                                 ) : (
-                                    filteredTopics.map((t) => {
-                                        const topicLower = t.topic.toLowerCase();
-                                        const isFollowing = isSubscribedTopic(t.topic);
-                                        const isInProgress = isTopicPending(topicLower);
-                                        return (
-                                            <ItemRow key={`topic-${t.topic}`}>
-                                                <ItemLeft>
-                                                    <Subtle>#</Subtle>
-                                                    <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
-                                                    {t.dominant_tag && (
-                                                        <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>
-                                                    )}
-                                                    <CountText>
-                                                        ({t.post_count || 0} posts, {t.comment_count || 0} comments)
-                                                    </CountText>
-                                                </ItemLeft>
-                                                <ItemRight>
-                                                    <Button
-                                                        variant={
-                                                            isFollowing && hoverTopic === topicLower
-                                                                ? 'primaryDanger'
+                                    <>
+                                        {filteredTopics.map((t) => {
+                                            const topicLower = t.topic.toLowerCase();
+                                            const isFollowing = isSubscribedTopic(t.topic);
+                                            const isInProgress = isTopicPending(topicLower);
+                                            return (
+                                                <ItemRow key={`topic-${t.topic}`}>
+                                                    <ItemLeft>
+                                                        <Subtle>#</Subtle>
+                                                        <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
+                                                        {t.dominant_tag && (
+                                                            <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>
+                                                        )}
+                                                        <CountText>
+                                                            ({t.post_count || 0} posts, {t.comment_count || 0} comments)
+                                                        </CountText>
+                                                    </ItemLeft>
+                                                    <ItemRight>
+                                                        <Button
+                                                            variant={
+                                                                isFollowing && hoverTopic === topicLower
+                                                                    ? 'primaryDanger'
+                                                                    : isFollowing
+                                                                        ? 'subtle'
+                                                                        : 'primary'
+                                                            }
+                                                            size="pill"
+                                                            disabled={isInProgress}
+                                                            loading={isInProgress}
+                                                            onMouseEnter={() => setHoverTopic(topicLower)}
+                                                            onMouseLeave={() => setHoverTopic(null)}
+                                                            onClick={() => handleSubscribeToggle(t.topic)}
+                                                        >
+                                                            {isInProgress
+                                                                ? formatTopicStatus(topicLower)
                                                                 : isFollowing
-                                                                    ? 'subtle'
-                                                                    : 'primary'
-                                                        }
-                                                        size="pill"
-                                                        disabled={isInProgress}
-                                                        loading={isInProgress}
-                                                        onMouseEnter={() => setHoverTopic(topicLower)}
-                                                        onMouseLeave={() => setHoverTopic(null)}
-                                                        onClick={() => handleSubscribeToggle(t.topic)}
-                                                    >
-                                                        {isInProgress
-                                                            ? formatTopicStatus(topicLower)
-                                                            : isFollowing
-                                                                ? (hoverTopic === topicLower ? 'Unfollow' : 'Following')
-                                                                : 'Follow'}
-                                                    </Button>
-                                                </ItemRight>
-                                            </ItemRow>
-                                        );
-                                    })
+                                                                    ? (hoverTopic === topicLower ? 'Unfollow' : 'Following')
+                                                                    : 'Follow'}
+                                                        </Button>
+                                                    </ItemRight>
+                                                </ItemRow>
+                                            );
+                                        })}
+                                        {searchResults.length > 0 && (
+                                            <>
+                                                <MoreTopicsHint style={{ marginTop: filteredTopics.length > 0 ? '0.5rem' : 0, borderTop: filteredTopics.length > 0 ? undefined : 'none', fontStyle: 'normal', fontWeight: 600 }}>
+                                                    Topics with fewer than 10 posts
+                                                </MoreTopicsHint>
+                                                {searchResults.map((t) => {
+                                                    const topicLower = t.topic.toLowerCase();
+                                                    const isFollowing = isSubscribedTopic(t.topic);
+                                                    const isInProgress = isTopicPending(topicLower);
+                                                    return (
+                                                        <ItemRow key={`search-${t.topic}`}>
+                                                            <ItemLeft>
+                                                                <Subtle>#</Subtle>
+                                                                <ItemLink to={`/t/${t.topic}`}>{t.topic}</ItemLink>
+                                                                {t.dominant_tag && (
+                                                                    <TagBadge $tag={t.dominant_tag}>{t.dominant_tag}</TagBadge>
+                                                                )}
+                                                                <CountText>
+                                                                    ({t.post_count || 0} posts, {t.comment_count || 0} comments)
+                                                                </CountText>
+                                                            </ItemLeft>
+                                                            <ItemRight>
+                                                                <Button
+                                                                    variant={
+                                                                        isFollowing && hoverTopic === topicLower
+                                                                            ? 'primaryDanger'
+                                                                            : isFollowing
+                                                                                ? 'subtle'
+                                                                                : 'primary'
+                                                                    }
+                                                                    size="pill"
+                                                                    disabled={isInProgress}
+                                                                    loading={isInProgress}
+                                                                    onMouseEnter={() => setHoverTopic(topicLower)}
+                                                                    onMouseLeave={() => setHoverTopic(null)}
+                                                                    onClick={() => handleSubscribeToggle(t.topic)}
+                                                                >
+                                                                    {isInProgress
+                                                                        ? formatTopicStatus(topicLower)
+                                                                        : isFollowing
+                                                                            ? (hoverTopic === topicLower ? 'Unfollow' : 'Following')
+                                                                            : 'Follow'}
+                                                                </Button>
+                                                            </ItemRight>
+                                                        </ItemRow>
+                                                    );
+                                                })}
+                                            </>
+                                        )}
+                                        {isSearching && (
+                                            <EmptyMessage>Searching for more topics...</EmptyMessage>
+                                        )}
+                                        {!searchTerm.trim() && smallTopicsCount > 0 && (
+                                            <MoreTopicsHint>
+                                                and {smallTopicsCount} more topic{smallTopicsCount !== 1 ? 's' : ''} with fewer than 10 posts
+                                            </MoreTopicsHint>
+                                        )}
+                                    </>
                                 )}
                             </Section>
                         </ContainerBody>
