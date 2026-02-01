@@ -1418,11 +1418,13 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const data = await Api.get('get_stats', { tab: 'overview' }, { timeoutMs: 10000 });
                 if (cancelled) return;
                 if (data) {
+                    const dau = data.dau_any_today || data.dau_today || 0;
+                    const chainActive = data.chain_active_24h || 0;
                     setWelcomeStats({
                         userCount: data.registered_users || 0,
                         posts24h: data.posts_24h || 0,
                         comments24h: data.comments_24h || 0,
-                        dau: data.dau_any_today || data.dau_today || 0,
+                        active24h: Math.max(dau, chainActive),
                     });
                 }
             } catch (_) {
@@ -2815,7 +2817,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             <WelcomeStatLabel>Users</WelcomeStatLabel>
                                         </WelcomeStatItem>
                                         <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStats.dau.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatValue>{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
                                             <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
                                         </WelcomeStatItem>
                                         <WelcomeStatItem>
