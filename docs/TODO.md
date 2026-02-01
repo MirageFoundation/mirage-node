@@ -49,4 +49,15 @@ posts should be: mirage.talk/p/[id]
 users should be: mirage.talk/u/[id | username]
 topics should be: mirage.talk/t/[id]
 
+**DONE**: Clean URLs implemented. New routes:
+- `/p/:postId` - posts and comments (use `?depth=1-5` for parent context)
+- `/u/:identity` - user profiles (username or mirage1... address)
+- `/t/:topic` - topics (already existed)
+
+**TODO - Future Release**: Remove legacy routes once migration is complete:
+- `/view_post` (replaced by `/p/`)
+- `/profile?address=` (replaced by `/u/`)
+- Legacy query params in ViewPostView: `?post_id=`, `?root=`
+- Legacy query params in ProfileView: `?address=`
+Search for "DEPRECATED" comments in code to find all removal points.
 

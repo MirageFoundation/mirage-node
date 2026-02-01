@@ -756,10 +756,10 @@ export default function NetworkView({ state }) {
                                                         <AccountItem key={account.address}>
                                                             <AccountRank>#{idx + 1}</AccountRank>
                                                             <AccountName
-                                                                href={`/profile?address=${account.address}`}
+                                                                href={`/u/${account.username || account.address}`}
                                                                 onClick={(e) => {
                                                                     e.preventDefault();
-                                                                    navigate(`/profile?address=${account.address}`);
+                                                                    navigate(`/u/${account.username || account.address}`);
                                                                 }}
                                                             >
                                                                 {account.username || account.address.slice(0, 12) + '...'}

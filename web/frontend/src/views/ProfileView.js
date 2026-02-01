@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Helmet } from 'react-helmet-async';
 import styled from "styled-components";
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from "../utils/CryptoUtils";
 import Api from '../lib/api';
@@ -292,13 +293,37 @@ const LoadingRow = styled.div`
 
 //
 
+const isValidMirageAddress = (value) => {
+    if (!value) return false;
+    const trimmed = String(value).trim();
+    if (!trimmed) return false;
+    const candidate = trimmed.toLowerCase();
+    if (!candidate.startsWith('mirage1')) return false;
+    try {
+        const decoded = bech32.decode(candidate);
+        return decoded && decoded.prefix === 'mirage';
+    } catch (_) {
+        return false;
+    }
+};
+
 export default function ProfileView({ state }) {
     const navigate = useNavigate();
     const location = useLocation();
+    const routeParams = useParams();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : Storage.load('seedPhrase', '');
 
+    // State for username resolution (for /u/:identity route)
+    const [resolvedAddress, setResolvedAddress] = useState(null);
+    const [usernameResolutionError, setUsernameResolutionError] = useState(null);
+    const [isResolvingUsername, setIsResolvingUsername] = useState(false);
+
+    // Support new clean URL /u/:identity and legacy /profile?address=...
+    const routeIdentity = routeParams.identity || '';
+
+    // DEPRECATED: Legacy query params, remove in future release
     const queryAddress = useMemo(() => {
         try {
             const params = new URLSearchParams(location.search);
@@ -308,12 +333,57 @@ export default function ProfileView({ state }) {
             return '';
         }
     }, [location.search]);
-    const profileAddress = queryAddress || address || '';
+
+    // Resolve username to address for /u/:identity route
+    useEffect(() => {
+        if (!routeIdentity) {
+            setResolvedAddress(null);
+            setUsernameResolutionError(null);
+            return;
+        }
+        // If identity is a valid mirage bech32 address, treat as address directly
+        if (isValidMirageAddress(routeIdentity)) {
+            setResolvedAddress(routeIdentity.trim().toLowerCase());
+            setUsernameResolutionError(null);
+            return;
+        }
+        // Otherwise, resolve username to address
+        setIsResolvingUsername(true);
+        setUsernameResolutionError(null);
+        Api.get('get_address_from_username', { username: routeIdentity }, { timeoutMs: 10000 })
+            .then((res) => {
+                setIsResolvingUsername(false);
+                if (res && res.exists && res.address) {
+                    setResolvedAddress(res.address);
+                } else {
+                    setUsernameResolutionError(`User "${routeIdentity}" not found`);
+                    setResolvedAddress(null);
+                }
+            })
+            .catch((err) => {
+                setIsResolvingUsername(false);
+                console.error('[ProfileView] Failed to resolve username:', err);
+                setUsernameResolutionError(`Failed to look up user "${routeIdentity}"`);
+                setResolvedAddress(null);
+            });
+    }, [routeIdentity]);
+
+    // Determine effective profile address: route identity (resolved) > legacy query > own address
+    const profileAddress = useMemo(() => {
+        if (routeIdentity) {
+            // For /u/:identity route
+            if (isValidMirageAddress(routeIdentity)) return routeIdentity.trim().toLowerCase();
+            return resolvedAddress || '';
+        }
+        // Legacy /profile?address=... or own profile
+        return queryAddress || address || '';
+    }, [routeIdentity, resolvedAddress, queryAddress, address]);
+
     const normalizedOwn = (address || '').trim().toLowerCase();
     const normalizedProfile = (profileAddress || '').trim().toLowerCase();
     const isOwnProfile = normalizedOwn && normalizedProfile
         ? normalizedOwn === normalizedProfile
-        : Boolean(normalizedOwn) && !queryAddress;
+        : Boolean(normalizedOwn) && !queryAddress && !routeIdentity;
 
     const VALID_TABS = ['profile', 'posts', 'follows', 'blocks', 'algo'];
     const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
@@ -1117,23 +1187,14 @@ export default function ProfileView({ state }) {
             Storage.setPendingPostHighlight(post.post_id);
         } catch (_) { }
 
+        // New clean URL format - works for both posts and comments
+        // For comments, the view will auto-detect and show context options
         const isComment = post.target && post.target.trim() !== '';
         if (isComment) {
-            try {
-                const res = await Api.get('get_root_post_id', { comment_id: post.post_id }, { timeoutMs: 5000 });
-                if (res && res.root_post_id) {
-                    const normalizedCommentId = String(post.post_id).toLowerCase();
-                    const normalizedRootId = String(res.root_post_id).toLowerCase();
-                    navigate(`/view_post?post_id=${encodeURIComponent(normalizedCommentId)}&root=${encodeURIComponent(normalizedRootId)}#comment-${encodeURIComponent(normalizedCommentId)}`);
-                } else {
-                    navigate(`/view_post?post_id=${post.post_id}`);
-                }
-            } catch (err) {
-                console.error('[ProfileView] Failed to get root post ID:', err);
-                navigate(`/view_post?post_id=${post.post_id}`);
-            }
+            // Show comment with parent context
+            navigate(`/p/${post.post_id}?depth=1`);
         } else {
-            navigate(`/view_post?post_id=${post.post_id}`);
+            navigate(`/p/${post.post_id}`);
         }
     };
 
@@ -1151,11 +1212,39 @@ export default function ProfileView({ state }) {
         ? 'You can follow moderators, and any posts or users they choose to block will automatically be blocked for you as well.'
         : 'Not following any moderators.';
 
-    const profileTitle = profileUsername 
-        ? `@${profileUsername}` 
-        : profileAddress 
-            ? `${profileAddress.slice(0, 10)}...` 
+    const profileTitle = profileUsername
+        ? `@${profileUsername}`
+        : profileAddress
+            ? `${profileAddress.slice(0, 10)}...`
             : 'Profile';
+
+    // Show loading/error states for username resolution
+    if (isResolvingUsername || usernameResolutionError) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>{routeIdentity ? `@${routeIdentity}` : 'Profile'} | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    <TopBar state={state} />
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <TabbedContainer>
+                            <ContainerBody style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2rem', gap: '0.5rem', minHeight: '200px' }}>
+                                {isResolvingUsername ? (
+                                    <span style={{ color: '#888' }}>Looking up @{routeIdentity}...</span>
+                                ) : (
+                                    <span style={{ color: '#ff6b6b' }}>{usernameResolutionError}</span>
+                                )}
+                            </ContainerBody>
+                        </TabbedContainer>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    }
+
     return (
         <ContentGrid>
             <Helmet>
@@ -1342,7 +1431,7 @@ export default function ProfileView({ state }) {
                                                         <ModeratorTag key={modAddr} $isRemoving={isRemovingModerator === modAddr}>
                                                             <Mono
                                                                 style={{ cursor: 'pointer' }}
-                                                                onClick={() => navigate(`/profile?address=${encodeURIComponent(modAddr)}&tab=posts`)}
+                                                                onClick={() => navigate(`/u/${encodeURIComponent(moderatorUsernames[modAddr] || modAddr)}?tab=posts`)}
                                                             >
                                                                 {moderatorUsernames[modAddr] && moderatorUsernames[modAddr] !== modAddr
                                                                     ? moderatorUsernames[modAddr]
@@ -1363,7 +1452,7 @@ export default function ProfileView({ state }) {
                                                     {moderators.map((modAddr) => (
                                                         <PostItem
                                                             key={modAddr}
-                                                            onClick={() => navigate(`/profile?address=${encodeURIComponent(modAddr)}&tab=posts`)}
+                                                            onClick={() => navigate(`/u/${encodeURIComponent(moderatorUsernames[modAddr] || modAddr)}?tab=posts`)}
                                                         >
                                                             <PostPreview>
                                                                 {moderatorUsernames[modAddr] && moderatorUsernames[modAddr] !== modAddr
@@ -1445,7 +1534,7 @@ export default function ProfileView({ state }) {
                                                 {followedUsers.map((userAddr) => (
                                                     <PostItem
                                                         key={userAddr}
-                                                        onClick={() => navigate(`/profile?address=${encodeURIComponent(userAddr)}&tab=posts`)}
+                                                        onClick={() => navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`)}
                                                     >
                                                         <PostPreview>
                                                             {followedUsernames[userAddr] && followedUsernames[userAddr] !== userAddr
@@ -1499,7 +1588,7 @@ export default function ProfileView({ state }) {
                                                         <div
                                                             key={u.user}
                                                             style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
-                                                            onClick={() => navigate(`/profile?address=${encodeURIComponent(u.user)}&tab=posts`)}
+                                                            onClick={() => navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`)}
                                                         >
                                                             <Mono>{uname && uname !== u.user ? uname : shortenAddress(u.user)}</Mono>
                                                             <Mono style={{ color: colorForWeight(u.weight) }}>
@@ -1525,7 +1614,7 @@ export default function ProfileView({ state }) {
                                                     <div
                                                         key={u.address}
                                                         style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
-                                                        onClick={() => navigate(`/profile?address=${encodeURIComponent(u.address)}&tab=posts`)}
+                                                        onClick={() => navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`)}
                                                     >
                                                         <Mono>{u.username || shortenAddress(u.address)}</Mono>
                                                         <Mono style={{ color: '#22c55e' }}>
@@ -1550,7 +1639,7 @@ export default function ProfileView({ state }) {
                                         {!listsLoading && !listsError && blockedUsers.length > 0 && (
                                             <PostsList>
                                                 {blockedUsers.map((userAddr) => (
-                                                    <PostItem key={userAddr} onClick={() => navigate(`/profile?address=${encodeURIComponent(userAddr)}`)}>
+                                                    <PostItem key={userAddr} onClick={() => navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`)}>
                                                         <PostPreview>
                                                             {blockedUsernames[userAddr] && blockedUsernames[userAddr] !== userAddr
                                                                 ? blockedUsernames[userAddr]
@@ -1572,7 +1661,7 @@ export default function ProfileView({ state }) {
                                         {!listsLoading && !listsError && blockedPosts.length > 0 && (
                                             <PostsList>
                                                 {blockedPosts.map((postId) => (
-                                                    <PostItem key={postId} onClick={() => navigate(`/view_post?post_id=${encodeURIComponent(postId)}`)}>
+                                                    <PostItem key={postId} onClick={() => navigate(`/p/${encodeURIComponent(postId)}`)}>
                                                         <PostPreview>{shortenAddress(postId)}</PostPreview>
                                                         <PostMeta>{postId}</PostMeta>
                                                     </PostItem>

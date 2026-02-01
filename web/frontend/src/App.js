@@ -36,7 +36,7 @@ function lazyWithRetry(importFn) {
                     sessionStorage.setItem(CHUNK_RELOAD_KEY, 'true');
                     window.location.reload();
                     // Return a never-resolving promise to prevent React from rendering an error
-                    return new Promise(() => {});
+                    return new Promise(() => { });
                 } else {
                     console.error('[Mirage] Chunk load error persists after reload:', error);
                 }
@@ -65,6 +65,7 @@ const StatsView = lazyWithRetry(() => import('./views/StatsView'));
 const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
 const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
 const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
+const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
 const APP_BUILD_ID = process.env.REACT_APP_BUILD_ID || '';
 const darkTheme = {
@@ -131,7 +132,8 @@ const excludedRoutes = [
     '/create_account',
     '/welcome',
     '/sign_out',
-    '/view_post',
+    '/view_post', // DEPRECATED: legacy post route, remove in future release
+    '/p/',        // New clean post route (not restored like view_post)
     '/create_post'
 ];
 
@@ -140,7 +142,8 @@ const restorableRoutePrefixes = [
     '/home',
     '/following',
     '/t/',
-    '/profile',
+    '/profile', // DEPRECATED: legacy profile route, remove in future release
+    '/u/',      // New clean user profile route
     '/settings',
     '/subscription',
     '/network',
@@ -863,6 +866,10 @@ class App extends Component {
                                             <Route path="/welcome" element={<WelcomeView state={this.state} />} />
                                             <Route path="/change_username" element={<ChangeUsernameView state={this.state} />} />
                                             <Route path="/sign_out" element={<SignOutView state={this.state} setCredentials={this.setCredentials} />} />
+                                            {/* New clean URL routes */}
+                                            <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
+                                            <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
+                                            {/* DEPRECATED: legacy routes, remove in future release */}
                                             <Route path="/view_post" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/profile" element={<ProfileView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
@@ -875,6 +882,7 @@ class App extends Component {
                                             <Route path="/stats" element={<StatsView />} />
                                             <Route path="/search" element={<SearchResultsView state={this.state} />} />
                                             <Route path="/bridge" element={<BridgeView state={this.state} />} />
+                                            <Route path="*" element={<NotFoundView state={this.state} />} />
                                         </Routes>
                                     </React.Suspense>
                                 </SiteContainer>

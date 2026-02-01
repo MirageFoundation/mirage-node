@@ -1202,7 +1202,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         if (!post || !post.post_id) return;
         const targetPostId = post.post_id;
         markViewPostOpenedFromFeed();
-        navigate(`/view_post?post_id=${encodeURIComponent(targetPostId)}&edit=true`);
+        navigate(`/p/${encodeURIComponent(targetPostId)}?edit=true`);
     };
 
     const handleDonate = () => {
@@ -1519,11 +1519,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     // All card title clicks go to the post view page - external links are available there
     if (post) {
-        title = (<StyledLink to={`/view_post?post_id=${targetPostId}`}>{post.title}</StyledLink>);
+        title = (<StyledLink to={`/p/${targetPostId}`}>{post.title}</StyledLink>);
     }
 
     // All thumbnail clicks go to the post view page - external links are available there
-    const thumbTo = `/view_post?post_id=${targetPostId}`;
+    const thumbTo = `/p/${targetPostId}`;
     const thumbTarget = undefined;
     const thumbRel = undefined;
 
@@ -1545,7 +1545,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const username = (post && typeof post.username === 'string') ? post.username.trim() : '';
         const display = username ? `@${username}` : `@${shortenAddress(post.user_id)}`;
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
-        const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
+        // New clean URL: prefer username, fallback to address
+        const href = username ? `/u/${encodeURIComponent(username)}` : (ownerAddress ? `/u/${encodeURIComponent(ownerAddress)}` : '/profile');
         const tierColor = getTierColor(post.author_level);
         const tierName = getTierName(post.author_level);
         const content = ownerAddress ? (
@@ -1611,20 +1612,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const handleShare = async () => {
         try {
-            const hasTitle = post && post.title && String(post.title).trim() !== '';
-            const isComment = !hasTitle;
-            let path = `/view_post?post_id=${encodeURIComponent(targetPostId)}`;
-            if (isComment) {
-                try {
-                    const res = await Api.get('get_root_post_id', { comment_id: targetPostId }, { timeoutMs: 5000 });
-                    if (res && res.root_post_id) {
-                        const rootId = String(res.root_post_id).toLowerCase();
-                        path = `/view_post?post_id=${encodeURIComponent(targetPostId)}&root=${encodeURIComponent(rootId)}#comment-${encodeURIComponent(targetPostId)}`;
-                    }
-                } catch (_) {
-                    /* fallback to sharing the comment itself if root lookup fails */
-                }
-            }
+            // New clean URL format: /p/:postId
+            const path = `/p/${encodeURIComponent(targetPostId)}`;
             const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
             const url = origin + path;
             const title = (post && post.title) ? String(post.title) : 'Mirage';
@@ -2097,7 +2086,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <VoteSection inline state={state} post={post} updatePost={updatePost} />
                             <MetaSeparatorAction>•</MetaSeparatorAction>
                         </VoteInline>
-                        <Link to={`/view_post?post_id=${targetPostId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                        <Link to={`/p/${targetPostId}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                             <Icon aria-hidden="true">
                                 <svg viewBox="0 0 24 24">
                                     <path d="M4 4h16v12H5.17L4 17.17V4zm0-2a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H4z"></path>

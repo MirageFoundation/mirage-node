@@ -189,6 +189,67 @@ const InviteOnlyHeroButtons = styled.div`
     }
 `;
 
+// Stats display for welcome hero (logged-out users)
+const WelcomeStatsGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0.5rem 0;
+    padding: 0.75rem 0;
+    border-top: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.2)'
+        : 'rgba(102, 126, 234, 0.25)'};
+    border-bottom: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.2)'
+        : 'rgba(102, 126, 234, 0.25)'};
+    width: 100%;
+
+    @media (max-width: 768px) {
+        gap: 0.5rem;
+    }
+`;
+
+const WelcomeStatItem = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 0;
+`;
+
+const WelcomeStatValue = styled.div`
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+
+    @media (max-width: 1000px) {
+        font-size: 1.1rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 1rem;
+    }
+`;
+
+const WelcomeStatLabel = styled.div`
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+
+    @media (max-width: 1000px) {
+        font-size: 0.6rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.55rem;
+    }
+`;
+
 // Mobile header branding for home/following feeds
 
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
@@ -1300,6 +1361,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
 
+    // Welcome stats for logged-out users (user count, posts, DAU)
+    const [welcomeStats, setWelcomeStats] = useState(null);
+
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
         try { return Storage.load('invite_banner_collapsed', false); } catch (_) { return false; }
@@ -1344,6 +1408,30 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             window.removeEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
         };
     }, [isLoggedIn, viewerAddress]);
+
+    // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
+    useEffect(() => {
+        if (isLoggedIn) return; // Only fetch for logged-out visitors
+        let cancelled = false;
+        const loadWelcomeStats = async () => {
+            try {
+                const data = await Api.get('get_stats', { tab: 'overview' }, { timeoutMs: 10000 });
+                if (cancelled) return;
+                if (data) {
+                    setWelcomeStats({
+                        userCount: data.registered_users || 0,
+                        posts24h: data.posts_24h || 0,
+                        comments24h: data.comments_24h || 0,
+                        dau: data.dau_any_today || data.dau_today || 0,
+                    });
+                }
+            } catch (_) {
+                // Silently fail - stats are optional enhancement
+            }
+        };
+        loadWelcomeStats();
+        return () => { cancelled = true; };
+    }, [isLoggedIn]);
 
     // Get next available invite code
     const nextAvailableCode = inviteCodes.find(c => !c.is_used);
@@ -1530,23 +1618,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return () => window.removeEventListener('settingsUpdated', handler);
     }, []);
 
-    // Track mobile screen size to hide compact option
+    // Track mobile screen size to hide compact option in dropdown
     useEffect(() => {
         const checkMobile = () => {
             try {
                 if (typeof window !== 'undefined' && window.matchMedia) {
                     const mobile = window.matchMedia('(max-width: 600px)').matches;
                     setIsMobile(mobile);
-                    // If on mobile and compact is selected, switch to large
-                    if (mobile && cardSize === 'compact') {
-                        handleCardSizeChange('large');
-                    }
                 } else if (typeof window !== 'undefined') {
                     const mobile = window.innerWidth <= 600;
                     setIsMobile(mobile);
-                    if (mobile && cardSize === 'compact') {
-                        handleCardSizeChange('large');
-                    }
                 }
             } catch (_) { }
         };
@@ -1563,7 +1644,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             }
         }
         return () => window.removeEventListener('resize', checkMobile);
-    }, [cardSize]);
+    }, []);
 
     // Track posts the viewer downvoted to hide with animation on Home
     useEffect(() => {
@@ -2221,7 +2302,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 // This enables browser back button to restore feed position
                 try {
                     const url = new URL(link.href, window.location.origin);
-                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post')) {
+                    // Support both new /p/ routes and legacy /view_post
+                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post') || url.pathname.startsWith('/p/')) {
                         sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                             source: 'feed',
                             topic: urlTopic,
@@ -2309,11 +2391,18 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }
 
     // When viewing a single post with comments, header should show topic > title
-    const isPostView = location.pathname.startsWith('/view_post');
+    // Support both new /p/ routes and legacy /view_post
+    const isPostView = location.pathname.startsWith('/view_post') || location.pathname.startsWith('/p/');
     let header = null;
     if (isPostView) {
-        const params = new URLSearchParams(location.search);
-        const pid = params.get('post_id');
+        const pid = (() => {
+            if (location.pathname.startsWith('/p/')) {
+                const raw = location.pathname.slice(3);
+                return raw ? decodeURIComponent(raw) : null;
+            }
+            const params = new URLSearchParams(location.search);
+            return params.get('post_id');
+        })();
         const p = pid ? state.posts[pid] : null;
         if (p) {
             const topicKey = String(p.topic || '').trim().toLowerCase();
@@ -2719,6 +2808,22 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                 <InviteOnlyHeroDescription>
                                     <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Learn more about our mission</a>
                                 </InviteOnlyHeroDescription>
+                                {welcomeStats && welcomeStats.userCount > 0 && (
+                                    <WelcomeStatsGrid>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Users</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{welcomeStats.dau.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                    </WelcomeStatsGrid>
+                                )}
                                 <InviteOnlyHeroDescription>
                                     Have an invite code? Join the community today.
                                 </InviteOnlyHeroDescription>

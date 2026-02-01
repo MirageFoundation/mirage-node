@@ -398,14 +398,20 @@ const Sidebar = ({ currentPath, state }) => {
                 {peopleToShow.length === 0 ? (
                     <EmptyState>None followed</EmptyState>
                 ) : (
-                    peopleToShow.map((addr) => (
-                        <UserItem
-                            key={addr}
-                            to={`/profile?address=${encodeURIComponent(addr)}&tab=posts`}
-                        >
-                            <UserName>{renderUserLabel(addr)}</UserName>
-                        </UserItem>
-                    ))
+                    peopleToShow.map((addr) => {
+                        // Prefer username for clean URL, fallback to address
+                        const lower = String(addr || '').toLowerCase();
+                        const uname = usernamesMap?.[lower];
+                        const identity = (uname && typeof uname === 'string' && uname.trim().length > 0) ? uname.trim() : addr;
+                        return (
+                            <UserItem
+                                key={addr}
+                                to={`/u/${encodeURIComponent(identity)}?tab=posts`}
+                            >
+                                <UserName>{renderUserLabel(addr)}</UserName>
+                            </UserItem>
+                        );
+                    })
                 )}
                 {people.length > peopleLimit && (
                     <ToggleButton onClick={() => setShowAllPeople((v) => !v)}>

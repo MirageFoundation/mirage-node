@@ -4488,10 +4488,23 @@ def get_root_post_id():
 
 @public_bp.route("/api/get_comment_context")
 def get_comment_context():
+    rid = next_request_id()
     comment_id = request.args.get("comment_id", type=str)
     address = request.args.get("address", default="", type=str)
-    max_depth = request.args.get("max_depth", default=6, type=int)
-    max_depth = min(max(1, max_depth), 10)
+    max_depth_raw = request.args.get("max_depth", default=None, type=str)
+
+    # Parse and validate max_depth strictly (1-5, hard error on invalid)
+    if max_depth_raw is None:
+        max_depth = 5  # Default to max
+    else:
+        try:
+            max_depth = int(max_depth_raw)
+        except (ValueError, TypeError):
+            log_event(rid, "get_comment_context.invalid_depth", raw=max_depth_raw)
+            return jsonify({"error": f"Invalid max_depth '{max_depth_raw}'. Must be integer 1-5."}), 400
+        if max_depth < 1 or max_depth > 5:
+            log_event(rid, "get_comment_context.invalid_depth", value=max_depth)
+            return jsonify({"error": f"max_depth must be 1-5, got {max_depth}"}), 400
 
     if not comment_id:
         return jsonify({"error": "comment_id is required"}), 400
@@ -5280,6 +5293,29 @@ def get_stats():
 
             cur.execute("SELECT COUNT(*) FROM votes")
             stats["total_votes"] = cur.fetchone()[0] or 0
+
+            # Posts and comments in last 24h (for welcome screen stats)
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE COALESCE(target,'') = ''
+                  AND deleted = FALSE
+                  AND timestamp >= %s
+                """,
+                (today_start,),
+            )
+            stats["posts_24h"] = cur.fetchone()[0] or 0
+
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE LENGTH(COALESCE(target,'')) > 0
+                  AND deleted = FALSE
+                  AND timestamp >= %s
+                """,
+                (today_start,),
+            )
+            stats["comments_24h"] = cur.fetchone()[0] or 0
 
             # Registered-only engagement tallies
             cur.execute(

@@ -383,7 +383,7 @@ export default function StatsView() {
                     )}
                     <div>
                         {address ? (
-                            <UserLink to={`/profile?address=${address}`}>
+                            <UserLink to={`/u/${user.username || address}`}>
                                 {user.username || truncateAddress(address)}
                             </UserLink>
                         ) : (
@@ -414,7 +414,7 @@ export default function StatsView() {
                     )}
                     <div>
                         {user.address ? (
-                            <UserLink to={`/profile?address=${user.address}`}>
+                            <UserLink to={`/u/${user.username || user.address}`}>
                                 {user.username || 'Anonymous'}
                             </UserLink>
                         ) : (
@@ -1095,13 +1095,13 @@ export default function StatsView() {
                                                         <tr key={idx}>
                                                             <Td style={{ width: '40px', color: '#888' }}>{idx + 1}</Td>
                                                             <Td>
-                                                                <UserLink to={`/profile?address=${account.address}`}>
+                                                                <UserLink to={`/u/${account.username || account.address}`}>
                                                                     <AddressText>{truncateAddress(account.address)}</AddressText>
                                                                 </UserLink>
                                                             </Td>
                                                             <Td>
                                                                 {account.username ? (
-                                                                    <UserLink to={`/profile?address=${account.address}`}>
+                                                                    <UserLink to={`/u/${account.username}`}>
                                                                         {account.username}
                                                                     </UserLink>
                                                                 ) : (
@@ -1200,7 +1200,7 @@ export default function StatsView() {
                                                                     <UserCell>
                                                                         <AvatarPlaceholder>?</AvatarPlaceholder>
                                                                         <div>
-                                                                            <UserLink to={`/profile?address=${user.address}`} onClick={e => e.stopPropagation()}>
+                                                                            <UserLink to={`/u/${user.username || user.address}`} onClick={e => e.stopPropagation()}>
                                                                                 {user.username || truncateAddress(user.address)}
                                                                             </UserLink>
                                                                             {user.username && (
@@ -1288,7 +1288,7 @@ export default function StatsView() {
                                                         </Mono>
                                                     </div>
                                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <UserLink to={`/profile?address=${reward.address}`} style={{ fontWeight: 500 }}>
+                                                        <UserLink to={`/u/${reward.username || reward.address}`} style={{ fontWeight: 500 }}>
                                                             {reward.username || truncateAddress(reward.address)}
                                                         </UserLink>
                                                         <div style={{ fontSize: '0.7rem', color: '#888', marginTop: '0.15rem' }}>

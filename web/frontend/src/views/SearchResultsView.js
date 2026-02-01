@@ -363,8 +363,8 @@ export default function SearchResultsView({ state }) {
                                     {users.map((user) => (
                                         <ItemRow key={user.address}>
                                             <ItemLeft>
-                                                <ItemLink 
-                                                    to={`/profile?address=${encodeURIComponent(user.address)}`}
+                                                <ItemLink
+                                                    to={`/u/${encodeURIComponent(user.username || user.address)}`}
                                                     $tierColor={getTierColor(user.level)}
                                                     data-tooltip={getTierName(user.level)}
                                                 >
@@ -447,8 +447,8 @@ export default function SearchResultsView({ state }) {
                                                 direction: post.user_vote,
                                             };
                                             return (
-                                                <AnimatedCard 
-                                                    key={post.post_id} 
+                                                <AnimatedCard
+                                                    key={post.post_id}
                                                     style={{ animationDelay: `${index * 30}ms` }}
                                                     onClick={() => {
                                                         try {

@@ -614,7 +614,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                 if (res && res.success) {
                     // Only navigate if user is still on this page
                     if (mountedRef.current) {
-                        navigate(`/view_post?post_id=${overrideId}`);
+                        navigate(`/p/${overrideId}`);
                     }
                 } else {
                     setSubmitError(res && res.error ? String(res.error) : 'Edit failed');
@@ -690,7 +690,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                     }));
                     // Only navigate if user is still on this page
                     if (mountedRef.current) {
-                        navigate(`/view_post?post_id=${txHash}`);
+                        navigate(`/p/${txHash}`);
                     }
                 } catch (e) {
                     setSubmitError(String(e && e.message ? e.message : 'Failed to confirm transaction'));
