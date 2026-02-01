@@ -5502,7 +5502,7 @@ def get_welcome_stats():
 
 @public_bp.route("/api/get_stats")
 def get_stats():
-    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts, analytics."""
+    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts, analytics, rewards."""
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
@@ -5516,6 +5516,10 @@ def get_stats():
         return _get_stats_accounts(rid)
     elif tab == "analytics":
         return _get_stats_analytics(rid)
+    elif tab == "rewards":
+        # Delegate to the rewards stats endpoint in quests module
+        from routes.quests import reward_stats
+        return reward_stats()
 
     # Check cache for overview stats
     now = int(time.time())

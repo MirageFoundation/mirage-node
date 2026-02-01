@@ -324,26 +324,22 @@ export default function StatsView() {
         setLoading(true);
         setError(null);
         try {
-            if (tab === 'rewards') {
-                // Rewards tab - public endpoint
-                const data = await Api.get('rewards/stats', {}, { timeoutMs: 30000 });
+            const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
+            if (tab === 'overview') {
+                setStats(data);
+                // Also fetch analytics separately (lazy load)
+                fetchAnalytics();
+            } else if (tab === 'signups') {
+                setSignupsData(data);
+            } else if (tab === 'subscribers') {
+                setSubscribersData(data);
+            } else if (tab === 'accounts') {
+                setAccountsData(data);
+            } else if (tab === 'rewards') {
                 setRewardsData(data);
                 // Also fetch initial reward history
                 setPayouts([]);
                 fetchRewardHistory(0, false);
-            } else {
-                const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
-                if (tab === 'overview') {
-                    setStats(data);
-                    // Also fetch analytics separately (lazy load)
-                    fetchAnalytics();
-                } else if (tab === 'signups') {
-                    setSignupsData(data);
-                } else if (tab === 'subscribers') {
-                    setSubscribersData(data);
-                } else if (tab === 'accounts') {
-                    setAccountsData(data);
-                }
             }
         } catch (err) {
             setError(err.message || 'Failed to load stats');
