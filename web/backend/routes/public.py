@@ -5317,6 +5317,19 @@ def get_stats():
             )
             stats["comments_24h"] = cur.fetchone()[0] or 0
 
+            # Unique users active on-chain in last 24h (posted, commented, or voted)
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT owner) FROM (
+                    SELECT LOWER(owner) as owner FROM posts WHERE created_at >= %s AND deleted = FALSE
+                    UNION
+                    SELECT LOWER(owner) as owner FROM votes WHERE created_at >= %s
+                ) active_users
+                """,
+                (today_start, today_start),
+            )
+            stats["chain_active_24h"] = cur.fetchone()[0] or 0
+
             # Registered-only engagement tallies
             cur.execute(
                 """
