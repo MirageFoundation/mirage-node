@@ -919,7 +919,6 @@ class TransactionHandler {
     async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
         try {
             const seedPhrase = Storage.load("seedPhrase", "");
-            const publicKey = Storage.load("publicKey", "");
             
             const chain = String(destinationChain || "").trim().toLowerCase();
             if (!chain) return { success: false, error: "destination_chain required" };

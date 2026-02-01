@@ -457,15 +457,23 @@ else
     echo "==> Moving tag will be updated: $IMAGE_MOVING_TAG"
   fi
 
-  maybe_proto_gen_and_go_build
-
   if [ "$LOCAL_MODE" -eq 1 ]; then
+    # Local mode: always build locally
+    maybe_proto_gen_and_go_build
     echo "==> Building image locally..."
     docker_build load
   else
-    echo "==> Building and pushing image to registry..."
-    docker_build push
-    DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    # Remote mode: check if image already exists in registry before building
+    echo "==> Checking if image exists in registry: $IMAGE_SHA_TAG"
+    if docker manifest inspect "$IMAGE_SHA_TAG" >/dev/null 2>&1; then
+      echo "==> Image already exists in registry, skipping build"
+      DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    else
+      echo "==> Image not found in registry, building and pushing..."
+      maybe_proto_gen_and_go_build
+      docker_build push
+      DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    fi
   fi
 fi
 

@@ -11,6 +11,7 @@ Endpoints:
 """
 
 import base64
+import os
 import re
 from typing import Any, Dict
 import time
@@ -118,11 +119,11 @@ def _get_utc_julian_day(ts: int) -> int:
 def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
     """
     Process invite quest completion when a new user sets their username.
-    
+
     Checks if:
     1. New user used an invite code
     2. Referrer has invite_recruit quest assigned for today and not completed
-    
+
     If both conditions are met:
     - Marks referrer's invite_recruit quest as completed
     - Creates pending reward for referrer (10k MIRAGE, no multiplier)
@@ -130,7 +131,7 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
     """
     now_ts = int(time.time())
     day_utc = _get_utc_julian_day(now_ts)
-    
+
     with connect_db() as conn:
         with conn.cursor() as cur:
             # Step 1: Find the invite code used by this new user
@@ -141,39 +142,41 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
                 ORDER BY used_at DESC
                 LIMIT 1
                 """,
-                (new_user_addr,)
+                (new_user_addr,),
             )
             invite_row = cur.fetchone()
-            
+
             if not invite_row:
                 log_event(rid, "invite_quest.no_invite_code", new_user=new_user_addr)
                 return
-            
+
             referrer_addr, invite_code = invite_row
             referrer_addr = referrer_addr.lower()
-            log_event(rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code)
-            
+            log_event(
+                rid, "invite_quest.found_referrer", new_user=new_user_addr, referrer=referrer_addr, code=invite_code
+            )
+
             # Step 2: Check if referrer has invite_recruit quest for today, not completed
             cur.execute(
                 """
                 SELECT quest_id, completed_at FROM user_daily_quests
                 WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
                 """,
-                (referrer_addr, day_utc)
+                (referrer_addr, day_utc),
             )
             quest_row = cur.fetchone()
-            
+
             if not quest_row:
                 log_event(rid, "invite_quest.referrer_no_quest", referrer=referrer_addr, day_utc=day_utc)
                 return
-            
+
             _, completed_at = quest_row
             if completed_at is not None:
                 log_event(rid, "invite_quest.referrer_quest_already_completed", referrer=referrer_addr)
                 return
-            
+
             log_event(rid, "invite_quest.completing", referrer=referrer_addr, new_user=new_user_addr)
-            
+
             # Step 3: Mark referrer's invite_recruit quest as completed
             cur.execute(
                 """
@@ -181,20 +184,21 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
                 SET progress = 1, completed_at = %s
                 WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = 'invite_recruit'
                 """,
-                (now_ts, referrer_addr, day_utc)
+                (now_ts, referrer_addr, day_utc),
             )
-            
+
             # Step 4: Insert pending reward for referrer (10k MIRAGE = 10,000,000,000 umirage)
+            # Referrer reward DOES get multiplier (apply_multiplier: True)
             reward_amount_umirage = 10000 * 1_000_000  # 10k MIRAGE
             cur.execute(
                 """
                 INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
                 VALUES (%s, 'mirage', %s, 'quest:invite_recruit', %s)
                 """,
-                (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts)
+                (referrer_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": True}), now_ts),
             )
             log_event(rid, "invite_quest.referrer_reward_created", referrer=referrer_addr, amount=reward_amount_umirage)
-            
+
             # Step 5: Insert invite_referred quest for new user (already completed)
             cur.execute(
                 """
@@ -202,19 +206,20 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
                 VALUES (%s, %s, 'invite_referred', 1, '{}', %s)
                 ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
                 """,
-                (new_user_addr, day_utc, now_ts)
+                (new_user_addr, day_utc, now_ts),
             )
-            
+
             # Step 6: Insert pending reward for new user (10k MIRAGE)
+            # New user reward does NOT get multiplier (they're new, multiplier would be 1x anyway)
             cur.execute(
                 """
                 INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
                 VALUES (%s, 'mirage', %s, 'quest:invite_referred', %s)
                 """,
-                (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts)
+                (new_user_addr, json.dumps({"amount": reward_amount_umirage, "apply_multiplier": False}), now_ts),
             )
             log_event(rid, "invite_quest.referee_reward_created", new_user=new_user_addr, amount=reward_amount_umirage)
-            
+
             log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
 
 
@@ -546,6 +551,73 @@ def core_set_username():
         except Exception:
             return jsonify({"error": "invalid signature"}), 400
 
+        # Extract invite code (always extract, but only enforce if enabled)
+        invite_code = str(data.get("invite_code", "")).strip().upper()
+
+        # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS (if enabled via env var)
+        INVITE_CODES_REQUIRED = os.environ.get("INVITE_CODES_REQUIRED", "").lower() == "true"
+        if INVITE_CODES_REQUIRED:
+            # Check if this is a new user (no existing profile/username)
+            is_new_user = False
+            try:
+                with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT username FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1",
+                        (user_addr,),
+                    )
+                    row = cur.fetchone()
+                    # User is new if no profile exists OR profile exists but has no username
+                    is_new_user = not row or not row[0] or row[0].strip() == ""
+            except Exception as db_err:
+                log_event(rid, "set_username.profile_check_error", error=str(db_err))
+                # If we can't check, also check on-chain as fallback
+                try:
+                    chain_profile = _query_chain_profile_full(user_addr)
+                    is_new_user = (
+                        not chain_profile
+                        or not chain_profile.get("username")
+                        or chain_profile.get("username", "").strip() == ""
+                    )
+                except Exception:
+                    # If both checks fail, err on the side of requiring invite code
+                    is_new_user = True
+
+            # If this is a new user, REQUIRE a valid invite code
+            if is_new_user:
+                if not invite_code or len(invite_code) != 9 or invite_code[4] != "-":
+                    log_event(rid, "set_username.invite_code_required", user=user_addr, username=username)
+                    return jsonify({"error": "invite code required for new account registration"}), 400
+
+                # Validate that the invite code exists and is unused
+                try:
+                    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                        cur = conn.cursor()
+                        cur.execute(
+                            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
+                            (invite_code,),
+                        )
+                        row = cur.fetchone()
+                        if not row:
+                            log_event(rid, "set_username.invite_code_invalid", code=invite_code, user=user_addr)
+                            return jsonify({"error": "invalid invite code"}), 400
+
+                        owner, used_by = row
+                        if used_by:
+                            log_event(
+                                rid,
+                                "set_username.invite_code_already_used",
+                                code=invite_code,
+                                user=user_addr,
+                                used_by=used_by,
+                            )
+                            return jsonify({"error": "this invite code has already been used"}), 400
+
+                        log_event(rid, "set_username.invite_code_validated", code=invite_code, user=user_addr)
+                except Exception as invite_check_err:
+                    log_event(rid, "set_username.invite_code_check_error", error=str(invite_check_err))
+                    return jsonify({"error": "failed to validate invite code"}), 500
+
         msg = MsgSetUsername()
         # authority is the validator/node address relaying this transaction, NOT the user's address
         msg.authority = validator_addr
@@ -602,14 +674,14 @@ def core_set_username():
                 except Exception as ref_err:
                     log_event(rid, "set_username.referral_error", error=str(ref_err))
 
-        # Mark invite code as used (if provided) - this must happen BEFORE quest completion check
-        invite_code = str(data.get("invite_code", "")).strip().upper()
-        if invite_code and len(invite_code) == 9 and invite_code[4] == "-":
+        # Mark invite code as used (if provided and transaction succeeded) - this must happen BEFORE quest completion check
+        if invite_code and len(invite_code) == 9 and invite_code[4] == "-" and code == 0:
+            # Only mark as used if transaction succeeded (code == 0)
             try:
                 now_ts = int(time.time())
                 with connect_db() as conn:
                     with conn.cursor() as cur:
-                        # Only mark as used if it exists and is not already used
+                        # Only mark as used if it exists and is not already used (double-check)
                         cur.execute(
                             """
                             UPDATE invite_codes 
@@ -2325,8 +2397,22 @@ def core_vote():
         # no client-provided fees
         # Minimal fields; last_block_hash/difficulty/proof only needed for PoW path
         if not (pub_b64 and sig_b64 and target):
-            log_event(rid, "vote.missing_fields", has_pubkey=bool(pub_b64), has_signature=bool(sig_b64), has_target=bool(target))
-            return jsonify({"error": "missing required fields", "details": f"pubkey={bool(pub_b64)}, signature={bool(sig_b64)}, target={bool(target)}"}), 400
+            log_event(
+                rid,
+                "vote.missing_fields",
+                has_pubkey=bool(pub_b64),
+                has_signature=bool(sig_b64),
+                has_target=bool(target),
+            )
+            return (
+                jsonify(
+                    {
+                        "error": "missing required fields",
+                        "details": f"pubkey={bool(pub_b64)}, signature={bool(sig_b64)}, target={bool(target)}",
+                    }
+                ),
+                400,
+            )
         if not _is_hex64(target.strip()):
             return jsonify({"error": "invalid target"}), 400
 
@@ -2345,11 +2431,21 @@ def core_vote():
 
         # Free users require PoW; subscribers must NOT use PoW
         user_is_sub = is_subscriber(user_addr)
-        log_event(rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty)
+        log_event(
+            rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty
+        )
         if not user_is_sub:
             if not (int(difficulty) > 0 and proof):
                 log_event(rid, "vote.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
-                return jsonify({"error": "pow_required", "details": "Non-subscriber must provide valid PoW. Your subscription may have expired."}), 400
+                return (
+                    jsonify(
+                        {
+                            "error": "pow_required",
+                            "details": "Non-subscriber must provide valid PoW. Your subscription may have expired.",
+                        }
+                    ),
+                    400,
+                )
             if not _is_hex64(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             if not is_valid_recent_block_hash(last_block_hash):

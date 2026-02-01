@@ -710,25 +710,23 @@ class DatabaseManager:
                 )
                 # Migration: add power columns if missing (for existing databases)
                 for col in ["power", "attested_power", "required_power"]:
-                    cur.execute(f"""
+                    cur.execute(
+                        f"""
                         DO $$ BEGIN
                             ALTER TABLE bridge_transactions ADD COLUMN {col} BIGINT DEFAULT 0;
                         EXCEPTION
                             WHEN duplicate_column THEN NULL;
                         END $$;
-                    """)
+                    """
+                    )
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_bridge_burn_id ON bridge_transactions(burn_id, source_chain)"
                 )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_bridge_tx_hash ON bridge_transactions(LOWER(tx_hash))"
-                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_bridge_tx_hash ON bridge_transactions(LOWER(tx_hash))")
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_bridge_direction ON bridge_transactions(direction, created_at DESC)"
                 )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_bridge_recipient ON bridge_transactions(LOWER(recipient))"
-                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_bridge_recipient ON bridge_transactions(LOWER(recipient))")
                 # Prevent duplicate entries during re-indexing
                 cur.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_bridge_unique_tx ON bridge_transactions(tx_hash, msg_type)"
@@ -1150,6 +1148,28 @@ class DatabaseManager:
                     return (row[0], float(row[1]), float(row[2]))
                 return None
 
+    def get_target_vote_counts(self, target: str) -> tuple[int, int]:
+        """Return (upvotes, downvotes) for a target post/comment."""
+        target_norm = str(target or "").strip()
+        if not target_norm:
+            return (0, 0)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        COALESCE(SUM(CASE WHEN user_vote > 0 THEN 1 ELSE 0 END), 0) AS upvotes,
+                        COALESCE(SUM(CASE WHEN user_vote < 0 THEN 1 ELSE 0 END), 0) AS downvotes
+                    FROM votes
+                    WHERE LOWER(target) = LOWER(%s)
+                    """,
+                    (target_norm,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return (0, 0)
+                return (int(row[0] or 0), int(row[1] or 0))
+
     def upsert_vote(
         self,
         txhash: str,
@@ -1393,7 +1413,7 @@ class DatabaseManager:
         updated_at: int,
     ) -> bool:
         """Update subscription-related fields for a profile.
-        
+
         If auto_renew is None, it won't be changed (used for renewals).
         If auto_renew is a bool, it will be updated (used for user toggling).
         """
@@ -1472,7 +1492,6 @@ class DatabaseManager:
                         int(updated_at),
                     ),
                 )
-
 
     def update_profile_timestamp(self, owner: str, updated_at: int) -> None:
         """Update profile timestamp."""
@@ -1639,7 +1658,7 @@ class DatabaseManager:
 
     def increment_ancestor_comment_counts(self, target_post_id: str) -> None:
         """Increment comment_count for all ancestors of a new comment.
-        
+
         Called when a new comment is indexed. target_post_id is the parent post
         that the new comment is replying to.
         """
@@ -1651,7 +1670,7 @@ class DatabaseManager:
 
     def _update_ancestor_comment_counts(self, cur, post_id: str, delta: int) -> None:
         """Update comment_count for all ancestors of a post by delta.
-        
+
         Walks up the parent chain and adjusts comment_count.
         For new comments: delta=+1 (increment)
         For deleted posts: delta=-1 (decrement)
@@ -1948,16 +1967,27 @@ class DatabaseManager:
                     ON CONFLICT (tx_hash, msg_type) DO NOTHING
                     """,
                     (
-                        tx_hash, direction, msg_type, source_chain, destination_chain,
-                        burn_id, sender, recipient, amount, validator, destination_tx,
-                        minted, created_at, height,
+                        tx_hash,
+                        direction,
+                        msg_type,
+                        source_chain,
+                        destination_chain,
+                        burn_id,
+                        sender,
+                        recipient,
+                        amount,
+                        validator,
+                        destination_tx,
+                        minted,
+                        created_at,
+                        height,
                     ),
                 )
                 return cur.rowcount > 0  # True if inserted, False if duplicate
 
     def get_bridge_attestation(self, source_chain: str, burn_id: str) -> dict:
         """Get inbound bridge attestation by source_chain and burn_id.
-        
+
         Returns dict with: found, minted, tx_hash, recipient, amount, validator, created_at,
                           attestor_count, attested_power, required_power
         """
@@ -2002,8 +2032,8 @@ class DatabaseManager:
 
     def get_bridge_burn(self, burn_id: str) -> dict:
         """Get outbound bridge burn by burn_id (tx_hash).
-        
-        Returns dict with: found, minted, destination_chain, destination_address, 
+
+        Returns dict with: found, minted, destination_chain, destination_address,
                           destination_tx, amount, created_at, attestor_count,
                           attested_power, required_power
         """
@@ -2102,7 +2132,7 @@ class DatabaseManager:
         required_power: int,
     ) -> bool:
         """Update power fields for a bridge attestation record by tx_hash + msg_type.
-        
+
         Each attestation message has a unique tx_hash for its msg_type.
         Called when processing bridge_attest or bridge_attest_minted events.
         """

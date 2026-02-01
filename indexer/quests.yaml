@@ -284,6 +284,7 @@ achievements:
     action_type: quality_comments
     target_count: 10
     quality_threshold: 5
+    unique_target: true
     rewards:
       - type: mirage
         amount: 75000

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, memo } from "react";
 import ReactDOM from "react-dom";
-import styled from "styled-components"
+import styled, { useTheme } from "styled-components"
 import { Link, useNavigate } from 'react-router-dom';
 import VoteSection from "./VoteSection";
 import InlineMedia from "./InlineMedia";
@@ -904,6 +904,7 @@ const markViewPostOpenedFromFeed = () => {
 
 function CardView({ state, post, updatePost, showContent = false, footer = null }) {
     const navigate = useNavigate();
+    const theme = useTheme();
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(false);
@@ -2223,8 +2224,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     display: 'flex',
                                     alignItems: 'center',
                                     gap: '0.35rem',
-                                    background: 'rgba(255, 255, 255, 0.6)',
-                                    border: '1px solid rgba(148, 163, 184, 0.55)',
+                                    background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
+                                    border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
                                     borderRadius: '8px',
                                     padding: '0.2rem 0.5rem',
                                     minWidth: '10rem',
@@ -2241,7 +2242,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             background: 'transparent',
                                             border: 'none',
                                             outline: 'none',
-                                            color: 'inherit',
+                                            color: theme?.colors?.text || 'inherit',
                                             fontSize: '0.8rem',
                                             fontWeight: 700,
                                             textAlign: 'right',

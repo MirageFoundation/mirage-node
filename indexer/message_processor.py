@@ -481,10 +481,24 @@ class MessageProcessor:
                         weight = COMMUNITY_VOTE_BASELINE
                         limiting_factor = f"net_votes({net_votes})<{COMMUNITY_VOTE_MIN_NET_VOTES}"
                     else:
-                        topic_factor = min(vote_count / COMMUNITY_VOTE_MAX_TOPIC_VOTES, 1.0) if COMMUNITY_VOTE_MAX_TOPIC_VOTES > 0 else 1.0
-                        age_factor = min(age_days / COMMUNITY_VOTE_MATURITY_DAYS, 1.0) if COMMUNITY_VOTE_MATURITY_DAYS > 0 else 1.0
-                        root_factor = min(unique_root_posts / COMMUNITY_VOTE_MIN_ROOT_POSTS, 1.0) if COMMUNITY_VOTE_MIN_ROOT_POSTS > 0 else 1.0
-                        posts_factor = min(post_count / COMMUNITY_VOTE_MAX_POSTS, 1.0) if COMMUNITY_VOTE_MAX_POSTS > 0 else 1.0
+                        topic_factor = (
+                            min(vote_count / COMMUNITY_VOTE_MAX_TOPIC_VOTES, 1.0)
+                            if COMMUNITY_VOTE_MAX_TOPIC_VOTES > 0
+                            else 1.0
+                        )
+                        age_factor = (
+                            min(age_days / COMMUNITY_VOTE_MATURITY_DAYS, 1.0)
+                            if COMMUNITY_VOTE_MATURITY_DAYS > 0
+                            else 1.0
+                        )
+                        root_factor = (
+                            min(unique_root_posts / COMMUNITY_VOTE_MIN_ROOT_POSTS, 1.0)
+                            if COMMUNITY_VOTE_MIN_ROOT_POSTS > 0
+                            else 1.0
+                        )
+                        posts_factor = (
+                            min(post_count / COMMUNITY_VOTE_MAX_POSTS, 1.0) if COMMUNITY_VOTE_MAX_POSTS > 0 else 1.0
+                        )
                         combined = topic_factor * age_factor * root_factor * posts_factor
                         weight = COMMUNITY_VOTE_BASELINE + combined * (tier_max - COMMUNITY_VOTE_BASELINE)
 
@@ -605,6 +619,53 @@ class MessageProcessor:
                 )
             except Exception as e:
                 logger.warning("Quest progress tracking failed for vote %s: %s", txhash, e)
+
+        # Track quest progress for received upvotes (post/comment authors)
+        if target_author and raw_direction > 0:
+            try:
+                delta_upvotes = 1 if prev_vote <= 0 else 0
+                if delta_upvotes > 0:
+                    upvotes, downvotes = self.db.get_target_vote_counts(target)
+                    post_row = self.db.get_post(target)
+                    if not post_row:
+                        raise ValueError(f"Vote {txhash} target not found for content length")
+                    content_length = len(post_row[2] or "")
+                    target_norm = str(target or "").strip().lower()
+                    root_norm = str(root_post_id or "").strip().lower()
+                    is_root_target = bool(root_norm) and target_norm == root_norm
+                    action_type = "upvotes_received" if is_root_target else "comment_upvotes_received"
+                    logger.debug(
+                        "Received upvote quest check: target=%s author=%s root_post=%s upvotes=%s downvotes=%s action=%s",
+                        target_norm[:12] if target_norm else None,
+                        target_author[:12] if target_author else None,
+                        root_norm[:12] if root_norm else None,
+                        upvotes,
+                        downvotes,
+                        action_type,
+                    )
+                    self.quest_tracker.update_progress(
+                        target_author,
+                        action_type,
+                        ts,
+                        target=target,
+                        root_post_id=root_post_id,
+                        content_length=content_length,
+                        quality=upvotes,
+                        target_owner=owner,
+                    )
+                    if not is_root_target:
+                        self.quest_tracker.update_progress(
+                            target_author,
+                            "quality_comments",
+                            ts,
+                            target=target,
+                            root_post_id=root_post_id,
+                            content_length=content_length,
+                            quality=upvotes,
+                            target_owner=owner,
+                        )
+            except Exception as e:
+                logger.warning("Quest progress tracking failed for received upvote %s: %s", txhash, e)
 
         # Build detailed vote log
         vote_log = {
@@ -1445,6 +1506,7 @@ class MessageProcessor:
             if host in ("www.youtube.com", "youtube.com", "m.youtube.com"):
                 if u.path == "/watch":
                     from urllib.parse import parse_qs
+
                     qs = parse_qs(u.query)
                     v = qs.get("v")
                     if v and v[0]:
@@ -1735,7 +1797,7 @@ class MessageProcessor:
 
     def process_tx_events(self, events: list, tx_hash: str = "") -> None:
         """Process per-tx events for bridge confirmation updates and power info.
-        
+
         Args:
             events: List of events from the transaction
             tx_hash: The transaction hash (used to update power on attestation records)
@@ -1758,7 +1820,13 @@ class MessageProcessor:
                 updated = self.db.update_bridge_attestation_minted(source_chain, burn_id, True)
                 logger.info(
                     "Bridge mint event (inbound complete): %s:%s -> %s amount=%s power=%s/%s updated=%s",
-                    source_chain, burn_id, recipient, amount, attested_power, required_power, updated
+                    source_chain,
+                    burn_id,
+                    recipient,
+                    amount,
+                    attested_power,
+                    required_power,
+                    updated,
                 )
 
             # Handle inbound bridge attestations (bridge_attest event)
@@ -1789,7 +1857,15 @@ class MessageProcessor:
                     )
                 logger.info(
                     "Bridge attest event (inbound): %s:%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
-                    source_chain, burn_id, tx_hash[:16] if tx_hash else "?", validator, power, attested_power, required_power, minted, updated
+                    source_chain,
+                    burn_id,
+                    tx_hash[:16] if tx_hash else "?",
+                    validator,
+                    power,
+                    attested_power,
+                    required_power,
+                    minted,
+                    updated,
                 )
 
                 # If threshold reached, also update minted status
@@ -1825,7 +1901,14 @@ class MessageProcessor:
                     )
                 logger.info(
                     "Bridge attest minted event (outbound): burn_id=%s tx=%s validator=%s power=%d attested=%d/%d minted=%s updated=%s",
-                    effective_burn_id, tx_hash[:16] if tx_hash else "?", validator, power, attested_power, required_power, minted, updated
+                    effective_burn_id,
+                    tx_hash[:16] if tx_hash else "?",
+                    validator,
+                    power,
+                    attested_power,
+                    required_power,
+                    minted,
+                    updated,
                 )
 
                 # If threshold reached, also update minted status
@@ -1896,13 +1979,15 @@ class MessageProcessor:
                 minted=False,  # Only set true when chain confirms mint via BridgeConfirmed event
             )
 
-            logger.info(f"Indexed bridge attest burned: {source_chain}:{burn_id} validator={validator} -> {mirage_recipient} amount={amount}")
+            logger.info(
+                f"Indexed bridge attest burned: {source_chain}:{burn_id} validator={validator} -> {mirage_recipient} amount={amount}"
+            )
         except Exception as e:
             logger.error(f"Failed to index bridge attest burned {tx_hash}: {e}")
 
     def _handle_bridge_attest_minted(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgBridgeAttestMinted (validator attests mint on external chain for outbound burns).
-        
+
         The burn_id in the message is the sequence number, but we use mirage_tx_hash
         for linking to the original burn transaction in the indexer database.
         """
@@ -1937,6 +2022,8 @@ class MessageProcessor:
                 minted=False,  # Only set true via BridgeConfirmed event
             )
 
-            logger.info(f"Indexed bridge attest minted: burn_id={effective_burn_id} (seq={burn_id_seq}) validator={validator} -> {destination_chain} tx={destination_tx}")
+            logger.info(
+                f"Indexed bridge attest minted: burn_id={effective_burn_id} (seq={burn_id_seq}) validator={validator} -> {destination_chain} tx={destination_tx}"
+            )
         except Exception as e:
             logger.error(f"Failed to index bridge attest minted {tx_hash}: {e}")

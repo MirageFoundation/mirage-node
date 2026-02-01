@@ -9,7 +9,6 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 import { useTabs } from "../utils/useTabs";
-import Storage from "../utils/Storage";
 
 // Tier names and colors (same as SubscriptionView)
 const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];

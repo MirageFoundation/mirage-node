@@ -25,7 +25,6 @@ export function useQuests() {
     const [suspensionInfo, setSuspensionInfo] = useState(null);
     const [disabled, setDisabled] = useState(false);
     const [debug, setDebug] = useState(false);
-    const [initialLoadDone, setInitialLoadDone] = useState(false);
 
     const userAddress = Storage.load('publicKey', '');
 
@@ -113,8 +112,6 @@ export function useQuests() {
             } else {
                 setFlashQuest(null);
             }
-
-            setInitialLoadDone(true);
         } catch (err) {
             console.error('Failed to fetch quests:', err);
             setError(err.message || 'Failed to load quests');
@@ -175,7 +172,7 @@ export function useQuests() {
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [flashQuest?.id]); // Only re-run when flash quest changes
+    }, [flashQuest]); // Re-run when flash quest changes
 
     return {
         dailyQuests,

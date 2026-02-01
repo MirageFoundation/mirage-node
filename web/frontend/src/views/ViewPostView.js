@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Helmet } from 'react-helmet-async';
 import Button from "../components/Button";
 import { useLocation, Link, useNavigate, Navigate } from 'react-router-dom';
@@ -936,6 +936,7 @@ function ViewPostView({ state, updatePost }) {
     const [shareMessages, setShareMessages] = useState({}); // { postId: { type: 'success', message } }
     const [showContext, setShowContext] = useState(false);
     const [contextComments, setContextComments] = useState([]);
+    const theme = useTheme();
     const location = useLocation();
     const navigate = useNavigate();
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
@@ -1586,7 +1587,7 @@ function ViewPostView({ state, updatePost }) {
         if (!userId) return;
         const adminAddress = state.publicKey;
         if (!adminAddress) return;
-        
+
         setIsSuspending(true);
         try {
             const response = await Api.post('/admin/rewards/suspend', {
@@ -2713,8 +2714,8 @@ function ViewPostView({ state, updatePost }) {
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.35rem',
-                            background: 'rgba(255, 255, 255, 0.6)',
-                            border: '1px solid rgba(148, 163, 184, 0.55)',
+                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
+                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
                             borderRadius: '8px',
                             padding: '0.2rem 0.5rem',
                             minWidth: '6.5rem',
@@ -2731,7 +2732,7 @@ function ViewPostView({ state, updatePost }) {
                                     background: 'transparent',
                                     border: 'none',
                                     outline: 'none',
-                                    color: 'inherit',
+                                    color: theme?.colors?.text || 'inherit',
                                     fontSize: '0.8rem',
                                     fontWeight: 700,
                                     textAlign: 'right',

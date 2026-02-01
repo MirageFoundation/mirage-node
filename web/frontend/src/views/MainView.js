@@ -220,14 +220,6 @@ const InviteOnlyBanner = styled.div`
     }
 `;
 
-const InviteBannerContent = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    flex: 1;
-    min-width: 0;
-`;
-
 const InviteBannerContentWrapper = styled.div`
     display: flex;
     align-items: center;
@@ -251,46 +243,6 @@ const InviteBannerTextContent = styled.div`
 
     @media (max-width: 768px) {
         padding-right: 0;
-    }
-`;
-
-const InviteBannerTitle = styled.div`
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    line-height: 1;
-
-    @media (max-width: 1000px) {
-        font-size: 0.62rem;
-    }
-`;
-
-const InviteBannerEmoji = styled.span`
-    font-size: 0.9rem;
-    line-height: 1;
-    display: inline-block;
-
-    @media (max-width: 1000px) {
-        font-size: 0.8rem;
-    }
-`;
-
-const InviteBannerDescription = styled.div`
-    font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
-    line-height: 1.4;
-
-    @media (max-width: 1000px) {
-        font-size: 0.55rem;
-    }
-`;
-
-const DesktopBr = styled.br`
-    @media (max-width: 768px) {
-        display: none;
     }
 `;
 
