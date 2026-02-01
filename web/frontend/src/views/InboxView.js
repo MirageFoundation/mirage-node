@@ -282,8 +282,8 @@ export default function InboxView({ state }) {
         } else {
             window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount } }));
         }
-        // Use focused comment format: root=ROOT&post_id=REPLY to show reply in context
-        navigate(`/view_post?root=${reply.root_post_id}&post_id=${reply.reply_id}`);
+        // Use new clean URL with depth=1 to show reply with immediate parent context
+        navigate(`/p/${reply.reply_id}?depth=1`);
     };
 
     const shortenAddress = (addr) => {
@@ -349,8 +349,8 @@ export default function InboxView({ state }) {
             {replies.map((reply) => {
                 const isUnread = !viewedReplyIds.includes(reply.reply_id);
                 const displayUsername = `@${reply.reply_username || shortenAddress(reply.reply_owner)}`;
-                // Use focused comment format for better context
-                const replyUrl = `/view_post?root=${reply.root_post_id}&post_id=${reply.reply_id}`;
+                // Use new clean URL with depth=1 for reply with parent context
+                const replyUrl = `/p/${reply.reply_id}?depth=1`;
                 return (
                     <ReplyItem
                         key={reply.reply_id}
