@@ -2133,6 +2133,10 @@ _WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
 _overview_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _OVERVIEW_STATS_CACHE_TTL = 30  # 30 seconds
 
+# Cache for analytics stats (very expensive - stats_events processing)
+_analytics_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_ANALYTICS_STATS_CACHE_TTL = 60  # 60 seconds (longer TTL for expensive query)
+
 # Wallets excluded from circulating supply (team/founder controlled)
 _EXCLUDED_FROM_CIRCULATING = [
     "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",  # Founders Fund
@@ -4988,6 +4992,177 @@ def stats_event():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_stats_analytics(rid: int):
+    """Return analytics stats from stats_events (DAU/MAU, device/browser/OS breakdown).
+
+    This is a separate endpoint because stats_events processing is expensive.
+    The frontend loads this lazily after showing core stats.
+    """
+    now = int(time.time())
+
+    # Check cache first
+    if _analytics_stats_cache["data"] is not None and _analytics_stats_cache["expires"] > now:
+        log_event(rid, "get_stats.analytics.cached")
+        return jsonify(_analytics_stats_cache["data"])
+
+    try:
+        conn = connect_db(timeout=15.0, busy_timeout_ms=20000)
+        try:
+            cur = conn.cursor()
+            today_start = now - 86400
+            yesterday_start = now - (2 * 86400)
+            thirty_days_ago = now - (30 * 86400)
+
+            stats: dict[str, Any] = {}
+
+            # Check if we have stats_events
+            cur.execute("SELECT COUNT(*) FROM stats_events")
+            has_stats_events = cur.fetchone()[0] > 0
+
+            if has_stats_events:
+                # Known bots/crawlers to exclude
+                bot_names = {
+                    "googlebot", "applebot", "bingbot", "yandexbot", "baiduspider",
+                    "duckduckbot", "slurp", "facebook", "facebookexternalhit", "facebot",
+                    "twitterbot", "twitter", "linkedinbot", "pinterest", "semrushbot",
+                    "ahrefsbot", "mj12bot", "dotbot", "petalbot", "bytespider",
+                }
+
+                # Fetch all events from last 30 days
+                cur.execute(
+                    """
+                    SELECT session_id, user_address, user_agent, created_at, event_type
+                    FROM stats_events
+                    WHERE created_at >= %s
+                    """,
+                    (thirty_days_ago,),
+                )
+                all_events = cur.fetchall()
+
+                # First pass: identify bot sessions and parse user agents
+                session_ua: dict[str, Any] = {}
+                bot_sessions: set[str] = set()
+                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
+                    if sess_id in session_ua or sess_id in bot_sessions:
+                        continue
+                    if not ua_string or not ua_string.strip():
+                        continue
+                    try:
+                        ua = parse_user_agent(ua_string)
+                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
+                            bot_sessions.add(sess_id)
+                        else:
+                            session_ua[sess_id] = ua
+                    except Exception:
+                        pass
+
+                # Filter to non-bot events only
+                clean_events = [
+                    (sess_id, user_addr, created_at, event_type)
+                    for sess_id, user_addr, _ua, created_at, event_type in all_events
+                    if sess_id not in bot_sessions
+                ]
+
+                # Calculate DAU/MAU from clean events
+                dau_today_set: set[str] = set()
+                dau_yesterday_set: set[str] = set()
+                mau_set: set[str] = set()
+                dau_reg_set: set[str] = set()
+                unreg_sessions: set[str] = set()
+
+                for sess_id, user_addr, created_at, event_type in clean_events:
+                    if event_type not in ("visit", "session_start", "page_view"):
+                        continue
+                    user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
+
+                    mau_set.add(user_key)
+
+                    if created_at >= today_start:
+                        dau_today_set.add(user_key)
+                        if user_addr and user_addr.strip():
+                            dau_reg_set.add(user_addr.lower())
+
+                    if yesterday_start <= created_at < today_start:
+                        dau_yesterday_set.add(user_key)
+
+                    if not user_addr or not user_addr.strip():
+                        unreg_sessions.add(sess_id)
+
+                stats["dau_today"] = len(dau_today_set)
+                stats["dau_any_today"] = len(dau_today_set)
+                stats["dau_yesterday"] = len(dau_yesterday_set)
+                stats["maus"] = len(mau_set)
+                stats["dau_registered_today"] = len(dau_reg_set)
+                stats["unregistered_users"] = len(unreg_sessions)
+
+                # Browser/device/OS breakdown
+                browser_counts: dict[str, int] = {}
+                os_counts: dict[str, int] = {}
+                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
+
+                for sess_id, ua in session_ua.items():
+                    browser = ua.browser.family or "Unknown"
+                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
+                    os_family = ua.os.family or "Unknown"
+                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
+                    if ua.is_mobile:
+                        device_counts["mobile"] += 1
+                    elif ua.is_tablet:
+                        device_counts["tablet"] += 1
+                    elif ua.is_pc:
+                        device_counts["desktop"] += 1
+                    else:
+                        device_counts["other"] += 1
+
+                total_sessions = len(session_ua) or 1
+                browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
+                browser_pcts.sort(key=lambda x: x[1], reverse=True)
+                top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
+                if len(browser_pcts) > 4:
+                    other_pct = round(sum(p for _, p in browser_pcts[4:]), 1)
+                    if other_pct > 0:
+                        top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
+                stats["browser_breakdown"] = top_browsers
+
+                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
+                os_pcts.sort(key=lambda x: x[1], reverse=True)
+                top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
+                if len(os_pcts) > 4:
+                    other_pct = round(sum(p for _, p in os_pcts[4:]), 1)
+                    if other_pct > 0:
+                        top_os.append({"name": "Other", "pct": f"{other_pct}%"})
+                stats["os_breakdown"] = top_os
+
+                device_total = sum(device_counts.values()) or 1
+                stats["device_breakdown"] = {
+                    k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
+                }
+            else:
+                stats["dau_today"] = 0
+                stats["dau_any_today"] = 0
+                stats["dau_yesterday"] = 0
+                stats["maus"] = 0
+                stats["dau_registered_today"] = 0
+                stats["unregistered_users"] = 0
+                stats["browser_breakdown"] = []
+                stats["os_breakdown"] = []
+                stats["device_breakdown"] = {"desktop": "0%", "mobile": "0%", "tablet": "0%", "other": "0%"}
+
+        finally:
+            conn.close()
+
+        # Cache the result
+        _analytics_stats_cache["data"] = stats
+        _analytics_stats_cache["expires"] = now + _ANALYTICS_STATS_CACHE_TTL
+
+        log_event(rid, "get_stats.analytics.ok", dau=stats.get("dau_today", 0), mau=stats.get("maus", 0))
+        return jsonify(stats)
+
+    except Exception as e:
+        log_event(rid, "get_stats.analytics.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 def _get_stats_signups(rid: int):
     """Return recent signups via invite codes with referrer info."""
     try:
@@ -5327,7 +5502,7 @@ def get_welcome_stats():
 
 @public_bp.route("/api/get_stats")
 def get_stats():
-    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts."""
+    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts, analytics."""
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
@@ -5339,6 +5514,8 @@ def get_stats():
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
         return _get_stats_accounts(rid)
+    elif tab == "analytics":
+        return _get_stats_analytics(rid)
 
     # Check cache for overview stats
     now = int(time.time())
@@ -5584,158 +5761,12 @@ def get_stats():
                 "porn": tag_counts.get("porn", 0),
             }
 
-            # Lightweight domain stats (DAU / MAU) from stats_events
-            cur.execute("SELECT COUNT(*) FROM stats_events")
-            has_stats_events = cur.fetchone()[0] > 0
-            if has_stats_events:
-                # Known bots/crawlers to exclude
-                bot_names = {
-                    "googlebot",
-                    "applebot",
-                    "bingbot",
-                    "yandexbot",
-                    "baiduspider",
-                    "duckduckbot",
-                    "slurp",
-                    "facebook",
-                    "facebookexternalhit",
-                    "facebot",
-                    "twitterbot",
-                    "twitter",
-                    "linkedinbot",
-                    "pinterest",
-                    "semrushbot",
-                    "ahrefsbot",
-                    "mj12bot",
-                    "dotbot",
-                    "petalbot",
-                    "bytespider",
-                }
-
-                # Fetch all events from last 30 days (covers DAU/MAU/browser stats)
-                cur.execute(
-                    """
-                    SELECT session_id, user_address, user_agent, created_at, event_type
-                    FROM stats_events
-                    WHERE created_at >= %s
-                    """,
-                    (thirty_days_ago,),
-                )
-                all_events = cur.fetchall()
-
-                # First pass: identify bot sessions and parse user agents
-                session_ua: dict[str, Any] = {}  # session_id -> parsed UA
-                bot_sessions: set[str] = set()
-                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
-                    if sess_id in session_ua or sess_id in bot_sessions:
-                        continue
-                    if not ua_string or not ua_string.strip():
-                        continue
-                    try:
-                        ua = parse_user_agent(ua_string)
-                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
-                            bot_sessions.add(sess_id)
-                        else:
-                            session_ua[sess_id] = ua
-                    except Exception:
-                        pass
-
-                # Filter to non-bot events only
-                clean_events = [
-                    (sess_id, user_addr, created_at, event_type)
-                    for sess_id, user_addr, _ua, created_at, event_type in all_events
-                    if sess_id not in bot_sessions
-                ]
-
-                # Calculate DAU/MAU from clean events
-                dau_today_set: set[str] = set()
-                dau_yesterday_set: set[str] = set()
-                mau_set: set[str] = set()
-                dau_reg_set: set[str] = set()
-                unreg_sessions: set[str] = set()
-
-                for sess_id, user_addr, created_at, event_type in clean_events:
-                    if event_type not in ("visit", "session_start", "page_view"):
-                        continue
-                    user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
-
-                    # MAU (last 30 days)
-                    mau_set.add(user_key)
-
-                    # DAU today
-                    if created_at >= today_start:
-                        dau_today_set.add(user_key)
-                        if user_addr and user_addr.strip():
-                            dau_reg_set.add(user_addr.lower())
-
-                    # DAU yesterday
-                    if yesterday_start <= created_at < today_start:
-                        dau_yesterday_set.add(user_key)
-
-                    # Unregistered sessions
-                    if not user_addr or not user_addr.strip():
-                        unreg_sessions.add(sess_id)
-
-                stats["dau_today"] = len(dau_today_set)
-                stats["dau_yesterday"] = len(dau_yesterday_set)
-                stats["maus"] = len(mau_set)
-                stats["dau_registered_today"] = len(dau_reg_set)
-                stats["unregistered_users"] = len(unreg_sessions)
-
-                # Browser/device/OS breakdown from parsed UAs
-                browser_counts: dict[str, int] = {}
-                os_counts: dict[str, int] = {}
-                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
-                for sess_id, ua in session_ua.items():
-                    browser = ua.browser.family or "Unknown"
-                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
-                    os_family = ua.os.family or "Unknown"
-                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
-                    if ua.is_mobile:
-                        device_counts["mobile"] += 1
-                    elif ua.is_tablet:
-                        device_counts["tablet"] += 1
-                    elif ua.is_pc:
-                        device_counts["desktop"] += 1
-                    else:
-                        device_counts["other"] += 1
-
-                # Convert to percentage strings (top 4 + Other)
-                total_sessions = len(session_ua) or 1
-                browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
-                browser_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
-                if len(browser_pcts) > 4:
-                    other_pct = round(sum(p for _, p in browser_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["browser_breakdown"] = top_browsers
-
-                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
-                os_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
-                if len(os_pcts) > 4:
-                    other_pct = round(sum(p for _, p in os_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_os.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["os_breakdown"] = top_os
-
-                device_total = sum(device_counts.values()) or 1
-                stats["device_breakdown"] = {
-                    k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
-                }
-            else:
-                stats["dau_today"] = 0
-                stats["dau_yesterday"] = 0
-                stats["maus"] = 0
-                stats["dau_registered_today"] = 0
-                stats["unregistered_users"] = 0
-                stats["browser_breakdown"] = []
-                stats["os_breakdown"] = []
-                stats["device_breakdown"] = {"desktop": "0%", "mobile": "0%", "tablet": "0%", "other": "0%"}
-
-            stats["dau_any_today"] = stats.get("dau_today", 0)
-            stats["total_users"] = stats.get("registered_users", 0) + stats.get("unregistered_users", 0)
+            # Analytics stats (DAU/MAU, device breakdown) are loaded separately via tab=analytics
+            # Use on-chain active users as a fast proxy for DAU
+            stats["chain_active_24h"] = stats.get("chain_active_24h", 0)
+            stats["dau_any_today"] = stats["chain_active_24h"]  # Fast approximation
+            stats["dau_today"] = stats["chain_active_24h"]
+            stats["total_users"] = stats.get("registered_users", 0)
 
         finally:
             conn.close()

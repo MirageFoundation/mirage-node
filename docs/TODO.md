@@ -56,3 +56,9 @@ Search for "DEPRECATED" comments in code to find all removal points.
 
 
 generally optimize website. Find any bottlenecks. Use firefox profiler.
+
+
+
+----------
+
+we need to add the relaying node into the blockchain history. this way we can prevent botting in the future. like a rogue node - e.g. if a node is known to facilite spammers, then a separate script can create a moderator that excludes these posts.
