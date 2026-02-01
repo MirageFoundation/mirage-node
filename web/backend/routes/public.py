@@ -5300,7 +5300,7 @@ def get_stats():
                 SELECT COUNT(*) FROM posts
                 WHERE COALESCE(target,'') = ''
                   AND deleted = FALSE
-                  AND timestamp >= %s
+                  AND created_at >= %s
                 """,
                 (today_start,),
             )
@@ -5311,7 +5311,7 @@ def get_stats():
                 SELECT COUNT(*) FROM posts
                 WHERE LENGTH(COALESCE(target,'')) > 0
                   AND deleted = FALSE
-                  AND timestamp >= %s
+                  AND created_at >= %s
                 """,
                 (today_start,),
             )
