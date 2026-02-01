@@ -2676,7 +2676,28 @@ def get_topics():
         if min_posts > 1:
             cur.execute(
                 f"""
-                SELECT COUNT(DISTINCT p.topic)
+                SELECT COUNT(*) FROM (
+                    SELECT p.topic
+                    FROM posts p
+                    WHERE COALESCE(p.target, '') = ''
+                      AND LENGTH(COALESCE(p.title, '')) > 0
+                      AND p.topic IS NOT NULL
+                      AND LENGTH(TRIM(p.topic)) >= %s
+                      AND LENGTH(TRIM(p.topic)) <= %s
+                      {deleted_clause}
+                    GROUP BY p.topic
+                    HAVING COUNT(1) > 0 AND COUNT(1) < %s
+                ) small_topics
+                """,
+                (min_topic, max_topic, min_posts),
+            )
+            small_topics_count = cur.fetchone()[0] or 0
+
+        # Fallback: if no topics found with min_posts filter, get all topics
+        if not rows and min_posts > 1:
+            cur.execute(
+                f"""
+                SELECT p.topic, COUNT(1) as post_count
                 FROM posts p
                 WHERE COALESCE(p.target, '') = ''
                   AND LENGTH(COALESCE(p.title, '')) > 0
@@ -2684,19 +2705,15 @@ def get_topics():
                   AND LENGTH(TRIM(p.topic)) >= %s
                   AND LENGTH(TRIM(p.topic)) <= %s
                   {deleted_clause}
-                  AND p.topic NOT IN (
-                      SELECT p2.topic FROM posts p2
-                      WHERE COALESCE(p2.target, '') = ''
-                        AND LENGTH(COALESCE(p2.title, '')) > 0
-                        AND p2.topic IS NOT NULL
-                        {deleted_clause}
-                      GROUP BY p2.topic
-                      HAVING COUNT(1) >= %s
-                  )
+                GROUP BY p.topic
+                HAVING COUNT(1) > 0
+                ORDER BY post_count DESC, p.topic ASC
+                LIMIT %s
                 """,
-                (min_topic, max_topic, min_posts),
+                (min_topic, max_topic, limit),
             )
-            small_topics_count = cur.fetchone()[0] or 0
+            rows = cur.fetchall()
+            small_topics_count = 0  # All shown, no "more" to mention
         # Opportunistic backfill for missing thumbnails
         try:
             for i, row in enumerate(rows):
