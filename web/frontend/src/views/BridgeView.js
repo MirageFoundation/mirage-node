@@ -780,54 +780,6 @@ const SOURCE_NETWORKS = {
     },
 };
 
-// Copy button component for addresses
-const CopyButton = styled.button`
-    background: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 4px;
-    padding: 0.35rem 0.5rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-    font-size: 0.65rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    flex-shrink: 0;
-    
-    &:hover {
-        background: ${({ theme }) => theme?.colors?.border || '#444'};
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    }
-`;
-
-const ConfirmButtonRow = styled.div`
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.75rem;
-`;
-
-const ConfirmButton = styled.button`
-    flex: 1;
-    padding: 0.6rem 1rem;
-    border: 2px solid ${({ $variant }) => $variant === 'yes' ? '#48bb78' : '#f59e0b'};
-    border-radius: 8px;
-    background: ${({ $variant, $selected }) =>
-        $selected
-            ? ($variant === 'yes' ? 'rgba(72, 187, 120, 0.2)' : 'rgba(245, 158, 11, 0.2)')
-            : 'transparent'};
-    color: ${({ $variant }) => $variant === 'yes' ? '#48bb78' : '#f59e0b'};
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    
-    &:hover {
-        background: ${({ $variant }) => $variant === 'yes' ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 158, 11, 0.15)'};
-    }
-`;
-
 // Solana wallet button
 const SolanaWalletButton = styled.button`
     display: flex;
@@ -918,7 +870,6 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
     const [bridgeError, setBridgeError] = useState('');
     const [bridgeTxHash, setBridgeTxHash] = useState('');
     const [burnNonce, setBurnNonce] = useState(null);
-    const [mirageBalance, setMirageBalance] = useState(null); // Mirage network balance
 
     // Step tracking for progress UI
     const [stepTimestamps, setStepTimestamps] = useState({});
@@ -936,9 +887,12 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
     const [preBridgeSolanaBalance, setPreBridgeSolanaBalance] = useState(null);
     const [bridgeAmount, setBridgeAmount] = useState(''); // Store amount at bridge time
 
+    // Track Mirage chain balance separately from Solana wallet balances
+    const [mirageChainBalance, setMirageChainBalance] = useState(null);
+
     const refreshMirageBalance = useCallback(async (reason = 'init') => {
         if (!mirageAddress) {
-            setMirageBalance(null);
+            setMirageChainBalance(null);
             console.debug('[Solana Bridge] Mirage balance fetch skipped (no address)');
             return;
         }
@@ -959,7 +913,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
             if (!Number.isFinite(balanceVal)) {
                 throw new Error('Invalid balance from get_user_status');
             }
-            setMirageBalance(balanceVal);
+            setMirageChainBalance(balanceVal);
             console.debug('[Solana Bridge] Mirage balance updated', { balance: balanceVal });
         } catch (e) {
             console.error('[Solana Bridge] Mirage balance fetch failed:', e);
@@ -1696,10 +1650,10 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                     </SectionTitle>
                     <InputSection>
                         {/* Inline balance display */}
-                        <div style={{ 
-                            display: 'flex', 
-                            justifyContent: 'flex-end', 
-                            fontSize: '0.75rem', 
+                        <div style={{
+                            display: 'flex',
+                            justifyContent: 'flex-end',
+                            fontSize: '0.75rem',
                             color: theme?.colors?.subtleText || '#888',
                             marginBottom: '0.35rem'
                         }}>
@@ -1819,32 +1773,16 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
 function BridgeInPanel({ address, chainConfigs, attestationThresholdBps, balance, balanceLoading, balanceError, refreshBalance, formatBalance }) {
     const theme = useTheme();
     const [selectedSource, setSelectedSource] = useState(null);
-    const [addressConfirmed, setAddressConfirmed] = useState(null); // null = not answered, true = yes, false = no
-    const [copiedAddress, setCopiedAddress] = useState(null); // Track which address was copied
     const [isSolanaBridging, setIsSolanaBridging] = useState(false); // Track when Solana bridge is in progress
 
     const handleSourceSelect = (networkId) => {
         setSelectedSource(SOURCE_NETWORKS[networkId]);
-        setAddressConfirmed(null); // Reset when changing source
         console.debug('[Bridge In] Selected source:', networkId);
     };
 
     const handleSolanaBridgingChange = useCallback((isBridging) => {
         setIsSolanaBridging(isBridging);
     }, []);
-
-    const handleCopy = async (addr) => {
-        if (!addr) return;
-        try {
-            await navigator.clipboard.writeText(addr);
-            setCopiedAddress(addr);
-            setTimeout(() => {
-                setCopiedAddress(null);
-            }, 2000);
-        } catch (e) {
-            console.error('Failed to copy:', e);
-        }
-    };
 
     if (!address) {
         return (
@@ -2870,10 +2808,10 @@ export default function BridgeView({ state }) {
                                             </SectionTitle>
                                             <InputSection>
                                                 {/* Inline balance display */}
-                                                <div style={{ 
-                                                    display: 'flex', 
-                                                    justifyContent: 'flex-end', 
-                                                    fontSize: '0.75rem', 
+                                                <div style={{
+                                                    display: 'flex',
+                                                    justifyContent: 'flex-end',
+                                                    fontSize: '0.75rem',
                                                     color: theme?.colors?.subtleText || '#888',
                                                     marginBottom: '0.35rem'
                                                 }}>

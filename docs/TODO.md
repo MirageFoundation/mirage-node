@@ -42,3 +42,11 @@ Cleaner separation between "what happened" and "current state"
 
 
 
+-------
+
+
+posts should be: mirage.talk/p/[id]
+users should be: mirage.talk/u/[id | username]
+topics should be: mirage.talk/t/[id]
+
+

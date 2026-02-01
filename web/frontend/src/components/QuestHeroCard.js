@@ -81,42 +81,6 @@ const ResetTimer = styled.div`
     }
 `;
 
-const MultiplierBadge = styled.div`
-    font-size: 0.6rem;
-    color: #60a5fa;
-    background: ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(59, 130, 246, 0.15)'
-        : 'rgba(96, 165, 250, 0.2)'};
-    padding: 0.15rem 0.35rem;
-    border-radius: 4px;
-    font-weight: 600;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
-    cursor: default;
-    transition: all 0.15s ease;
-
-    &:hover {
-        color: #93c5fd;
-        background: ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(59, 130, 246, 0.25)'
-        : 'rgba(96, 165, 250, 0.35)'};
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.5rem;
-    }
-`;
-
-const QuestCountBadge = styled.span`
-    font-size: 0.6rem;
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: 500;
-
-    @media (max-width: 1000px) {
-        font-size: 0.5rem;
-    }
-`;
-
 const QuestList = styled.div`
     display: flex;
     flex-direction: column;
@@ -323,16 +287,6 @@ const ClaimSection = styled.div`
         : 'rgba(255, 255, 255, 0.08)'};
 `;
 
-const RewardAmount = styled.div`
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #f59e0b;
-
-    @media (max-width: 768px) {
-        font-size: 0.55rem;
-    }
-`;
-
 const pulseAnimation = keyframes`
     0% { transform: scale(1); }
     50% { transform: scale(1.02); }
@@ -515,17 +469,6 @@ function formatTime(seconds) {
 }
 
 /**
- * Format MIRAGE amount (umirage to MIRAGE)
- */
-function formatMirage(amount) {
-    const mirage = amount / 1_000_000;
-    if (mirage >= 1) {
-        return mirage.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    }
-    return mirage.toFixed(6);
-}
-
-/**
  * Get icon for quest action type
  */
 function getQuestIcon(actionType) {
@@ -541,15 +484,6 @@ function getQuestIcon(actionType) {
         'claim_only': '🎁',
     };
     return icons[actionType] || '🎯';
-}
-
-/**
- * Get MIRAGE reward amount from quest rewards array
- */
-function getQuestMirageReward(rewards) {
-    if (!rewards || !Array.isArray(rewards)) return 0;
-    const mirageReward = rewards.find(r => r.type === 'mirage');
-    return mirageReward?.amount || 0;
 }
 
 /**
@@ -966,7 +900,6 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
     }
 
     const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
-    const completedCount = dailyQuests.filter(q => q.completed).length;
 
     return (
         <>
