@@ -9,7 +9,6 @@ This reduces the cross-language surface area from 3 languages to 2.
 
 
 
-
 2. Use Protobuf Code Generation, Not Dynamic Message Building
 Current: datatypes.py manually builds protobuf descriptors at runtime:
 msg = file_proto.message_type.add()msg.name = "MsgPost"add_f(msg, "authority", 1, TYPE_STRING)add_f(msg, "envelope_pubkey", 2, TYPE_BYTES)# ... 50+ fields across 20+ message types
@@ -45,19 +44,15 @@ Cleaner separation between "what happened" and "current state"
 -------
 
 
-posts should be: mirage.talk/p/[id]
-users should be: mirage.talk/u/[id | username]
-topics should be: mirage.talk/t/[id]
 
-**DONE**: Clean URLs implemented. New routes:
-- `/p/:postId` - posts and comments (use `?depth=1-5` for parent context)
-- `/u/:identity` - user profiles (username or mirage1... address)
-- `/t/:topic` - topics (already existed)
-
-**TODO - Future Release**: Remove legacy routes once migration is complete:
+**TODO - Future Release**: Remove legacy routes for:
 - `/view_post` (replaced by `/p/`)
 - `/profile?address=` (replaced by `/u/`)
 - Legacy query params in ViewPostView: `?post_id=`, `?root=`
 - Legacy query params in ProfileView: `?address=`
 Search for "DEPRECATED" comments in code to find all removal points.
 
+----------
+
+
+generally optimize website. Find any bottlenecks. Use firefox profiler.

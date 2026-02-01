@@ -49,12 +49,11 @@ const PostCard = styled.div`
     padding: ${({ $size }) => $size === 'compact' ? '0.85rem' : '1.25rem'};
     /* No margins - gap is handled by ModernPostFeed via --card-gap CSS variable */
     margin: 0;
-    transition: all 0.3s ease;
+    transition: background 0.3s ease;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
     ${({ $isNew, theme }) => $isNew ? `background: ${theme?.colors?.panelAlt || '#2A2E33'};` : ''}
 
     &:hover {
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
         background: ${({ theme }) => pickCard(theme, 'cardAlt')};
     }
 

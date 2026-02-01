@@ -219,7 +219,7 @@ const PostItem = styled.div`
     border-radius: 8px;
     padding: 0.6rem 0.85rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
     box-shadow: ${({ isActive }) => (isActive ? '0 0 12px rgba(102, 126, 234, 0.25)' : 'none')};
 
     &:hover {
