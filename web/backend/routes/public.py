@@ -2291,7 +2291,9 @@ def get_config():
             if valoper:
                 possible_paths = [
                     "/opt/mirage/blockchain/bin/miraged",
-                    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")),
+                    os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")
+                    ),
                     "miraged",
                 ]
                 bin_path = None
@@ -3920,7 +3922,7 @@ def _fetch_post(
     use_stored_counts: bool = False,
 ):
     """Fetch a single post with aggregates.
-    
+
     Args:
         cur: Database cursor
         txhash: Post ID
@@ -4140,7 +4142,7 @@ def _fetch_comment_tree_batch(
         root_topic_val = (row[7] or "").strip()
         root_post_id_val = (row[8] or "").strip().lower()
         target_val = (row[9] or "").strip().lower()
-        thumbnail_val = (row[10] or "")
+        thumbnail_val = row[10] or ""
         edited_flag = bool(row[11])
         edited_at_val = int(row[12] or 0)
         depth = int(row[13])
@@ -4232,13 +4234,57 @@ def _fetch_comment_tree_batch(
         if parent_id in all_posts:
             all_posts[parent_id]["children"] = kids
 
+    # Step 3b: For posts at max_depth with no loaded children, query actual reply counts
+    # This ensures "Continue this thread" links appear when there are deeper replies
+    deleted_bare = _deleted_filter_bare()
+    leaf_ids = [pid for pid, post in all_posts.items() if post.get("_depth") == max_depth and not post.get("children")]
+    leaf_reply_counts: dict[str, int] = {}
+    if leaf_ids:
+        # Exclude blocked posts/users from the count
+        if blocked_posts or blocked_users:
+            all_blocked = list((blocked_posts or set()) | (blocked_users or set()))
+            blocked_ph = ",".join(["%s"] * len(all_blocked))
+            leaf_ph = ",".join(["%s"] * len(leaf_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COUNT(1)
+                FROM posts
+                WHERE LOWER(target) IN ({leaf_ph})
+                  AND LOWER(txhash) NOT IN ({blocked_ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
+                  {deleted_bare}
+                GROUP BY LOWER(target)
+                """,
+                leaf_ids + all_blocked + all_blocked,
+            )
+        else:
+            leaf_ph = ",".join(["%s"] * len(leaf_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COUNT(1)
+                FROM posts
+                WHERE LOWER(target) IN ({leaf_ph})
+                  {deleted_bare}
+                GROUP BY LOWER(target)
+                """,
+                leaf_ids,
+            )
+        for tgt, cnt in cur.fetchall():
+            if tgt:
+                leaf_reply_counts[tgt] = int(cnt or 0)
+
     # Step 4: Compute visible-only comment counts via post-order traversal
     def count_descendants(node: dict) -> int:
         """Count all descendants (recursive). Updates node['comments'] and returns total."""
         total = 0
         for child in node.get("children", []):
             total += 1 + count_descendants(child)
-        node["comments"] = total
+        # For leaf nodes at max_depth, use the queried reply count instead
+        pid = node.get("post_id", "")
+        if pid in leaf_reply_counts:
+            node["comments"] = leaf_reply_counts[pid]
+        else:
+            node["comments"] = total
         return total
 
     root = all_posts[root_id_lower]
@@ -4274,9 +4320,7 @@ def get_comments():
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
-        root, children = _fetch_comment_tree_batch(
-            cur, post_id, blocked_posts, blocked_users, max_depth=6
-        )
+        root, children = _fetch_comment_tree_batch(cur, post_id, blocked_posts, blocked_users, max_depth=6)
         t_tree_ms = (time.time() - t_tree) * 1000
 
         if not root:

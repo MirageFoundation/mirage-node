@@ -8,7 +8,6 @@ import MobileHeader from "../components/MobileHeader";
 import QuestHeroCard from "../components/QuestHeroCard";
 import styled from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
-import { sortPosts } from '../utils/SortPosts.js';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
 import { isSubscribed, subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
@@ -1148,14 +1147,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }, []);
 
     const [error, setError] = useState(null);
-    const [sortBy] = useState(() => {
-        try {
-            const saved = Storage.load('sort_by', 'magic');
-            return (saved === 'magic' || saved === 'points' || saved === 'newest') ? saved : 'magic';
-        } catch (_) {
-            return 'magic';
-        }
-    }); // Sorting mechanism (persisted)
     const [, setTopics] = useState([]); // Dynamically store unique topics (state is persisted but value unused)
 
     // Only restore from cache on back navigation (POP), not on direct nav (clicking links)
@@ -1688,9 +1679,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
             // Note: Downvote filtering is handled in render phase to avoid stale closure issues
 
-            const sortedOnce = (isHomeFeed || isFollowingFeed)
-                ? filtered
-                : sortPosts(filtered, sortBy);
+            // Server already returns posts in correct order for all feeds (magic or newest)
+            const sortedOnce = filtered;
             const sortedOrder = sortedOnce.map(p => p.post_id);
 
             const postDict = sortedOnce.reduce((acc, post) => {
@@ -1814,7 +1804,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 .catch(onError);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, sortBy, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback((allowNsfw) => {
@@ -2168,11 +2158,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const filtered = (urlTopic === "all" || urlTopic === "home" || urlTopic === "following")
             ? topLevelPosts
             : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
-        const sortedOnce = (urlTopic === "home" || urlTopic === "following")
-            ? filtered
-            : sortPosts(filtered, sortBy);
-        setStableOrder(sortedOnce.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, sortBy, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
+        // Server already returns posts in correct order
+        setStableOrder(filtered.map(p => p.post_id));
+    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
