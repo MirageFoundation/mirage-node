@@ -122,6 +122,18 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Fail fast if there are uncommitted changes (only scripts/deploy_all_prod.sh is allowed)
+dirty_files="$(git -C "$REPO_ROOT" diff --name-only 2>/dev/null; git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null)"
+if [ -n "$dirty_files" ]; then
+  # Check if the only dirty file is scripts/deploy_all_prod.sh
+  other_dirty="$(echo "$dirty_files" | grep -v '^scripts/deploy_all_prod.sh$' || true)"
+  if [ -n "$other_dirty" ]; then
+    echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
+    git -C "$REPO_ROOT" status --short >&2
+    exit 1
+  fi
+fi
+
 GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
 GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
 
