@@ -2567,10 +2567,11 @@ function ViewPostView({ state, updatePost }) {
         } catch (_) { }
     }, [annotated, focusedCommentId]);
 
-    const handleShowContext = async (maxDepth = 5) => {
-        if (!focusedCommentId) return;
+    const handleShowContext = async (maxDepth = 5, commentIdOverride = null) => {
+        const targetCommentId = commentIdOverride || focusedCommentId;
+        if (!targetCommentId) return;
         try {
-            const params = { comment_id: focusedCommentId, max_depth: Math.min(maxDepth, 5) };
+            const params = { comment_id: targetCommentId, max_depth: Math.min(maxDepth, 5) };
             if (state.publicKey) params.address = state.publicKey;
             const res = await Api.get('get_comment_context', params, { timeoutMs: 10000 });
             if (res && Array.isArray(res.context)) {
@@ -2590,7 +2591,8 @@ function ViewPostView({ state, updatePost }) {
         if (depthParam === null || depthParam === 'invalid') return;
         if (depthParam > 0) {
             hasAutoLoadedContextRef.current = true;
-            handleShowContext(depthParam);
+            // Pass focusedCommentId directly to avoid closure issues
+            handleShowContext(depthParam, focusedCommentId);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [focusedCommentId, depthParam]);
