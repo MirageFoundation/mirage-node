@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Helmet } from 'react-helmet-async';
 import styled from "styled-components";
 import { useLocation, Link } from "react-router-dom";
@@ -276,7 +276,6 @@ export default function StatsView() {
     const [payoutsLoading, setPayoutsLoading] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const fetchedTabRef = useRef(null);
 
     // Merge stats with analytics when both are loaded
     const mergedStats = stats ? {
@@ -350,9 +349,6 @@ export default function StatsView() {
     }, [fetchRewardHistory, fetchAnalytics]);
 
     useEffect(() => {
-        // Prevent double-fetch from React Strict Mode
-        if (fetchedTabRef.current === activeTab) return;
-        fetchedTabRef.current = activeTab;
         fetchData(activeTab);
     }, [activeTab, fetchData]);
 
