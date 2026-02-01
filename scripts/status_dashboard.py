@@ -2535,10 +2535,78 @@ def render_dashboard(refresh_secs: int):
     print(center_text(footer, term_width))
 
 
+def run_health_check_json(required_services: list[str]) -> dict:
+    """
+    Run health checks and return JSON-serializable result.
+
+    Args:
+        required_services: List of service names that must be healthy.
+
+    Returns:
+        Dict with:
+            - healthy: bool (True if all required services are OK or WARN)
+            - services: dict mapping service name to status info
+            - errors: list of error messages for unhealthy required services
+    """
+    # Run all checks
+    all_statuses = [
+        check_node(),
+        check_validator(),
+        check_postgres(),
+        check_backend(),
+        check_indexer(),
+        check_caddy(),
+        check_endpoints(),
+    ]
+
+    # Build services dict
+    services = {}
+    for s in all_statuses:
+        services[s.name] = {
+            "status": s.status.value,
+            "message": s.message,
+            "healthy": s.status in (Status.OK, Status.WARN),
+            "details": s.details,
+        }
+
+    # Check required services
+    errors = []
+    all_healthy = True
+
+    for req in required_services:
+        if req not in services:
+            errors.append(f"{req}: service not found")
+            all_healthy = False
+            continue
+
+        svc = services[req]
+        if not svc["healthy"]:
+            errors.append(f"{req}: {svc['status']} - {svc['message']}")
+            all_healthy = False
+
+    return {
+        "healthy": all_healthy,
+        "services": services,
+        "errors": errors,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Mirage unified status dashboard")
     parser.add_argument("--once", action="store_true", help="Render once and exit")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON health check result and exit (for scripting)",
+    )
+    parser.add_argument(
+        "--require",
+        type=str,
+        default="CometBFT,Validator,PostgreSQL,Backend,Indexer,Caddy,Endpoints",
+        help="Comma-separated list of required services for --json health check",
+    )
     parser.add_argument(
         "--interval",
         type=int,
@@ -2557,6 +2625,13 @@ def main():
         help="Do not clear the screen before rendering",
     )
     args = parser.parse_args()
+
+    # JSON health check mode
+    if args.json:
+        required = [s.strip() for s in args.require.split(",") if s.strip()]
+        result = run_health_check_json(required)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["healthy"] else 1)
 
     active_interval = max(1, int(args.interval))
     idle_interval = max(1, int(args.idle_interval))
