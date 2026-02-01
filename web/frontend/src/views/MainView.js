@@ -2132,7 +2132,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (shouldFetch && !topicsLoadedRef.current) {
             topicsLoadedRef.current = true;
             let cancelled = false;
-            Api.get('get_topics', { limit: 50 }, { timeoutMs: 10000 })
+            Api.get('get_topics', { limit: 50, min_posts: 1 }, { timeoutMs: 10000 })
                 .then((data) => {
                     if (cancelled || !isMountedRef.current) return;
                     if (data && Array.isArray(data.topics)) {
