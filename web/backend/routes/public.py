@@ -5703,19 +5703,18 @@ def get_welcome_stats():
             cur.execute("SELECT COUNT(*) FROM profiles")
             registered_users = cur.fetchone()[0] or 0
 
-            # Query 2: posts in last 24h
+            # Query 2: posts + comments in last 24h
             cur.execute(
                 """
                 SELECT COUNT(*) FROM posts
-                WHERE COALESCE(target,'') = ''
-                  AND deleted = FALSE
+                WHERE deleted = FALSE
                   AND created_at >= %s
                 """,
                 (today_start,),
             )
             posts_24h = cur.fetchone()[0] or 0
 
-            # Query 3: unique active users on-chain in last 24h
+            # Query 3: unique active users on-chain in last 24h (DAU)
             cur.execute(
                 """
                 SELECT COUNT(DISTINCT owner) FROM (
@@ -5726,7 +5725,24 @@ def get_welcome_stats():
                 """,
                 (today_start, today_start),
             )
-            active_24h = cur.fetchone()[0] or 0
+            dau = cur.fetchone()[0] or 0
+
+            # Query 4: registered users active in last 24h
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT LOWER(p.owner)) FROM profiles p
+                WHERE EXISTS (
+                    SELECT 1 FROM posts po WHERE LOWER(po.owner) = LOWER(p.owner) AND po.created_at >= %s AND po.deleted = FALSE
+                ) OR EXISTS (
+                    SELECT 1 FROM votes v WHERE LOWER(v.owner) = LOWER(p.owner) AND v.created_at >= %s
+                )
+                """,
+                (today_start, today_start),
+            )
+            registered_active_24h = cur.fetchone()[0] or 0
+
+            # Use whichever is higher: DAU or registered active
+            active_24h = max(dau, registered_active_24h)
 
             result = {
                 "registered_users": registered_users,
