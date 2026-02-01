@@ -1361,7 +1361,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
 
     // Welcome stats for logged-out users (user count, posts, DAU)
-    const [welcomeStats, setWelcomeStats] = useState(null);
+    // Initialize from cache for instant display (stale-while-revalidate pattern)
+    const [welcomeStats, setWelcomeStats] = useState(() => {
+        try { return Storage.load('welcome_stats_cache', null); } catch (_) { return null; }
+    });
+    const [welcomeStatsStale, setWelcomeStatsStale] = useState(() => {
+        // If we have cached stats, they're stale until fresh data loads
+        try { return Storage.load('welcome_stats_cache', null) !== null; } catch (_) { return false; }
+    });
 
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
@@ -1409,25 +1416,31 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }, [isLoggedIn, viewerAddress]);
 
     // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
+    // Uses lightweight endpoint that only returns essential counts (fast, cached)
+    // Implements stale-while-revalidate: show cached value immediately, update when fresh
     useEffect(() => {
         if (isLoggedIn) return; // Only fetch for logged-out visitors
         let cancelled = false;
         const loadWelcomeStats = async () => {
             try {
-                const data = await Api.get('get_stats', { tab: 'overview' }, { timeoutMs: 10000 });
+                // Use lightweight endpoint - only 3 queries, cached 30s
+                const data = await Api.get('get_welcome_stats', {}, { timeoutMs: 3000 });
                 if (cancelled) return;
                 if (data) {
-                    const dau = data.dau_any_today || data.dau_today || 0;
-                    const chainActive = data.chain_active_24h || 0;
-                    setWelcomeStats({
+                    const freshStats = {
                         userCount: data.registered_users || 0,
                         posts24h: data.posts_24h || 0,
-                        comments24h: data.comments_24h || 0,
-                        active24h: Math.max(dau, chainActive),
-                    });
+                        comments24h: 0, // Not returned by lightweight endpoint
+                        active24h: data.active_24h || 0,
+                    };
+                    setWelcomeStats(freshStats);
+                    setWelcomeStatsStale(false); // Fresh data loaded
+                    // Cache for next visit
+                    try { Storage.save('welcome_stats_cache', freshStats); } catch (_) { }
                 }
             } catch (_) {
                 // Silently fail - stats are optional enhancement
+                // Keep showing stale data if we have it
             }
         };
         loadWelcomeStats();
@@ -2812,15 +2825,15 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                 {welcomeStats && welcomeStats.userCount > 0 && (
                                     <WelcomeStatsGrid>
                                         <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
                                             <WelcomeStatLabel>Users</WelcomeStatLabel>
                                         </WelcomeStatItem>
                                         <WelcomeStatItem>
-                                            <WelcomeStatValue>{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
                                             <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
                                         </WelcomeStatItem>
                                         <WelcomeStatItem>
-                                            <WelcomeStatValue>{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
                                             <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
                                         </WelcomeStatItem>
                                     </WelcomeStatsGrid>

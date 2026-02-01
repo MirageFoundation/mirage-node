@@ -2125,6 +2125,14 @@ def get_supply_history():
 _circulation_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _CIRCULATION_CACHE_TTL = 60  # 60 seconds
 
+# Cache for welcome stats (lightweight stats for landing page)
+_welcome_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
+
+# Cache for full overview stats (expensive query)
+_overview_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_OVERVIEW_STATS_CACHE_TTL = 30  # 30 seconds
+
 # Wallets excluded from circulating supply (team/founder controlled)
 _EXCLUDED_FROM_CIRCULATING = [
     "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",  # Founders Fund
@@ -5246,6 +5254,77 @@ def _get_stats_accounts(rid: int):
         return jsonify({"error": str(e)}), 500
 
 
+@public_bp.route("/api/get_welcome_stats")
+def get_welcome_stats():
+    """Lightweight stats for welcome/landing page. Returns only essential counts.
+
+    This is much faster than get_stats?tab=overview as it only runs 3 queries.
+    Cached for 30 seconds.
+    """
+    rid = next_request_id()
+    log_event(rid, "get_welcome_stats.begin")
+
+    now = int(time.time())
+
+    # Check cache first
+    if _welcome_stats_cache["data"] is not None and _welcome_stats_cache["expires"] > now:
+        log_event(rid, "get_welcome_stats.cached")
+        return jsonify(_welcome_stats_cache["data"])
+
+    try:
+        conn = connect_db(timeout=3.0, busy_timeout_ms=5000)
+        try:
+            cur = conn.cursor()
+            today_start = now - 86400  # last 24h window
+
+            # Query 1: registered users count
+            cur.execute("SELECT COUNT(*) FROM profiles")
+            registered_users = cur.fetchone()[0] or 0
+
+            # Query 2: posts in last 24h
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE COALESCE(target,'') = ''
+                  AND deleted = FALSE
+                  AND created_at >= %s
+                """,
+                (today_start,),
+            )
+            posts_24h = cur.fetchone()[0] or 0
+
+            # Query 3: unique active users on-chain in last 24h
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT owner) FROM (
+                    SELECT LOWER(owner) as owner FROM posts WHERE created_at >= %s AND deleted = FALSE
+                    UNION
+                    SELECT LOWER(owner) as owner FROM votes WHERE created_at >= %s
+                ) active_users
+                """,
+                (today_start, today_start),
+            )
+            active_24h = cur.fetchone()[0] or 0
+
+            result = {
+                "registered_users": registered_users,
+                "posts_24h": posts_24h,
+                "active_24h": active_24h,
+            }
+
+            # Cache the result
+            _welcome_stats_cache["data"] = result
+            _welcome_stats_cache["expires"] = now + _WELCOME_STATS_CACHE_TTL
+
+            log_event(rid, "get_welcome_stats.ok", **result)
+            return jsonify(result)
+        finally:
+            conn.close()
+    except Exception as e:
+        log_event(rid, "get_welcome_stats.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 @public_bp.route("/api/get_stats")
 def get_stats():
     """Return stats for the stats page. Supports tabs: overview (default), signups, accounts."""
@@ -5260,6 +5339,12 @@ def get_stats():
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
         return _get_stats_accounts(rid)
+
+    # Check cache for overview stats
+    now = int(time.time())
+    if _overview_stats_cache["data"] is not None and _overview_stats_cache["expires"] > now:
+        log_event(rid, "get_stats.overview.cached")
+        return jsonify(_overview_stats_cache["data"])
 
     # Default: overview stats
     try:
@@ -5654,6 +5739,10 @@ def get_stats():
 
         finally:
             conn.close()
+
+        # Cache the result
+        _overview_stats_cache["data"] = stats
+        _overview_stats_cache["expires"] = int(time.time()) + _OVERVIEW_STATS_CACHE_TTL
 
         log_event(
             rid,
