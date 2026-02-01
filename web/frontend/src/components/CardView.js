@@ -2228,7 +2228,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
                                     borderRadius: '8px',
                                     padding: '0.2rem 0.5rem',
-                                    minWidth: '10rem',
                                 }}>
                                     <input
                                         type="text"
@@ -2236,9 +2235,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         value={formatDonateAmount(donateAmountRaw)}
                                         onChange={(e) => setDonateAmountRaw(e.target.value.replace(/[^\d]/g, ""))}
                                         placeholder="10,000"
+                                        maxLength={11}
                                         style={{
-                                            flex: 1,
-                                            minWidth: '6rem',
+                                            width: '5.5rem',
                                             background: 'transparent',
                                             border: 'none',
                                             outline: 'none',

@@ -2597,26 +2597,30 @@ function ViewPostView({ state, updatePost }) {
         if (confirmBlockPost === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm block post? This will hide it and all its comments.</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmBlockPostAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🚫 Block this post?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmBlockPostAction} disabled={isBlocking}>
+                                Block
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
         if (confirmBlockUser?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm block user? This will hide all their posts and comments.</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmBlockUserAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🚫 Block {post.username || 'this user'}?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmBlockUserAction} disabled={isBlocking}>
+                                Block
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
@@ -2624,13 +2628,15 @@ function ViewPostView({ state, updatePost }) {
             const isComment = post.target && post.target !== '';
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm delete {isComment ? 'comment' : 'post'}?</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
-                            Delete
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>⚠ Mark {isComment ? 'comment' : 'post'} as deleted?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
+                                Delete
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
@@ -2638,7 +2644,7 @@ function ViewPostView({ state, updatePost }) {
         if (confirmSuspendQuests?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                         <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
                         <select
                             value={suspendDuration}
@@ -2651,7 +2657,7 @@ function ViewPostView({ state, updatePost }) {
                             <option value={30}>30 days</option>
                             <option value={0}>Permanent</option>
                         </select>
-                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
                                 {isSuspending ? 'Suspending...' : 'Suspend'}
                             </Button>
@@ -2685,7 +2691,7 @@ function ViewPostView({ state, updatePost }) {
         if (confirmReportPost === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Report this post? Provide a short reason.</span>
+                    <span>🚨 Report this post? Provide a short reason.</span>
                     <ReportInput
                         type="text"
                         value={reportReason}
@@ -2693,7 +2699,7 @@ function ViewPostView({ state, updatePost }) {
                         placeholder="Short reason (max 140 chars)"
                         maxLength={140}
                     />
-                    <ConfirmButtons>
+                    <ConfirmButtons style={{ width: 'auto' }}>
                         <Button variant="warning" size="sm" onClick={confirmReportAction} disabled={isReporting}>
                             Report
                         </Button>
@@ -2706,9 +2712,9 @@ function ViewPostView({ state, updatePost }) {
         if (confirmDonate?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
-                        <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            Send MIRAGE to {post.username || post.user_id.substring(0, 12) + '...'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                            💰 Donate to {post.username || post.user_id.substring(0, 12) + '...'}:
                         </span>
                         <div style={{
                             display: 'flex',
@@ -2718,17 +2724,16 @@ function ViewPostView({ state, updatePost }) {
                             border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
                             borderRadius: '8px',
                             padding: '0.2rem 0.5rem',
-                            minWidth: '6.5rem',
                         }}>
                             <input
                                 type="text"
                                 inputMode="numeric"
                                 value={formatDonateAmount(donateAmount)}
                                 onChange={(e) => handleDonateAmountChange(e.target.value)}
-                                placeholder="1,000"
+                                placeholder="10,000"
+                                maxLength={11}
                                 style={{
-                                    flex: 1,
-                                    minWidth: '4rem',
+                                    width: '5.5rem',
                                     background: 'transparent',
                                     border: 'none',
                                     outline: 'none',
@@ -2740,11 +2745,11 @@ function ViewPostView({ state, updatePost }) {
                             />
                             <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
                         </div>
-                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
                                 {isDonating ? 'Sending...' : 'Send'}
                             </Button>
-                            <InlineCancelButton type="button" onClick={cancelDonate}>Cancel</InlineCancelButton>
+                            <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                         </ConfirmButtons>
                     </div>
                 </BlockConfirmMessage>
