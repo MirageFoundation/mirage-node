@@ -2639,6 +2639,7 @@ def get_topics():
     """Get list of most active topics, excluding deleted messages."""
     limit = request.args.get("limit", 50, type=int)
     limit = min(max(1, limit), 200)
+    min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
     try:
         # Get min/max topic size from chain params
         p = expect_params()
@@ -2650,6 +2651,7 @@ def get_topics():
 
         deleted_clause = _deleted_filter()
 
+        # Get topics with at least min_posts
         cur.execute(
             f"""
             SELECT p.topic, COUNT(1) as post_count
@@ -2661,13 +2663,40 @@ def get_topics():
               AND LENGTH(TRIM(p.topic)) <= %s
               {deleted_clause}
             GROUP BY p.topic
-            HAVING COUNT(1) > 0
+            HAVING COUNT(1) >= %s
             ORDER BY post_count DESC, p.topic ASC
             LIMIT %s
             """,
-            (min_topic, max_topic, limit),
+            (min_topic, max_topic, min_posts, limit),
         )
         rows = cur.fetchall()
+
+        # Count topics with fewer posts (for "and X more" display)
+        small_topics_count = 0
+        if min_posts > 1:
+            cur.execute(
+                f"""
+                SELECT COUNT(DISTINCT p.topic)
+                FROM posts p
+                WHERE COALESCE(p.target, '') = ''
+                  AND LENGTH(COALESCE(p.title, '')) > 0
+                  AND p.topic IS NOT NULL
+                  AND LENGTH(TRIM(p.topic)) >= %s
+                  AND LENGTH(TRIM(p.topic)) <= %s
+                  {deleted_clause}
+                  AND p.topic NOT IN (
+                      SELECT p2.topic FROM posts p2
+                      WHERE COALESCE(p2.target, '') = ''
+                        AND LENGTH(COALESCE(p2.title, '')) > 0
+                        AND p2.topic IS NOT NULL
+                        {deleted_clause}
+                      GROUP BY p2.topic
+                      HAVING COUNT(1) >= %s
+                  )
+                """,
+                (min_topic, max_topic, min_posts),
+            )
+            small_topics_count = cur.fetchone()[0] or 0
         # Opportunistic backfill for missing thumbnails
         try:
             for i, row in enumerate(rows):
@@ -2737,7 +2766,7 @@ def get_topics():
         topics = list(topics_dict.values())
         conn.close()
 
-        return jsonify({"topics": topics})
+        return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -5312,6 +5341,69 @@ def _get_stats_rewards(rid: int):
         return jsonify({"error": str(e)}), 500
 
 
+def _get_stats_rewards_history(rid: int):
+    """Return paginated reward history."""
+    try:
+        offset = int(request.args.get("offset", 0))
+        limit = min(int(request.args.get("limit", 50)), 100)
+
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 
+                    pr.owner,
+                    p.username,
+                    pr.reward_type,
+                    pr.reward_data,
+                    pr.reason,
+                    pr.created_at,
+                    pr.claimed_at,
+                    pr.payout_amount
+                FROM pending_rewards pr
+                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                ORDER BY pr.created_at DESC
+                LIMIT %s OFFSET %s
+            """,
+                (limit + 1, offset),
+            )
+            reward_rows = cur.fetchall()
+
+            has_more = len(reward_rows) > limit
+            if has_more:
+                reward_rows = reward_rows[:limit]
+
+            rewards = []
+            for row in reward_rows:
+                reward_data = row[3] if isinstance(row[3], dict) else {}
+                base_amount = reward_data.get("amount", 0)
+                payout_amount = row[7]
+                display_amount = payout_amount if payout_amount is not None else base_amount
+                rewards.append(
+                    {
+                        "address": row[0],
+                        "username": row[1],
+                        "type": row[2],
+                        "amount": display_amount,
+                        "reason": row[4],
+                        "created_at": row[5],
+                        "claimed_at": row[6],
+                        "claimed": row[6] is not None,
+                    }
+                )
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.rewards_history.ok", count=len(rewards), offset=offset)
+        return jsonify({"rewards": rewards, "has_more": has_more})
+
+    except Exception as e:
+        log_event(rid, "get_stats.rewards_history.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 def _get_stats_signups(rid: int):
     """Return recent signups via invite codes with referrer info."""
     try:
@@ -5667,6 +5759,8 @@ def get_stats():
         return _get_stats_analytics(rid)
     elif tab == "rewards":
         return _get_stats_rewards(rid)
+    elif tab == "rewards_history":
+        return _get_stats_rewards_history(rid)
 
     # Check cache for overview stats
     now = int(time.time())

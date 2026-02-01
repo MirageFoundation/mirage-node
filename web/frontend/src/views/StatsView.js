@@ -287,7 +287,8 @@ export default function StatsView() {
     const fetchRewardHistory = useCallback(async (offset = 0, append = false) => {
         setPayoutsLoading(true);
         try {
-            const data = await Api.get('rewards/history', {
+            const data = await Api.get('get_stats', {
+                tab: 'rewards_history',
                 offset,
                 limit: 50
             }, { timeoutMs: 30000 });
