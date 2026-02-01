@@ -2441,7 +2441,8 @@ function ViewPostView({ state, updatePost }) {
                     return contextPostId !== rootPostId;
                 });
                 filteredContext.forEach((c) => {
-                    out.push({ ...c, children: [], level: nextLevel });
+                    // Mark as context comment so "Continue this thread" doesn't show
+                    out.push({ ...c, children: [], level: nextLevel, isContextComment: true });
                     nextLevel++;
                 });
             }
@@ -2483,7 +2484,8 @@ function ViewPostView({ state, updatePost }) {
                     });
                     const contextDepth = filteredContext.length;
                     filteredContext.forEach((c, idx) => {
-                        const contextNode = { ...c, children: [] };
+                        // Mark as context comment so "Continue this thread" doesn't show
+                        const contextNode = { ...c, children: [], isContextComment: true };
                         out.push({ ...contextNode, level: idx + 1 });
                     });
                     const focusedWithLevel = { ...targetNode };
@@ -3889,6 +3891,8 @@ function ViewPostView({ state, updatePost }) {
                                         if (isRoot) return null;
                                         // Don't show if collapsed
                                         if (isCollapsed) return null;
+                                        // Don't show for context comments (parent chain in focused view)
+                                        if (post.isContextComment) return null;
                                         // Don't show if this IS the focused comment (we're already viewing its thread)
                                         if (focusedCommentId && String(post.post_id).toLowerCase() === String(focusedCommentId).toLowerCase()) return null;
                                         // Don't show if no replies
