@@ -8,15 +8,18 @@ User endpoints:
 - GET /api/rewards/achievements: Get all achievements with unlock status
 - GET /api/rewards/pending: Get user's pending/claimable rewards
 - POST /api/rewards/claim: Claim pending rewards
-- GET /api/rewards/stats: Get reward statistics (public)
-- GET /api/rewards/history: Get reward history (public)
 
 Admin endpoints (require level >= 100):
 - POST /api/admin/rewards/suspend: Suspend rewards for a user
 - POST /api/admin/rewards/unsuspend: Unsuspend a user
 - GET /api/admin/rewards/suspensions: List all suspended users
+
+Note: Reward stats moved to GET /api/get_stats?tab=rewards
+      Reward history moved to GET /api/get_stats?tab=rewards_history
 """
 
+import hashlib
+import ipaddress
 import json
 import os
 import random
@@ -34,12 +37,20 @@ from routes.core import get_user_level
 
 quests_bp = Blueprint("quests", __name__)
 
+# Backend debug switch (default false; must be explicitly enabled)
+BACKEND_DEBUG = os.environ.get("BACKEND_DEBUG", "").lower() == "true"
+
 # Quest system configuration (from environment)
 QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
 DAILY_QUESTS_COUNT = int(os.environ.get("DAILY_QUESTS_COUNT", "2"))
 FLASH_QUESTS_COUNT = int(os.environ.get("FLASH_QUESTS_COUNT", "1"))
 FLASH_QUEST_MIN_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MIN_INTERVAL_HOURS", "5"))
 FLASH_QUEST_MAX_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MAX_INTERVAL_HOURS", "7"))
+
+# Special quest gating
+INVITE_RECRUIT_CHANCE = float(os.environ.get("INVITE_RECRUIT_CHANCE", "0.30"))
+INVITE_EARNER_QUEST_INTERVAL = int(os.environ.get("INVITE_EARNER_QUEST_INTERVAL", "10"))
+INVITE_EARNER_CHANCE = float(os.environ.get("INVITE_EARNER_CHANCE", "0.30"))
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -120,7 +131,7 @@ def _set_next_flash_time(owner: str, next_ts: int) -> None:
                 VALUES (%s, %s)
                 ON CONFLICT (owner) DO UPDATE SET next_flash_at = EXCLUDED.next_flash_at
                 """,
-                (owner, next_ts)
+                (owner, next_ts),
             )
 
 
@@ -138,13 +149,21 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
                 WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
                 LIMIT 1
                 """,
-                (owner, ts)
+                (owner, ts),
             )
             if cur.fetchone():
                 return None  # Already has an active quest
 
     # Check if enough time has passed since last flash quest
     next_flash_at = _get_next_flash_time(owner)
+
+    # New user check: if no next_flash_at record exists (returns 0),
+    # initialize it with minimum interval delay so new users don't get flash quests immediately
+    if next_flash_at == 0:
+        initial_delay = FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
+        _set_next_flash_time(owner, ts + initial_delay)
+        return None
+
     if ts < next_flash_at:
         return None
 
@@ -164,14 +183,11 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
                 INSERT INTO user_flash_quests (owner, template_id, starts_at, ends_at, progress, progress_meta)
                 VALUES (%s, %s, %s, %s, 0, '{}')
                 """,
-                (owner, template_id, ts, ends_at)
+                (owner, template_id, ts, ends_at),
             )
 
     # Schedule next flash quest (random interval between MIN and MAX hours)
-    next_interval_seconds = random.randint(
-        FLASH_QUEST_MIN_INTERVAL_HOURS * 3600,
-        FLASH_QUEST_MAX_INTERVAL_HOURS * 3600
-    )
+    next_interval_seconds = random.randint(FLASH_QUEST_MIN_INTERVAL_HOURS * 3600, FLASH_QUEST_MAX_INTERVAL_HOURS * 3600)
     _set_next_flash_time(owner, ts + next_interval_seconds)
 
     return {
@@ -207,11 +223,111 @@ def _get_suspension_info(owner: str) -> Optional[Dict[str, Any]]:
             }
 
 
-def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[str, Any]) -> List[str]:
+def _has_unused_invite_codes(owner: str) -> bool:
+    """Check if user has at least one unused invite code."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT 1 FROM invite_codes
+                WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
+                LIMIT 1
+                """,
+                (owner,),
+            )
+            return cur.fetchone() is not None
+
+
+def _get_completed_quest_count(owner: str) -> int:
+    """Get total number of completed quests for a user."""
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM user_daily_quests
+                WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                """,
+                (owner,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+
+def _get_invite_earner_completed_count(owner: str) -> int:
+    """Get total number of completed invite_earner quests for a user.
+
+    Counts claimed invite_code rewards from invite_earner quests, which is more
+    reliable than counting quest completions (which can be reset via debug panel).
+    """
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM pending_rewards
+                WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
+                """,
+                (owner,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else 0
+
+
+def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
+    """Check if user is eligible for invite_earner quest.
+
+    User is eligible if:
+    1. completed_count >= (invite_earner_completed + 1) * interval
+    2. 30% daily roll passes
+    """
+    completed_count = _get_completed_quest_count(owner)
+    invite_earner_completed = _get_invite_earner_completed_count(owner)
+    next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+
+    if completed_count < next_milestone:
+        return False
+
+    # 30% daily roll
+    roll = _deterministic_roll(owner, day_utc, "invite_earner")
+    return roll < INVITE_EARNER_CHANCE
+
+
+def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
+    """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
+    seed_str = f"{owner.lower()}:{day_utc}:{roll_type}"
+    seed_hash = hashlib.sha256(seed_str.encode()).hexdigest()
+    # Use first 8 hex chars as seed (32 bits)
+    seed_int = int(seed_hash[:8], 16)
+    rng = random.Random(seed_int)
+    return rng.random()
+
+
+def _assign_daily_quests_if_needed(
+    owner: str,
+    day_utc: int,
+    daily_defs: Dict[str, Any],
+    special_defs: Dict[str, Any] = None,
+    use_random_rolls: bool = False,
+) -> List[str]:
     """Assign daily quests to a user if they don't have any for today.
+
+    Includes special quest gating logic:
+    - invite_recruit: 30% chance if user has unused invite codes
+    - invite_earner: appears every N completed quests + 30% roll
+
+    Args:
+        use_random_rolls: If True, use random.random() instead of deterministic rolls (for localhost testing)
 
     Returns the list of assigned quest IDs.
     """
+    if special_defs is None:
+        special_defs = {}
+
+    def get_roll(roll_type: str) -> float:
+        """Get roll value - random on localhost, deterministic in production."""
+        if use_random_rolls:
+            return random.random()
+        return _deterministic_roll(owner, day_utc, roll_type)
+
     with connect_db() as conn:
         with conn.cursor() as cur:
             # Check if user already has quests for today
@@ -227,16 +343,59 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
             if existing:
                 return existing
 
-            # No quests assigned yet - assign random ones
-            if not daily_defs:
-                return []
+            # No quests assigned yet - check special quests first
+            quest_ids = []
+            special_quest_assigned = False
 
-            available_ids = list(daily_defs.keys())
-            count = min(DAILY_QUESTS_COUNT, len(available_ids))
-            selected_ids = random.sample(available_ids, count)
+            # Check for invite_recruit eligibility (30% roll if user has unused codes)
+            if not special_quest_assigned and "invite_recruit" in special_defs:
+                if _has_unused_invite_codes(owner):
+                    roll = get_roll("invite_recruit")
+                    log_event(
+                        None,
+                        "quest.invite_recruit.roll",
+                        owner=owner,
+                        roll=round(roll, 3),
+                        threshold=INVITE_RECRUIT_CHANCE,
+                    )
+                    if roll < INVITE_RECRUIT_CHANCE:
+                        quest_ids.append("invite_recruit")
+                        special_quest_assigned = True
+                        log_event(None, "quest.invite_recruit.assigned", owner=owner)
+
+            # Check for invite_earner eligibility (every N completed quests + 30% roll)
+            if not special_quest_assigned and "invite_earner" in special_defs:
+                # Check milestone first
+                completed_count = _get_completed_quest_count(owner)
+                invite_earner_completed = _get_invite_earner_completed_count(owner)
+                next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                if completed_count >= next_milestone:
+                    roll = get_roll("invite_earner")
+                    log_event(
+                        None,
+                        "quest.invite_earner.roll",
+                        owner=owner,
+                        roll=round(roll, 3),
+                        threshold=INVITE_EARNER_CHANCE,
+                    )
+                    if roll < INVITE_EARNER_CHANCE:
+                        quest_ids.append("invite_earner")
+                        special_quest_assigned = True
+                        log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
+
+            # Fill remaining slots with random daily quests
+            if not daily_defs:
+                return quest_ids
+
+            remaining_slots = DAILY_QUESTS_COUNT - len(quest_ids)
+            if remaining_slots > 0:
+                available_ids = list(daily_defs.keys())
+                count = min(remaining_slots, len(available_ids))
+                selected_ids = random.sample(available_ids, count)
+                quest_ids.extend(selected_ids)
 
             # Insert initial progress records
-            for quest_id in selected_ids:
+            for quest_id in quest_ids:
                 cur.execute(
                     """
                     INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta)
@@ -246,7 +405,7 @@ def _assign_daily_quests_if_needed(owner: str, day_utc: int, daily_defs: Dict[st
                     (owner, day_utc, quest_id),
                 )
 
-            return selected_ids
+            return quest_ids
 
 
 @quests_bp.route("/api/rewards/daily", methods=["GET"])
@@ -267,6 +426,7 @@ def get_daily_quests():
                 "daily_quests": [],
                 "seconds_until_reset": 0,
                 "reward_multiplier": 1,
+                "debug": BACKEND_DEBUG,
             }
         )
 
@@ -288,15 +448,18 @@ def get_daily_quests():
                     "daily_quests": [],
                     "seconds_until_reset": _get_seconds_until_reset(ts),
                     "reward_multiplier": 1.0,
+                    "debug": BACKEND_DEBUG,
                 }
             )
 
         # Load quest definitions
         defs = _load_quest_definitions()
         daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
 
         # Assign quests if user doesn't have any for today
-        _assign_daily_quests_if_needed(owner, day_utc, daily_defs)
+        # Use random rolls on localhost for easier testing
+        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
         # Get user's assigned quests for today
         with connect_db() as conn:
@@ -312,6 +475,9 @@ def get_daily_quests():
                 )
                 rows = cur.fetchall()
 
+        # Merge daily_defs and special_defs for lookup
+        all_defs = {**daily_defs, **special_defs}
+
         daily_quests = []
         for row in rows:
             quest_id = row[0]
@@ -319,7 +485,7 @@ def get_daily_quests():
             progress_meta = row[2] if isinstance(row[2], dict) else {}
             completed_at = row[3]
 
-            quest_def = daily_defs.get(quest_id, {})
+            quest_def = all_defs.get(quest_id, {})
             if not quest_def:
                 continue
 
@@ -364,6 +530,7 @@ def get_daily_quests():
                 "daily_quests": daily_quests,
                 "seconds_until_reset": _get_seconds_until_reset(ts),
                 "reward_multiplier": round(multiplier, 4),
+                "debug": BACKEND_DEBUG,
             }
         )
     except Exception as e:
@@ -607,7 +774,9 @@ def get_pending_rewards():
                 rows = cur.fetchall()
 
         pending_rewards = []
-        total_mirage = 0
+        total_mirage_with_multiplier = 0
+        total_mirage_no_multiplier = 0
+        pending_invite_codes = 0
 
         for row in rows:
             reward_data = row[2] if isinstance(row[2], dict) else {}
@@ -621,9 +790,19 @@ def get_pending_rewards():
             pending_rewards.append(reward)
 
             if row[1] == "mirage":
-                total_mirage += reward_data.get("amount", 0)
+                amount = reward_data.get("amount", 0)
+                apply_multiplier = reward_data.get("apply_multiplier", True)
+                if apply_multiplier:
+                    total_mirage_with_multiplier += amount
+                else:
+                    total_mirage_no_multiplier += amount
+            elif row[1] == "invite_code":
+                pending_invite_codes += reward_data.get("amount", 1)
 
         multiplier = _get_user_reward_multiplier(owner, ts)
+        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+        # Apply multiplier only to rewards that allow it
+        total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 
         # Check if claiming is available
         distributor = get_distributor()
@@ -635,7 +814,8 @@ def get_pending_rewards():
                 "suspended": False,
                 "pending_rewards": pending_rewards,
                 "total_mirage": total_mirage,
-                "total_mirage_after_multiplier": int(total_mirage * multiplier),
+                "total_mirage_after_multiplier": total_mirage_after_multiplier,
+                "pending_invite_codes": pending_invite_codes,
                 "reward_multiplier": round(multiplier, 4),
                 "claiming_available": claiming_available,
             }
@@ -720,6 +900,42 @@ def claim_rewards():
                             "success": False,
                             "error": "insufficient_funds",
                             "message": "Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "rewards_pool_key_not_configured":
+                log_event(rid, "rewards.claim.pool_not_configured", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "pool_not_configured",
+                            "message": "Reward payouts are not yet configured. Please notify the admins.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "sequence_mismatch_retry":
+                log_event(rid, "rewards.claim.sequence_mismatch", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "retry",
+                            "message": "Transaction conflict, please try again.",
+                        }
+                    ),
+                    503,
+                )  # Service Unavailable
+            elif error_msg == "payout_transaction_failed":
+                log_event(rid, "rewards.claim.tx_failed", owner=owner)
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": "payout_failed",
+                            "message": "Payout transaction failed. Please try again or notify the admins.",
                         }
                     ),
                     503,
@@ -963,203 +1179,347 @@ def admin_list_suspensions():
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/rewards/stats", methods=["GET"])
-def reward_stats():
-    """Get comprehensive reward statistics (public).
+# ==================== Debug Endpoints (localhost only) ====================
 
-    Returns:
-    - summary: Overall stats (total earned, claimed, pending, pool balance)
-    - users: Per-user breakdown with earnings data
+
+def _is_private_or_loopback_ip(ip: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return parsed.is_private or parsed.is_loopback
+
+
+def _is_debug_enabled() -> bool:
+    return BACKEND_DEBUG and _is_localhost()
+
+
+def _is_localhost() -> bool:
+    """Check if request is from localhost/private network."""
+    remote_ip = request.remote_addr or ""
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        forwarded_ips = [ip.strip() for ip in forwarded_for.split(",") if ip.strip()]
+        if not forwarded_ips:
+            return False
+        if any(not _is_private_or_loopback_ip(ip) for ip in forwarded_ips):
+            return False
+    return _is_private_or_loopback_ip(remote_ip)
+
+
+@quests_bp.route("/api/rewards/debug", methods=["GET"])
+def debug_quests_info():
+    """Get quest debug info for a user. Localhost only.
+
+    Query params:
+    - owner: User address (required)
     """
+    if not _is_debug_enabled():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
     rid = next_request_id()
-    log_event(rid, "rewards.stats.begin")
+    log_event(rid, "debug.quests.info.begin")
 
     try:
-        ts = int(time.time())
+        owner = (request.args.get("owner") or "").strip().lower()
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
 
-        # Get pool balance
-        distributor = get_distributor()
-        pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
 
         with connect_db() as conn:
             with conn.cursor() as cur:
-                # Get overall stats
+                # Get total completed quests count
                 cur.execute(
                     """
-                    SELECT 
-                        COUNT(*) as total_rewards,
-                        COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
-                        COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
-                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as total_amount,
-                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
-                        COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
-                        MIN(created_at) as first_reward_at,
-                        MAX(created_at) as last_reward_at
-                    FROM pending_rewards
-                """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
                 )
-                summary_row = cur.fetchone()
+                completed_count = cur.fetchone()[0] or 0
 
-                summary = {
-                    "total_rewards": summary_row[0] or 0,
-                    "claimed_count": summary_row[1] or 0,
-                    "pending_count": summary_row[2] or 0,
-                    "total_amount": summary_row[3] or 0,
-                    "claimed_amount": summary_row[4] or 0,
-                    "pending_amount": summary_row[5] or 0,
-                    "first_reward_at": summary_row[6],
-                    "last_reward_at": summary_row[7],
-                    "pool_balance": pool_balance,
-                    "payouts_enabled": distributor.is_configured(),
-                }
-
-                # Calculate daily rate (last 7 days)
-                week_ago = ts - (7 * 86400)
+                # Get today's quests
                 cur.execute(
                     """
-                    SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN (reward_data->>'amount')::bigint ELSE 0 END), 0)
-                    FROM pending_rewards
-                    WHERE created_at >= %s
-                """,
-                    (week_ago,),
+                    SELECT quest_id, progress, completed_at FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    """,
+                    (owner, day_utc),
                 )
-                week_total = cur.fetchone()[0] or 0
-                summary["daily_rate"] = week_total // 7
+                today_quests = [
+                    {"quest_id": row[0], "progress": row[1], "completed": row[2] is not None} for row in cur.fetchall()
+                ]
 
-                # Get per-user stats
+                # Check invite_recruit eligibility
                 cur.execute(
                     """
-                    SELECT 
-                        pr.owner,
-                        p.username,
-                        COUNT(*) as reward_count,
-                        COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
-                        COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
-                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as total_earned,
-                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as claimed_amount,
-                        COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
-                        MIN(pr.created_at) as first_reward_at,
-                        MAX(pr.created_at) as last_reward_at,
-                        p.created_at as account_created_at
-                    FROM pending_rewards pr
-                    LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
-                    GROUP BY pr.owner, p.username, p.created_at
-                    ORDER BY total_earned DESC
-                """
+                    SELECT COUNT(*) FROM invite_codes
+                    WHERE LOWER(owner) = LOWER(%s) AND used_by IS NULL
+                    """,
+                    (owner,),
                 )
-                user_rows = cur.fetchall()
+                unused_invite_codes = cur.fetchone()[0] or 0
 
-                users = []
-                for row in user_rows:
-                    owner = row[0]
-                    first_reward_at = row[8]
-                    last_reward_at = row[9]
-                    total_earned = row[5] or 0
+                # Check invite_recruit - just show if prerequisites are met (has unused codes)
+                invite_recruit_has_codes = unused_invite_codes > 0
+                invite_recruit_assigned = any(q["quest_id"] == "invite_recruit" for q in today_quests)
 
-                    # Calculate earnings per day
-                    if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
-                        days_active = max(1, (last_reward_at - first_reward_at) // 86400)
-                        earnings_per_day = total_earned // days_active
-                    else:
-                        earnings_per_day = total_earned  # Single day
+                # Check invite_earner eligibility (milestone-based)
+                # Count claimed invite_code rewards (more reliable than quest completions)
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM pending_rewards
+                    WHERE LOWER(owner) = LOWER(%s) AND reason = 'quest:invite_earner' AND claimed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                invite_earner_completed = cur.fetchone()[0] or 0
+                invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                invite_earner_milestone_reached = completed_count >= invite_earner_next_milestone
+                invite_earner_assigned = any(q["quest_id"] == "invite_earner" for q in today_quests)
 
-                    users.append(
-                        {
-                            "address": owner,
-                            "username": row[1],
-                            "reward_count": row[2] or 0,
-                            "claimed_count": row[3] or 0,
-                            "pending_count": row[4] or 0,
-                            "total_earned": total_earned,
-                            "claimed_amount": row[6] or 0,
-                            "pending_amount": row[7] or 0,
-                            "first_reward_at": first_reward_at,
-                            "last_reward_at": last_reward_at,
-                            "account_created_at": row[10],
-                            "earnings_per_day": earnings_per_day,
-                        }
-                    )
-
-        log_event(rid, "rewards.stats.ok", user_count=len(users))
+        log_event(rid, "debug.quests.info.ok", owner=owner)
         return jsonify(
             {
-                "summary": summary,
-                "users": users,
+                "owner": owner,
+                "day_utc": day_utc,
+                "completed_count": completed_count,
+                "today_quests": today_quests,
+                "unused_invite_codes": unused_invite_codes,
+                "invite_recruit": {
+                    "has_codes": invite_recruit_has_codes,
+                    "chance": f"{int(INVITE_RECRUIT_CHANCE * 100)}%",
+                    "assigned": invite_recruit_assigned,
+                },
+                "invite_earner": {
+                    "interval": INVITE_EARNER_QUEST_INTERVAL,
+                    "completed": invite_earner_completed,
+                    "next_milestone": invite_earner_next_milestone,
+                    "milestone_reached": invite_earner_milestone_reached,
+                    "chance": f"{int(INVITE_EARNER_CHANCE * 100)}%",
+                    "assigned": invite_earner_assigned,
+                },
             }
         )
     except Exception as e:
-        log_event(rid, "rewards.stats.err", error=str(e))
+        log_event(rid, "debug.quests.info.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
-@quests_bp.route("/api/rewards/history", methods=["GET"])
-def reward_history():
-    """Get paginated list of all rewards (public).
+@quests_bp.route("/api/rewards/debug/complete", methods=["POST"])
+def debug_complete_quest():
+    """Instantly complete a quest. Localhost only.
 
-    Query params:
-    - offset: Pagination offset (default 0)
-    - limit: Number of items to return (default 50, max 100)
-
-    Returns:
-    - rewards: List of reward records
-    - has_more: Whether there are more records
+    Body:
+    - owner: User address (required)
+    - quest_id: Quest ID to complete (required)
     """
+    if not _is_debug_enabled():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
     rid = next_request_id()
-    log_event(rid, "rewards.history.begin")
+    log_event(rid, "debug.quests.complete.begin")
 
     try:
-        offset = int(request.args.get("offset", 0))
-        limit = min(int(request.args.get("limit", 50)), 100)
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        quest_id = str(data.get("quest_id", "")).strip()
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        if not quest_id:
+            return jsonify({"error": "quest_id required"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        # Load quest definitions to get reward info
+        defs = _load_quest_definitions()
+        daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
+        special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
+        all_defs = {**daily_defs, **special_defs}
+
+        quest_def = all_defs.get(quest_id)
+        if not quest_def:
+            return jsonify({"error": f"unknown quest_id: {quest_id}"}), 400
 
         with connect_db() as conn:
             with conn.cursor() as cur:
-                # Get all rewards with pagination (newest first)
+                # Check if quest exists for today
                 cur.execute(
                     """
-                    SELECT 
-                        pr.owner,
-                        p.username,
-                        pr.reward_type,
-                        pr.reward_data,
-                        pr.reason,
-                        pr.created_at,
-                        pr.claimed_at
-                    FROM pending_rewards pr
-                    LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
-                    ORDER BY pr.created_at DESC
-                    LIMIT %s OFFSET %s
-                """,
-                    (limit + 1, offset),
-                )  # Fetch one extra to check if there's more
-                reward_rows = cur.fetchall()
+                    SELECT completed_at FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (owner, day_utc, quest_id),
+                )
+                row = cur.fetchone()
 
-                has_more = len(reward_rows) > limit
-                if has_more:
-                    reward_rows = reward_rows[:limit]
+                if not row:
+                    return jsonify({"error": f"quest {quest_id} not assigned for today"}), 400
 
-                rewards = []
-                for row in reward_rows:
-                    reward_data = row[3] if isinstance(row[3], dict) else {}
-                    rewards.append(
-                        {
-                            "address": row[0],
-                            "username": row[1],
-                            "type": row[2],
-                            "amount": reward_data.get("amount", 0),
-                            "reason": row[4],
-                            "created_at": row[5],
-                            "claimed_at": row[6],
-                            "claimed": row[6] is not None,
-                        }
+                if row[0] is not None:
+                    return jsonify({"error": f"quest {quest_id} already completed"}), 400
+
+                # Mark quest as completed
+                target = quest_def.get("target_count", 1)
+                cur.execute(
+                    """
+                    UPDATE user_daily_quests
+                    SET progress = %s, completed_at = %s
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s AND quest_id = %s
+                    """,
+                    (target, ts, owner, day_utc, quest_id),
+                )
+
+                # Add rewards
+                rewards = quest_def.get("rewards", [])
+                for reward in rewards:
+                    reward_type = reward.get("type", "mirage")
+                    if reward_type == "mirage":
+                        amount_umirage = reward.get("amount", 0) * 1_000_000
+                        apply_multiplier = reward.get("apply_multiplier", True)
+                        reward_data = {"amount": amount_umirage, "apply_multiplier": apply_multiplier}
+                    elif reward_type == "invite_code":
+                        reward_data = {"amount": reward.get("amount", 1)}
+                    else:
+                        reward_data = {"id": reward.get("id")}
+
+                    cur.execute(
+                        """
+                        INSERT INTO pending_rewards (owner, reward_type, reward_data, reason, created_at)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (owner, reward_type, json.dumps(reward_data), f"quest:{quest_id}", ts),
                     )
 
-        log_event(rid, "rewards.history.ok", count=len(rewards), offset=offset)
-        return jsonify(
-            {
-                "rewards": rewards,
-                "has_more": has_more,
-            }
-        )
+        log_event(rid, "debug.quests.complete.ok", owner=owner, quest_id=quest_id)
+        return jsonify({"success": True, "quest_id": quest_id})
     except Exception as e:
-        log_event(rid, "rewards.history.err", error=str(e))
+        log_event(rid, "debug.quests.complete.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/rewards/debug/reset", methods=["POST"])
+def debug_reset_quests():
+    """Reset today's quests for a user. Localhost only.
+
+    Body:
+    - owner: User address (required)
+    """
+    if not _is_debug_enabled():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.reset.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+
+        ts = int(time.time())
+        day_utc = _get_utc_julian_day(ts)
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Delete today's quests
+                cur.execute(
+                    """
+                    DELETE FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND day_utc = %s
+                    """,
+                    (owner, day_utc),
+                )
+                deleted_count = cur.rowcount
+
+        log_event(rid, "debug.quests.reset.ok", owner=owner, deleted=deleted_count)
+        return jsonify({"success": True, "deleted_count": deleted_count})
+    except Exception as e:
+        log_event(rid, "debug.quests.reset.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+@quests_bp.route("/api/rewards/debug/set_completed", methods=["POST"])
+def debug_set_completed_count():
+    """Set the completed quest count by adding fake completed quests. Localhost only.
+
+    Body:
+    - owner: User address (required)
+    - count: Target completed count (required)
+    """
+    if not _is_debug_enabled():
+        return jsonify({"error": "debug endpoints only available on localhost"}), 403
+
+    rid = next_request_id()
+    log_event(rid, "debug.quests.set_completed.begin")
+
+    try:
+        data = request.get_json(force=True) or {}
+        owner = str(data.get("owner", "")).strip().lower()
+        target_count = int(data.get("count", 0))
+
+        if not owner:
+            return jsonify({"error": "owner required"}), 400
+        if target_count < 0:
+            return jsonify({"error": "count must be >= 0"}), 400
+
+        ts = int(time.time())
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # Get current completed count
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                current_count = cur.fetchone()[0] or 0
+
+                if target_count > current_count:
+                    # Add fake completed quests to reach target
+                    to_add = target_count - current_count
+                    for i in range(to_add):
+                        # Use negative day_utc values to avoid conflicts
+                        fake_day = -(i + 1 + current_count)
+                        cur.execute(
+                            """
+                            INSERT INTO user_daily_quests (owner, day_utc, quest_id, progress, progress_meta, completed_at)
+                            VALUES (%s, %s, %s, 1, '{}', %s)
+                            ON CONFLICT (owner, day_utc, quest_id) DO NOTHING
+                            """,
+                            (owner, fake_day, "debug_fake_quest", ts),
+                        )
+                elif target_count < current_count:
+                    # Delete fake quests first, then real ones if needed
+                    cur.execute(
+                        """
+                        DELETE FROM user_daily_quests
+                        WHERE LOWER(owner) = LOWER(%s) AND day_utc < 0
+                        """,
+                        (owner,),
+                    )
+
+        # Get new count
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM user_daily_quests
+                    WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                    """,
+                    (owner,),
+                )
+                new_count = cur.fetchone()[0] or 0
+
+        log_event(rid, "debug.quests.set_completed.ok", owner=owner, old=current_count, new=new_count)
+        return jsonify({"success": True, "old_count": current_count, "new_count": new_count})
+    except Exception as e:
+        log_event(rid, "debug.quests.set_completed.err", error=str(e))
         return jsonify({"error": str(e)}), 500

@@ -109,11 +109,6 @@ echo "Moniker:   $MONIKER"
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
 
-# Run store cleanup (for v1.10.4 upgrade)
-# Always run - script is idempotent and safe (only deletes keys for specific stores if they exist)
-echo "==> Running store cleanup for stale SDK stores..."
-python3 "$ROOT_DIR/deploy/cleanup_stale_stores.py" --home "$NODE_HOME" || echo "WARNING: Store cleanup failed or not needed"
-
 # Ensure Caddyfile exists and is correct
 # If DOMAIN is set and Caddyfile already has HTTPS config for that domain, don't overwrite
 mkdir -p /etc/caddy

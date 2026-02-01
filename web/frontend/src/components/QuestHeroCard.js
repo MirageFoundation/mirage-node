@@ -2,11 +2,13 @@
  * QuestHeroCard - Displays daily quests, progress, and claimable rewards
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
 import { useQuests, usePendingRewards } from '../utils/useQuests';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
+import Api from '../lib/api';
+import Storage from '../utils/Storage';
 
 const pickThemeColor = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -75,42 +77,6 @@ const ResetTimer = styled.div`
     font-variant-numeric: tabular-nums;
 
     @media (max-width: 768px) {
-        font-size: 0.5rem;
-    }
-`;
-
-const MultiplierBadge = styled.div`
-    font-size: 0.6rem;
-    color: #60a5fa;
-    background: ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(59, 130, 246, 0.15)'
-        : 'rgba(96, 165, 250, 0.2)'};
-    padding: 0.15rem 0.35rem;
-    border-radius: 4px;
-    font-weight: 600;
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
-    cursor: default;
-    transition: all 0.15s ease;
-
-    &:hover {
-        color: #93c5fd;
-        background: ${({ theme }) => theme?.name === 'light'
-        ? 'rgba(59, 130, 246, 0.25)'
-        : 'rgba(96, 165, 250, 0.35)'};
-    }
-
-    @media (max-width: 768px) {
-        font-size: 0.5rem;
-    }
-`;
-
-const QuestCountBadge = styled.span`
-    font-size: 0.6rem;
-    color: rgba(255, 255, 255, 0.8);
-    font-weight: 500;
-
-    @media (max-width: 1000px) {
         font-size: 0.5rem;
     }
 `;
@@ -291,8 +257,8 @@ const BalancedProgressRow = styled.span`
     display: flex;
     align-items: center;
     gap: 2px;
-    color: ${({ $met, theme }) => $met 
-        ? '#22c55e' 
+    color: ${({ $met, theme }) => $met
+        ? '#22c55e'
         : pickThemeColor(theme, 'subtleText')};
     font-weight: ${({ $met }) => $met ? '600' : '400'};
 `;
@@ -319,16 +285,6 @@ const ClaimSection = styled.div`
     border-top: 1px solid ${({ theme }) => theme?.name === 'light'
         ? 'rgba(0, 0, 0, 0.08)'
         : 'rgba(255, 255, 255, 0.08)'};
-`;
-
-const RewardAmount = styled.div`
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #f59e0b;
-
-    @media (max-width: 768px) {
-        font-size: 0.55rem;
-    }
 `;
 
 const pulseAnimation = keyframes`
@@ -513,17 +469,6 @@ function formatTime(seconds) {
 }
 
 /**
- * Format MIRAGE amount (umirage to MIRAGE)
- */
-function formatMirage(amount) {
-    const mirage = amount / 1_000_000;
-    if (mirage >= 1) {
-        return mirage.toLocaleString(undefined, { maximumFractionDigits: 2 });
-    }
-    return mirage.toFixed(6);
-}
-
-/**
  * Get icon for quest action type
  */
 function getQuestIcon(actionType) {
@@ -535,17 +480,34 @@ function getQuestIcon(actionType) {
         'upvotes_received': '⭐',
         'comment_upvotes_received': '🌟',
         'unique_topic_post': '🗺️',
+        'invite_recruit': '👥',
+        'claim_only': '🎁',
     };
     return icons[actionType] || '🎯';
 }
 
 /**
- * Get MIRAGE reward amount from quest rewards array
+ * Get reward display text for a quest (handles MIRAGE and invite_code rewards)
  */
-function getQuestMirageReward(rewards) {
-    if (!rewards || !Array.isArray(rewards)) return 0;
+function getQuestRewardDisplay(rewards, rewardMultiplier) {
+    if (!rewards || !Array.isArray(rewards)) return null;
+
     const mirageReward = rewards.find(r => r.type === 'mirage');
-    return mirageReward?.amount || 0;
+    const inviteCodeReward = rewards.find(r => r.type === 'invite_code');
+
+    if (inviteCodeReward) {
+        const count = inviteCodeReward.amount || 1;
+        return `+${count} Invite Code${count > 1 ? 's' : ''}`;
+    }
+
+    if (mirageReward) {
+        const amount = mirageReward.amount || 0;
+        const applyMultiplier = mirageReward.apply_multiplier !== false;
+        const displayAmount = applyMultiplier ? Math.round(amount * rewardMultiplier) : amount;
+        return `+${displayAmount.toLocaleString()} MIRAGE`;
+    }
+
+    return null;
 }
 
 /**
@@ -577,6 +539,110 @@ function getQuestRequirements(quest) {
 }
 
 const CONFETTI_COLORS = ['#f59e0b', '#22c55e', '#3b82f6', '#ec4899', '#8b5cf6'];
+
+// Debug panel styled components
+const DebugPanel = styled.div`
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(239, 68, 68, 0.1)'
+        : 'rgba(239, 68, 68, 0.15)'};
+    border: 1px dashed rgba(239, 68, 68, 0.5);
+    border-radius: 6px;
+    font-size: 0.55rem;
+`;
+
+const DebugTitle = styled.div`
+    font-weight: 700;
+    color: #ef4444;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+`;
+
+const DebugRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.15rem 0;
+    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+`;
+
+const DebugLabel = styled.span`
+    opacity: 0.7;
+`;
+
+const DebugValue = styled.span`
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+`;
+
+const DebugButton = styled.button`
+    background: ${({ $variant }) =>
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.2)' :
+            $variant === 'success' ? 'rgba(34, 197, 94, 0.2)' :
+                'rgba(59, 130, 246, 0.2)'};
+    border: 1px solid ${({ $variant }) =>
+        $variant === 'danger' ? 'rgba(239, 68, 68, 0.5)' :
+            $variant === 'success' ? 'rgba(34, 197, 94, 0.5)' :
+                'rgba(59, 130, 246, 0.5)'};
+    color: ${({ $variant }) =>
+        $variant === 'danger' ? '#ef4444' :
+            $variant === 'success' ? '#22c55e' :
+                '#3b82f6'};
+    font-size: 0.5rem;
+    font-weight: 600;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover:not(:disabled) {
+        opacity: 0.8;
+        transform: scale(1.02);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+
+const DebugButtonGroup = styled.div`
+    display: flex;
+    gap: 0.3rem;
+    flex-wrap: wrap;
+    margin-top: 0.3rem;
+`;
+
+const DebugInput = styled.input`
+    width: 50px;
+    padding: 0.15rem 0.25rem;
+    font-size: 0.5rem;
+    border: 1px solid rgba(59, 130, 246, 0.5);
+    border-radius: 4px;
+    background: ${({ theme }) => theme?.name === 'light' ? 'white' : 'rgba(0,0,0,0.3)'};
+    color: ${({ theme }) => pickThemeColor(theme, 'text')};
+    text-align: center;
+
+    &:focus {
+        outline: none;
+        border-color: #3b82f6;
+    }
+`;
+
+const DebugQuestRow = styled.div`
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.2rem 0.3rem;
+    margin: 0.15rem 0;
+    background: ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(0,0,0,0.03)'
+        : 'rgba(255,255,255,0.03)'};
+    border-radius: 4px;
+`;
 
 // Collapse button
 const CollapseButton = styled.button`
@@ -612,11 +678,13 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         suspended: questsSuspended,
         suspensionInfo: questsSuspensionInfo,
         disabled: questsDisabled,
+        debug: debugEnabled,
         refresh: refreshQuests,
     } = useQuests();
 
     const {
         totalAfterMultiplier,
+        pendingInviteCodes,
         claiming,
         claimRewards,
         claimingAvailable,
@@ -625,7 +693,78 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
 
     const [showCelebration, setShowCelebration] = useState(false);
     const [claimedAmount, setClaimedAmount] = useState(0);
+    const [claimedInviteCodes, setClaimedInviteCodes] = useState(0);
     const [claimError, setClaimError] = useState(null);
+
+    const userAddress = Storage.load('publicKey', '');
+
+    // Debug panel state (controlled by BACKEND_DEBUG env var on backend)
+    const [showDebug, setShowDebug] = useState(false);
+    const [debugInfo, setDebugInfo] = useState(null);
+    const [debugLoading, setDebugLoading] = useState(false);
+    const [targetCompletedCount, setTargetCompletedCount] = useState('');
+
+    const fetchDebugInfo = useCallback(async () => {
+        if (!userAddress || !debugEnabled) return;
+        setDebugLoading(true);
+        try {
+            const data = await Api.get('/rewards/debug', { owner: userAddress });
+            setDebugInfo(data);
+            setTargetCompletedCount(String(data.completed_count || 0));
+        } catch (e) {
+            console.error('Failed to fetch debug info:', e);
+        } finally {
+            setDebugLoading(false);
+        }
+    }, [userAddress, debugEnabled]);
+
+    const debugCompleteQuest = useCallback(async (questId) => {
+        if (!userAddress) return;
+        try {
+            await Api.post('/rewards/debug/complete', { owner: userAddress, quest_id: questId });
+            await fetchDebugInfo();
+            refreshQuests();
+            refreshRewards();
+        } catch (e) {
+            console.error('Failed to complete quest:', e);
+        }
+    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+
+    const debugResetQuests = useCallback(async () => {
+        if (!userAddress) return;
+        setDebugLoading(true);
+        try {
+            await Api.post('/rewards/debug/reset', { owner: userAddress });
+            refreshQuests();
+            refreshRewards();
+            setTimeout(async () => {
+                await fetchDebugInfo();
+                setDebugLoading(false);
+            }, 500);
+        } catch (e) {
+            console.error('Failed to reset quests:', e);
+            setDebugLoading(false);
+        }
+    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+
+    const debugSetCompletedCount = useCallback(async () => {
+        if (!userAddress) return;
+        const count = parseInt(targetCompletedCount, 10);
+        if (isNaN(count) || count < 0) return;
+        try {
+            await Api.post('/rewards/debug/set_completed', { owner: userAddress, count });
+            await fetchDebugInfo();
+            refreshQuests();
+        } catch (e) {
+            console.error('Failed to set completed count:', e);
+        }
+    }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
+
+    useEffect(() => {
+        if (showDebug && debugEnabled) {
+            fetchDebugInfo();
+        }
+    }, [showDebug, debugEnabled, fetchDebugInfo]);
 
     const handleClaim = useCallback(async () => {
         setClaimError(null);
@@ -636,21 +775,26 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             const mirageReward = result.rewards?.find(r => r.type === 'mirage');
             const amount = mirageReward?.amount || 0;
 
+            // Find invite code rewards
+            const inviteCodeReward = result.rewards?.find(r => r.type === 'invite_code');
+            const inviteCodesCount = inviteCodeReward?.count || 0;
+
             setClaimedAmount(amount);
+            setClaimedInviteCodes(inviteCodesCount);
             setShowCelebration(true);
 
             // Refresh data
             refreshQuests();
             refreshRewards();
-        } else {
-            // Handle specific errors with user-friendly messages
-            if (result.error === 'insufficient_funds') {
-                setClaimError('Payout temporarily unavailable due to low funds in the rewards pool. Please notify the admins.');
-            } else if (result.error === 'no_rewards') {
-                setClaimError('No rewards to claim.');
-            } else {
-                setClaimError(result.error || 'Failed to claim rewards. Please try again later.');
+
+            // If invite codes were claimed, notify other components to refresh
+            if (inviteCodesCount > 0) {
+                window.dispatchEvent(new CustomEvent('inviteCodesUpdated'));
             }
+        } else {
+            // Show user-friendly message from backend if available, otherwise show error code
+            const errorMessage = result.message || result.error || 'Failed to claim rewards. Please try again later.';
+            setClaimError(errorMessage);
             // Clear error after 10 seconds
             setTimeout(() => setClaimError(null), 10000);
         }
@@ -755,8 +899,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         );
     }
 
-    const hasClaimableRewards = totalAfterMultiplier > 0;
-    const completedCount = dailyQuests.filter(q => q.completed).length;
+    const hasClaimableRewards = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
 
     return (
         <>
@@ -791,7 +934,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                     <QuestName $completed={quest.completed}>
                                         {quest.title}
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
-                                            +{Math.round(getQuestMirageReward(quest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                            {getQuestRewardDisplay(quest.rewards, rewardMultiplier)}
                                         </QuestReward>
                                     </QuestName>
                                     <QuestDescription>{quest.description}</QuestDescription>
@@ -846,7 +989,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                             FLASH
                                         </span>
                                         <QuestReward as="span" style={{ marginLeft: '0.4rem' }}>
-                                            +{Math.round(getQuestMirageReward(flashQuest.rewards) * rewardMultiplier).toLocaleString()} MIRAGE
+                                            {getQuestRewardDisplay(flashQuest.rewards, rewardMultiplier)}
                                         </QuestReward>
                                     </QuestName>
                                     <QuestDescription>
@@ -899,7 +1042,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                                 $hasRewards={hasClaimableRewards && claimingAvailable}
                                 title={!claimingAvailable ? 'Reward distribution is not yet configured' : undefined}
                             >
-                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? `Claim ${Math.round(totalAfterMultiplier / 1_000_000).toLocaleString()} MIRAGE` : 'Complete Quests'}
+                                {claiming ? 'Claiming...' : !claimingAvailable ? 'Coming Soon' : hasClaimableRewards ? 'Claim Rewards' : 'Complete Quests'}
                             </ClaimButton>
                         </div>
                     </ClaimSection>
@@ -908,6 +1051,103 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     <ClaimErrorMessage>
                         ⚠️ {claimError}
                     </ClaimErrorMessage>
+                )}
+
+                {/* Debug panel - only shows when BACKEND_DEBUG=true in backend.env */}
+                {!collapsed && debugEnabled && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                        <DebugButton onClick={() => setShowDebug(!showDebug)}>
+                            {showDebug ? '🔧 Hide Debug' : '🔧 Debug'}
+                        </DebugButton>
+                        {showDebug && (
+                            <DebugPanel>
+                                <DebugTitle>🔧 Quest Debug Panel</DebugTitle>
+                                {debugLoading ? (
+                                    <div>Loading...</div>
+                                ) : debugInfo ? (
+                                    <>
+                                        <DebugRow>
+                                            <DebugLabel>Total Completed Quests:</DebugLabel>
+                                            <DebugValue>{debugInfo.completed_count}</DebugValue>
+                                        </DebugRow>
+                                        <DebugRow>
+                                            <DebugLabel>Unused Invite Codes:</DebugLabel>
+                                            <DebugValue>{debugInfo.unused_invite_codes}</DebugValue>
+                                        </DebugRow>
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>invite_recruit:</DebugLabel>
+                                            <DebugRow>
+                                                <span>
+                                                    Has codes: {debugInfo.invite_recruit?.has_codes ? 'Yes' : 'No'} |
+                                                    Chance: {debugInfo.invite_recruit?.chance}
+                                                </span>
+                                                <DebugValue style={{ color: debugInfo.invite_recruit?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                    {debugInfo.invite_recruit?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
+                                                </DebugValue>
+                                            </DebugRow>
+                                        </div>
+                                        <div style={{ marginTop: '0.3rem' }}>
+                                            <DebugLabel>invite_earner:</DebugLabel>
+                                            <DebugRow>
+                                                <span>
+                                                    Earned: {debugInfo.invite_earner?.completed || 0} |
+                                                    Next milestone: {debugInfo.invite_earner?.next_milestone}
+                                                    {debugInfo.invite_earner?.milestone_reached ? ' ✓' : ''} |
+                                                    Chance: {debugInfo.invite_earner?.chance}
+                                                </span>
+                                                <DebugValue style={{ color: debugInfo.invite_earner?.assigned ? '#22c55e' : '#6b7280' }}>
+                                                    {debugInfo.invite_earner?.assigned ? 'ASSIGNED TODAY' : 'not assigned'}
+                                                </DebugValue>
+                                            </DebugRow>
+                                        </div>
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>Today's Quests:</DebugLabel>
+                                            {debugInfo.today_quests?.map(q => (
+                                                <DebugQuestRow key={q.quest_id}>
+                                                    <span>
+                                                        {q.quest_id} ({q.progress})
+                                                        {q.completed && ' ✓'}
+                                                    </span>
+                                                    {!q.completed && (
+                                                        <DebugButton
+                                                            $variant="success"
+                                                            onClick={() => debugCompleteQuest(q.quest_id)}
+                                                        >
+                                                            Complete
+                                                        </DebugButton>
+                                                    )}
+                                                </DebugQuestRow>
+                                            ))}
+                                        </div>
+                                        <div style={{ marginTop: '0.4rem', borderTop: '1px dashed rgba(239,68,68,0.3)', paddingTop: '0.4rem' }}>
+                                            <DebugLabel>Set completed count:</DebugLabel>
+                                            <DebugRow>
+                                                <DebugInput
+                                                    type="number"
+                                                    value={targetCompletedCount}
+                                                    onChange={e => setTargetCompletedCount(e.target.value)}
+                                                    min="0"
+                                                />
+                                                <DebugButton onClick={debugSetCompletedCount}>
+                                                    Set Count
+                                                </DebugButton>
+                                            </DebugRow>
+                                        </div>
+                                        <DebugButtonGroup>
+                                            <DebugButton $variant="danger" onClick={debugResetQuests}>
+                                                Reset Today's Quests
+                                            </DebugButton>
+                                            <DebugButton onClick={fetchDebugInfo}>
+                                                Refresh Debug
+                                            </DebugButton>
+                                        </DebugButtonGroup>
+                                    </>
+                                ) : (
+                                    <div>No debug info available</div>
+                                )}
+                            </DebugPanel>
+                        )}
+                    </div>
                 )}
             </QuestCardContainer>
 
@@ -927,9 +1167,16 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                     <CelebrationContent onClick={e => e.stopPropagation()}>
                         <CelebrationEmoji>🎉</CelebrationEmoji>
                         <CelebrationTitle>Rewards Claimed!</CelebrationTitle>
-                        <CelebrationAmount>
-                            +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
-                        </CelebrationAmount>
+                        {claimedAmount > 0 && (
+                            <CelebrationAmount>
+                                +{Math.round(claimedAmount / 1_000_000).toLocaleString()} MIRAGE
+                            </CelebrationAmount>
+                        )}
+                        {claimedInviteCodes > 0 && (
+                            <CelebrationAmount style={{ fontSize: claimedAmount > 0 ? '1.5rem' : '2.5rem' }}>
+                                +{claimedInviteCodes} Invite Code{claimedInviteCodes > 1 ? 's' : ''}
+                            </CelebrationAmount>
+                        )}
                         <CelebrationClose onClick={closeCelebration}>
                             Awesome!
                         </CelebrationClose>

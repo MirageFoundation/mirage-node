@@ -8,7 +8,6 @@ import MobileHeader from "../components/MobileHeader";
 import QuestHeroCard from "../components/QuestHeroCard";
 import styled from "styled-components";
 import { Link, useLocation, useParams, useNavigationType } from 'react-router-dom';
-import { sortPosts } from '../utils/SortPosts.js';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
 import { isSubscribed, subscribe, unsubscribe, fetchFollowedTopics, invalidateCache as invalidateTopicsCache } from '../utils/Subscriptions';
@@ -190,6 +189,67 @@ const InviteOnlyHeroButtons = styled.div`
     }
 `;
 
+// Stats display for welcome hero (logged-out users)
+const WelcomeStatsGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 0.5rem 0;
+    padding: 0.75rem 0;
+    border-top: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.2)'
+        : 'rgba(102, 126, 234, 0.25)'};
+    border-bottom: 1px solid ${({ theme }) => theme?.name === 'light'
+        ? 'rgba(102, 126, 234, 0.2)'
+        : 'rgba(102, 126, 234, 0.25)'};
+    width: 100%;
+
+    @media (max-width: 768px) {
+        gap: 0.5rem;
+    }
+`;
+
+const WelcomeStatItem = styled.div`
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 0.15rem;
+    flex: 1;
+    min-width: 0;
+`;
+
+const WelcomeStatValue = styled.div`
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    font-variant-numeric: tabular-nums;
+
+    @media (max-width: 1000px) {
+        font-size: 1.1rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 1rem;
+    }
+`;
+
+const WelcomeStatLabel = styled.div`
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+
+    @media (max-width: 1000px) {
+        font-size: 0.6rem;
+    }
+
+    @media (max-width: 768px) {
+        font-size: 0.55rem;
+    }
+`;
+
 // Mobile header branding for home/following feeds
 
 // Invite-only banner - permanent, non-dismissable (matches HomeFeedInfoCard style)
@@ -220,14 +280,6 @@ const InviteOnlyBanner = styled.div`
     }
 `;
 
-const InviteBannerContent = styled.div`
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    flex: 1;
-    min-width: 0;
-`;
-
 const InviteBannerContentWrapper = styled.div`
     display: flex;
     align-items: center;
@@ -254,46 +306,6 @@ const InviteBannerTextContent = styled.div`
     }
 `;
 
-const InviteBannerTitle = styled.div`
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    line-height: 1;
-
-    @media (max-width: 1000px) {
-        font-size: 0.62rem;
-    }
-`;
-
-const InviteBannerEmoji = styled.span`
-    font-size: 0.9rem;
-    line-height: 1;
-    display: inline-block;
-
-    @media (max-width: 1000px) {
-        font-size: 0.8rem;
-    }
-`;
-
-const InviteBannerDescription = styled.div`
-    font-size: 0.65rem;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
-    line-height: 1.4;
-
-    @media (max-width: 1000px) {
-        font-size: 0.55rem;
-    }
-`;
-
-const DesktopBr = styled.br`
-    @media (max-width: 768px) {
-        display: none;
-    }
-`;
-
 const InviteBannerButton = styled.button`
     display: inline-flex;
     align-items: center;
@@ -309,12 +321,11 @@ const InviteBannerButton = styled.button`
     border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease;
     box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
     flex-shrink: 0;
 
     &:hover {
-        box-shadow: 0 4px 14px rgba(255, 140, 0, 0.55);
         transform: translateY(-1px);
     }
 
@@ -1196,14 +1207,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }, []);
 
     const [error, setError] = useState(null);
-    const [sortBy] = useState(() => {
-        try {
-            const saved = Storage.load('sort_by', 'magic');
-            return (saved === 'magic' || saved === 'points' || saved === 'newest') ? saved : 'magic';
-        } catch (_) {
-            return 'magic';
-        }
-    }); // Sorting mechanism (persisted)
     const [, setTopics] = useState([]); // Dynamically store unique topics (state is persisted but value unused)
 
     // Only restore from cache on back navigation (POP), not on direct nav (clicking links)
@@ -1357,6 +1360,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [inviteCodeCopied, setInviteCodeCopied] = useState(false);
 
+    // Welcome stats for logged-out users (user count, posts, DAU)
+    // Initialize from cache for instant display (stale-while-revalidate pattern)
+    const [welcomeStats, setWelcomeStats] = useState(() => {
+        try { return Storage.load('welcome_stats_cache', null); } catch (_) { return null; }
+    });
+    const [welcomeStatsStale, setWelcomeStatsStale] = useState(() => {
+        // If we have cached stats, they're stale until fresh data loads
+        try { return Storage.load('welcome_stats_cache', null) !== null; } catch (_) { return false; }
+    });
+
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
         try { return Storage.load('invite_banner_collapsed', false); } catch (_) { return false; }
@@ -1389,8 +1402,51 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             } catch (_) { }
         };
         loadInviteCodes();
-        return () => { cancelled = true; };
+
+        // Listen for invite codes updates (e.g., when claimed from quests)
+        const handleInviteCodesUpdated = () => {
+            loadInviteCodes();
+        };
+        window.addEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
+
+        return () => {
+            cancelled = true;
+            window.removeEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
+        };
     }, [isLoggedIn, viewerAddress]);
+
+    // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
+    // Uses lightweight endpoint that only returns essential counts (fast, cached)
+    // Implements stale-while-revalidate: show cached value immediately, update when fresh
+    useEffect(() => {
+        if (isLoggedIn) return; // Only fetch for logged-out visitors
+
+        let cancelled = false;
+        const loadWelcomeStats = async () => {
+            try {
+                // Use lightweight endpoint - only 3 queries, cached 30s
+                const data = await Api.get('get_welcome_stats', {}, { timeoutMs: 3000 });
+                if (cancelled) return;
+                if (data) {
+                    const freshStats = {
+                        userCount: data.registered_users || 0,
+                        posts24h: data.posts_24h || 0,
+                        comments24h: 0, // Not returned by lightweight endpoint
+                        active24h: data.active_24h || 0,
+                    };
+                    setWelcomeStats(freshStats);
+                    setWelcomeStatsStale(false); // Fresh data loaded
+                    // Cache for next visit
+                    try { Storage.save('welcome_stats_cache', freshStats); } catch (_) { }
+                }
+            } catch (_) {
+                // Silently fail - stats are optional enhancement
+                // Keep showing stale data if we have it
+            }
+        };
+        loadWelcomeStats();
+        return () => { cancelled = true; };
+    }, [isLoggedIn]);
 
     // Get next available invite code
     const nextAvailableCode = inviteCodes.find(c => !c.is_used);
@@ -1577,23 +1633,16 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return () => window.removeEventListener('settingsUpdated', handler);
     }, []);
 
-    // Track mobile screen size to hide compact option
+    // Track mobile screen size to hide compact option in dropdown
     useEffect(() => {
         const checkMobile = () => {
             try {
                 if (typeof window !== 'undefined' && window.matchMedia) {
                     const mobile = window.matchMedia('(max-width: 600px)').matches;
                     setIsMobile(mobile);
-                    // If on mobile and compact is selected, switch to large
-                    if (mobile && cardSize === 'compact') {
-                        handleCardSizeChange('large');
-                    }
                 } else if (typeof window !== 'undefined') {
                     const mobile = window.innerWidth <= 600;
                     setIsMobile(mobile);
-                    if (mobile && cardSize === 'compact') {
-                        handleCardSizeChange('large');
-                    }
                 }
             } catch (_) { }
         };
@@ -1610,7 +1659,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             }
         }
         return () => window.removeEventListener('resize', checkMobile);
-    }, [cardSize]);
+    }, []);
 
     // Track posts the viewer downvoted to hide with animation on Home
     useEffect(() => {
@@ -1726,9 +1775,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
             // Note: Downvote filtering is handled in render phase to avoid stale closure issues
 
-            const sortedOnce = (isHomeFeed || isFollowingFeed)
-                ? filtered
-                : sortPosts(filtered, sortBy);
+            // Server already returns posts in correct order for all feeds (magic or newest)
+            const sortedOnce = filtered;
             const sortedOrder = sortedOnce.map(p => p.post_id);
 
             const postDict = sortedOnce.reduce((acc, post) => {
@@ -1852,7 +1900,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 .catch(onError);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [state.topic, state.lastFetched, setTopic, setPosts, sortBy, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
+    }, [state.topic, state.lastFetched, setTopic, setPosts, currentPage, followedTopicsSet, followedAuthorsSet, homeSortMode, isLoadingMore, hideDownvotedPosts]);
 
     // handleNsfwChoice - must be after getPosts is defined
     const handleNsfwChoice = useCallback((allowNsfw) => {
@@ -2072,6 +2120,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }, [currentPage, urlTopic, hasMorePosts, isLoadingMore]);
 
     useEffect(() => {
+        // Skip topics fetch for logged-out users - they can't navigate topics anyway
+        if (!isLoggedIn) return;
+
         const storedTopicsData = Storage.load("topics", { topics: [], lastFetched: null });
         const stored = Array.isArray(storedTopicsData.topics) ? storedTopicsData.topics : [];
         const lastFetched = storedTopicsData.lastFetched ? new Date(storedTopicsData.lastFetched) : null;
@@ -2081,7 +2132,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (shouldFetch && !topicsLoadedRef.current) {
             topicsLoadedRef.current = true;
             let cancelled = false;
-            Api.get('get_topics', { limit: 50 }, { timeoutMs: 10000 })
+            Api.get('get_topics', { limit: 50, min_posts: 1 }, { timeoutMs: 10000 })
                 .then((data) => {
                     if (cancelled || !isMountedRef.current) return;
                     if (data && Array.isArray(data.topics)) {
@@ -2104,11 +2155,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         } else if (stored.length > 0) {
             setTopics(stored);
         }
-    }, []);
+    }, [isLoggedIn]);
 
     useEffect(() => {
         window.getPosts = getPosts;  // Expose getPosts globally
         let cancelled = false;
+
+        // Skip posts fetch for logged-out users - they see the welcome screen instead
+        if (!isLoggedIn) {
+            setIsLoading(false);
+            return;
+        }
 
         // On back navigation (POP), restore from cache if available
         if (shouldRestoreFeedState) {
@@ -2206,11 +2263,9 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const filtered = (urlTopic === "all" || urlTopic === "home" || urlTopic === "following")
             ? topLevelPosts
             : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
-        const sortedOnce = (urlTopic === "home" || urlTopic === "following")
-            ? filtered
-            : sortPosts(filtered, sortBy);
-        setStableOrder(sortedOnce.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, sortBy, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
+        // Server already returns posts in correct order
+        setStableOrder(filtered.map(p => p.post_id));
+    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
@@ -2271,7 +2326,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 // This enables browser back button to restore feed position
                 try {
                     const url = new URL(link.href, window.location.origin);
-                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post')) {
+                    // Support both new /p/ routes and legacy /view_post
+                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post') || url.pathname.startsWith('/p/')) {
                         sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                             source: 'feed',
                             topic: urlTopic,
@@ -2359,11 +2415,18 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     }
 
     // When viewing a single post with comments, header should show topic > title
-    const isPostView = location.pathname.startsWith('/view_post');
+    // Support both new /p/ routes and legacy /view_post
+    const isPostView = location.pathname.startsWith('/view_post') || location.pathname.startsWith('/p/');
     let header = null;
     if (isPostView) {
-        const params = new URLSearchParams(location.search);
-        const pid = params.get('post_id');
+        const pid = (() => {
+            if (location.pathname.startsWith('/p/')) {
+                const raw = location.pathname.slice(3);
+                return raw ? decodeURIComponent(raw) : null;
+            }
+            const params = new URLSearchParams(location.search);
+            return params.get('post_id');
+        })();
         const p = pid ? state.posts[pid] : null;
         if (p) {
             const topicKey = String(p.topic || '').trim().toLowerCase();
@@ -2766,6 +2829,25 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                 <InviteOnlyHeroDescription>
                                     Mirage is a fully decentralized social network built on its own blockchain, designed to be 100% censorship resistant. Your posts, votes, and identity live on-chain — no central authority can silence you.
                                 </InviteOnlyHeroDescription>
+                                <InviteOnlyHeroDescription>
+                                    <a href="https://mirage.foundation" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>Learn more about our mission</a>
+                                </InviteOnlyHeroDescription>
+                                {welcomeStats && welcomeStats.userCount > 0 && (
+                                    <WelcomeStatsGrid>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.userCount.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Users</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{welcomeStats.active24h.toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Active (24h)</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                        <WelcomeStatItem>
+                                            <WelcomeStatValue>{welcomeStatsStale ? '~' : ''}{(welcomeStats.posts24h + welcomeStats.comments24h).toLocaleString()}</WelcomeStatValue>
+                                            <WelcomeStatLabel>Posts (24h)</WelcomeStatLabel>
+                                        </WelcomeStatItem>
+                                    </WelcomeStatsGrid>
+                                )}
                                 <InviteOnlyHeroDescription>
                                     Have an invite code? Join the community today.
                                 </InviteOnlyHeroDescription>

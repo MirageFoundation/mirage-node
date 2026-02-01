@@ -1756,8 +1756,8 @@ def get_user_status():
         except Exception:
             pass
 
-        # Query chain for real-time subscription data
-        chain_profile = _query_chain_profile(addr)
+        # Query chain for real-time subscription data (use full gRPC query to get level)
+        chain_profile = _query_chain_profile_full(addr)
         if chain_profile:
             if chain_profile.get("level") is not None:
                 user_level = int(chain_profile["level"])
@@ -2125,6 +2125,18 @@ def get_supply_history():
 _circulation_cache: Dict[str, Any] = {"data": None, "expires": 0}
 _CIRCULATION_CACHE_TTL = 60  # 60 seconds
 
+# Cache for welcome stats (lightweight stats for landing page)
+_welcome_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_WELCOME_STATS_CACHE_TTL = 30  # 30 seconds
+
+# Cache for full overview stats (expensive query)
+_overview_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_OVERVIEW_STATS_CACHE_TTL = 30  # 30 seconds
+
+# Cache for analytics stats (very expensive - stats_events processing)
+_analytics_stats_cache: Dict[str, Any] = {"data": None, "expires": 0}
+_ANALYTICS_STATS_CACHE_TTL = 60  # 60 seconds (longer TTL for expensive query)
+
 # Wallets excluded from circulating supply (team/founder controlled)
 _EXCLUDED_FROM_CIRCULATING = [
     "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",  # Founders Fund
@@ -2291,7 +2303,9 @@ def get_config():
             if valoper:
                 possible_paths = [
                     "/opt/mirage/blockchain/bin/miraged",
-                    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")),
+                    os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")
+                    ),
                     "miraged",
                 ]
                 bin_path = None
@@ -2625,6 +2639,7 @@ def get_topics():
     """Get list of most active topics, excluding deleted messages."""
     limit = request.args.get("limit", 50, type=int)
     limit = min(max(1, limit), 200)
+    min_posts = request.args.get("min_posts", 10, type=int)  # Filter topics with < N posts
     try:
         # Get min/max topic size from chain params
         p = expect_params()
@@ -2636,6 +2651,7 @@ def get_topics():
 
         deleted_clause = _deleted_filter()
 
+        # Get topics with at least min_posts
         cur.execute(
             f"""
             SELECT p.topic, COUNT(1) as post_count
@@ -2647,13 +2663,36 @@ def get_topics():
               AND LENGTH(TRIM(p.topic)) <= %s
               {deleted_clause}
             GROUP BY p.topic
-            HAVING COUNT(1) > 0
+            HAVING COUNT(1) >= %s
             ORDER BY post_count DESC, p.topic ASC
             LIMIT %s
             """,
-            (min_topic, max_topic, limit),
+            (min_topic, max_topic, min_posts, limit),
         )
         rows = cur.fetchall()
+
+        # Count topics with fewer posts (for "and X more" display)
+        small_topics_count = 0
+        if min_posts > 1:
+            cur.execute(
+                f"""
+                SELECT COUNT(*) FROM (
+                    SELECT p.topic
+                    FROM posts p
+                    WHERE COALESCE(p.target, '') = ''
+                      AND LENGTH(COALESCE(p.title, '')) > 0
+                      AND p.topic IS NOT NULL
+                      AND LENGTH(TRIM(p.topic)) >= %s
+                      AND LENGTH(TRIM(p.topic)) <= %s
+                      {deleted_clause}
+                    GROUP BY p.topic
+                    HAVING COUNT(1) > 0 AND COUNT(1) < %s
+                ) small_topics
+                """,
+                (min_topic, max_topic, min_posts),
+            )
+            small_topics_count = cur.fetchone()[0] or 0
+
         # Opportunistic backfill for missing thumbnails
         try:
             for i, row in enumerate(rows):
@@ -2723,14 +2762,17 @@ def get_topics():
         topics = list(topics_dict.values())
         conn.close()
 
-        return jsonify({"topics": topics})
+        return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @public_bp.route("/api/search_topics")
 def search_topics():
-    """Prefix-search topics with safety flags."""
+    """Search topics by substring with relevance sorting.
+
+    Sorts results by: exact match > prefix match > contains match, then by post count.
+    """
     limit = request.args.get("limit", 20, type=int)
     offset = request.args.get("offset", 0, type=int)
     limit = min(max(1, limit), 50)
@@ -2750,6 +2792,8 @@ def search_topics():
         cur = conn.cursor()
         deleted_clause = _deleted_filter()
 
+        # Search with substring match, sorted by relevance:
+        # 0 = exact match, 1 = prefix match, 2 = contains match
         cur.execute(
             f"""
             WITH topic_base AS (
@@ -2763,19 +2807,24 @@ def search_topics():
                   AND LOWER(p.topic) LIKE %s
                   {deleted_clause}
                 GROUP BY LOWER(TRIM(p.topic))
-                ORDER BY post_count DESC, topic ASC
-                LIMIT %s
-                OFFSET %s
             )
             SELECT
                 tb.topic,
                 tb.post_count,
                 COALESCE(tcs.dominant_tag, '') AS dominant_tag,
-                COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio
+                COALESCE(tcs.dominant_ratio, 0) AS dominant_ratio,
+                CASE
+                    WHEN tb.topic = %s THEN 0
+                    WHEN tb.topic LIKE %s THEN 1
+                    ELSE 2
+                END AS relevance
             FROM topic_base tb
             LEFT JOIN topic_content_stats tcs ON LOWER(tcs.topic) = tb.topic
+            ORDER BY relevance ASC, post_count DESC, topic ASC
+            LIMIT %s
+            OFFSET %s
             """,
-            (min_topic, max_topic, f"{q}%", limit, offset),
+            (min_topic, max_topic, f"%{q}%", q, f"{q}%", limit, offset),
         )
 
         rows = cur.fetchall()
@@ -3920,7 +3969,7 @@ def _fetch_post(
     use_stored_counts: bool = False,
 ):
     """Fetch a single post with aggregates.
-    
+
     Args:
         cur: Database cursor
         txhash: Post ID
@@ -4140,7 +4189,7 @@ def _fetch_comment_tree_batch(
         root_topic_val = (row[7] or "").strip()
         root_post_id_val = (row[8] or "").strip().lower()
         target_val = (row[9] or "").strip().lower()
-        thumbnail_val = (row[10] or "")
+        thumbnail_val = row[10] or ""
         edited_flag = bool(row[11])
         edited_at_val = int(row[12] or 0)
         depth = int(row[13])
@@ -4232,13 +4281,57 @@ def _fetch_comment_tree_batch(
         if parent_id in all_posts:
             all_posts[parent_id]["children"] = kids
 
+    # Step 3b: For posts at max_depth with no loaded children, query actual reply counts
+    # This ensures "Continue this thread" links appear when there are deeper replies
+    deleted_bare = _deleted_filter_bare()
+    leaf_ids = [pid for pid, post in all_posts.items() if post.get("_depth") == max_depth and not post.get("children")]
+    leaf_reply_counts: dict[str, int] = {}
+    if leaf_ids:
+        # Exclude blocked posts/users from the count
+        if blocked_posts or blocked_users:
+            all_blocked = list((blocked_posts or set()) | (blocked_users or set()))
+            blocked_ph = ",".join(["%s"] * len(all_blocked))
+            leaf_ph = ",".join(["%s"] * len(leaf_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COUNT(1)
+                FROM posts
+                WHERE LOWER(target) IN ({leaf_ph})
+                  AND LOWER(txhash) NOT IN ({blocked_ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
+                  {deleted_bare}
+                GROUP BY LOWER(target)
+                """,
+                leaf_ids + all_blocked + all_blocked,
+            )
+        else:
+            leaf_ph = ",".join(["%s"] * len(leaf_ids))
+            cur.execute(
+                f"""
+                SELECT LOWER(target), COUNT(1)
+                FROM posts
+                WHERE LOWER(target) IN ({leaf_ph})
+                  {deleted_bare}
+                GROUP BY LOWER(target)
+                """,
+                leaf_ids,
+            )
+        for tgt, cnt in cur.fetchall():
+            if tgt:
+                leaf_reply_counts[tgt] = int(cnt or 0)
+
     # Step 4: Compute visible-only comment counts via post-order traversal
     def count_descendants(node: dict) -> int:
         """Count all descendants (recursive). Updates node['comments'] and returns total."""
         total = 0
         for child in node.get("children", []):
             total += 1 + count_descendants(child)
-        node["comments"] = total
+        # For leaf nodes at max_depth, use the queried reply count instead
+        pid = node.get("post_id", "")
+        if pid in leaf_reply_counts:
+            node["comments"] = leaf_reply_counts[pid]
+        else:
+            node["comments"] = total
         return total
 
     root = all_posts[root_id_lower]
@@ -4274,9 +4367,7 @@ def get_comments():
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
-        root, children = _fetch_comment_tree_batch(
-            cur, post_id, blocked_posts, blocked_users, max_depth=6
-        )
+        root, children = _fetch_comment_tree_batch(cur, post_id, blocked_posts, blocked_users, max_depth=6)
         t_tree_ms = (time.time() - t_tree) * 1000
 
         if not root:
@@ -4444,10 +4535,23 @@ def get_root_post_id():
 
 @public_bp.route("/api/get_comment_context")
 def get_comment_context():
+    rid = next_request_id()
     comment_id = request.args.get("comment_id", type=str)
     address = request.args.get("address", default="", type=str)
-    max_depth = request.args.get("max_depth", default=6, type=int)
-    max_depth = min(max(1, max_depth), 10)
+    max_depth_raw = request.args.get("max_depth", default=None, type=str)
+
+    # Parse and validate max_depth strictly (1-5, hard error on invalid)
+    if max_depth_raw is None:
+        max_depth = 5  # Default to max
+    else:
+        try:
+            max_depth = int(max_depth_raw)
+        except (ValueError, TypeError):
+            log_event(rid, "get_comment_context.invalid_depth", raw=max_depth_raw)
+            return jsonify({"error": f"Invalid max_depth '{max_depth_raw}'. Must be integer 1-5."}), 400
+        if max_depth < 1 or max_depth > 5:
+            log_event(rid, "get_comment_context.invalid_depth", value=max_depth)
+            return jsonify({"error": f"max_depth must be 1-5, got {max_depth}"}), 400
 
     if not comment_id:
         return jsonify({"error": "comment_id is required"}), 400
@@ -4923,6 +5027,389 @@ def stats_event():
         return jsonify({"error": str(e)}), 500
 
 
+def _get_stats_analytics(rid: int):
+    """Return analytics stats from stats_events (DAU/MAU, device/browser/OS breakdown).
+
+    This is a separate endpoint because stats_events processing is expensive.
+    The frontend loads this lazily after showing core stats.
+    """
+    now = int(time.time())
+
+    # Check cache first
+    if _analytics_stats_cache["data"] is not None and _analytics_stats_cache["expires"] > now:
+        log_event(rid, "get_stats.analytics.cached")
+        return jsonify(_analytics_stats_cache["data"])
+
+    try:
+        conn = connect_db(timeout=15.0, busy_timeout_ms=20000)
+        try:
+            cur = conn.cursor()
+            today_start = now - 86400
+            yesterday_start = now - (2 * 86400)
+            thirty_days_ago = now - (30 * 86400)
+
+            stats: dict[str, Any] = {}
+
+            # Check if we have stats_events
+            cur.execute("SELECT COUNT(*) FROM stats_events")
+            has_stats_events = cur.fetchone()[0] > 0
+
+            if has_stats_events:
+                # Known bots/crawlers to exclude
+                bot_names = {
+                    "googlebot",
+                    "applebot",
+                    "bingbot",
+                    "yandexbot",
+                    "baiduspider",
+                    "duckduckbot",
+                    "slurp",
+                    "facebook",
+                    "facebookexternalhit",
+                    "facebot",
+                    "twitterbot",
+                    "twitter",
+                    "linkedinbot",
+                    "pinterest",
+                    "semrushbot",
+                    "ahrefsbot",
+                    "mj12bot",
+                    "dotbot",
+                    "petalbot",
+                    "bytespider",
+                }
+
+                # Fetch all events from last 30 days
+                cur.execute(
+                    """
+                    SELECT session_id, user_address, user_agent, created_at, event_type
+                    FROM stats_events
+                    WHERE created_at >= %s
+                    """,
+                    (thirty_days_ago,),
+                )
+                all_events = cur.fetchall()
+
+                # First pass: identify bot sessions and parse user agents
+                session_ua: dict[str, Any] = {}
+                bot_sessions: set[str] = set()
+                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
+                    if sess_id in session_ua or sess_id in bot_sessions:
+                        continue
+                    if not ua_string or not ua_string.strip():
+                        continue
+                    try:
+                        ua = parse_user_agent(ua_string)
+                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
+                            bot_sessions.add(sess_id)
+                        else:
+                            session_ua[sess_id] = ua
+                    except Exception:
+                        pass
+
+                # Filter to non-bot events only
+                clean_events = [
+                    (sess_id, user_addr, created_at, event_type)
+                    for sess_id, user_addr, _ua, created_at, event_type in all_events
+                    if sess_id not in bot_sessions
+                ]
+
+                # Calculate DAU/MAU from clean events
+                dau_today_set: set[str] = set()
+                dau_yesterday_set: set[str] = set()
+                mau_set: set[str] = set()
+                dau_reg_set: set[str] = set()
+                unreg_sessions: set[str] = set()
+
+                for sess_id, user_addr, created_at, event_type in clean_events:
+                    if event_type not in ("visit", "session_start", "page_view"):
+                        continue
+                    user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
+
+                    mau_set.add(user_key)
+
+                    if created_at >= today_start:
+                        dau_today_set.add(user_key)
+                        if user_addr and user_addr.strip():
+                            dau_reg_set.add(user_addr.lower())
+
+                    if yesterday_start <= created_at < today_start:
+                        dau_yesterday_set.add(user_key)
+
+                    if not user_addr or not user_addr.strip():
+                        unreg_sessions.add(sess_id)
+
+                stats["dau_today"] = len(dau_today_set)
+                stats["dau_any_today"] = len(dau_today_set)
+                stats["dau_yesterday"] = len(dau_yesterday_set)
+                stats["maus"] = len(mau_set)
+                stats["dau_registered_today"] = len(dau_reg_set)
+                stats["unregistered_users"] = len(unreg_sessions)
+
+                # Browser/device/OS breakdown
+                browser_counts: dict[str, int] = {}
+                os_counts: dict[str, int] = {}
+                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
+
+                for sess_id, ua in session_ua.items():
+                    browser = ua.browser.family or "Unknown"
+                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
+                    os_family = ua.os.family or "Unknown"
+                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
+                    if ua.is_mobile:
+                        device_counts["mobile"] += 1
+                    elif ua.is_tablet:
+                        device_counts["tablet"] += 1
+                    elif ua.is_pc:
+                        device_counts["desktop"] += 1
+                    else:
+                        device_counts["other"] += 1
+
+                total_sessions = len(session_ua) or 1
+                browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
+                browser_pcts.sort(key=lambda x: x[1], reverse=True)
+                top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
+                if len(browser_pcts) > 4:
+                    other_pct = round(sum(p for _, p in browser_pcts[4:]), 1)
+                    if other_pct > 0:
+                        top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
+                stats["browser_breakdown"] = top_browsers
+
+                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
+                os_pcts.sort(key=lambda x: x[1], reverse=True)
+                top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
+                if len(os_pcts) > 4:
+                    other_pct = round(sum(p for _, p in os_pcts[4:]), 1)
+                    if other_pct > 0:
+                        top_os.append({"name": "Other", "pct": f"{other_pct}%"})
+                stats["os_breakdown"] = top_os
+
+                device_total = sum(device_counts.values()) or 1
+                stats["device_breakdown"] = {
+                    k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
+                }
+            else:
+                stats["dau_today"] = 0
+                stats["dau_any_today"] = 0
+                stats["dau_yesterday"] = 0
+                stats["maus"] = 0
+                stats["dau_registered_today"] = 0
+                stats["unregistered_users"] = 0
+                stats["browser_breakdown"] = []
+                stats["os_breakdown"] = []
+                stats["device_breakdown"] = {"desktop": "0%", "mobile": "0%", "tablet": "0%", "other": "0%"}
+
+        finally:
+            conn.close()
+
+        # Cache the result
+        _analytics_stats_cache["data"] = stats
+        _analytics_stats_cache["expires"] = now + _ANALYTICS_STATS_CACHE_TTL
+
+        log_event(rid, "get_stats.analytics.ok", dau=stats.get("dau_today", 0), mau=stats.get("maus", 0))
+        return jsonify(stats)
+
+    except Exception as e:
+        log_event(rid, "get_stats.analytics.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_stats_rewards(rid: int):
+    """Return comprehensive reward statistics."""
+    from routes.quests import get_distributor
+
+    try:
+        ts = int(time.time())
+
+        # Get pool balance
+        distributor = get_distributor()
+        pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
+
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+
+            # Get overall stats
+            cur.execute(
+                """
+                SELECT 
+                    COUNT(*) as total_rewards,
+                    COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                    COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as claimed_amount,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                    MIN(created_at) as first_reward_at,
+                    MAX(created_at) as last_reward_at
+                FROM pending_rewards
+            """
+            )
+            summary_row = cur.fetchone()
+
+            summary = {
+                "total_rewards": summary_row[0] or 0,
+                "claimed_count": summary_row[1] or 0,
+                "pending_count": summary_row[2] or 0,
+                "total_amount": summary_row[3] or 0,
+                "claimed_amount": summary_row[4] or 0,
+                "pending_amount": summary_row[5] or 0,
+                "first_reward_at": summary_row[6],
+                "last_reward_at": summary_row[7],
+                "pool_balance": pool_balance,
+                "payouts_enabled": distributor.is_configured(),
+            }
+
+            # Calculate daily rate (last 7 days)
+            week_ago = ts - (7 * 86400)
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                    COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                ELSE 0 END), 0)
+                FROM pending_rewards
+                WHERE created_at >= %s
+            """,
+                (week_ago,),
+            )
+            week_total = cur.fetchone()[0] or 0
+            summary["daily_rate"] = week_total // 7
+
+            # Get per-user stats
+            cur.execute(
+                """
+                SELECT 
+                    pr.owner,
+                    p.username,
+                    COUNT(*) as reward_count,
+                    COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                    COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN 
+                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as total_earned,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN 
+                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as claimed_amount,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                    MIN(pr.created_at) as first_reward_at,
+                    MAX(pr.created_at) as last_reward_at,
+                    p.created_at as account_created_at
+                FROM pending_rewards pr
+                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                GROUP BY pr.owner, p.username, p.created_at
+                ORDER BY total_earned DESC
+            """
+            )
+            user_rows = cur.fetchall()
+
+            users = []
+            for row in user_rows:
+                owner = row[0]
+                first_reward_at = row[8]
+                last_reward_at = row[9]
+                total_earned = row[5] or 0
+
+                # Calculate earnings per day
+                if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
+                    days_active = max(1, (last_reward_at - first_reward_at) // 86400)
+                    earnings_per_day = total_earned // days_active
+                else:
+                    earnings_per_day = total_earned
+
+                users.append(
+                    {
+                        "address": owner,
+                        "username": row[1],
+                        "reward_count": row[2] or 0,
+                        "claimed_count": row[3] or 0,
+                        "pending_count": row[4] or 0,
+                        "total_earned": total_earned,
+                        "claimed_amount": row[6] or 0,
+                        "pending_amount": row[7] or 0,
+                        "first_reward_at": first_reward_at,
+                        "last_reward_at": last_reward_at,
+                        "account_created_at": row[10],
+                        "earnings_per_day": earnings_per_day,
+                    }
+                )
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.rewards.ok", user_count=len(users))
+        return jsonify({"summary": summary, "users": users})
+
+    except Exception as e:
+        log_event(rid, "get_stats.rewards.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_stats_rewards_history(rid: int):
+    """Return paginated reward history."""
+    try:
+        offset = int(request.args.get("offset", 0))
+        limit = min(int(request.args.get("limit", 50)), 100)
+
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT 
+                    pr.owner,
+                    p.username,
+                    pr.reward_type,
+                    pr.reward_data,
+                    pr.reason,
+                    pr.created_at,
+                    pr.claimed_at,
+                    pr.payout_amount
+                FROM pending_rewards pr
+                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                ORDER BY pr.created_at DESC
+                LIMIT %s OFFSET %s
+            """,
+                (limit + 1, offset),
+            )
+            reward_rows = cur.fetchall()
+
+            has_more = len(reward_rows) > limit
+            if has_more:
+                reward_rows = reward_rows[:limit]
+
+            rewards = []
+            for row in reward_rows:
+                reward_data = row[3] if isinstance(row[3], dict) else {}
+                base_amount = reward_data.get("amount", 0)
+                payout_amount = row[7]
+                display_amount = payout_amount if payout_amount is not None else base_amount
+                rewards.append(
+                    {
+                        "address": row[0],
+                        "username": row[1],
+                        "type": row[2],
+                        "amount": display_amount,
+                        "reason": row[4],
+                        "created_at": row[5],
+                        "claimed_at": row[6],
+                        "claimed": row[6] is not None,
+                    }
+                )
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.rewards_history.ok", count=len(rewards), offset=offset)
+        return jsonify({"rewards": rewards, "has_more": has_more})
+
+    except Exception as e:
+        log_event(rid, "get_stats.rewards_history.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 def _get_stats_signups(rid: int):
     """Return recent signups via invite codes with referrer info."""
     try:
@@ -5189,9 +5676,84 @@ def _get_stats_accounts(rid: int):
         return jsonify({"error": str(e)}), 500
 
 
+@public_bp.route("/api/get_welcome_stats")
+def get_welcome_stats():
+    """Lightweight stats for welcome/landing page. Returns only essential counts.
+
+    This is much faster than get_stats?tab=overview as it only runs 3 queries.
+    Cached for 30 seconds.
+    """
+    rid = next_request_id()
+    log_event(rid, "get_welcome_stats.begin")
+
+    now = int(time.time())
+
+    # Check cache first
+    if _welcome_stats_cache["data"] is not None and _welcome_stats_cache["expires"] > now:
+        log_event(rid, "get_welcome_stats.cached")
+        return jsonify(_welcome_stats_cache["data"])
+
+    try:
+        conn = connect_db(timeout=3.0, busy_timeout_ms=5000)
+        try:
+            cur = conn.cursor()
+            today_start = now - 86400  # last 24h window
+
+            # Query 1: registered users count
+            cur.execute("SELECT COUNT(*) FROM profiles")
+            registered_users = cur.fetchone()[0] or 0
+
+            # Query 2: posts + comments in last 24h
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE deleted = FALSE
+                  AND created_at >= %s
+                """,
+                (today_start,),
+            )
+            posts_24h = cur.fetchone()[0] or 0
+
+            # Query 3: DAU from stats_events (actual page visits, same as /stats page)
+            # Count unique visitors: registered users by address, guests by session_id
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT 
+                    CASE 
+                        WHEN user_address IS NOT NULL AND user_address != '' THEN LOWER(user_address)
+                        ELSE session_id
+                    END
+                )
+                FROM stats_events
+                WHERE created_at >= %s
+                  AND event_type IN ('visit', 'session_start', 'page_view')
+                """,
+                (today_start,),
+            )
+            active_24h = cur.fetchone()[0] or 0
+
+            result = {
+                "registered_users": registered_users,
+                "posts_24h": posts_24h,
+                "active_24h": active_24h,
+            }
+
+            # Cache the result
+            _welcome_stats_cache["data"] = result
+            _welcome_stats_cache["expires"] = now + _WELCOME_STATS_CACHE_TTL
+
+            log_event(rid, "get_welcome_stats.ok", **result)
+            return jsonify(result)
+        finally:
+            conn.close()
+    except Exception as e:
+        log_event(rid, "get_welcome_stats.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
 @public_bp.route("/api/get_stats")
 def get_stats():
-    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts."""
+    """Return stats for the stats page. Supports tabs: overview (default), signups, accounts, analytics, rewards."""
     rid = next_request_id()
     tab = request.args.get("tab", "overview").lower()
     log_event(rid, "get_stats.begin", tab=tab)
@@ -5203,6 +5765,18 @@ def get_stats():
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
         return _get_stats_accounts(rid)
+    elif tab == "analytics":
+        return _get_stats_analytics(rid)
+    elif tab == "rewards":
+        return _get_stats_rewards(rid)
+    elif tab == "rewards_history":
+        return _get_stats_rewards_history(rid)
+
+    # Check cache for overview stats
+    now = int(time.time())
+    if _overview_stats_cache["data"] is not None and _overview_stats_cache["expires"] > now:
+        log_event(rid, "get_stats.overview.cached")
+        return jsonify(_overview_stats_cache["data"])
 
     # Default: overview stats
     try:
@@ -5236,6 +5810,42 @@ def get_stats():
 
             cur.execute("SELECT COUNT(*) FROM votes")
             stats["total_votes"] = cur.fetchone()[0] or 0
+
+            # Posts and comments in last 24h (for welcome screen stats)
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE COALESCE(target,'') = ''
+                  AND deleted = FALSE
+                  AND created_at >= %s
+                """,
+                (today_start,),
+            )
+            stats["posts_24h"] = cur.fetchone()[0] or 0
+
+            cur.execute(
+                """
+                SELECT COUNT(*) FROM posts
+                WHERE LENGTH(COALESCE(target,'')) > 0
+                  AND deleted = FALSE
+                  AND created_at >= %s
+                """,
+                (today_start,),
+            )
+            stats["comments_24h"] = cur.fetchone()[0] or 0
+
+            # Unique users active on-chain in last 24h (posted, commented, or voted)
+            cur.execute(
+                """
+                SELECT COUNT(DISTINCT owner) FROM (
+                    SELECT LOWER(owner) as owner FROM posts WHERE created_at >= %s AND deleted = FALSE
+                    UNION
+                    SELECT LOWER(owner) as owner FROM votes WHERE created_at >= %s
+                ) active_users
+                """,
+                (today_start, today_start),
+            )
+            stats["chain_active_24h"] = cur.fetchone()[0] or 0
 
             # Registered-only engagement tallies
             cur.execute(
@@ -5406,161 +6016,19 @@ def get_stats():
                 "porn": tag_counts.get("porn", 0),
             }
 
-            # Lightweight domain stats (DAU / MAU) from stats_events
-            cur.execute("SELECT COUNT(*) FROM stats_events")
-            has_stats_events = cur.fetchone()[0] > 0
-            if has_stats_events:
-                # Known bots/crawlers to exclude
-                bot_names = {
-                    "googlebot",
-                    "applebot",
-                    "bingbot",
-                    "yandexbot",
-                    "baiduspider",
-                    "duckduckbot",
-                    "slurp",
-                    "facebook",
-                    "facebookexternalhit",
-                    "facebot",
-                    "twitterbot",
-                    "twitter",
-                    "linkedinbot",
-                    "pinterest",
-                    "semrushbot",
-                    "ahrefsbot",
-                    "mj12bot",
-                    "dotbot",
-                    "petalbot",
-                    "bytespider",
-                }
-
-                # Fetch all events from last 30 days (covers DAU/MAU/browser stats)
-                cur.execute(
-                    """
-                    SELECT session_id, user_address, user_agent, created_at, event_type
-                    FROM stats_events
-                    WHERE created_at >= %s
-                    """,
-                    (thirty_days_ago,),
-                )
-                all_events = cur.fetchall()
-
-                # First pass: identify bot sessions and parse user agents
-                session_ua: dict[str, Any] = {}  # session_id -> parsed UA
-                bot_sessions: set[str] = set()
-                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
-                    if sess_id in session_ua or sess_id in bot_sessions:
-                        continue
-                    if not ua_string or not ua_string.strip():
-                        continue
-                    try:
-                        ua = parse_user_agent(ua_string)
-                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
-                            bot_sessions.add(sess_id)
-                        else:
-                            session_ua[sess_id] = ua
-                    except Exception:
-                        pass
-
-                # Filter to non-bot events only
-                clean_events = [
-                    (sess_id, user_addr, created_at, event_type)
-                    for sess_id, user_addr, _ua, created_at, event_type in all_events
-                    if sess_id not in bot_sessions
-                ]
-
-                # Calculate DAU/MAU from clean events
-                dau_today_set: set[str] = set()
-                dau_yesterday_set: set[str] = set()
-                mau_set: set[str] = set()
-                dau_reg_set: set[str] = set()
-                unreg_sessions: set[str] = set()
-
-                for sess_id, user_addr, created_at, event_type in clean_events:
-                    if event_type not in ("visit", "session_start", "page_view"):
-                        continue
-                    user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
-
-                    # MAU (last 30 days)
-                    mau_set.add(user_key)
-
-                    # DAU today
-                    if created_at >= today_start:
-                        dau_today_set.add(user_key)
-                        if user_addr and user_addr.strip():
-                            dau_reg_set.add(user_addr.lower())
-
-                    # DAU yesterday
-                    if yesterday_start <= created_at < today_start:
-                        dau_yesterday_set.add(user_key)
-
-                    # Unregistered sessions
-                    if not user_addr or not user_addr.strip():
-                        unreg_sessions.add(sess_id)
-
-                stats["dau_today"] = len(dau_today_set)
-                stats["dau_yesterday"] = len(dau_yesterday_set)
-                stats["maus"] = len(mau_set)
-                stats["dau_registered_today"] = len(dau_reg_set)
-                stats["unregistered_users"] = len(unreg_sessions)
-
-                # Browser/device/OS breakdown from parsed UAs
-                browser_counts: dict[str, int] = {}
-                os_counts: dict[str, int] = {}
-                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
-                for sess_id, ua in session_ua.items():
-                    browser = ua.browser.family or "Unknown"
-                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
-                    os_family = ua.os.family or "Unknown"
-                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
-                    if ua.is_mobile:
-                        device_counts["mobile"] += 1
-                    elif ua.is_tablet:
-                        device_counts["tablet"] += 1
-                    elif ua.is_pc:
-                        device_counts["desktop"] += 1
-                    else:
-                        device_counts["other"] += 1
-
-                # Convert to percentage strings (top 4 + Other)
-                total_sessions = len(session_ua) or 1
-                browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
-                browser_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
-                if len(browser_pcts) > 4:
-                    other_pct = round(sum(p for _, p in browser_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["browser_breakdown"] = top_browsers
-
-                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
-                os_pcts.sort(key=lambda x: x[1], reverse=True)
-                top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
-                if len(os_pcts) > 4:
-                    other_pct = round(sum(p for _, p in os_pcts[4:]), 1)
-                    if other_pct > 0:
-                        top_os.append({"name": "Other", "pct": f"{other_pct}%"})
-                stats["os_breakdown"] = top_os
-
-                device_total = sum(device_counts.values()) or 1
-                stats["device_breakdown"] = {
-                    k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
-                }
-            else:
-                stats["dau_today"] = 0
-                stats["dau_yesterday"] = 0
-                stats["maus"] = 0
-                stats["dau_registered_today"] = 0
-                stats["unregistered_users"] = 0
-                stats["browser_breakdown"] = []
-                stats["os_breakdown"] = []
-                stats["device_breakdown"] = {"desktop": "0%", "mobile": "0%", "tablet": "0%", "other": "0%"}
-
-            stats["dau_any_today"] = stats.get("dau_today", 0)
-            stats["total_users"] = stats.get("registered_users", 0) + stats.get("unregistered_users", 0)
+            # Analytics stats (DAU/MAU, device breakdown) are loaded separately via tab=analytics
+            # Use on-chain active users as a fast proxy for DAU
+            stats["chain_active_24h"] = stats.get("chain_active_24h", 0)
+            stats["dau_any_today"] = stats["chain_active_24h"]  # Fast approximation
+            stats["dau_today"] = stats["chain_active_24h"]
+            stats["total_users"] = stats.get("registered_users", 0)
 
         finally:
             conn.close()
+
+        # Cache the result
+        _overview_stats_cache["data"] = stats
+        _overview_stats_cache["expires"] = int(time.time()) + _OVERVIEW_STATS_CACHE_TTL
 
         log_event(
             rid,
@@ -5862,62 +6330,6 @@ def validate_invite_code():
     except Exception as e:
         log_event(rid, "invite.validate.err", error=str(e))
         return jsonify({"valid": False, "error": str(e)}), 500
-
-
-@public_bp.route("/api/use_invite_code", methods=["POST"])
-def use_invite_code():
-    """Mark an invite code as used by a new user. Only works on mirage.talk/localhost."""
-    rid = next_request_id()
-
-    if not _is_main_site():
-        log_event(rid, "invite.use.blocked", host=request.host)
-        return jsonify({"error": "Invite codes only work on mirage.talk"}), 403
-
-    data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip().upper()
-    used_by = (data.get("used_by") or "").strip()
-
-    if not code or len(code) != 9 or code[4] != "-":
-        return jsonify({"success": False, "error": "Invalid code format"}), 400
-
-    if not used_by:
-        return jsonify({"success": False, "error": "used_by address required"}), 400
-
-    try:
-        conn = connect_db(timeout=5.0)
-        cur = conn.cursor()
-
-        # Check if code exists and is unused
-        cur.execute(
-            "SELECT owner, used_by FROM invite_codes WHERE UPPER(code) = %s",
-            (code,),
-        )
-        row = cur.fetchone()
-
-        if not row:
-            conn.close()
-            log_event(rid, "invite.use.notfound", code=code)
-            return jsonify({"success": False, "error": "Invalid invite code"})
-
-        owner, existing_used_by = row
-        if existing_used_by:
-            conn.close()
-            log_event(rid, "invite.use.already_used", code=code)
-            return jsonify({"success": False, "error": "This invite code has already been used"})
-
-        # Mark as used
-        now_ts = int(time.time())
-        cur.execute(
-            "UPDATE invite_codes SET used_by = %s, used_at = %s WHERE UPPER(code) = %s",
-            (used_by, now_ts, code),
-        )
-        conn.close()
-
-        log_event(rid, "invite.use.ok", code=code, used_by=used_by[:12])
-        return jsonify({"success": True, "owner": owner})
-    except Exception as e:
-        log_event(rid, "invite.use.err", error=str(e))
-        return jsonify({"success": False, "error": str(e)}), 500
 
 
 __all__ = ["public_bp"]

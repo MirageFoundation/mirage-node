@@ -122,6 +122,18 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Fail fast if there are uncommitted changes (only scripts/deploy_all_prod.sh is allowed)
+dirty_files="$(git -C "$REPO_ROOT" diff --name-only 2>/dev/null; git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null)"
+if [ -n "$dirty_files" ]; then
+  # Check if the only dirty file is scripts/deploy_all_prod.sh
+  other_dirty="$(echo "$dirty_files" | grep -v '^scripts/deploy_all_prod.sh$' || true)"
+  if [ -n "$other_dirty" ]; then
+    echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
+    git -C "$REPO_ROOT" status --short >&2
+    exit 1
+  fi
+fi
+
 GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
 GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
 
@@ -457,15 +469,23 @@ else
     echo "==> Moving tag will be updated: $IMAGE_MOVING_TAG"
   fi
 
-  maybe_proto_gen_and_go_build
-
   if [ "$LOCAL_MODE" -eq 1 ]; then
+    # Local mode: always build locally
+    maybe_proto_gen_and_go_build
     echo "==> Building image locally..."
     docker_build load
   else
-    echo "==> Building and pushing image to registry..."
-    docker_build push
-    DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    # Remote mode: check if image already exists in registry before building
+    echo "==> Checking if image exists in registry: $IMAGE_SHA_TAG"
+    if docker manifest inspect "$IMAGE_SHA_TAG" >/dev/null 2>&1; then
+      echo "==> Image already exists in registry, skipping build"
+      DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    else
+      echo "==> Image not found in registry, building and pushing..."
+      maybe_proto_gen_and_go_build
+      docker_build push
+      DEPLOY_IMAGE="$IMAGE_SHA_TAG"
+    fi
   fi
 fi
 
@@ -498,6 +518,22 @@ if [ "$USE_TARBALL" -eq 1 ] && [ "$LOCAL_MODE" -eq 0 ]; then
   fi
 fi
 
+# Pull/load image BEFORE stopping container to minimize downtime
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    echo "==> Loading image locally..."
+    gunzip -c "$TARBALL" | docker load
+  fi
+else
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    echo "==> Loading image on remote..."
+    run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+  else
+    echo "==> Pulling image on remote (container still running): $DEPLOY_IMAGE"
+    ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
+  fi
+fi
+
 echo "==> Stopping old container..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
   # Local: run docker commands directly on host
@@ -505,12 +541,8 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     docker stop --timeout=60 mirage || true
     docker rm mirage || true
   fi
-  if [ "$USE_TARBALL" -eq 1 ]; then
-    echo "==> Loading image locally..."
-    gunzip -c "$TARBALL" | docker load
-  fi
 else
-  # Remote: always prune Docker and clear /tmp
+  # Remote: stop and remove old container
   run_ssh '
     set -euo pipefail
     if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
@@ -518,16 +550,8 @@ else
       docker rm mirage
     fi
   '
-  echo "==> Pruning Docker and clearing /tmp..."
+  echo "==> Pruning old Docker images..."
   run_ssh 'docker system prune -af && rm -rf /tmp/* 2>/dev/null || true'
-  
-  if [ "$USE_TARBALL" -eq 1 ]; then
-    echo "==> Loading image on remote..."
-    run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
-  else
-    echo "==> Pulling image on remote: $DEPLOY_IMAGE"
-    run_ssh "docker pull -q '$DEPLOY_IMAGE'"
-  fi
 fi
 
 # For --init: enforce --moniker is provided
@@ -781,6 +805,134 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
   echo "==> Running host fail2ban setup..."
   run_scp "$SCRIPT_DIR/enable_fail2ban.sh" "$REMOTE:/tmp/enable_fail2ban.sh"
   run_ssh "chmod +x /tmp/enable_fail2ban.sh && /tmp/enable_fail2ban.sh && rm /tmp/enable_fail2ban.sh"
+fi
+
+# =============================================================================
+# Service Health Check
+# =============================================================================
+# Verify all critical services are healthy before declaring deployment successful.
+# Uses status_dashboard.py --json for programmatic health checking.
+
+service_health_check() {
+  local max_attempts=30
+  local wait_secs=5
+  local attempt=1
+  
+  echo "==> Waiting for services to become healthy..."
+  echo "    Required: CometBFT, Validator, PostgreSQL, Backend, Indexer, Caddy, Endpoints"
+  echo ""
+  
+  while [ $attempt -le $max_attempts ]; do
+    echo "[$attempt/$max_attempts] Running health check..."
+    
+    # Run health check inside container
+    local result
+    if result=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1); then
+      # Parse JSON result
+      local healthy
+      healthy=$(echo "$result" | python3 -c "import sys, json; d=json.load(sys.stdin); print('true' if d.get('healthy') else 'false')" 2>/dev/null || echo "false")
+      
+      if [ "$healthy" = "true" ]; then
+        echo "  -> All services healthy!"
+        echo ""
+        # Show service summary
+        echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for name, info in d.get('services', {}).items():
+    status = info.get('status', 'unknown').upper()
+    msg = info.get('message', '')
+    symbol = '✓' if info.get('healthy') else '✗'
+    print(f'    {symbol} {name}: {status} - {msg}')
+" 2>/dev/null || true
+        return 0
+      else
+        echo "  -> Some services not healthy yet:"
+        echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for err in d.get('errors', []):
+    print(f'      - {err}')
+" 2>/dev/null || echo "      (could not parse errors)"
+      fi
+    else
+      echo "  -> Health check script failed (services may still be starting)"
+      echo "     $result" | head -3 | sed 's/^/      /'
+    fi
+    
+    if [ $attempt -lt $max_attempts ]; then
+      echo "  -> Retrying in ${wait_secs}s..."
+      sleep $wait_secs
+    fi
+    attempt=$((attempt + 1))
+  done
+  
+  echo ""
+  echo "ERROR: Services did not become healthy after $((max_attempts * wait_secs))s" >&2
+  echo "Final health check result:" >&2
+  docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | head -50 >&2 || true
+  return 1
+}
+
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  service_health_check
+else
+  # For remote: run health check via SSH
+  echo "==> Waiting for services to become healthy..."
+  echo "    Required: CometBFT, Validator, PostgreSQL, Backend, Indexer, Caddy, Endpoints"
+  echo ""
+  
+  HEALTH_CHECK_SCRIPT='
+set -euo pipefail
+max_attempts=30
+wait_secs=5
+attempt=1
+
+while [ $attempt -le $max_attempts ]; do
+  echo "[$attempt/$max_attempts] Running health check..."
+  
+  if result=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1); then
+    healthy=$(echo "$result" | python3 -c "import sys, json; d=json.load(sys.stdin); print(\"true\" if d.get(\"healthy\") else \"false\")" 2>/dev/null || echo "false")
+    
+    if [ "$healthy" = "true" ]; then
+      echo "  -> All services healthy!"
+      echo ""
+      echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for name, info in d.get(\"services\", {}).items():
+    status = info.get(\"status\", \"unknown\").upper()
+    msg = info.get(\"message\", \"\")
+    symbol = \"✓\" if info.get(\"healthy\") else \"✗\"
+    print(f\"    {symbol} {name}: {status} - {msg}\")
+" 2>/dev/null || true
+      exit 0
+    else
+      echo "  -> Some services not healthy yet:"
+      echo "$result" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for err in d.get(\"errors\", []):
+    print(f\"      - {err}\")
+" 2>/dev/null || echo "      (could not parse errors)"
+    fi
+  else
+    echo "  -> Health check script failed (services may still be starting)"
+  fi
+  
+  if [ $attempt -lt $max_attempts ]; then
+    echo "  -> Retrying in ${wait_secs}s..."
+    sleep $wait_secs
+  fi
+  attempt=$((attempt + 1))
+done
+
+echo ""
+echo "ERROR: Services did not become healthy after $((max_attempts * wait_secs))s" >&2
+docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | head -50 >&2 || true
+exit 1
+'
+  run_ssh "bash -c '$HEALTH_CHECK_SCRIPT'"
 fi
 
 if [ "$LOCAL_MODE" -eq 1 ]; then

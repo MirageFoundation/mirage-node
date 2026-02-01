@@ -286,8 +286,9 @@ export const TopicSelector = ({ value, onChange, maxLength, minLength, disabled 
                 }
 
                 // Always fetch fresh from backend - it filters by min/max topic size
+                // Show all topics when selecting for posting
                 try {
-                    const data = await Api.get('get_topics', { limit: 100 }, { timeoutMs: 10000 });
+                    const data = await Api.get('get_topics', { limit: 100, min_posts: 1 }, { timeoutMs: 10000 });
                     if (data && Array.isArray(data.topics)) {
                         const topicsWithCounts = data.topics
                             .filter(t => t && t.topic && typeof t.topic === 'string' && t.topic.trim() !== '')

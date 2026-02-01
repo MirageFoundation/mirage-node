@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import ReactDOM from "react-dom";
-import styled from "styled-components";
+import styled, { useTheme } from "styled-components";
 import { Helmet } from 'react-helmet-async';
 import Button from "../components/Button";
-import { useLocation, Link, useNavigate, Navigate } from 'react-router-dom';
+import { useLocation, Link, useNavigate, Navigate, useParams } from 'react-router-dom';
 import VoteSection from "../components/VoteSection.js";
 import * as tx from "../utils/tx.js";
 import Sidebar from "../components/Sidebar";
@@ -35,24 +35,25 @@ const pickCard = (theme, key) => {
 };
 
 // Card-based container matching front page style (width aligned with ModernPostFeed)
+// Supports $size prop ('compact' or 'large') to match feed view mode
+// No margins - ModernPostFeed's gap handles spacing (matches CardView behavior)
 const PostCard = styled.div`
     background: ${({ theme }) => pickCard(theme, 'card')};
     border: 1px solid ${({ theme }) => pickCard(theme, 'cardBorder')};
-    border-radius: 16px;
+    border-radius: ${({ $size }) => $size === 'compact' ? '12px' : '16px'};
     display: flex;    
     min-height: auto;
     flex-direction: row;
     text-align: left;
     align-items: flex-start;
-    padding: 1.25rem;
-    /* No horizontal margins so width matches ModernPostFeed cards */
-    margin: 0.5rem 0;
-    transition: all 0.3s ease;
+    padding: ${({ $size }) => $size === 'compact' ? '0.85rem' : '1.25rem'};
+    /* No margins - gap is handled by ModernPostFeed via --card-gap CSS variable */
+    margin: 0;
+    transition: background 0.3s ease;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
     ${({ $isNew, theme }) => $isNew ? `background: ${theme?.colors?.panelAlt || '#2A2E33'};` : ''}
 
     &:hover {
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
         background: ${({ theme }) => pickCard(theme, 'cardAlt')};
     }
 
@@ -71,23 +72,25 @@ const PostCard = styled.div`
     }
 
     @media (max-width: 1000px) {
-        padding: 1rem;
-        border-radius: 12px;
-        margin: 0.35rem 0;
+        padding: ${({ $size }) => $size === 'compact' ? '0.7rem' : '1rem'};
+        border-radius: ${({ $size }) => $size === 'compact' ? '10px' : '12px'};
     }
 
     @media (max-width: 768px) {
         padding: 0.35rem 0.75rem;
         border-radius: 8px;
-        margin: 0.35rem 0;
     }
 `;
 
 // Comment card with consistent, slightly tighter indentation per level
+// Inherits $size prop from PostCard for compact/large mode
+// Only margin-left for indentation - vertical spacing from ModernPostFeed gap
 const CommentCard = styled(PostCard)`
-    /* Each level indents by 1rem relative to the root card */
-    margin-left: ${({ $level }) => `${1 * (Number($level) || 0)}rem`};
-    padding: ${({ $isCollapsed }) => $isCollapsed ? '0.5rem 1rem' : '1rem'};
+    /* Each level indents by 1rem relative to the root card (tighter in compact mode) */
+    margin-left: ${({ $level, $size }) => `${($size === 'compact' ? 0.75 : 1) * (Number($level) || 0)}rem`};
+    padding: ${({ $isCollapsed, $size }) => $isCollapsed
+        ? ($size === 'compact' ? '0.35rem 0.75rem' : '0.5rem 1rem')
+        : ($size === 'compact' ? '0.7rem' : '1rem')};
     
     /* Persistent highlight for inbox-linked comments */
     &.inbox-highlight {
@@ -97,8 +100,7 @@ const CommentCard = styled(PostCard)`
     }
     
     @media (max-width: 1000px) {
-        margin-left: ${({ $level }) => `${0.6 * (Number($level) || 0)}rem`};
-        margin-right: 0;
+        margin-left: ${({ $level, $size }) => `${($size === 'compact' ? 0.45 : 0.6) * (Number($level) || 0)}rem`};
     }
 `;
 
@@ -936,6 +938,17 @@ function ViewPostView({ state, updatePost }) {
     const [shareMessages, setShareMessages] = useState({}); // { postId: { type: 'success', message } }
     const [showContext, setShowContext] = useState(false);
     const [contextComments, setContextComments] = useState([]);
+    // When viewing a comment, store the actual root post (for display at top)
+    const [actualRootPost, setActualRootPost] = useState(null);
+    // Card size state to match feed view mode (compact or large)
+    const [cardSize, setCardSize] = useState(() => {
+        try {
+            return Storage.load('card_size', 'compact');
+        } catch (_) {
+            return 'compact';
+        }
+    });
+    const theme = useTheme();
     const location = useLocation();
     const navigate = useNavigate();
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
@@ -982,6 +995,33 @@ function ViewPostView({ state, updatePost }) {
             window.removeEventListener('orientationchange', updateIsMobile);
         };
     }, []);
+
+    // Listen for card size changes from other views (MainView settings dropdown)
+    useEffect(() => {
+        const handleSettingsUpdated = (e) => {
+            try {
+                if (e && e.detail && typeof e.detail.cardSize !== 'undefined') {
+                    setCardSize(e.detail.cardSize);
+                    return;
+                }
+                // Fallback: re-read from storage
+                const size = Storage.load('card_size', 'compact');
+                setCardSize(size);
+            } catch (_) { }
+        };
+        window.addEventListener('settingsUpdated', handleSettingsUpdated);
+        return () => window.removeEventListener('settingsUpdated', handleSettingsUpdated);
+    }, []);
+
+    // Set CSS custom properties for card gap based on compact mode (matches CardView)
+    useEffect(() => {
+        const isCompactMode = cardSize === 'compact';
+        const root = document.documentElement;
+        const gap = isCompactMode ? '0.5rem' : '1.0rem';
+        const gapMobile = isCompactMode ? '0.25rem' : '0.5rem';
+        root.style.setProperty('--card-gap', gap);
+        root.style.setProperty('--card-gap-mobile', gapMobile);
+    }, [cardSize]);
 
     // Scroll to top instantly when navigating to this view
     useEffect(() => {
@@ -1586,7 +1626,7 @@ function ViewPostView({ state, updatePost }) {
         if (!userId) return;
         const adminAddress = state.publicKey;
         if (!adminAddress) return;
-        
+
         setIsSuspending(true);
         try {
             const response = await Api.post('/admin/rewards/suspend', {
@@ -2064,18 +2104,77 @@ function ViewPostView({ state, updatePost }) {
         }
     };
 
-    const postId = React.useMemo(() => {
+    // Support new clean URL /p/:postId and legacy /view_post?post_id=...
+    const routeParams = useParams();
+
+    // Parse depth from query params (0-5, must be valid integer when provided)
+    const depthParam = React.useMemo(() => {
         const params = new URLSearchParams(location.search);
-        return params.get('root') || params.get('post_id');
+        const raw = params.get('depth');
+        if (raw === null || raw === '') return null; // Not provided
+        if (!/^\d+$/.test(raw)) {
+            console.error('[ViewPostView] Invalid depth parameter:', raw, '- must be 0-5');
+            return 'invalid';
+        }
+        const num = Number(raw);
+        if (!Number.isFinite(num) || num < 0 || num > 5) {
+            console.error('[ViewPostView] Invalid depth parameter:', raw, '- must be 0-5');
+            return 'invalid';
+        }
+        return num;
     }, [location.search]);
 
-    const focusedCommentId = React.useMemo(() => {
+    const postId = React.useMemo(() => {
+        // New clean URL: /p/:postId
+        if (routeParams.postId) {
+            return routeParams.postId;
+        }
+        // DEPRECATED: Legacy query params, remove in future release
+        const params = new URLSearchParams(location.search);
+        return params.get('root') || params.get('post_id');
+    }, [routeParams.postId, location.search]);
+
+    // focusedCommentId: set when viewing a specific comment (not the root post)
+    // For legacy URLs: when both root and post_id are provided
+    // DEPRECATED: Legacy query params, remove in future release
+    const legacyFocusedCommentId = React.useMemo(() => {
         const params = new URLSearchParams(location.search);
         const r = params.get('root');
         const pid = params.get('post_id');
         if (r && pid) return String(pid).toLowerCase();
         return '';
     }, [location.search]);
+
+    // For new URLs (/p/:postId): detect if loaded post is a comment (has non-empty target)
+    // This is computed after root loads
+    const isViewingComment = React.useMemo(() => {
+        if (!root) return false;
+        // Check if this post has a target (is a reply) and has a different root_post_id
+        const target = root.target || '';
+        const rootPostId = root.root_post_id || '';
+        const thisPostId = (root.post_id || '').toLowerCase();
+        return target.trim() !== '' && rootPostId.toLowerCase() !== thisPostId;
+    }, [root]);
+
+    // Effective focusedCommentId: use legacy param if set, otherwise detect from loaded data
+    const focusedCommentId = React.useMemo(() => {
+        if (legacyFocusedCommentId) return legacyFocusedCommentId;
+        // For new URL scheme: if we loaded a comment (not root), treat postId as focused
+        if (isViewingComment && routeParams.postId) {
+            return String(routeParams.postId).toLowerCase();
+        }
+        return '';
+    }, [legacyFocusedCommentId, isViewingComment, routeParams.postId]);
+
+    // The actual root post ID (for "view full thread" links)
+    const actualRootPostId = React.useMemo(() => {
+        if (!root) return '';
+        // If viewing a comment, use root_post_id; otherwise use the post's own ID
+        if (isViewingComment && root.root_post_id) {
+            return root.root_post_id.toLowerCase();
+        }
+        return (root.post_id || '').toLowerCase();
+    }, [root, isViewingComment]);
 
     const [lastVisitTs, setLastVisitTs] = useState(null);
 
@@ -2275,6 +2374,29 @@ function ViewPostView({ state, updatePost }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [focusedCommentId, root]);
 
+    // When viewing a comment via /p/:commentId, also load the actual root post for display
+    useEffect(() => {
+        if (!isViewingComment || !actualRootPostId) {
+            setActualRootPost(null);
+            return;
+        }
+        // Don't reload if we already have it
+        if (actualRootPost && actualRootPost.post_id && actualRootPost.post_id.toLowerCase() === actualRootPostId) {
+            return;
+        }
+        const viewerAddress = Storage.load("publicKey", "");
+        Api.get('get_comments', { post_id: actualRootPostId, address: viewerAddress }, { timeoutMs: 10000 })
+            .then((data) => {
+                if (data && data.root) {
+                    setActualRootPost(data.root);
+                }
+            })
+            .catch((err) => {
+                console.error('[ViewPostView] Failed to load actual root post:', err);
+            });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isViewingComment, actualRootPostId]);
+
     // Flatten comments: root is level 0; replies increment level
     const flattenedComments = React.useMemo(() => {
         if (!root || !root.post_id) return [];
@@ -2292,19 +2414,53 @@ function ViewPostView({ state, updatePost }) {
             return sortComments(arr, viewerAddress);
         };
 
-        const out = [{ ...root, level: 0 }];
-        const walk = (nodes, level) => {
+        const walk = (nodes, level, out) => {
             if (!Array.isArray(nodes)) return;
             nodes.forEach((n) => {
                 out.push({ ...n, level });
                 const next = mergeChildren(n, n.children);
-                if (next && next.length) walk(next, level + 1);
+                if (next && next.length) walk(next, level + 1, out);
             });
         };
 
+        // When viewing a comment via /p/:commentId, always show actual root post at top
+        if (isViewingComment) {
+            const out = [];
+            let nextLevel = 0;
+            // Add actual root post if loaded; if not yet loaded, skip it (it will appear once loaded)
+            if (actualRootPost && actualRootPost.post_id) {
+                out.push({ ...actualRootPost, level: 0 });
+                nextLevel = 1;
+            }
+            // Add context comments (parent chain) if loaded
+            if (showContext && contextComments.length > 0) {
+                const rootPostId = actualRootPost?.post_id?.toLowerCase() || '';
+                const filteredContext = contextComments.filter(c => {
+                    const contextPostId = c && c.post_id ? String(c.post_id).toLowerCase() : '';
+                    return contextPostId !== rootPostId;
+                });
+                filteredContext.forEach((c) => {
+                    // Mark as context comment so "Continue this thread" doesn't show
+                    out.push({ ...c, children: [], level: nextLevel, isContextComment: true });
+                    nextLevel++;
+                });
+            }
+            // Add the focused comment (which is `root` in this case - the loaded comment)
+            out.push({ ...root, level: nextLevel });
+            // Add focused comment's children
+            const focusedChildren = mergeChildren(root, children);
+            if (focusedChildren && focusedChildren.length) {
+                walk(focusedChildren, nextLevel + 1, out);
+            }
+            return out;
+        }
+
+        // Normal view (viewing a root post, or legacy focused comment flow)
+        const out = [{ ...root, level: 0 }];
         const base = mergeChildren(root, children);
 
-        if (focusedCommentId) {
+        if (focusedCommentId && !isViewingComment) {
+            // Legacy focused comment view (from ?root=X&post_id=Y)
             const lcTarget = String(focusedCommentId).toLowerCase();
             const findInMerged = (nodes) => {
                 if (!Array.isArray(nodes)) return null;
@@ -2327,17 +2483,18 @@ function ViewPostView({ state, updatePost }) {
                     });
                     const contextDepth = filteredContext.length;
                     filteredContext.forEach((c, idx) => {
-                        const contextNode = { ...c, children: [] };
+                        // Mark as context comment so "Continue this thread" doesn't show
+                        const contextNode = { ...c, children: [], isContextComment: true };
                         out.push({ ...contextNode, level: idx + 1 });
                     });
                     const focusedWithLevel = { ...targetNode };
                     out.push({ ...focusedWithLevel, level: contextDepth + 1 });
                     const focusedChildren = mergeChildren(targetNode, targetNode.children);
                     if (focusedChildren && focusedChildren.length) {
-                        walk(focusedChildren, contextDepth + 2);
+                        walk(focusedChildren, contextDepth + 2, out);
                     }
                 } else {
-                    walk([targetNode], 1);
+                    walk([targetNode], 1, out);
                 }
                 return out;
             }
@@ -2345,9 +2502,9 @@ function ViewPostView({ state, updatePost }) {
             return out;
         }
 
-        walk(base, 1);
+        walk(base, 1, out);
         return out;
-    }, [root, children, state.posts, focusedCommentId, showContext, contextComments, viewerAddress]);
+    }, [root, children, state.posts, focusedCommentId, showContext, contextComments, viewerAddress, isViewingComment, actualRootPost]);
 
     // Compute visibility/collapsed per comment using ancestor stack
     const annotated = React.useMemo(() => {
@@ -2411,10 +2568,11 @@ function ViewPostView({ state, updatePost }) {
         } catch (_) { }
     }, [annotated, focusedCommentId]);
 
-    const handleShowContext = async () => {
-        if (!focusedCommentId) return;
+    const handleShowContext = async (maxDepth = 5, commentIdOverride = null) => {
+        const targetCommentId = commentIdOverride || focusedCommentId;
+        if (!targetCommentId) return;
         try {
-            const params = { comment_id: focusedCommentId, max_depth: 6 };
+            const params = { comment_id: targetCommentId, max_depth: Math.min(maxDepth, 5) };
             if (state.publicKey) params.address = state.publicKey;
             const res = await Api.get('get_comment_context', params, { timeoutMs: 10000 });
             if (res && Array.isArray(res.context)) {
@@ -2425,6 +2583,20 @@ function ViewPostView({ state, updatePost }) {
             console.error('[ViewPostView] Failed to load context:', err);
         }
     };
+
+    // Auto-load context when depth param is provided via URL
+    const hasAutoLoadedContextRef = useRef(false);
+    useEffect(() => {
+        if (hasAutoLoadedContextRef.current) return;
+        if (!focusedCommentId) return;
+        if (depthParam === null || depthParam === 'invalid') return;
+        if (depthParam > 0) {
+            hasAutoLoadedContextRef.current = true;
+            // Pass focusedCommentId directly to avoid closure issues
+            handleShowContext(depthParam, focusedCommentId);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [focusedCommentId, depthParam]);
 
     // Mark reply as viewed when navigating to it via hash or focusedCommentId
     useEffect(() => {
@@ -2446,8 +2618,9 @@ function ViewPostView({ state, updatePost }) {
         }
     }, [focusedCommentId, location.hash]);
 
-    // Show loading/error states within the layout
-    if (loading || error) {
+    // Show loading/error states within the layout (including invalid depth)
+    const depthError = depthParam === 'invalid' ? 'Invalid depth parameter. Must be 0-5.' : null;
+    if (loading || error || depthError) {
         return (
             <ContentGrid>
                 <Sidebar currentPath={location.pathname} state={state} />
@@ -2463,12 +2636,12 @@ function ViewPostView({ state, updatePost }) {
                             Back
                         </BackButton>
                         {loading ? (
-                            <PostCard style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2rem', gap: '0.35rem' }}>
+                            <PostCard $size={cardSize} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2rem', gap: '0.35rem' }}>
                                 <span style={{ color: '#888' }}>Loading post...</span>
                             </PostCard>
                         ) : (
-                            <PostCard style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2rem', gap: '0.5rem' }}>
-                                <span style={{ color: '#ff6b6b' }}>{error}</span>
+                            <PostCard $size={cardSize} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', padding: '2rem', gap: '0.5rem' }}>
+                                <span style={{ color: '#ff6b6b' }}>{depthError || error}</span>
                             </PostCard>
                         )}
                     </ModernPostFeed>
@@ -2490,7 +2663,8 @@ function ViewPostView({ state, updatePost }) {
         if (!display) return null;
         const displayWithAt = `@${display}`;
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
-        const href = ownerAddress ? `/profile?address=${encodeURIComponent(ownerAddress)}` : '/profile';
+        // New clean URL: prefer username, fallback to address
+        const href = trimmedUsername ? `/u/${encodeURIComponent(trimmedUsername)}` : (ownerAddress ? `/u/${encodeURIComponent(ownerAddress)}` : '/profile');
         const tierColor = getTierColor(currentPost.author_level);
         const tierName = getTierName(currentPost.author_level);
         const content = ownerAddress ? (
@@ -2508,12 +2682,13 @@ function ViewPostView({ state, updatePost }) {
         if (!rootId) return '';
         const rawCommentId = (post && (post.tx_hash || post.post_id)) ? String(post.tx_hash || post.post_id).toLowerCase() : '';
         const validCommentId = isValidHash64(rawCommentId) ? rawCommentId : '';
-        const base = `/view_post`;
         const isComment = post && post.post_id && String(post.post_id).toLowerCase() !== rootId;
+        // New clean URL format: /p/:postId
         if (isComment && validCommentId) {
-            return `${base}?post_id=${encodeURIComponent(validCommentId)}&root=${encodeURIComponent(rootId)}#comment-${encodeURIComponent(validCommentId)}`;
+            // For comments, link directly to the comment (no depth = single comment view)
+            return `/p/${encodeURIComponent(validCommentId)}`;
         }
-        return `${base}?post_id=${encodeURIComponent(rootId)}`;
+        return `/p/${encodeURIComponent(rootId)}`;
     };
 
     const handleShare = async (post) => {
@@ -2596,26 +2771,30 @@ function ViewPostView({ state, updatePost }) {
         if (confirmBlockPost === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm block post? This will hide it and all its comments.</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmBlockPostAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🚫 Block this post?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmBlockPostAction} disabled={isBlocking}>
+                                Block
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelBlockPost}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
         if (confirmBlockUser?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm block user? This will hide all their posts and comments.</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmBlockUserAction} disabled={isBlocking}>
-                            Block
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🚫 Block {post.username || 'this user'}?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmBlockUserAction} disabled={isBlocking}>
+                                Block
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
@@ -2623,13 +2802,15 @@ function ViewPostView({ state, updatePost }) {
             const isComment = post.target && post.target !== '';
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Confirm delete {isComment ? 'comment' : 'post'}?</span>
-                    <ConfirmButtons>
-                        <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
-                            Delete
-                        </Button>
-                        <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
-                    </ConfirmButtons>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>⚠ Mark {isComment ? 'comment' : 'post'} as deleted?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmDeletePostAction} disabled={isDeleting}>
+                                Delete
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelDeletePost}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
                 </BlockConfirmMessage>
             );
         }
@@ -2637,7 +2818,7 @@ function ViewPostView({ state, updatePost }) {
         if (confirmSuspendQuests?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
                         <span style={{ whiteSpace: 'nowrap' }}>🛡️ Suspend this user from quests:</span>
                         <select
                             value={suspendDuration}
@@ -2650,7 +2831,7 @@ function ViewPostView({ state, updatePost }) {
                             <option value={30}>30 days</option>
                             <option value={0}>Permanent</option>
                         </select>
-                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button variant="warning" size="sm" onClick={confirmSuspendFromQuests} disabled={isSuspending}>
                                 {isSuspending ? 'Suspending...' : 'Suspend'}
                             </Button>
@@ -2684,7 +2865,7 @@ function ViewPostView({ state, updatePost }) {
         if (confirmReportPost === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <span>⚠ Report this post? Provide a short reason.</span>
+                    <span>🚨 Report this post? Provide a short reason.</span>
                     <ReportInput
                         type="text"
                         value={reportReason}
@@ -2692,7 +2873,7 @@ function ViewPostView({ state, updatePost }) {
                         placeholder="Short reason (max 140 chars)"
                         maxLength={140}
                     />
-                    <ConfirmButtons>
+                    <ConfirmButtons style={{ width: 'auto' }}>
                         <Button variant="warning" size="sm" onClick={confirmReportAction} disabled={isReporting}>
                             Report
                         </Button>
@@ -2705,33 +2886,32 @@ function ViewPostView({ state, updatePost }) {
         if (confirmDonate?.postId === post.post_id) {
             return (
                 <BlockConfirmMessage>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'nowrap' }}>
-                        <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            Send MIRAGE to {post.username || post.user_id.substring(0, 12) + '...'}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>
+                            💰 Donate to {post.username || post.user_id.substring(0, 12) + '...'}:
                         </span>
                         <div style={{
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.35rem',
-                            background: 'rgba(255, 255, 255, 0.6)',
-                            border: '1px solid rgba(148, 163, 184, 0.55)',
+                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0, 0, 0, 0.3)',
+                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148, 163, 184, 0.3)'}`,
                             borderRadius: '8px',
                             padding: '0.2rem 0.5rem',
-                            minWidth: '6.5rem',
                         }}>
                             <input
                                 type="text"
                                 inputMode="numeric"
                                 value={formatDonateAmount(donateAmount)}
                                 onChange={(e) => handleDonateAmountChange(e.target.value)}
-                                placeholder="1,000"
+                                placeholder="10,000"
+                                maxLength={11}
                                 style={{
-                                    flex: 1,
-                                    minWidth: '4rem',
+                                    width: '5.5rem',
                                     background: 'transparent',
                                     border: 'none',
                                     outline: 'none',
-                                    color: 'inherit',
+                                    color: theme?.colors?.text || 'inherit',
                                     fontSize: '0.8rem',
                                     fontWeight: 700,
                                     textAlign: 'right',
@@ -2739,11 +2919,11 @@ function ViewPostView({ state, updatePost }) {
                             />
                             <span style={{ fontSize: '0.68rem', opacity: 0.7 }}>MIRAGE</span>
                         </div>
-                        <ConfirmButtons style={{ marginLeft: 'auto' }}>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
                             <Button variant="warning" size="sm" onClick={confirmDonateAction} disabled={isDonating}>
                                 {isDonating ? 'Sending...' : 'Send'}
                             </Button>
-                            <InlineCancelButton type="button" onClick={cancelDonate}>Cancel</InlineCancelButton>
+                            <Button variant="ghost" size="sm" onClick={cancelDonate}>Cancel</Button>
                         </ConfirmButtons>
                     </div>
                 </BlockConfirmMessage>
@@ -3515,6 +3695,7 @@ function ViewPostView({ state, updatePost }) {
                                         $isNew={!!(lastVisitTs && post.level > 0 && typeof post.timestamp === 'number' && post.timestamp > lastVisitTs)}
                                         $isCollapsed={isCollapsed}
                                         $level={displayLevel}
+                                        $size={cardSize}
                                     >
                                         <ColumnFlex>
                                             {/* Mobile root post meta - two rows */}
@@ -3687,17 +3868,17 @@ function ViewPostView({ state, updatePost }) {
                                             {!showContext ? (
                                                 <>
                                                     Click{' '}
-                                                    <Link to="#" onClick={(e) => { e.preventDefault(); handleShowContext(); }}>
+                                                    <Link to={`/p/${focusedCommentId}?depth=5`}>
                                                         here
                                                     </Link>
                                                     {' '}to view the recent context, or{' '}
-                                                    <Link to={`/view_post?post_id=${root.post_id}`}>here</Link>
+                                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
                                                     {' '}to view the full thread.
                                                 </>
                                             ) : (
                                                 <>
                                                     Click{' '}
-                                                    <Link to={`/view_post?post_id=${root.post_id}`}>here</Link>
+                                                    <Link to={`/p/${actualRootPostId}`}>here</Link>
                                                     {' '}to view the full thread.
                                                 </>
                                             )}
@@ -3709,6 +3890,8 @@ function ViewPostView({ state, updatePost }) {
                                         if (isRoot) return null;
                                         // Don't show if collapsed
                                         if (isCollapsed) return null;
+                                        // Don't show for context comments (parent chain in focused view)
+                                        if (post.isContextComment) return null;
                                         // Don't show if this IS the focused comment (we're already viewing its thread)
                                         if (focusedCommentId && String(post.post_id).toLowerCase() === String(focusedCommentId).toLowerCase()) return null;
                                         // Don't show if no replies
@@ -3720,7 +3903,7 @@ function ViewPostView({ state, updatePost }) {
 
                                         return (
                                             <ContinueThreadLink
-                                                to={`/view_post?root=${root.post_id}&post_id=${post.post_id}`}
+                                                to={`/p/${post.post_id}`}
                                                 $level={displayLevel}
                                             >
                                                 Continue this thread →
@@ -3751,7 +3934,7 @@ function ViewPostView({ state, updatePost }) {
                             </svg>
                             Back
                         </BackButton>
-                        <PostCard style={{ textAlign: 'center', padding: '2rem' }}>
+                        <PostCard $size={cardSize} style={{ textAlign: 'center', padding: '2rem' }}>
                             <span style={{ color: '#ff6b6b' }}>Unable to load post.</span>
                         </PostCard>
                     </ModernPostFeed>

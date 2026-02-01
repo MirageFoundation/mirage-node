@@ -24,7 +24,7 @@ export function useQuests() {
     const [suspended, setSuspended] = useState(false);
     const [suspensionInfo, setSuspensionInfo] = useState(null);
     const [disabled, setDisabled] = useState(false);
-    const [initialLoadDone, setInitialLoadDone] = useState(false);
+    const [debug, setDebug] = useState(false);
 
     const userAddress = Storage.load('publicKey', '');
 
@@ -47,6 +47,7 @@ export function useQuests() {
             // Check if quests system is disabled
             if (dailyResponse.disabled) {
                 setDisabled(true);
+                setDebug(dailyResponse.debug === true);
                 setDailyQuests([]);
                 setFlashQuest(null);
                 setLoading(false);
@@ -54,6 +55,7 @@ export function useQuests() {
             }
 
             setDisabled(false);
+            setDebug(dailyResponse.debug === true);
 
             if (dailyResponse.suspended) {
                 setSuspended(true);
@@ -110,8 +112,6 @@ export function useQuests() {
             } else {
                 setFlashQuest(null);
             }
-
-            setInitialLoadDone(true);
         } catch (err) {
             console.error('Failed to fetch quests:', err);
             setError(err.message || 'Failed to load quests');
@@ -172,7 +172,7 @@ export function useQuests() {
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [flashQuest?.id]); // Only re-run when flash quest changes
+    }, [flashQuest]); // Re-run when flash quest changes
 
     return {
         dailyQuests,
@@ -184,6 +184,7 @@ export function useQuests() {
         suspended,
         suspensionInfo,
         disabled,
+        debug,
         refresh: fetchQuests,
     };
 }
@@ -197,6 +198,7 @@ export function usePendingRewards() {
     const [pendingRewards, setPendingRewards] = useState([]);
     const [totalMirage, setTotalMirage] = useState(0);
     const [totalAfterMultiplier, setTotalAfterMultiplier] = useState(0);
+    const [pendingInviteCodes, setPendingInviteCodes] = useState(0);
     const [rewardMultiplier, setRewardMultiplier] = useState(1);
     const [loading, setLoading] = useState(true);
     const [claiming, setClaiming] = useState(false);
@@ -243,11 +245,13 @@ export function usePendingRewards() {
                 setPendingRewards([]);
                 setTotalMirage(0);
                 setTotalAfterMultiplier(0);
+                setPendingInviteCodes(0);
             } else {
                 setSuspended(false);
                 setPendingRewards(response.pending_rewards || []);
                 setTotalMirage(response.total_mirage || 0);
                 setTotalAfterMultiplier(response.total_mirage_after_multiplier || 0);
+                setPendingInviteCodes(response.pending_invite_codes || 0);
                 setRewardMultiplier(response.reward_multiplier || 0);
                 setClaimingAvailable(response.claiming_available !== false);
             }
@@ -260,7 +264,8 @@ export function usePendingRewards() {
     }, [userAddress]);
 
     const claimRewards = useCallback(async () => {
-        if (!userAddress || claiming || totalAfterMultiplier <= 0) {
+        const hasClaimable = totalAfterMultiplier > 0 || pendingInviteCodes > 0;
+        if (!userAddress || claiming || !hasClaimable) {
             return { success: false, error: 'nothing_to_claim' };
         }
 
@@ -284,27 +289,29 @@ export function usePendingRewards() {
                 };
             } else {
                 clearOptimisticClaimBalance('claim_failed');
-                setError(response.error || 'Claim failed');
-                return { success: false, error: response.error };
+                setError(response.message || response.error || 'Claim failed');
+                return { success: false, error: response.error, message: response.message };
             }
         } catch (err) {
             console.error('Failed to claim rewards:', err);
             clearOptimisticClaimBalance('claim_error');
             // Try to parse JSON error from HTTP error message (e.g., "HTTP 503: {...}")
             let errorCode = err.message;
+            let errorMessage = null;
             try {
                 const jsonMatch = err.message?.match(/\{[\s\S]*\}/);
                 if (jsonMatch) {
                     const parsed = JSON.parse(jsonMatch[0]);
-                    errorCode = parsed.error || parsed.message || err.message;
+                    errorCode = parsed.error || err.message;
+                    errorMessage = parsed.message;
                 }
             } catch (_) { /* ignore parse errors */ }
-            setError(errorCode || 'Failed to claim rewards');
-            return { success: false, error: errorCode };
+            setError(errorMessage || errorCode || 'Failed to claim rewards');
+            return { success: false, error: errorCode, message: errorMessage };
         } finally {
             setClaiming(false);
         }
-    }, [userAddress, claiming, totalAfterMultiplier, fetchRewards, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
+    }, [userAddress, claiming, totalAfterMultiplier, pendingInviteCodes, fetchRewards, setOptimisticClaimBalance, clearOptimisticClaimBalance]);
 
     useEffect(() => {
         fetchRewards();
@@ -329,6 +336,7 @@ export function usePendingRewards() {
         pendingRewards,
         totalMirage,
         totalAfterMultiplier,
+        pendingInviteCodes,
         rewardMultiplier,
         loading,
         claiming,

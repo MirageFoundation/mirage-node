@@ -16,7 +16,6 @@ import (
 	storetypes "cosmossdk.io/store/types"
 	circuitkeeper "cosmossdk.io/x/circuit/keeper"
 	upgradekeeper "cosmossdk.io/x/upgrade/keeper"
-	upgradetypes "cosmossdk.io/x/upgrade/types"
 
 	"mirage/docs"
 	corekeeper "mirage/x/core/keeper"
@@ -361,45 +360,6 @@ func New(
 
 	// Register upgrade handlers
 	app.RegisterUpgradeHandlers()
-
-	// For v1.10.4-restore-sdk upgrade: handle stores that may or may not exist.
-	// - Production: stores have data (soft-removed in v1.10.3 but data preserved) → don't use Added
-	// - Local testnet from v1.10.3 backup: stores have version 0 → need Added
-	//
-	// We check if store data exists by looking for IAVL tree nodes in the database.
-	// Store data is prefixed with "s/k:{storeName}/" in the database.
-	upgradeInfo, err := app.UpgradeKeeper.ReadUpgradeInfoFromDisk()
-	if err == nil && upgradeInfo.Name == sdkRestoreUpgradeName && upgradeInfo.Height > 0 {
-		// Modules removed in v1.10.3-sdk-bloat, restored in v1.10.4-restore-sdk
-		potentialStores := []string{
-			"mint", "epochs", "authz", "circuit", "evidence", "feegrant", "group",
-		}
-
-		// Check which stores have data in the database
-		var storesToAdd []string
-		for _, storeName := range potentialStores {
-			// Check if store has any IAVL nodes by looking for the store prefix
-			prefix := []byte("s/k:" + storeName + "/")
-			iter, iterErr := db.Iterator(prefix, append(prefix[:len(prefix)-1], prefix[len(prefix)-1]+1))
-			hasData := false
-			if iterErr == nil {
-				hasData = iter.Valid()
-				iter.Close()
-			}
-			if !hasData {
-				storesToAdd = append(storesToAdd, storeName)
-			}
-		}
-
-		if len(storesToAdd) > 0 {
-			logger.Info("v1.10.4-restore-sdk: Adding stores without data in DB", "stores", storesToAdd)
-			app.SetStoreLoader(upgradetypes.UpgradeStoreLoader(upgradeInfo.Height, &storetypes.StoreUpgrades{
-				Added: storesToAdd,
-			}))
-		} else {
-			logger.Info("v1.10.4-restore-sdk: All stores have data, no StoreUpgrades needed")
-		}
-	}
 
 	/****  Module Options ****/
 

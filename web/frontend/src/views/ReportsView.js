@@ -319,7 +319,7 @@ export default function ReportsView({ state }) {
                                                 <TableRow>
                                                     <TableCell>Target post:</TableCell>
                                                     <TableCell>
-                                                        <StyledLink to={`/view_post?post_id=${encodeURIComponent(String(r.target || ''))}`}>
+                                                        <StyledLink to={`/p/${encodeURIComponent(String(r.target || ''))}`}>
                                                             {String(r.target || '')}
                                                         </StyledLink>
                                                     </TableCell>

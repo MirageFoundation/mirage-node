@@ -1000,4 +1000,23 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.10.5: Cleanup one-time upgrade code from app.go
+	// - Removed store loader logic for v1.10.4-restore-sdk (no longer needed after upgrade ran)
+	// - No state migration needed, binary-only change
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.5",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.5...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.5 complete - cleanup of one-time upgrade code")
+			return toVM, nil
+		},
+	)
 }

@@ -188,20 +188,20 @@ def debug_log(msg: str) -> None:
 def get_tmux_visibility_state() -> tuple[bool, bool]:
     """
     Check if running inside tmux and whether the session is actively visible.
-    
+
     Returns:
         (is_in_tmux, is_visible)
         - is_in_tmux: True if running inside a tmux session
-        - is_visible: True if the session has attached clients AND the current 
+        - is_visible: True if the session has attached clients AND the current
                       window is the active window (user is looking at it)
     """
     # Check if we're inside tmux
     if not os.environ.get("TMUX"):
         return False, True  # Not in tmux, assume visible
-    
+
     # Get our pane ID for explicit targeting
     pane_id = os.environ.get("TMUX_PANE", "")
-    
+
     try:
         # Check if session has any attached clients
         result = subprocess.run(
@@ -214,16 +214,23 @@ def get_tmux_visibility_state() -> tuple[bool, bool]:
             # No clients attached = detached
             debug_log("tmux: no clients attached (detached)")
             return True, False
-        
+
         # Session has clients - check if current window is active
         # Get our window index and compare to the session's active window
         cmd = ["tmux", "display-message", "-p", "#{window_index} #{session_attached} #{client_session}"]
         if pane_id:
-            cmd = ["tmux", "display-message", "-t", pane_id, "-p", "#{window_index} #{session_attached} #{client_session}"]
-        
+            cmd = [
+                "tmux",
+                "display-message",
+                "-t",
+                pane_id,
+                "-p",
+                "#{window_index} #{session_attached} #{client_session}",
+            ]
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=2)
         our_window_index = result.stdout.strip().split()[0] if result.stdout.strip() else ""
-        
+
         # List windows to find which one is active (has * flag)
         result = subprocess.run(
             ["tmux", "list-windows", "-F", "#{window_index} #{window_flags}"],
@@ -231,7 +238,7 @@ def get_tmux_visibility_state() -> tuple[bool, bool]:
             text=True,
             timeout=2,
         )
-        
+
         active_window_index = None
         for line in result.stdout.strip().split("\n"):
             parts = line.split(None, 1)
@@ -243,17 +250,19 @@ def get_tmux_visibility_state() -> tuple[bool, bool]:
             elif len(parts) == 1:
                 # No flags means this might be the only window
                 pass
-        
+
         window_active = our_window_index == active_window_index
-        
-        debug_log(f"tmux: pane={pane_id} our_window={our_window_index} active_window={active_window_index} visible={window_active}")
-        
+
+        debug_log(
+            f"tmux: pane={pane_id} our_window={our_window_index} active_window={active_window_index} visible={window_active}"
+        )
+
         if not window_active:
             return True, False
-        
+
         # Window is active - user is looking at this
         return True, True
-        
+
     except Exception as e:
         debug_log(f"tmux: visibility check failed: {e}")
         # On error, assume visible to avoid stale data
@@ -318,6 +327,34 @@ def min_non_zero(a: Optional[int], b: Optional[int]) -> Optional[int]:
     if not b or b <= 0:
         return a
     return a if a < b else b
+
+
+def parse_env_bool(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+    normalized = str(value).strip().lower().strip('"').strip("'")
+    if normalized in ("true", "1", "yes"):
+        return True
+    if normalized in ("false", "0", "no"):
+        return False
+    return None
+
+
+def load_env_file(path: Path) -> dict:
+    data = {}
+    content = path.read_text(encoding="utf-8")
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            data[key] = value
+    return data
 
 
 @dataclass
@@ -647,10 +684,7 @@ def check_retention() -> ServiceStatus:
     try:
         consensus_resp = requests.get("http://127.0.0.1:26657/consensus_params", timeout=3).json()
         evidence = (
-            consensus_resp.get("result", {})
-            .get("consensus_params", {})
-            .get("evidence", {})
-            .get("max_age_num_blocks")
+            consensus_resp.get("result", {}).get("consensus_params", {}).get("evidence", {}).get("max_age_num_blocks")
         )
         evidence_max_age_blocks = parse_int(evidence)
     except Exception as e:
@@ -716,7 +750,7 @@ def check_retention() -> ServiceStatus:
 def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
     """
     Get jail timing info from slashing module.
-    
+
     Returns dict with:
         - jailed_since: datetime when jailed (if calculable)
         - jailed_since_secs: seconds since jailing
@@ -724,7 +758,7 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
         - tombstoned: bool if validator is tombstoned (permanent jail)
     """
     result = {}
-    
+
     try:
         # Query all signing infos - we'll match by finding the one that's jailed
         # (There's typically only one validator per node anyway)
@@ -734,25 +768,25 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
             text=True,
             timeout=5,
         )
-        
+
         if signing_result.returncode != 0:
             debug_log(f"validator: slashing signing-infos query failed: {signing_result.stderr}")
             return result
-            
+
         signing_data = json.loads(signing_result.stdout)
         infos = signing_data.get("info", [])
-        
+
         for info in infos:
             # The address field is in bech32 format, but we can match by checking
             # if this is likely our validator (there's usually only one local validator)
             val_info = info.get("validator_signing_info", info)  # Handle both formats
-            
+
             jailed_until_str = val_info.get("jailed_until", "")
-            
+
             # Skip if not jailed (jailed_until is zero time)
             if not jailed_until_str or jailed_until_str.startswith("0001-01-01"):
                 continue
-                
+
             # Parse jailed_until
             try:
                 # Handle various timestamp formats
@@ -770,24 +804,24 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
                     else:
                         frac_end = len(frac_and_tz)
                     # Keep only 6 digits for microseconds
-                    frac = frac_and_tz[:frac_end][:6].ljust(6, '0')
+                    frac = frac_and_tz[:frac_end][:6].ljust(6, "0")
                     tz = frac_and_tz[frac_end:]
                     jailed_until_str = f"{parts[0]}.{frac}{tz}"
-                    
+
                 jailed_until = datetime.fromisoformat(jailed_until_str)
                 if jailed_until.tzinfo is None:
                     jailed_until = jailed_until.replace(tzinfo=timezone.utc)
-                    
+
                 result["jailed_until"] = jailed_until
-                
+
                 # Check for tombstone (far future date, like year 9999)
                 if jailed_until.year > 9000:
                     result["tombstoned"] = True
                     debug_log(f"validator: detected tombstone, jailed_until={jailed_until}")
                     return result
-                    
+
                 result["tombstoned"] = False
-                
+
                 # Query slashing params to get downtime_jail_duration
                 params_result = subprocess.run(
                     [get_miraged_bin(), "query", "slashing", "params", "--home", node_home, "-o", "json"],
@@ -795,12 +829,12 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
                     text=True,
                     timeout=5,
                 )
-                
+
                 if params_result.returncode == 0:
                     params_data = json.loads(params_result.stdout)
                     params = params_data.get("params", params_data)
                     jail_duration_str = params.get("downtime_jail_duration", "")
-                    
+
                     # Parse duration (format: "600s" or "600000000000" nanoseconds)
                     jail_duration_secs = 0
                     if jail_duration_str.endswith("s"):
@@ -808,22 +842,22 @@ def _get_jail_info(node_home: str, cons_pubkey_base64: str) -> dict:
                     elif jail_duration_str.isdigit():
                         # Nanoseconds
                         jail_duration_secs = int(jail_duration_str) / 1_000_000_000
-                    
+
                     if jail_duration_secs > 0:
                         jailed_since = jailed_until - timedelta(seconds=jail_duration_secs)
                         result["jailed_since"] = jailed_since
                         result["jailed_since_secs"] = (datetime.now(timezone.utc) - jailed_since).total_seconds()
                         debug_log(f"validator: jailed_since={jailed_since} ({result['jailed_since_secs']:.0f}s ago)")
-                
+
                 break  # Found our validator's info
-                
+
             except Exception as e:
                 debug_log(f"validator: failed to parse jailed_until={jailed_until_str!r}: {e}")
                 continue
-                
+
     except Exception as e:
         debug_log(f"validator: _get_jail_info failed: {e}")
-        
+
     return result
 
 
@@ -925,7 +959,7 @@ def check_validator() -> ServiceStatus:
             # Get jail timing info
             jail_info = _get_jail_info(node_home, local_pubkey)
             jail_details = {**base_details, "active": False, "jailed": True}
-            
+
             if jail_info.get("tombstoned"):
                 jail_details["tombstoned"] = True
                 return ServiceStatus(
@@ -934,12 +968,12 @@ def check_validator() -> ServiceStatus:
                     message="TOMBSTONED",
                     details=jail_details,
                 )
-            
+
             if jail_info.get("jailed_since_secs") is not None:
                 jail_details["jailed_since_secs"] = jail_info["jailed_since_secs"]
             if jail_info.get("jailed_until"):
                 jail_details["jailed_until"] = jail_info["jailed_until"].isoformat()
-                
+
             return ServiceStatus(
                 name="Validator",
                 status=Status.ERROR,
@@ -1157,6 +1191,81 @@ def check_indexer() -> ServiceStatus:
             message="Running (DB error)",
             details={"running": True, "error": str(e)[:20]},
         )
+
+
+def check_rewards() -> ServiceStatus:
+    """Check rewards/quest enablement consistency (backend + indexer)."""
+    details: dict = {}
+    env_path = Path.home() / ".mirage" / "env" / "backend.env"
+    details["backend_env"] = str(env_path)
+
+    try:
+        env_data = load_env_file(env_path)
+    except FileNotFoundError:
+        debug_log("rewards: backend.env missing")
+        return ServiceStatus(name="Rewards", status=Status.ERROR, message="backend.env missing", details=details)
+    except Exception as e:
+        debug_log(f"rewards: failed to read backend.env: {e}")
+        return ServiceStatus(
+            name="Rewards", status=Status.ERROR, message="backend.env read error", details={"error": str(e)[:20]}
+        )
+
+    backend_quests_raw = env_data.get("QUESTS_ENABLED")
+    backend_quests = parse_env_bool(backend_quests_raw)
+    if backend_quests is None:
+        debug_log(f"rewards: QUESTS_ENABLED invalid or missing: {backend_quests_raw!r}")
+        return ServiceStatus(
+            name="Rewards",
+            status=Status.ERROR,
+            message="QUESTS_ENABLED invalid",
+            details={"backend_env": str(env_path), "QUESTS_ENABLED": backend_quests_raw},
+        )
+
+    backend_debug_raw = env_data.get("BACKEND_DEBUG")
+    backend_debug = parse_env_bool(backend_debug_raw)
+    details.update(
+        {
+            "backend_quests_enabled": backend_quests,
+            "backend_debug": backend_debug,
+        }
+    )
+
+    try:
+        from indexer import settings as indexer_settings
+
+        indexer_quests = bool(indexer_settings.QUESTS_ENABLED)
+        details["indexer_quests_enabled"] = indexer_quests
+    except Exception as e:
+        debug_log(f"rewards: failed to read indexer settings: {e}")
+        return ServiceStatus(
+            name="Rewards",
+            status=Status.ERROR,
+            message="Indexer settings error",
+            details={"backend_env": str(env_path), "error": str(e)[:20]},
+        )
+
+    both_on = backend_quests and indexer_quests
+    details["both_enabled"] = both_on
+
+    if both_on:
+        status = Status.OK
+        message = "Enabled"
+    else:
+        status = Status.ERROR
+        if not backend_quests and not indexer_quests:
+            message = "Both OFF"
+        elif not backend_quests:
+            message = "Backend OFF"
+        else:
+            message = "Indexer OFF"
+
+    debug_log(
+        "rewards: "
+        f"backend_quests={backend_quests} indexer_quests={indexer_quests} "
+        f"backend_debug={backend_debug} status={status.value} message={message}"
+    )
+
+    return ServiceStatus(name="Rewards", status=status, message=message, details=details)
 
 
 def check_caddy() -> ServiceStatus:
@@ -1596,9 +1705,7 @@ def check_orchestrator() -> ServiceStatus:
 
     # If not enabled, show as unknown (not configured to run)
     if not enabled:
-        return ServiceStatus(
-            name="Orchestrator", status=Status.UNKNOWN, message="Disabled", details=base_details
-        )
+        return ServiceStatus(name="Orchestrator", status=Status.UNKNOWN, message="Disabled", details=base_details)
 
     # Check if process is running
     try:
@@ -1634,29 +1741,21 @@ def check_orchestrator() -> ServiceStatus:
                 base_details["sol_balance"] = sol_balance
 
     if not process_running:
-        return ServiceStatus(
-            name="Orchestrator", status=Status.ERROR, message="Not running", details=base_details
-        )
+        return ServiceStatus(name="Orchestrator", status=Status.ERROR, message="Not running", details=base_details)
 
     if not keypair_exists:
-        return ServiceStatus(
-            name="Orchestrator", status=Status.WARN, message="No keypair", details=base_details
-        )
+        return ServiceStatus(name="Orchestrator", status=Status.WARN, message="No keypair", details=base_details)
 
     # Check SOL balance thresholds
     if sol_balance is not None:
         if sol_balance < ORCHESTRATOR_SOL_ERROR:
-            return ServiceStatus(
-                name="Orchestrator", status=Status.ERROR, message="Low SOL!", details=base_details
-            )
+            return ServiceStatus(name="Orchestrator", status=Status.ERROR, message="Low SOL!", details=base_details)
         elif sol_balance < ORCHESTRATOR_SOL_WARN:
             return ServiceStatus(
                 name="Orchestrator", status=Status.WARN, message="SOL running low", details=base_details
             )
 
-    return ServiceStatus(
-        name="Orchestrator", status=Status.OK, message="Running", details=base_details
-    )
+    return ServiceStatus(name="Orchestrator", status=Status.OK, message="Running", details=base_details)
 
 
 def _get_cpu_count() -> int:
@@ -1690,10 +1789,10 @@ def _get_memory_info() -> Optional[dict]:
                     if val_parts:
                         val_kb = int(val_parts[0])
                         meminfo[key] = val_kb * 1024
-            
+
             total = meminfo.get("MemTotal", 0)
             available = meminfo.get("MemAvailable", 0)
-            
+
             if total > 0:
                 used = total - available
                 used_pct = (used / total) * 100
@@ -1742,7 +1841,7 @@ def _format_uptime(seconds: float) -> str:
     days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)
-    
+
     if days > 0:
         return f"{days}d {hours}h"
     elif hours > 0:
@@ -1753,11 +1852,11 @@ def _format_uptime(seconds: float) -> str:
 
 def _format_bytes(b: int) -> str:
     """Format bytes in human-readable form."""
-    if b >= 1024 ** 4:
+    if b >= 1024**4:
         return f"{b / (1024 ** 4):.1f} TB"
-    elif b >= 1024 ** 3:
+    elif b >= 1024**3:
         return f"{b / (1024 ** 3):.1f} GB"
-    elif b >= 1024 ** 2:
+    elif b >= 1024**2:
         return f"{b / (1024 ** 2):.1f} MB"
     elif b >= 1024:
         return f"{b / 1024:.1f} KB"
@@ -1768,7 +1867,7 @@ def _format_bytes(b: int) -> str:
 def _get_pending_updates() -> Optional[dict]:
     """
     Check for pending system updates (Debian/Ubuntu/Arch).
-    
+
     Returns dict with:
         - total: total number of upgradable packages
         - security: number of security updates (Debian/Ubuntu only)
@@ -1784,24 +1883,24 @@ def _get_pending_updates() -> Optional[dict]:
                 timeout=10,
                 env={**os.environ, "LANG": "C"},
             )
-            
+
             if result.returncode == 0:
                 lines = result.stdout.strip().split("\n")
                 # First line is "Listing..." header
                 packages = [l for l in lines[1:] if l.strip()]
-                
+
                 total = len(packages)
                 security = 0
                 names = []
-                
+
                 for pkg in packages[:10]:
                     pkg_name = pkg.split("/")[0]
                     names.append(pkg_name)
                     if "-security" in pkg or "security" in pkg.lower():
                         security += 1
-                
+
                 return {"total": total, "security": security, "names": names}
-        
+
         # Try pacman (Arch Linux)
         if os.path.exists("/usr/bin/pacman"):
             # checkupdates is the safe way to check for updates (doesn't need root)
@@ -1814,22 +1913,22 @@ def _get_pending_updates() -> Optional[dict]:
                 timeout=30,
                 env={**os.environ, "LANG": "C"},
             )
-            
+
             # pacman -Qu returns 1 if no updates, checkupdates returns 2 if no updates
             if result.returncode in (0, 1, 2):
                 lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
                 total = len(lines)
                 names = []
-                
+
                 for pkg in lines[:10]:
                     # Format: "package old_version -> new_version"
                     pkg_name = pkg.split()[0] if pkg else ""
                     if pkg_name:
                         names.append(pkg_name)
-                
+
                 # Arch doesn't distinguish security updates in the same way
                 return {"total": total, "security": 0, "names": names}
-        
+
         # Try dnf (Fedora/RHEL)
         if os.path.exists("/usr/bin/dnf"):
             result = subprocess.run(
@@ -1839,17 +1938,17 @@ def _get_pending_updates() -> Optional[dict]:
                 timeout=30,
                 env={**os.environ, "LANG": "C"},
             )
-            
+
             # dnf returns 100 if updates available, 0 if none
             if result.returncode in (0, 100):
                 lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
                 total = len(lines)
                 names = [l.split()[0] for l in lines[:10] if l.split()]
-                
+
                 return {"total": total, "security": 0, "names": names}
-        
+
         return None
-        
+
     except subprocess.TimeoutExpired:
         debug_log("system: update check timed out")
         return None
@@ -1862,49 +1961,49 @@ def check_system() -> ServiceStatus:
     """Check system health: disk space, memory, CPU load, uptime."""
     details = {}
     issues = []
-    
+
     # Get disk usage for root filesystem
     disk = _get_disk_usage("/")
     if disk:
-        free_gb = disk["free"] / (1024 ** 3)
+        free_gb = disk["free"] / (1024**3)
         details["disk_total"] = disk["total"]
         details["disk_free"] = disk["free"]
         details["disk_used_pct"] = disk["used_pct"]
         details["disk_free_gb"] = free_gb
-        
+
         if free_gb < SYSTEM_STORAGE_ERROR_GB:
             issues.append(("error", "disk_critical"))
         elif free_gb < SYSTEM_STORAGE_WARN_GB:
             issues.append(("warn", "disk_low"))
-    
+
     # Get disk usage for ~/.mirage if it exists on a different mount
     mirage_home = os.path.expanduser("~/.mirage")
     if os.path.exists(mirage_home):
         mirage_disk = _get_disk_usage(mirage_home)
         if mirage_disk and mirage_disk.get("total") != disk.get("total"):
             # Different filesystem
-            free_gb = mirage_disk["free"] / (1024 ** 3)
+            free_gb = mirage_disk["free"] / (1024**3)
             details["mirage_disk_free"] = mirage_disk["free"]
             details["mirage_disk_used_pct"] = mirage_disk["used_pct"]
             details["mirage_disk_free_gb"] = free_gb
-            
+
             if free_gb < SYSTEM_STORAGE_ERROR_GB:
                 issues.append(("error", "mirage_disk_critical"))
             elif free_gb < SYSTEM_STORAGE_WARN_GB:
                 issues.append(("warn", "mirage_disk_low"))
-    
+
     # Get memory info
     mem = _get_memory_info()
     if mem:
         details["mem_total"] = mem["total"]
         details["mem_available"] = mem["available"]
         details["mem_used_pct"] = mem["used_pct"]
-        
+
         if mem["used_pct"] >= SYSTEM_MEMORY_ERROR_PCT:
             issues.append(("error", "memory_critical"))
         elif mem["used_pct"] >= SYSTEM_MEMORY_WARN_PCT:
             issues.append(("warn", "memory_high"))
-    
+
     # Get CPU load
     load = _get_load_average()
     cpu_count = _get_cpu_count()
@@ -1913,40 +2012,40 @@ def check_system() -> ServiceStatus:
         details["load_5m"] = load[1]
         details["load_15m"] = load[2]
         details["cpu_count"] = cpu_count
-        
+
         # Check load per core
         load_per_core = load[0] / cpu_count
         details["load_per_core"] = load_per_core
-        
+
         if load_per_core >= SYSTEM_LOAD_ERROR_PER_CORE:
             issues.append(("error", "load_critical"))
         elif load_per_core >= SYSTEM_LOAD_WARN_PER_CORE:
             issues.append(("warn", "load_high"))
-    
+
     # Get uptime
     uptime = _get_uptime()
     if uptime:
         details["uptime_secs"] = uptime
         details["uptime_human"] = _format_uptime(uptime)
-    
+
     # Check for pending system updates
     updates = _get_pending_updates()
     if updates:
         details["updates_total"] = updates["total"]
         details["updates_security"] = updates["security"]
         details["updates_names"] = updates["names"]
-        
+
         # Security updates are critical
         if updates["security"] > 0:
             issues.append(("error", "security_updates"))
         elif updates["total"] > 20:
             # Many pending updates is a warning
             issues.append(("warn", "many_updates"))
-    
+
     # Determine overall status and message
     has_error = any(level == "error" for level, _ in issues)
     has_warn = any(level == "warn" for level, _ in issues)
-    
+
     if has_error:
         status = Status.ERROR
         # Prioritize message by severity
@@ -1975,9 +2074,9 @@ def check_system() -> ServiceStatus:
     else:
         status = Status.OK
         message = "Healthy"
-    
+
     details["issues"] = issues
-    
+
     return ServiceStatus(name="System", status=status, message=message, details=details)
 
 
@@ -2166,6 +2265,29 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if details.get("rate"):
             lines.append(f"{bullet}{Colors.DIM}Rate:{Colors.RESET} {details['rate']}")
 
+    elif status.name == "Rewards":
+        backend_quests = details.get("backend_quests_enabled")
+        indexer_quests = details.get("indexer_quests_enabled")
+        backend_debug = details.get("backend_debug")
+        both_enabled = details.get("both_enabled")
+
+        if backend_quests is not None:
+            b_color = Colors.BRIGHT_GREEN if backend_quests else Colors.BRIGHT_RED
+            b_text = "ON" if backend_quests else "OFF"
+            lines.append(f"{bullet}{Colors.DIM}Backend quests:{Colors.RESET} {b_color}{b_text}{Colors.RESET}")
+        if indexer_quests is not None:
+            i_color = Colors.BRIGHT_GREEN if indexer_quests else Colors.BRIGHT_RED
+            i_text = "ON" if indexer_quests else "OFF"
+            lines.append(f"{bullet}{Colors.DIM}Indexer quests:{Colors.RESET} {i_color}{i_text}{Colors.RESET}")
+        if both_enabled is not None:
+            both_color = Colors.BRIGHT_GREEN if both_enabled else Colors.BRIGHT_RED
+            both_text = "YES" if both_enabled else "NO"
+            lines.append(f"{bullet}{Colors.DIM}Both enabled:{Colors.RESET} {both_color}{both_text}{Colors.RESET}")
+        if backend_debug is not None:
+            d_color = Colors.BRIGHT_GREEN if backend_debug else Colors.BRIGHT_YELLOW
+            d_text = "ON" if backend_debug else "OFF"
+            lines.append(f"{bullet}{Colors.DIM}Debug:{Colors.RESET} {d_color}{d_text}{Colors.RESET}")
+
     elif status.name == "Caddy":
         if details.get("domain"):
             lines.append(f"{bullet}{Colors.DIM}Domain:{Colors.RESET} {truncate(details['domain'], 18)}")
@@ -2175,7 +2297,11 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         if http_val is not None:
             if isinstance(http_val, int):
                 # It's TCP connect latency in ms
-                ms_color = Colors.BRIGHT_GREEN if http_val < 50 else Colors.BRIGHT_YELLOW if http_val < 200 else Colors.BRIGHT_RED
+                ms_color = (
+                    Colors.BRIGHT_GREEN
+                    if http_val < 50
+                    else Colors.BRIGHT_YELLOW if http_val < 200 else Colors.BRIGHT_RED
+                )
                 lines.append(f"{bullet}{Colors.DIM}HTTP:{Colors.RESET} {ms_color}{http_val}ms{Colors.RESET}")
             elif http_val == "refused" and https_ok:
                 # HTTP refused is expected when HTTPS is working
@@ -2252,7 +2378,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(
                 f"{bullet}{Colors.DIM}Disk:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
             )
-        
+
         # Mirage data disk (if different mount)
         if "mirage_disk_free_gb" in details:
             free_gb = details["mirage_disk_free_gb"]
@@ -2268,7 +2394,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(
                 f"{bullet}{Colors.DIM}Data:{Colors.RESET} {disk_color}{free_gb:.1f} GB free{disk_suffix}{Colors.RESET}"
             )
-        
+
         # Memory usage
         if "mem_used_pct" in details:
             used_pct = details["mem_used_pct"]
@@ -2283,7 +2409,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(
                 f"{bullet}{Colors.DIM}Memory:{Colors.RESET} {mem_color}{used_pct:.0f}% used{Colors.RESET} ({avail_str} free)"
             )
-        
+
         # CPU load (show as percentage of total capacity)
         if "load_1m" in details:
             load_1m = details["load_1m"]
@@ -2298,26 +2424,26 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(
                 f"{bullet}{Colors.DIM}CPU:{Colors.RESET} {load_color}{load_pct:.0f}%{Colors.RESET} ({cpu_count} cores)"
             )
-        
+
         # Uptime
         if details.get("uptime_human"):
             lines.append(f"{bullet}{Colors.DIM}Uptime:{Colors.RESET} {details['uptime_human']}")
-        
+
         # Pending updates
         if "updates_total" in details:
             total = details["updates_total"]
             security = details.get("updates_security", 0)
             if security > 0:
-                lines.append(
-                    f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)"
-                )
+                lines.append(f"{bullet}{Colors.BRIGHT_RED}Updates:{Colors.RESET} {total} ({security} security!)")
             elif total > 0:
                 update_color = Colors.BRIGHT_YELLOW if total > 20 else Colors.BRIGHT_GREEN
                 lines.append(
                     f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {update_color}{total} available{Colors.RESET}"
                 )
             else:
-                lines.append(f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {Colors.BRIGHT_GREEN}up to date{Colors.RESET}")
+                lines.append(
+                    f"{bullet}{Colors.DIM}Updates:{Colors.RESET} {Colors.BRIGHT_GREEN}up to date{Colors.RESET}"
+                )
 
     # Ensure minimum card height (4 detail lines + status = 5 total)
     while len(lines) < 5:
@@ -2337,6 +2463,7 @@ def render_dashboard(refresh_secs: int):
         check_validator(),
         check_postgres(),
         check_backend(),
+        check_rewards(),
         check_indexer(),
         check_caddy(),
         check_endpoints(),
@@ -2408,10 +2535,78 @@ def render_dashboard(refresh_secs: int):
     print(center_text(footer, term_width))
 
 
+def run_health_check_json(required_services: list[str]) -> dict:
+    """
+    Run health checks and return JSON-serializable result.
+
+    Args:
+        required_services: List of service names that must be healthy.
+
+    Returns:
+        Dict with:
+            - healthy: bool (True if all required services are OK or WARN)
+            - services: dict mapping service name to status info
+            - errors: list of error messages for unhealthy required services
+    """
+    # Run all checks
+    all_statuses = [
+        check_node(),
+        check_validator(),
+        check_postgres(),
+        check_backend(),
+        check_indexer(),
+        check_caddy(),
+        check_endpoints(),
+    ]
+
+    # Build services dict
+    services = {}
+    for s in all_statuses:
+        services[s.name] = {
+            "status": s.status.value,
+            "message": s.message,
+            "healthy": s.status in (Status.OK, Status.WARN),
+            "details": s.details,
+        }
+
+    # Check required services
+    errors = []
+    all_healthy = True
+
+    for req in required_services:
+        if req not in services:
+            errors.append(f"{req}: service not found")
+            all_healthy = False
+            continue
+
+        svc = services[req]
+        if not svc["healthy"]:
+            errors.append(f"{req}: {svc['status']} - {svc['message']}")
+            all_healthy = False
+
+    return {
+        "healthy": all_healthy,
+        "services": services,
+        "errors": errors,
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="Mirage unified status dashboard")
     parser.add_argument("--once", action="store_true", help="Render once and exit")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output JSON health check result and exit (for scripting)",
+    )
+    parser.add_argument(
+        "--require",
+        type=str,
+        default="CometBFT,Validator,PostgreSQL,Backend,Indexer,Caddy,Endpoints",
+        help="Comma-separated list of required services for --json health check",
+    )
     parser.add_argument(
         "--interval",
         type=int,
@@ -2431,23 +2626,30 @@ def main():
     )
     args = parser.parse_args()
 
+    # JSON health check mode
+    if args.json:
+        required = [s.strip() for s in args.require.split(",") if s.strip()]
+        result = run_health_check_json(required)
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["healthy"] else 1)
+
     active_interval = max(1, int(args.interval))
     idle_interval = max(1, int(args.idle_interval))
-    
+
     # Track last render time for idle mode
     last_render_time = 0
 
     try:
         while True:
             is_in_tmux, is_visible = get_tmux_visibility_state()
-            
+
             if is_visible:
                 # Actively visible - render and use short interval
                 if not args.no_clear:
                     print("\033[2J\033[H", end="")
                 render_dashboard(refresh_secs=active_interval)
                 last_render_time = time.time()
-                
+
                 if args.once:
                     return
                 time.sleep(active_interval)
@@ -2456,20 +2658,20 @@ def main():
                 # Only render if idle_interval has passed since last render
                 now = time.time()
                 time_since_render = now - last_render_time
-                
+
                 if time_since_render >= idle_interval:
                     if not args.no_clear:
                         print("\033[2J\033[H", end="")
                     render_dashboard(refresh_secs=idle_interval)
                     last_render_time = time.time()
-                
+
                 if args.once:
                     return
-                    
+
                 # Sleep in shorter chunks to detect visibility changes quickly
                 # Check every 2 seconds if we became visible
                 time.sleep(2)
-                
+
     except KeyboardInterrupt:
         print("\n")
         sys.exit(0)

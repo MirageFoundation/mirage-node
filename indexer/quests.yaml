@@ -284,6 +284,7 @@ achievements:
     action_type: quality_comments
     target_count: 10
     quality_threshold: 5
+    unique_target: true
     rewards:
       - type: mirage
         amount: 75000
@@ -298,3 +299,38 @@ achievements:
       - type: mirage
         amount: 20000
     badge_icon: "🏴"
+
+# Special quests - NOT included in random daily pool, assigned via specific gating logic
+special_quests:
+  # Referrer quest: appears with 30% daily chance if user has unused invite codes
+  - id: invite_recruit
+    title: "Recruit a Friend"
+    description: "Successfully invite a new user with your invite code before the daily reset"
+    action_type: invite_recruit
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 10000
+
+  # Referee quest: auto-assigned (completed) when new user joins via invite code
+  - id: invite_referred
+    title: "Welcome Bonus!"
+    description: "You were referred by a friend - claim your 10,000 MIRAGE reward!"
+    action_type: claim_only
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 10000
+        apply_multiplier: false
+
+  # Invite earner quest: appears every N completed quests, reward is an invite code
+  - id: invite_earner
+    title: "Earn an Invite Code"
+    description: "Create a post that gets 5+ upvotes to earn a new invite code"
+    action_type: upvotes_received
+    target_count: 1
+    quality_threshold: 5
+    min_content_length: 50
+    rewards:
+      - type: invite_code
+        amount: 1

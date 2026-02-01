@@ -9,7 +9,6 @@ import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 import { useTabs } from "../utils/useTabs";
-import Storage from "../utils/Storage";
 
 // Tier names and colors (same as SubscriptionView)
 const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];
@@ -265,6 +264,8 @@ export default function StatsView() {
     const location = useLocation();
     const [activeTab, setActiveTab] = useTabs('overview', VALID_TABS);
     const [stats, setStats] = useState(null);
+    const [analyticsStats, setAnalyticsStats] = useState(null);
+    const [analyticsLoading, setAnalyticsLoading] = useState(false);
     const [signupsData, setSignupsData] = useState(null);
     const [subscribersData, setSubscribersData] = useState(null);
     const [accountsData, setAccountsData] = useState(null);
@@ -276,11 +277,18 @@ export default function StatsView() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Merge stats with analytics when both are loaded
+    const mergedStats = stats ? {
+        ...stats,
+        ...(analyticsStats || {}),
+    } : null;
+
     // Fetch reward history with pagination
     const fetchRewardHistory = useCallback(async (offset = 0, append = false) => {
         setPayoutsLoading(true);
         try {
-            const data = await Api.get('rewards/history', {
+            const data = await Api.get('get_stats', {
+                tab: 'rewards_history',
                 offset,
                 limit: 50
             }, { timeoutMs: 30000 });
@@ -298,36 +306,48 @@ export default function StatsView() {
         }
     }, []);
 
+    // Fetch analytics stats separately (slow - user agent parsing)
+    const fetchAnalytics = useCallback(async () => {
+        setAnalyticsLoading(true);
+        try {
+            const data = await Api.get('get_stats', { tab: 'analytics' }, { timeoutMs: 30000 });
+            setAnalyticsStats(data);
+        } catch (err) {
+            console.error('Failed to load analytics:', err);
+            // Don't set error - analytics is optional enhancement
+        } finally {
+            setAnalyticsLoading(false);
+        }
+    }, []);
+
     // Fetch data based on active tab
     const fetchData = useCallback(async (tab) => {
         setLoading(true);
         setError(null);
         try {
-            if (tab === 'rewards') {
-                // Rewards tab - public endpoint
-                const data = await Api.get('rewards/stats', {}, { timeoutMs: 30000 });
+            const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
+            if (tab === 'overview') {
+                setStats(data);
+                // Also fetch analytics separately (lazy load)
+                fetchAnalytics();
+            } else if (tab === 'signups') {
+                setSignupsData(data);
+            } else if (tab === 'subscribers') {
+                setSubscribersData(data);
+            } else if (tab === 'accounts') {
+                setAccountsData(data);
+            } else if (tab === 'rewards') {
                 setRewardsData(data);
                 // Also fetch initial reward history
                 setPayouts([]);
                 fetchRewardHistory(0, false);
-            } else {
-                const data = await Api.get('get_stats', { tab }, { timeoutMs: 30000 });
-                if (tab === 'overview') {
-                    setStats(data);
-                } else if (tab === 'signups') {
-                    setSignupsData(data);
-                } else if (tab === 'subscribers') {
-                    setSubscribersData(data);
-                } else if (tab === 'accounts') {
-                    setAccountsData(data);
-                }
             }
         } catch (err) {
             setError(err.message || 'Failed to load stats');
         } finally {
             setLoading(false);
         }
-    }, [fetchRewardHistory]);
+    }, [fetchRewardHistory, fetchAnalytics]);
 
     useEffect(() => {
         fetchData(activeTab);
@@ -360,9 +380,9 @@ export default function StatsView() {
     };
 
     const getDAUTrend = () => {
-        if (!stats || !stats.dau_today || !stats.dau_yesterday) return null;
-        if (stats.dau_today > stats.dau_yesterday) return 'up';
-        if (stats.dau_today < stats.dau_yesterday) return 'down';
+        if (!mergedStats || !mergedStats.dau_today || !mergedStats.dau_yesterday) return null;
+        if (mergedStats.dau_today > mergedStats.dau_yesterday) return 'up';
+        if (mergedStats.dau_today < mergedStats.dau_yesterday) return 'down';
         return 'same';
     };
 
@@ -384,7 +404,7 @@ export default function StatsView() {
                     )}
                     <div>
                         {address ? (
-                            <UserLink to={`/profile?address=${address}`}>
+                            <UserLink to={`/u/${user.username || address}`}>
                                 {user.username || truncateAddress(address)}
                             </UserLink>
                         ) : (
@@ -415,7 +435,7 @@ export default function StatsView() {
                     )}
                     <div>
                         {user.address ? (
-                            <UserLink to={`/profile?address=${user.address}`}>
+                            <UserLink to={`/u/${user.username || user.address}`}>
                                 {user.username || 'Anonymous'}
                             </UserLink>
                         ) : (
@@ -552,7 +572,7 @@ export default function StatsView() {
                         </TabsRow>
                         <ContainerBody>
                             {/* Overview Tab */}
-                            {activeTab === 'overview' && stats && (
+                            {activeTab === 'overview' && mergedStats && (
                                 <>
                                     <SectionTitle>
                                         Usage
@@ -570,8 +590,8 @@ export default function StatsView() {
                                         </Label>
                                         <ValueBox>
                                             <Mono>
-                                                {formatNumber(stats.dau_any_today || stats.dau_today || 0)}
-                                                {dauTrend && <TrendIndicator trend={dauTrend}>{trendSymbol}</TrendIndicator>}
+                                                {analyticsLoading ? '...' : formatNumber(mergedStats.dau_any_today || mergedStats.dau_today || 0)}
+                                                {!analyticsLoading && dauTrend && <TrendIndicator trend={dauTrend}>{trendSymbol}</TrendIndicator>}
                                             </Mono>
                                         </ValueBox>
                                     </Row>
@@ -583,7 +603,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.dau_registered_today || 0)}</Mono>
+                                            <Mono>{analyticsLoading ? '...' : formatNumber(mergedStats.dau_registered_today || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -594,7 +614,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.maus || 0)}</Mono>
+                                            <Mono>{analyticsLoading ? '...' : formatNumber(mergedStats.maus || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -605,7 +625,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.registered_users || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.registered_users || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -616,7 +636,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.new_registrations_7d || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.new_registrations_7d || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -627,7 +647,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.subscribers || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.subscribers || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row style={{ paddingLeft: '1rem' }}>
@@ -635,7 +655,7 @@ export default function StatsView() {
                                             {TIER_NAMES[1]}
                                         </Label>
                                         <ValueBox>
-                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_1 || 0)}</Mono>
+                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_1 || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row style={{ paddingLeft: '1rem' }}>
@@ -643,7 +663,7 @@ export default function StatsView() {
                                             {TIER_NAMES[2]}
                                         </Label>
                                         <ValueBox>
-                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_2 || 0)}</Mono>
+                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_2 || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row style={{ paddingLeft: '1rem' }}>
@@ -651,7 +671,7 @@ export default function StatsView() {
                                             {TIER_NAMES[3]}
                                         </Label>
                                         <ValueBox>
-                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(stats.subscribers_tier_3 || 0)}</Mono>
+                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_3 || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
 
@@ -666,7 +686,7 @@ export default function StatsView() {
                                             Posts
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.total_posts || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.total_posts || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -674,7 +694,7 @@ export default function StatsView() {
                                             Comments
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.total_comments || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.total_comments || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -682,7 +702,7 @@ export default function StatsView() {
                                             Votes
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.total_votes || 0)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.total_votes || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <SectionTitle>
@@ -697,7 +717,7 @@ export default function StatsView() {
                                         </Label>
                                         <ValueBox>
                                             <Mono>
-                                                ↑{formatNumber(stats.upvotes || 0)} / ↓{formatNumber(stats.downvotes || 0)}
+                                                ↑{formatNumber(mergedStats.upvotes || 0)} / ↓{formatNumber(mergedStats.downvotes || 0)}
                                             </Mono>
                                         </ValueBox>
                                     </Row>
@@ -706,7 +726,7 @@ export default function StatsView() {
                                             Avg Posts/User
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.average_posts_per_user || 0, 1)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.average_posts_per_user || 0, 1)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -714,7 +734,7 @@ export default function StatsView() {
                                             Avg Comments/Post
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.average_comments_per_post || 0, 1)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.average_comments_per_post || 0, 1)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -722,7 +742,7 @@ export default function StatsView() {
                                             Avg Votes/User
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatNumber(stats.average_votes_per_user || 0, 1)}</Mono>
+                                            <Mono>{formatNumber(mergedStats.average_votes_per_user || 0, 1)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -733,7 +753,7 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatPercentage((stats.edit_frequency || 0) * 100, 1)}</Mono>
+                                            <Mono>{formatPercentage((mergedStats.edit_frequency || 0) * 100, 1)}</Mono>
                                         </ValueBox>
                                     </Row>
                                     <Row>
@@ -744,10 +764,10 @@ export default function StatsView() {
                                             </InfoIcon>
                                         </Label>
                                         <ValueBox>
-                                            <Mono>{formatPercentage((stats.delete_rate || 0) * 100, 1)}</Mono>
+                                            <Mono>{formatPercentage((mergedStats.delete_rate || 0) * 100, 1)}</Mono>
                                         </ValueBox>
                                     </Row>
-                                    {stats.most_active_topics && stats.most_active_topics.length > 0 && (
+                                    {mergedStats.most_active_topics && mergedStats.most_active_topics.length > 0 && (
                                         <>
                                             <SectionTitle>
                                                 Active Topics
@@ -761,7 +781,7 @@ export default function StatsView() {
                                                 </Label>
                                                 <ValueBox>
                                                     <StatList>
-                                                        {stats.most_active_topics.map((item, idx) => (
+                                                        {mergedStats.most_active_topics.map((item, idx) => (
                                                             <StatItem key={idx}>
                                                                 <Mono>#{item.topic}</Mono>
                                                                 <Mono>{formatNumber(item.count)}</Mono>
@@ -772,7 +792,7 @@ export default function StatsView() {
                                             </Row>
                                         </>
                                     )}
-                                    {stats.tag_counts && (
+                                    {mergedStats.tag_counts && (
                                         <>
                                             <SectionTitle>
                                                 Content Tags
@@ -788,34 +808,40 @@ export default function StatsView() {
                                                     <StatList>
                                                         <StatItem>
                                                             <Mono>Safe</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.safe || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.safe || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Sensitive</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.sensitive || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.sensitive || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Porn</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.porn || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.porn || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Violence</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.violence || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.violence || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Gore</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.gore || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.gore || 0)}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Death</Mono>
-                                                            <Mono>{formatNumber(stats.tag_counts.death || 0)}</Mono>
+                                                            <Mono>{formatNumber(mergedStats.tag_counts.death || 0)}</Mono>
                                                         </StatItem>
                                                     </StatList>
                                                 </ValueBox>
                                             </Row>
                                         </>
                                     )}
-                                    {stats.device_breakdown && (
+                                    {/* Analytics sections - loaded lazily */}
+                                    {analyticsLoading && (
+                                        <SectionNote style={{ textAlign: 'center', padding: '1rem' }}>
+                                            Loading analytics...
+                                        </SectionNote>
+                                    )}
+                                    {mergedStats.device_breakdown && !analyticsLoading && (
                                         <>
                                             <SectionTitle>
                                                 Device Types
@@ -831,20 +857,20 @@ export default function StatsView() {
                                                     <StatList>
                                                         <StatItem>
                                                             <Mono>Desktop</Mono>
-                                                            <Mono>{stats.device_breakdown.desktop}</Mono>
+                                                            <Mono>{mergedStats.device_breakdown.desktop}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Mobile</Mono>
-                                                            <Mono>{stats.device_breakdown.mobile}</Mono>
+                                                            <Mono>{mergedStats.device_breakdown.mobile}</Mono>
                                                         </StatItem>
                                                         <StatItem>
                                                             <Mono>Tablet</Mono>
-                                                            <Mono>{stats.device_breakdown.tablet}</Mono>
+                                                            <Mono>{mergedStats.device_breakdown.tablet}</Mono>
                                                         </StatItem>
-                                                        {stats.device_breakdown.other && stats.device_breakdown.other !== "0%" && (
+                                                        {mergedStats.device_breakdown.other && mergedStats.device_breakdown.other !== "0%" && (
                                                             <StatItem>
                                                                 <Mono>Other</Mono>
-                                                                <Mono>{stats.device_breakdown.other}</Mono>
+                                                                <Mono>{mergedStats.device_breakdown.other}</Mono>
                                                             </StatItem>
                                                         )}
                                                     </StatList>
@@ -852,7 +878,7 @@ export default function StatsView() {
                                             </Row>
                                         </>
                                     )}
-                                    {stats.browser_breakdown && stats.browser_breakdown.length > 0 && (
+                                    {mergedStats.browser_breakdown && mergedStats.browser_breakdown.length > 0 && !analyticsLoading && (
                                         <>
                                             <SectionTitle>
                                                 Browsers
@@ -866,7 +892,7 @@ export default function StatsView() {
                                                 </Label>
                                                 <ValueBox>
                                                     <StatList>
-                                                        {stats.browser_breakdown.map((item, idx) => (
+                                                        {mergedStats.browser_breakdown.map((item, idx) => (
                                                             <StatItem key={idx}>
                                                                 <Mono>{item.name}</Mono>
                                                                 <Mono>{item.pct}</Mono>
@@ -877,7 +903,7 @@ export default function StatsView() {
                                             </Row>
                                         </>
                                     )}
-                                    {stats.os_breakdown && stats.os_breakdown.length > 0 && (
+                                    {mergedStats.os_breakdown && mergedStats.os_breakdown.length > 0 && !analyticsLoading && (
                                         <>
                                             <SectionTitle>
                                                 Operating Systems
@@ -891,7 +917,7 @@ export default function StatsView() {
                                                 </Label>
                                                 <ValueBox>
                                                     <StatList>
-                                                        {stats.os_breakdown.map((item, idx) => (
+                                                        {mergedStats.os_breakdown.map((item, idx) => (
                                                             <StatItem key={idx}>
                                                                 <Mono>{item.name}</Mono>
                                                                 <Mono>{item.pct}</Mono>
@@ -1096,13 +1122,13 @@ export default function StatsView() {
                                                         <tr key={idx}>
                                                             <Td style={{ width: '40px', color: '#888' }}>{idx + 1}</Td>
                                                             <Td>
-                                                                <UserLink to={`/profile?address=${account.address}`}>
+                                                                <UserLink to={`/u/${account.username || account.address}`}>
                                                                     <AddressText>{truncateAddress(account.address)}</AddressText>
                                                                 </UserLink>
                                                             </Td>
                                                             <Td>
                                                                 {account.username ? (
-                                                                    <UserLink to={`/profile?address=${account.address}`}>
+                                                                    <UserLink to={`/u/${account.username}`}>
                                                                         {account.username}
                                                                     </UserLink>
                                                                 ) : (
@@ -1201,7 +1227,7 @@ export default function StatsView() {
                                                                     <UserCell>
                                                                         <AvatarPlaceholder>?</AvatarPlaceholder>
                                                                         <div>
-                                                                            <UserLink to={`/profile?address=${user.address}`} onClick={e => e.stopPropagation()}>
+                                                                            <UserLink to={`/u/${user.username || user.address}`} onClick={e => e.stopPropagation()}>
                                                                                 {user.username || truncateAddress(user.address)}
                                                                             </UserLink>
                                                                             {user.username && (
@@ -1289,7 +1315,7 @@ export default function StatsView() {
                                                         </Mono>
                                                     </div>
                                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                                        <UserLink to={`/profile?address=${reward.address}`} style={{ fontWeight: 500 }}>
+                                                        <UserLink to={`/u/${reward.username || reward.address}`} style={{ fontWeight: 500 }}>
                                                             {reward.username || truncateAddress(reward.address)}
                                                         </UserLink>
                                                         <div style={{ fontSize: '0.7rem', color: '#888', marginTop: '0.15rem' }}>

@@ -24,14 +24,63 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import subprocess
-from typing import Optional, Tuple
+import time
+from typing import List, Optional, Tuple
 
 from bank import get_balance
 from db import connect_db
 from node import min_gas_price_umirage
 
 logger = logging.getLogger(__name__)
+
+# Characters for invite codes (uppercase alphanumeric, excluding confusing chars)
+INVITE_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # Excludes I, O, 0, 1 for clarity
+
+
+def _generate_invite_code() -> str:
+    """Generate a random invite code in format XXXX-XXXX."""
+    part1 = "".join(random.choices(INVITE_CODE_CHARS, k=4))
+    part2 = "".join(random.choices(INVITE_CODE_CHARS, k=4))
+    return f"{part1}-{part2}"
+
+
+def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
+    """Generate unique invite codes and insert them into the database."""
+    codes = []
+    now_ts = int(time.time())
+
+    with connect_db() as conn:
+        with conn.cursor() as cur:
+            # Get existing codes to avoid duplicates
+            cur.execute("SELECT code FROM invite_codes")
+            existing = {row[0] for row in cur.fetchall()}
+
+            for _ in range(count):
+                # Generate unique code
+                for attempt in range(100):
+                    code = _generate_invite_code()
+                    if code not in existing:
+                        break
+                else:
+                    logger.error("Failed to generate unique invite code after 100 attempts")
+                    continue
+
+                existing.add(code)
+                codes.append(code)
+
+                # Insert the code
+                cur.execute(
+                    """
+                    INSERT INTO invite_codes (code, owner, created_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (code, owner, now_ts),
+                )
+                logger.info(f"Generated invite code {code} for {owner}")
+
+    return codes
 
 
 # Configuration from environment
@@ -57,8 +106,6 @@ def _get_miraged_path() -> str:
     return "/opt/mirage/blockchain/bin/miraged"
 
 
-
-
 def _send_tokens_via_cli(
     from_key: str,
     to_address: str,
@@ -67,37 +114,46 @@ def _send_tokens_via_cli(
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Send tokens using miraged CLI.
-    
+
     Returns:
         (success, tx_hash, error_message)
     """
     miraged = _get_miraged_path()
     amount_str = f"{amount}umirage"
-    
+
     # Get the actual minimum gas price from the node config
     try:
         gas_price = int(min_gas_price_umirage())
     except Exception:
         gas_price = 5000  # Fallback to reasonable default
-    
+
     cmd = [
         miraged,
-        "tx", "bank", "send",
+        "tx",
+        "bank",
+        "send",
         from_key,
         to_address,
         amount_str,
-        "--home", node_home,
-        "--keyring-backend", KEYRING_BACKEND,
-        "--chain-id", "mirage-1",
-        "--gas", "auto",
-        "--gas-adjustment", "1.5",
-        "--gas-prices", f"{gas_price}umirage",
+        "--home",
+        node_home,
+        "--keyring-backend",
+        KEYRING_BACKEND,
+        "--chain-id",
+        "mirage-1",
+        "--gas",
+        "auto",
+        "--gas-adjustment",
+        "1.5",
+        "--gas-prices",
+        f"{gas_price}umirage",
         "--yes",  # Skip confirmation
-        "--output", "json",
+        "--output",
+        "json",
     ]
-    
+
     logger.info(f"Executing: {' '.join(cmd)}")
-    
+
     try:
         result = subprocess.run(
             cmd,
@@ -105,26 +161,35 @@ def _send_tokens_via_cli(
             text=True,
             timeout=30,
         )
-        
+
         logger.info(f"miraged exit code: {result.returncode}")
         logger.info(f"miraged stdout: {result.stdout[:500] if result.stdout else 'empty'}")
         if result.stderr:
             logger.warning(f"miraged stderr: {result.stderr[:500]}")
-        
+
         if result.returncode != 0:
-            error_msg = result.stderr or result.stdout or "Unknown error"
-            return False, None, error_msg
-        
+            raw_error = result.stderr or result.stdout or "Unknown error"
+            # Parse common errors into user-friendly messages
+            if "key not found" in raw_error.lower():
+                return False, None, "rewards_pool_key_not_configured"
+            if "insufficient funds" in raw_error.lower():
+                return False, None, "insufficient_pool_balance"
+            if "account sequence mismatch" in raw_error.lower():
+                return False, None, "sequence_mismatch_retry"
+            # Log the full error but return a sanitized version
+            logger.error(f"miraged tx failed: {raw_error[:500]}")
+            return False, None, "payout_transaction_failed"
+
         # Parse the JSON output to get tx_hash
         try:
             output = json.loads(result.stdout)
             tx_hash = output.get("txhash")
             code = output.get("code", 0)
-            
+
             if code != 0:
                 raw_log = output.get("raw_log", "Transaction failed")
                 return False, tx_hash, raw_log
-            
+
             return True, tx_hash, None
         except json.JSONDecodeError:
             # If not JSON, try to extract tx hash from output
@@ -136,7 +201,7 @@ def _send_tokens_via_cli(
                         if len(parts) >= 2:
                             return True, parts[1].strip(), None
             return True, None, None  # Assume success if no error code
-            
+
     except subprocess.TimeoutExpired:
         return False, None, "Transaction timed out"
     except Exception as e:
@@ -299,8 +364,10 @@ class RewardDistributor:
 
         # Separate by type
         mirage_rewards = []
+        invite_code_rewards = []
         cosmetic_rewards = []
-        total_mirage = 0
+        total_mirage_with_multiplier = 0
+        total_mirage_no_multiplier = 0
 
         for row in rows:
             reward_id, reward_type, reward_data, reason = row
@@ -308,11 +375,24 @@ class RewardDistributor:
 
             if reward_type == "mirage":
                 amount = reward_data.get("amount", 0)
-                total_mirage += amount
+                apply_multiplier = reward_data.get("apply_multiplier", True)
+                if apply_multiplier:
+                    total_mirage_with_multiplier += amount
+                else:
+                    total_mirage_no_multiplier += amount
                 mirage_rewards.append(
                     {
                         "id": reward_id,
                         "amount": amount,
+                        "reason": reason,
+                        "apply_multiplier": apply_multiplier,
+                    }
+                )
+            elif reward_type == "invite_code":
+                invite_code_rewards.append(
+                    {
+                        "id": reward_id,
+                        "amount": reward_data.get("amount", 1),
                         "reason": reason,
                     }
                 )
@@ -326,9 +406,11 @@ class RewardDistributor:
                     }
                 )
 
-        # Get reward multiplier
+        # Get reward multiplier and compute payout
         multiplier = self._get_multiplier(owner, ts)
-        payout_amount = int(total_mirage * multiplier)
+        # Apply multiplier only to rewards that allow it
+        payout_amount = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
+        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
 
         result = {
             "success": True,
@@ -382,18 +464,64 @@ class RewardDistributor:
                     }
                 )
 
-        # Mark all rewards as claimed
-        reward_ids = [r["id"] for r in mirage_rewards] + [r["id"] for r in cosmetic_rewards]
-        if reward_ids:
-            with connect_db() as conn:
-                with conn.cursor() as cur:
+        # Process invite code rewards
+        generated_codes = []
+        for invite_reward in invite_code_rewards:
+            count = invite_reward.get("amount", 1)
+            codes = _generate_unique_invite_codes(owner, count)
+            generated_codes.extend(codes)
+            result["rewards"].append(
+                {
+                    "type": "invite_code",
+                    "codes": codes,
+                    "count": len(codes),
+                }
+            )
+
+        # Mark all rewards as claimed and store payout amounts
+        mirage_ids = [r["id"] for r in mirage_rewards]
+        cosmetic_ids = [r["id"] for r in cosmetic_rewards]
+        invite_code_ids = [r["id"] for r in invite_code_rewards]
+
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                # For MIRAGE rewards, calculate and store per-reward payout amounts
+                if mirage_ids:
+                    for reward in mirage_rewards:
+                        # Each reward gets its share of the multiplier based on apply_multiplier flag
+                        if reward.get("apply_multiplier", True):
+                            reward_payout = int(reward["amount"] * multiplier)
+                        else:
+                            reward_payout = reward["amount"]
+                        cur.execute(
+                            """
+                            UPDATE pending_rewards
+                            SET claimed_at = %s, payout_amount = %s
+                            WHERE id = %s
+                            """,
+                            (ts, reward_payout, reward["id"]),
+                        )
+
+                # Cosmetic rewards don't have payout amounts
+                if cosmetic_ids:
                     cur.execute(
                         """
                         UPDATE pending_rewards
                         SET claimed_at = %s
                         WHERE id = ANY(%s)
                         """,
-                        (ts, reward_ids),
+                        (ts, cosmetic_ids),
+                    )
+
+                # Invite code rewards
+                if invite_code_ids:
+                    cur.execute(
+                        """
+                        UPDATE pending_rewards
+                        SET claimed_at = %s
+                        WHERE id = ANY(%s)
+                        """,
+                        (ts, invite_code_ids),
                     )
 
         return result

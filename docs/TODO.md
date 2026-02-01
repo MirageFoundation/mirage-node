@@ -1,14 +1,3 @@
-### NOTE: SDK bloat removal reverted
-- v1.10.3-sdk-bloat was applied on-chain, but we are restoring SDK modules.
-- New upgrade: v1.10.4-restore-sdk (re-adds authz, feegrant, group, epochs, circuit, evidence, vesting, mint).
-
-### TODO: Remove v1.10.4-restore-sdk store detection code
-- After v1.10.4-restore-sdk upgrade is complete on all chains (production + testnets), remove:
-  - The store detection logic in `app.go` (lines ~365-400) that checks for missing stores
-  - The `sdkRestoreUpgradeName` constant and its upgrade handler in `upgrades.go`
-- This code handles the edge case where local testnets from v1.10.3 backups have stores at version 0
-- Once all chains have upgraded past this point, the code is dead weight
-
 1. Language Consistency: Go Everywhere
 Current: Go (chain, orchestrator) + Python (indexer, backend) + JavaScript (frontend)
 The problem: The canonical serialization must be byte-identical across Go, Python, and JavaScript. This is a maintenance nightmare and a source of subtle bugs. Three separate implementations of uvarint, encStr, encBytes, field ordering...
@@ -17,7 +6,6 @@ Write indexer in Go (consume protobuf natively, no datatypes.py mirroring)
 Write backend in Go (single binary, shared types with chain)
 Keep JS on frontend (unavoidable)
 This reduces the cross-language surface area from 3 languages to 2.
-
 
 
 
@@ -52,33 +40,25 @@ Cleaner separation between "what happened" and "current state"
 
 
 
-## Cosmos SDK Bloat Analysis
 
-### Pure Bloat (0 actual usage) - REMOVE
-- `authz` - permission delegation, never used
-- `feegrant` - fee payment delegation, never used  
-- `group` - on-chain DAO/multisig, never used
-- `epochs` - scheduled hooks, never used
-- `vesting` - token lockups, never used
-- `mint` - SDK inflation minting, never used (we do custom minting via bank)
-- `circuit` - emergency shutdown, never used
-- `evidence` - double-sign evidence, never used
+-------
 
-### Actually Needed
-- `auth` - accounts, signatures
-- `bank` - balances, mint/burn (heavily used)
-- `staking` - validator set (delegation disabled via ante)
-- `gov` - admin operations (params, setlevel, punish, mint)
-- `upgrade` - chain upgrades (13+ handlers)
-- `genutil` - genesis init
-- `consensus` - required by SDK
 
-### Partially Used (infrastructure only)
-- `params` - legacy, only for subspaces
-- `slashing` - only in export.go and PunishValidator
-- `distribution` - only in export.go
 
-### Summary
-- 8 modules are pure bloat
-- ~7 modules actually needed
+**TODO - Future Release**: Remove legacy routes for:
+- `/view_post` (replaced by `/p/`)
+- `/profile?address=` (replaced by `/u/`)
+- Legacy query params in ViewPostView: `?post_id=`, `?root=`
+- Legacy query params in ProfileView: `?address=`
+Search for "DEPRECATED" comments in code to find all removal points.
 
+----------
+
+
+generally optimize website. Find any bottlenecks. Use firefox profiler.
+
+
+
+----------
+
+we need to add the relaying node into the blockchain history. this way we can prevent botting in the future. like a rogue node - e.g. if a node is known to facilite spammers, then a separate script can create a moderator that excludes these posts.
