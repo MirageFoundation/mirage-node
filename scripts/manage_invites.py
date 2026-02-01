@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Replenish invite codes for all users on the platform, or give codes to a specific user.
+Manage invite codes: replenish for all users, give codes to a specific user, or list codes.
 
 Modes:
 1. Replenish all users: Gives every user a target number of invite codes (default: 3).
@@ -8,11 +8,14 @@ Modes:
 
 2. Give to specific user: Adds a specific number of codes to one user and returns their full code list.
 
+3. List codes for a user: Shows all codes (unused and used) without creating new ones.
+
 Usage:
-    python3 scripts/replenish_invites.py                    # Top up all users to 3 codes
-    python3 scripts/replenish_invites.py --target 5         # Top up all users to 5 codes
-    python3 scripts/replenish_invites.py --dry-run          # Show what would happen without making changes
-    python3 scripts/replenish_invites.py --user Santa --count 100   # Give Santa 100 new codes, show all their codes
+    python3 scripts/manage_invites.py                    # Top up all users to 3 codes
+    python3 scripts/manage_invites.py --target 5         # Top up all users to 5 codes
+    python3 scripts/manage_invites.py --dry-run          # Show what would happen without making changes
+    python3 scripts/manage_invites.py --user Santa --count 100   # Give Santa 100 new codes, show all their codes
+    python3 scripts/manage_invites.py --user Santa --list        # List all of Santa's codes (no changes)
 """
 
 import argparse
@@ -47,6 +50,72 @@ def generate_unique_code(existing: set) -> str:
         if code not in existing:
             return code
     raise RuntimeError("Failed to generate unique code after 1000 attempts")
+
+
+def list_codes_for_user(conn, username: str) -> None:
+    """List all codes for a user without creating new ones."""
+    cur = conn.cursor()
+
+    # Find the user by username (case-insensitive)
+    cur.execute(
+        "SELECT owner, username FROM profiles WHERE LOWER(username) = LOWER(%s)",
+        (username,),
+    )
+    row = cur.fetchone()
+    if not row:
+        print(f"Error: User '{username}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    owner, actual_username = row
+    print(f"User: {actual_username} ({owner[:20]}...)")
+    print()
+
+    # Get all codes for this user
+    cur.execute(
+        """
+        SELECT code, created_at, used_by 
+        FROM invite_codes 
+        WHERE LOWER(owner) = LOWER(%s)
+        ORDER BY created_at DESC
+        """,
+        (owner,),
+    )
+    all_codes = cur.fetchall()
+
+    if not all_codes:
+        print("No invite codes found for this user.")
+        return
+
+    unused_codes = []
+    used_codes = []
+    for code, created_at, used_by in all_codes:
+        if used_by:
+            used_codes.append((code, used_by))
+        else:
+            unused_codes.append(code)
+
+    print("=" * 60)
+    print(f"ALL CODES FOR {actual_username} ({len(all_codes)} total)")
+    print("=" * 60)
+    print()
+
+    print(f"UNUSED CODES ({len(unused_codes)}):")
+    print("-" * 40)
+    if unused_codes:
+        for code in unused_codes:
+            print(f"  {code}")
+    else:
+        print("  (none)")
+    print()
+
+    if used_codes:
+        print(f"USED CODES ({len(used_codes)}):")
+        print("-" * 40)
+        for code, used_by in used_codes:
+            print(f"  {code}  -> {used_by[:30]}...")
+        print()
+
+    print("=" * 60)
 
 
 def give_codes_to_user(conn, username: str, count: int, dry_run: bool) -> None:
@@ -166,7 +235,7 @@ def give_codes_to_user(conn, username: str, count: int, dry_run: bool) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Replenish invite codes for all users")
+    parser = argparse.ArgumentParser(description="Manage invite codes: replenish, give, or list")
     parser.add_argument(
         "--target",
         type=int,
@@ -186,13 +255,24 @@ def main():
     parser.add_argument(
         "--count",
         type=int,
-        help="Number of codes to give to --user (required with --user)",
+        help="Number of codes to give to --user (required with --user unless --list)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all codes for --user without creating new ones",
     )
     args = parser.parse_args()
 
     # Validate args
-    if args.user and not args.count:
-        print("Error: --count is required when using --user", file=sys.stderr)
+    if args.list and not args.user:
+        print("Error: --user is required when using --list", file=sys.stderr)
+        sys.exit(1)
+    if args.list and args.count:
+        print("Error: --list and --count cannot be used together", file=sys.stderr)
+        sys.exit(1)
+    if args.user and not args.count and not args.list:
+        print("Error: --count or --list is required when using --user", file=sys.stderr)
         sys.exit(1)
     if args.count and not args.user:
         print("Error: --user is required when using --count", file=sys.stderr)
@@ -219,7 +299,13 @@ def main():
         print(f"Error connecting to database: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Single user mode
+    # Single user mode: list only
+    if args.user and args.list:
+        list_codes_for_user(conn, args.user)
+        conn.close()
+        return
+
+    # Single user mode: add codes
     if args.user:
         give_codes_to_user(conn, args.user, args.count, dry_run)
         conn.close()
