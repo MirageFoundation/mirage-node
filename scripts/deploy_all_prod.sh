@@ -101,6 +101,7 @@ for HOST in "${HOSTS[@]}"; do
   echo "Deploying to ${SSH_USER}@${HOST}"
   echo "=============================================================="
   "${DEPLOY_SH}" "${SSH_USER}@${HOST}" "${MODE}" "${PROXYJUMP_ARGS[@]}"
+  sleep 3
 done
 
 echo ""

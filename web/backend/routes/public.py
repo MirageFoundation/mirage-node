@@ -5022,10 +5022,26 @@ def _get_stats_analytics(rid: int):
             if has_stats_events:
                 # Known bots/crawlers to exclude
                 bot_names = {
-                    "googlebot", "applebot", "bingbot", "yandexbot", "baiduspider",
-                    "duckduckbot", "slurp", "facebook", "facebookexternalhit", "facebot",
-                    "twitterbot", "twitter", "linkedinbot", "pinterest", "semrushbot",
-                    "ahrefsbot", "mj12bot", "dotbot", "petalbot", "bytespider",
+                    "googlebot",
+                    "applebot",
+                    "bingbot",
+                    "yandexbot",
+                    "baiduspider",
+                    "duckduckbot",
+                    "slurp",
+                    "facebook",
+                    "facebookexternalhit",
+                    "facebot",
+                    "twitterbot",
+                    "twitter",
+                    "linkedinbot",
+                    "pinterest",
+                    "semrushbot",
+                    "ahrefsbot",
+                    "mj12bot",
+                    "dotbot",
+                    "petalbot",
+                    "bytespider",
                 }
 
                 # Fetch all events from last 30 days
@@ -5160,6 +5176,139 @@ def _get_stats_analytics(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.analytics.err", error=str(e))
+        return jsonify({"error": str(e)}), 500
+
+
+def _get_stats_rewards(rid: int):
+    """Return comprehensive reward statistics."""
+    from routes.quests import get_distributor
+
+    try:
+        ts = int(time.time())
+
+        # Get pool balance
+        distributor = get_distributor()
+        pool_balance = distributor.get_pool_balance() if distributor.is_configured() else 0
+
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+
+            # Get overall stats
+            cur.execute(
+                """
+                SELECT 
+                    COUNT(*) as total_rewards,
+                    COUNT(CASE WHEN claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                    COUNT(CASE WHEN claimed_at IS NULL THEN 1 END) as pending_count,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as total_amount,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NOT NULL THEN 
+                        COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as claimed_amount,
+                    COALESCE(SUM(CASE WHEN reward_type = 'mirage' AND claimed_at IS NULL THEN (reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                    MIN(created_at) as first_reward_at,
+                    MAX(created_at) as last_reward_at
+                FROM pending_rewards
+            """
+            )
+            summary_row = cur.fetchone()
+
+            summary = {
+                "total_rewards": summary_row[0] or 0,
+                "claimed_count": summary_row[1] or 0,
+                "pending_count": summary_row[2] or 0,
+                "total_amount": summary_row[3] or 0,
+                "claimed_amount": summary_row[4] or 0,
+                "pending_amount": summary_row[5] or 0,
+                "first_reward_at": summary_row[6],
+                "last_reward_at": summary_row[7],
+                "pool_balance": pool_balance,
+                "payouts_enabled": distributor.is_configured(),
+            }
+
+            # Calculate daily rate (last 7 days)
+            week_ago = ts - (7 * 86400)
+            cur.execute(
+                """
+                SELECT COALESCE(SUM(CASE WHEN reward_type = 'mirage' THEN 
+                    COALESCE(payout_amount, (reward_data->>'amount')::bigint)
+                ELSE 0 END), 0)
+                FROM pending_rewards
+                WHERE created_at >= %s
+            """,
+                (week_ago,),
+            )
+            week_total = cur.fetchone()[0] or 0
+            summary["daily_rate"] = week_total // 7
+
+            # Get per-user stats
+            cur.execute(
+                """
+                SELECT 
+                    pr.owner,
+                    p.username,
+                    COUNT(*) as reward_count,
+                    COUNT(CASE WHEN pr.claimed_at IS NOT NULL THEN 1 END) as claimed_count,
+                    COUNT(CASE WHEN pr.claimed_at IS NULL THEN 1 END) as pending_count,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' THEN 
+                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as total_earned,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NOT NULL THEN 
+                        COALESCE(pr.payout_amount, (pr.reward_data->>'amount')::bigint)
+                    ELSE 0 END), 0) as claimed_amount,
+                    COALESCE(SUM(CASE WHEN pr.reward_type = 'mirage' AND pr.claimed_at IS NULL THEN (pr.reward_data->>'amount')::bigint ELSE 0 END), 0) as pending_amount,
+                    MIN(pr.created_at) as first_reward_at,
+                    MAX(pr.created_at) as last_reward_at,
+                    p.created_at as account_created_at
+                FROM pending_rewards pr
+                LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
+                GROUP BY pr.owner, p.username, p.created_at
+                ORDER BY total_earned DESC
+            """
+            )
+            user_rows = cur.fetchall()
+
+            users = []
+            for row in user_rows:
+                owner = row[0]
+                first_reward_at = row[8]
+                last_reward_at = row[9]
+                total_earned = row[5] or 0
+
+                # Calculate earnings per day
+                if first_reward_at and last_reward_at and first_reward_at != last_reward_at:
+                    days_active = max(1, (last_reward_at - first_reward_at) // 86400)
+                    earnings_per_day = total_earned // days_active
+                else:
+                    earnings_per_day = total_earned
+
+                users.append(
+                    {
+                        "address": owner,
+                        "username": row[1],
+                        "reward_count": row[2] or 0,
+                        "claimed_count": row[3] or 0,
+                        "pending_count": row[4] or 0,
+                        "total_earned": total_earned,
+                        "claimed_amount": row[6] or 0,
+                        "pending_amount": row[7] or 0,
+                        "first_reward_at": first_reward_at,
+                        "last_reward_at": last_reward_at,
+                        "account_created_at": row[10],
+                        "earnings_per_day": earnings_per_day,
+                    }
+                )
+
+        finally:
+            conn.close()
+
+        log_event(rid, "get_stats.rewards.ok", user_count=len(users))
+        return jsonify({"summary": summary, "users": users})
+
+    except Exception as e:
+        log_event(rid, "get_stats.rewards.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
@@ -5517,9 +5666,7 @@ def get_stats():
     elif tab == "analytics":
         return _get_stats_analytics(rid)
     elif tab == "rewards":
-        # Delegate to the rewards stats endpoint in quests module
-        from routes.quests import reward_stats
-        return reward_stats()
+        return _get_stats_rewards(rid)
 
     # Check cache for overview stats
     now = int(time.time())
