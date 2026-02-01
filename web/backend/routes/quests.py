@@ -8,7 +8,6 @@ User endpoints:
 - GET /api/rewards/achievements: Get all achievements with unlock status
 - GET /api/rewards/pending: Get user's pending/claimable rewards
 - POST /api/rewards/claim: Claim pending rewards
-- GET /api/rewards/history: Get reward history (public)
 
 Admin endpoints (require level >= 100):
 - POST /api/admin/rewards/suspend: Suspend rewards for a user
@@ -16,6 +15,7 @@ Admin endpoints (require level >= 100):
 - GET /api/admin/rewards/suspensions: List all suspended users
 
 Note: Reward stats moved to GET /api/get_stats?tab=rewards
+      Reward history moved to GET /api/get_stats?tab=rewards_history
 """
 
 import hashlib
@@ -1176,84 +1176,6 @@ def admin_list_suspensions():
         return jsonify({"suspensions": suspensions})
     except Exception as e:
         log_event(rid, "admin.suspensions.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-@quests_bp.route("/api/rewards/history", methods=["GET"])
-def reward_history():
-    """Get paginated list of all rewards (public).
-
-    Query params:
-    - offset: Pagination offset (default 0)
-    - limit: Number of items to return (default 50, max 100)
-
-    Returns:
-    - rewards: List of reward records
-    - has_more: Whether there are more records
-    """
-    rid = next_request_id()
-    log_event(rid, "rewards.history.begin")
-
-    try:
-        offset = int(request.args.get("offset", 0))
-        limit = min(int(request.args.get("limit", 50)), 100)
-
-        with connect_db() as conn:
-            with conn.cursor() as cur:
-                # Get all rewards with pagination (newest first)
-                cur.execute(
-                    """
-                    SELECT 
-                        pr.owner,
-                        p.username,
-                        pr.reward_type,
-                        pr.reward_data,
-                        pr.reason,
-                        pr.created_at,
-                        pr.claimed_at,
-                        pr.payout_amount
-                    FROM pending_rewards pr
-                    LEFT JOIN profiles p ON LOWER(pr.owner) = LOWER(p.owner)
-                    ORDER BY pr.created_at DESC
-                    LIMIT %s OFFSET %s
-                """,
-                    (limit + 1, offset),
-                )  # Fetch one extra to check if there's more
-                reward_rows = cur.fetchall()
-
-                has_more = len(reward_rows) > limit
-                if has_more:
-                    reward_rows = reward_rows[:limit]
-
-                rewards = []
-                for row in reward_rows:
-                    reward_data = row[3] if isinstance(row[3], dict) else {}
-                    base_amount = reward_data.get("amount", 0)
-                    payout_amount = row[7]  # Actual amount paid (with multiplier)
-                    # Use payout_amount if claimed, otherwise base_amount
-                    display_amount = payout_amount if payout_amount is not None else base_amount
-                    rewards.append(
-                        {
-                            "address": row[0],
-                            "username": row[1],
-                            "type": row[2],
-                            "amount": display_amount,
-                            "reason": row[4],
-                            "created_at": row[5],
-                            "claimed_at": row[6],
-                            "claimed": row[6] is not None,
-                        }
-                    )
-
-        log_event(rid, "rewards.history.ok", count=len(rewards), offset=offset)
-        return jsonify(
-            {
-                "rewards": rewards,
-                "has_more": has_more,
-            }
-        )
-    except Exception as e:
-        log_event(rid, "rewards.history.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
