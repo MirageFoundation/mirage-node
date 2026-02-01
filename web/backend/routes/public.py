@@ -5714,16 +5714,21 @@ def get_welcome_stats():
             )
             posts_24h = cur.fetchone()[0] or 0
 
-            # Query 3: DAU - unique active users on-chain in last 24h
+            # Query 3: DAU from stats_events (actual page visits, same as /stats page)
+            # Count unique visitors: registered users by address, guests by session_id
             cur.execute(
                 """
-                SELECT COUNT(DISTINCT owner) FROM (
-                    SELECT LOWER(owner) as owner FROM posts WHERE created_at >= %s AND deleted = FALSE
-                    UNION
-                    SELECT LOWER(owner) as owner FROM votes WHERE created_at >= %s
-                ) active_users
+                SELECT COUNT(DISTINCT 
+                    CASE 
+                        WHEN user_address IS NOT NULL AND user_address != '' THEN LOWER(user_address)
+                        ELSE session_id
+                    END
+                )
+                FROM stats_events
+                WHERE created_at >= %s
+                  AND event_type IN ('visit', 'session_start', 'page_view')
                 """,
-                (today_start, today_start),
+                (today_start,),
             )
             active_24h = cur.fetchone()[0] or 0
 
