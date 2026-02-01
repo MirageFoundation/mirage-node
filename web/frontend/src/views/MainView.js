@@ -321,12 +321,11 @@ const InviteBannerButton = styled.button`
     border-radius: 6px;
     cursor: pointer;
     white-space: nowrap;
-    transition: all 0.15s ease;
+    transition: transform 0.15s ease;
     box-shadow: 0 2px 8px rgba(255, 140, 0, 0.4);
     flex-shrink: 0;
 
     &:hover {
-        box-shadow: 0 4px 14px rgba(255, 140, 0, 0.55);
         transform: translateY(-1px);
     }
 

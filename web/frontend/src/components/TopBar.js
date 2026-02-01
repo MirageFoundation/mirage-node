@@ -183,7 +183,7 @@ const Avatar = styled.button`
     justify-content: center;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    transition: transform 0.15s, box-shadow 0.15s;
+    transition: transform 0.15s ease;
     font-family: inherit;
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
     overflow: hidden;
@@ -192,7 +192,6 @@ const Avatar = styled.button`
 
     &:hover {
         transform: scale(1.08);
-        box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
     }
     &:focus-visible {
         outline: 2px solid rgba(255, 255, 255, 0.6);
