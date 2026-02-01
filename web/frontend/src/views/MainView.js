@@ -1369,7 +1369,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         // If we have cached stats, they're stale until fresh data loads
         try { return Storage.load('welcome_stats_cache', null) !== null; } catch (_) { return false; }
     });
-    const welcomeStatsFetchedRef = useRef(false);
 
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
@@ -1421,8 +1420,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Implements stale-while-revalidate: show cached value immediately, update when fresh
     useEffect(() => {
         if (isLoggedIn) return; // Only fetch for logged-out visitors
-        if (welcomeStatsFetchedRef.current) return; // Prevent double-fetch (React StrictMode)
-        welcomeStatsFetchedRef.current = true;
 
         let cancelled = false;
         const loadWelcomeStats = async () => {
