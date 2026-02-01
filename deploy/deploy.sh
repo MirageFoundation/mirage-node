@@ -506,6 +506,22 @@ if [ "$USE_TARBALL" -eq 1 ] && [ "$LOCAL_MODE" -eq 0 ]; then
   fi
 fi
 
+# Pull/load image BEFORE stopping container to minimize downtime
+if [ "$LOCAL_MODE" -eq 1 ]; then
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    echo "==> Loading image locally..."
+    gunzip -c "$TARBALL" | docker load
+  fi
+else
+  if [ "$USE_TARBALL" -eq 1 ]; then
+    echo "==> Loading image on remote..."
+    run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
+  else
+    echo "==> Pulling image on remote (container still running): $DEPLOY_IMAGE"
+    ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
+  fi
+fi
+
 echo "==> Stopping old container..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
   # Local: run docker commands directly on host
@@ -513,12 +529,8 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     docker stop --timeout=60 mirage || true
     docker rm mirage || true
   fi
-  if [ "$USE_TARBALL" -eq 1 ]; then
-    echo "==> Loading image locally..."
-    gunzip -c "$TARBALL" | docker load
-  fi
 else
-  # Remote: always prune Docker and clear /tmp
+  # Remote: stop and remove old container
   run_ssh '
     set -euo pipefail
     if docker ps -a --format "{{.Names}}" | grep -qx mirage; then
@@ -526,16 +538,8 @@ else
       docker rm mirage
     fi
   '
-  echo "==> Pruning Docker and clearing /tmp..."
+  echo "==> Pruning old Docker images..."
   run_ssh 'docker system prune -af && rm -rf /tmp/* 2>/dev/null || true'
-  
-  if [ "$USE_TARBALL" -eq 1 ]; then
-    echo "==> Loading image on remote..."
-    run_ssh 'gunzip < /tmp/mirage-docker.tar.gz | docker load'
-  else
-    echo "==> Pulling image on remote: $DEPLOY_IMAGE"
-    ssh -t $SSH_OPTS "$REMOTE" "docker pull '$DEPLOY_IMAGE'"
-  fi
 fi
 
 # For --init: enforce --moniker is provided
