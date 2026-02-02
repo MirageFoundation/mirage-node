@@ -23,6 +23,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY_SH="${REPO_ROOT}/deploy/deploy.sh"
 
+
+# Hard-coded production hosts
+SSH_USER="${SSH_USER:-root}"
+HOSTS=(
+  "mirage.vote"
+  "146.190.108.140"
+  "139.59.9.96"  
+#   "mirage.talk"
+)
+
+
 # Parse arguments
 MODE=""
 PROXYJUMP=""
@@ -56,15 +67,6 @@ PROXYJUMP_ARGS=()
 if [[ -n "${PROXYJUMP}" ]]; then
   PROXYJUMP_ARGS=(--proxyjump "${PROXYJUMP}")
 fi
-
-# Hard-coded production hosts
-SSH_USER="${SSH_USER:-root}"
-HOSTS=(
-  "mirage.vote"
-  "146.190.108.140"
-  "139.59.9.96"  
-  "mirage.talk"
-)
 
 # Get image tag info
 GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
