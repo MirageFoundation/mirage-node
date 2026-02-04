@@ -919,13 +919,13 @@ class TransactionHandler {
     async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
         try {
             const seedPhrase = Storage.load("seedPhrase", "");
-            
+
             const chain = String(destinationChain || "").trim().toLowerCase();
             if (!chain) return { success: false, error: "destination_chain required" };
-            
+
             const address = String(destinationAddress || "").trim();
             if (!address) return { success: false, error: "destination_address required" };
-            
+
             const amount = Number(amountUmirage) || 0;
             if (amount <= 0) return { success: false, error: "amount must be positive" };
 
@@ -1112,6 +1112,8 @@ class TransactionHandler {
             if (Number.isFinite(balanceNum)) {
                 this.lastOnchainBalanceUmirage = balanceNum >>> 0;
             }
+            // Dispatch event to notify balance displays immediately
+            window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: balanceVal }));
         }
         if (data.block_time !== undefined) Storage.save('block_time_seconds', String(data.block_time));
         if (data.pow_difficulty !== undefined) Storage.save('pow_difficulty_cached', String(data.pow_difficulty));

@@ -674,7 +674,7 @@ export default function ProfileView({ state }) {
         let cancelled = false;
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: profileAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: profileAddress, _cb: Date.now() }, { timeoutMs: 10000 });
                 if (!data || cancelled) return;
 
                 if (isOwnProfile) {

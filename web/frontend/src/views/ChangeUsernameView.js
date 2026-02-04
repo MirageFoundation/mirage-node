@@ -161,7 +161,7 @@ function ChangeUsernameView({ state }) {
     useEffect(() => {
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: publicKey }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 });
                 if (data) {
                     setUserLevel(parseInt(data.user_level || 0));
                 }

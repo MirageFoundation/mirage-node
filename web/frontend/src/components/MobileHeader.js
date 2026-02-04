@@ -282,8 +282,15 @@ const MobileHeader = () => {
             applyBalanceUpdate(stored);
         };
 
-        // Poll for changes (TransactionHandler updates this)
-        const interval = setInterval(checkBalance, 2000);
+        // Check balance immediately on mount/login
+        checkBalance();
+
+        // Listen for balance updates (fired by TransactionHandler.cacheConfigData)
+        const handleBalanceUpdated = (e) => {
+            if (e.detail !== undefined) {
+                applyBalanceUpdate(e.detail);
+            }
+        };
 
         // Also listen for storage events (cross-tab sync)
         const handleStorage = (e) => {
@@ -296,11 +303,12 @@ const MobileHeader = () => {
             if (stored === null) return;
             applyBalanceUpdate(stored);
         };
+        window.addEventListener('balanceUpdated', handleBalanceUpdated);
         window.addEventListener('storage', handleStorage);
         window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
 
         return () => {
-            clearInterval(interval);
+            window.removeEventListener('balanceUpdated', handleBalanceUpdated);
             window.removeEventListener('storage', handleStorage);
             window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
         };
