@@ -618,8 +618,8 @@ class App extends Component {
                 // Send device fingerprint for fraud detection
                 sendDeviceFingerprint(publicKey);
 
-                // Fetch user-specific data
-                Api.get('get_user_status', { address: publicKey }, { timeoutMs: 10000 })
+                // Fetch user-specific data (cache-bust to ensure fresh balance)
+                Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 })
                     .then((userStatus) => {
                         if (!userStatus) {
                             console.warn('[App] No user status returned from API');
