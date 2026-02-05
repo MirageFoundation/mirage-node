@@ -66,6 +66,26 @@ class TransactionHandler {
         return TransactionHandler.instance;
     }
 
+    _persistUserBalance(balanceVal, { normalizeStorage = false, updateLastOnchain = true } = {}) {
+        if (balanceVal === undefined || balanceVal === null) return;
+        if (normalizeStorage) {
+            const balanceNum = Number(balanceVal);
+            const normalized = Number.isFinite(balanceNum) ? (balanceNum >>> 0) : 0;
+            if (updateLastOnchain) {
+                this.lastOnchainBalanceUmirage = normalized;
+            }
+            Storage.save('user_balance', String(normalized));
+            window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: normalized }));
+            return;
+        }
+        Storage.save('user_balance', String(balanceVal));
+        const balanceNum = Number(balanceVal);
+        if (updateLastOnchain && Number.isFinite(balanceNum)) {
+            this.lastOnchainBalanceUmirage = balanceNum >>> 0;
+        }
+        window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: balanceVal }));
+    }
+
     // Vote tracking methods
     addVoteListener(callback) {
         if (typeof callback === 'function') {
@@ -308,8 +328,7 @@ class TransactionHandler {
 
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -355,8 +374,7 @@ class TransactionHandler {
                 pow_difficulty2 = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -413,8 +431,7 @@ class TransactionHandler {
                 pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -976,8 +993,7 @@ class TransactionHandler {
                 pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -1106,14 +1122,7 @@ class TransactionHandler {
         // Handle both 'balance' (from get_user_status) and 'user_balance' (legacy)
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {
-            Storage.save('user_balance', String(balanceVal));
-            // Also update TransactionHandler's balance tracking
-            const balanceNum = Number(balanceVal);
-            if (Number.isFinite(balanceNum)) {
-                this.lastOnchainBalanceUmirage = balanceNum >>> 0;
-            }
-            // Dispatch event to notify balance displays immediately
-            window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: balanceVal }));
+            this._persistUserBalance(balanceVal);
         }
         if (data.block_time !== undefined) Storage.save('block_time_seconds', String(data.block_time));
         if (data.pow_difficulty !== undefined) Storage.save('pow_difficulty_cached', String(data.pow_difficulty));
@@ -1377,7 +1386,7 @@ class TransactionHandler {
                         if (spentIncluded) this.pendingFeeUmirage = 0;
                     }
                     const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - (this.pendingFeeUmirage >>> 0));
-                    Storage.save('user_balance', String(effectiveBalance));
+                    this._persistUserBalance(effectiveBalance, { normalizeStorage: true, updateLastOnchain: false });
                 } catch (error) {
                     const msg = (error && error.message) ? error.message : 'network error';
                     updateNotification(msg, 5, true);
