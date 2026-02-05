@@ -42,6 +42,9 @@ export const GlobalStyle = createGlobalStyle`
     background-color: 
       ${({ theme }) => (theme && theme.colors && theme.colors.bg) ? theme.colors.bg : '#1A1A1A'};
     overscroll-behavior: contain; 
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
     word-break: normal;      /* do not break words into pieces */
     overflow-wrap: normal;   /* wrap only at normal break points (spaces) */
     text-indent: 0;
