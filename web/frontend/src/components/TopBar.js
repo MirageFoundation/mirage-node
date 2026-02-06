@@ -5,25 +5,7 @@ import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
 import Button from "./Button";
 import { formatMirageBalance } from "../utils/formatters";
-
-const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
-
-const resolveOptimisticDelta = (currentBalance) => {
-    const payload = Storage.load(OPTIMISTIC_CLAIM_KEY, null);
-    if (!payload || typeof payload !== 'object') return 0;
-    const delta = Number(payload.delta_umirage);
-    const base = Number(payload.base_umirage);
-    const expiresAt = Number(payload.expires_at_ms);
-    if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
-        Storage.remove(OPTIMISTIC_CLAIM_KEY);
-        return 0;
-    }
-    if (Number.isFinite(currentBalance) && Number.isFinite(base) && currentBalance !== base) {
-        Storage.remove(OPTIMISTIC_CLAIM_KEY);
-        return 0;
-    }
-    return delta;
-};
+import useBalance from "../utils/useBalance";
 
 const UserControls = styled.div`
     display: flex;
@@ -341,12 +323,7 @@ function TopBar({ state }) {
         }
     });
     const [searchQuery, setSearchQuery] = useState('');
-    const [userBalance, setUserBalance] = useState(() => {
-        const stored = Storage.load('user_balance', null);
-        if (stored === null) return null; // Not loaded yet
-        return Number(stored) || 0;
-    });
-    const [optimisticDeltaUmirage, setOptimisticDeltaUmirage] = useState(0);
+    const { displayBalance } = useBalance();
     const menuRef = useRef(null);
     const mountedRef = useRef(true);
 
@@ -460,70 +437,6 @@ function TopBar({ state }) {
         setMenuOpen(false);
     }, [pathname]);
 
-    // Track user balance changes
-    useEffect(() => {
-        if (!hasPublicKey) {
-            setUserBalance(null);
-            setOptimisticDeltaUmirage(0);
-            Storage.remove(OPTIMISTIC_CLAIM_KEY);
-            return;
-        }
-
-        const applyBalanceUpdate = (storedValue) => {
-            if (storedValue === null || storedValue === undefined) {
-                setUserBalance(null);
-                setOptimisticDeltaUmirage(0);
-                return;
-            }
-            const balance = Number(storedValue);
-            if (!Number.isFinite(balance)) {
-                setUserBalance(0);
-                setOptimisticDeltaUmirage(0);
-                return;
-            }
-            const optimisticDelta = resolveOptimisticDelta(balance);
-            setUserBalance(balance);
-            setOptimisticDeltaUmirage(optimisticDelta);
-        };
-
-        const checkBalance = () => {
-            const stored = Storage.load('user_balance', null);
-            if (stored === null) return; // Not loaded yet, keep showing "~"
-            applyBalanceUpdate(stored);
-        };
-
-        // Check balance immediately on mount/login
-        checkBalance();
-
-        // Listen for balance updates (fired by TransactionHandler.cacheConfigData)
-        const handleBalanceUpdated = (e) => {
-            if (e.detail !== undefined) {
-                applyBalanceUpdate(e.detail);
-            }
-        };
-
-        // Also listen for storage events (cross-tab sync)
-        const handleStorage = (e) => {
-            if (e.key === 'user_balance') {
-                applyBalanceUpdate(e.newValue);
-            }
-        };
-        const handleOptimisticUpdate = () => {
-            const stored = Storage.load('user_balance', null);
-            if (stored === null) return;
-            applyBalanceUpdate(stored);
-        };
-        window.addEventListener('balanceUpdated', handleBalanceUpdated);
-        window.addEventListener('storage', handleStorage);
-        window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
-
-        return () => {
-            window.removeEventListener('balanceUpdated', handleBalanceUpdated);
-            window.removeEventListener('storage', handleStorage);
-            window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
-        };
-    }, [hasPublicKey]);
-
     const getInitials = (name) => {
         if (!name) return '?';
         let str = String(name).trim();
@@ -563,8 +476,6 @@ function TopBar({ state }) {
         }
         return pathname === path;
     };
-
-    const displayBalance = userBalance === null ? null : userBalance + optimisticDeltaUmirage;
 
     return (
         <SearchContainer>
