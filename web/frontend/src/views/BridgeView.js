@@ -11,7 +11,6 @@ import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
 import { bridgeBurn, pollTxStatus } from '../utils/tx';
-import useBalance from '../utils/useBalance';
 import transactionHandler from '../utils/TransactionHandler';
 
 // Lazy import for Solana bridge - only loads when needed
@@ -1888,7 +1887,7 @@ export default function BridgeView({ state }) {
         return savedNetworkId ? localStorage.getItem(`bridge_dest_${savedNetworkId}`) || '' : '';
     });
     const [useDifferentAddress, setUseDifferentAddress] = useState(false);
-    const { balance } = useBalance();
+    const [balance, setBalance] = useState(null);
     const [balanceLoading, setBalanceLoading] = useState(false);
     const [balanceError, setBalanceError] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1982,6 +1981,7 @@ export default function BridgeView({ state }) {
 
     const refreshBalance = useCallback(async (reason = 'init') => {
         if (!address) {
+            setBalance(null);
             setBalanceError(null);
             console.debug('[Bridge] Balance fetch skipped (no address)');
             return;
@@ -2005,7 +2005,8 @@ export default function BridgeView({ state }) {
             if (!Number.isFinite(balanceVal)) {
                 throw new Error('Invalid balance from get_user_status');
             }
-            // Update through cacheConfigData → _persistUserBalance → useBalance hook
+            setBalance(balanceVal);
+            // Also sync to TopBar/MobileHeader via cacheConfigData → _persistUserBalance → balanceUpdated event
             try { transactionHandler.cacheConfigData(data); } catch (_) { }
             setBalanceError(null);
             console.debug('[Bridge] Balance updated', { balance: balanceVal });
