@@ -70,7 +70,7 @@ class TransactionHandler {
         if (balanceVal === undefined || balanceVal === null) return;
         if (normalizeStorage) {
             const balanceNum = Number(balanceVal);
-            const normalized = Number.isFinite(balanceNum) ? (balanceNum >>> 0) : 0;
+            const normalized = Number.isFinite(balanceNum) ? Math.max(0, Math.trunc(balanceNum)) : 0;
             if (updateLastOnchain) {
                 this.lastOnchainBalanceUmirage = normalized;
             }
@@ -81,7 +81,7 @@ class TransactionHandler {
         Storage.save('user_balance', String(balanceVal));
         const balanceNum = Number(balanceVal);
         if (updateLastOnchain && Number.isFinite(balanceNum)) {
-            this.lastOnchainBalanceUmirage = balanceNum >>> 0;
+            this.lastOnchainBalanceUmirage = Math.max(0, Math.trunc(balanceNum));
         }
         window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: balanceVal }));
     }
@@ -1378,14 +1378,14 @@ class TransactionHandler {
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = Number(status.pow_difficulty || 0);
-                    const onChainBalance = Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'));
-                    const prevOnChain = this.lastOnchainBalanceUmirage >>> 0;
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
+                    const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
+                    const prevOnChain = this.lastOnchainBalanceUmirage;
+                    this.lastOnchainBalanceUmirage = onChainBalance;
                     if (this.pendingFeeUmirage > 0) {
                         const spentIncluded = onChainBalance <= Math.max(0, prevOnChain - this.pendingFeeUmirage);
                         if (spentIncluded) this.pendingFeeUmirage = 0;
                     }
-                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - (this.pendingFeeUmirage >>> 0));
+                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - Math.max(0, this.pendingFeeUmirage));
                     this._persistUserBalance(effectiveBalance, { normalizeStorage: true, updateLastOnchain: false });
                 } catch (error) {
                     const msg = (error && error.message) ? error.message : 'network error';
