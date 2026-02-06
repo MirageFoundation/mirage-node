@@ -18,6 +18,7 @@ import { tooltipStyles } from "../components/Tooltip";
 import { useTxStatus } from "../utils/useTxStatus";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 import { formatMirage } from "../utils/formatters";
+import useBalance from "../utils/useBalance";
 
 const Row = styled.div`
     display: grid;
@@ -388,7 +389,9 @@ export default function ProfileView({ state }) {
     const VALID_TABS = ['profile', 'posts', 'follows', 'blocks', 'algo'];
     const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
-    const [balance, setBalance] = useState(null);
+    const { balance: ownBalance } = useBalance();
+    const [otherProfileBalance, setOtherProfileBalance] = useState(null);
+    const balance = isOwnProfile ? ownBalance : otherProfileBalance;
     const [reserveFunds, setReserveFunds] = useState(null);
     const [profileRegisteredAt, setProfileRegisteredAt] = useState(null);
     const [userLevel, setUserLevel] = useState(0);
@@ -689,15 +692,18 @@ export default function ProfileView({ state }) {
                     setProfileUsername(username || '');
                 }
 
-                // Handle both 'balance' (new) and 'user_balance' (legacy)
-                const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
-                if (typeof balanceVal !== 'undefined') {
-                    const asInt = Number(balanceVal);
-                    if (Number.isFinite(asInt)) {
-                        setBalance(asInt);
+                // For other profiles, store balance in local state.
+                // Own profile balance comes from useBalance hook (updated via cacheConfigData above).
+                if (!isOwnProfile) {
+                    const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
+                    if (typeof balanceVal !== 'undefined') {
+                        const asInt = Number(balanceVal);
+                        if (Number.isFinite(asInt)) {
+                            setOtherProfileBalance(asInt);
+                        }
+                    } else {
+                        setOtherProfileBalance(null);
                     }
-                } else {
-                    setBalance(null);
                 }
 
                 if (typeof data.reserve_funds !== 'undefined') {
