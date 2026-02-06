@@ -4,7 +4,6 @@ import styled from 'styled-components';
 import { useLocation } from 'react-router-dom';
 import Storage from '../utils/Storage';
 import { formatMirage, formatMirageCompact } from '../utils/formatters';
-import useBalance from '../utils/useBalance';
 import Api from '../lib/api';
 import { upgradeLevel as txUpgradeLevel, setAutoRenewal as txSetAutoRenewal } from '../utils/tx';
 import transactionHandler from '../utils/TransactionHandler';
@@ -458,8 +457,7 @@ export default function SubscriptionView({ state }) {
     const [userLevel, setUserLevel] = useState(0);
     const [subscriptionExpiry, setSubscriptionExpiry] = useState(0);
     const [autoRenew, setAutoRenew] = useState(false);
-    const { balance: balanceFromHook } = useBalance();
-    const balance = balanceFromHook ?? 0;
+    const [balance, setBalance] = useState(0);
     const [reserveFunds, setReserveFunds] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isUpgrading, setIsUpgrading] = useState(false);
@@ -542,7 +540,11 @@ export default function SubscriptionView({ state }) {
                     setAutoRenew(data.auto_renew);
                     autoRenewDisplayRef.current = data.auto_renew;
                 }
-                // Balance comes from useBalance hook (updated via cacheConfigData above)
+                // Balance from API response (cacheConfigData above also syncs to TopBar via useBalance hook)
+                const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
+                if (typeof balanceVal !== 'undefined') {
+                    setBalance(Number(balanceVal) || 0);
+                }
                 if (typeof data.reserve_funds !== 'undefined') {
                     setReserveFunds(Number(data.reserve_funds) || 0);
                 }
@@ -671,8 +673,12 @@ export default function SubscriptionView({ state }) {
             try {
                 const data = await Api.get('get_user_status', { address: address || undefined, _cb: Date.now() }, { timeoutMs: 10000 });
                 // Persist to Storage so TransactionHandler picks up the new user_level
-                // (also updates balance via _persistUserBalance → balanceUpdated event → useBalance hook)
+                // (also syncs balance to TopBar via _persistUserBalance → balanceUpdated event)
                 try { transactionHandler.cacheConfigData(data); } catch (_) { }
+                const balanceVal = data?.balance !== undefined ? data.balance : data?.user_balance;
+                if (balanceVal !== undefined) {
+                    setBalance(Number(balanceVal) || 0);
+                }
                 // Only overwrite optimistic state when backend matches the expected outcome
                 const fetchedLevel = data?.user_level !== undefined ? Number(data.user_level) || 0 : undefined;
                 const fetchedAuto = data?.auto_renew !== undefined ? Boolean(data.auto_renew) : undefined;
