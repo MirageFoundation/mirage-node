@@ -68,8 +68,8 @@ we need to add the relaying node into the blockchain history. this way we can pr
 ----------
 
 we need to allow for galleries / multiple pics and videos
-add blocking topics
 add blocking keywords (in topics or posts)
+add blocking topics
 
 ----------
 
