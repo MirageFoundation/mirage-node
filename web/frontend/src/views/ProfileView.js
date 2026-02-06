@@ -736,7 +736,7 @@ export default function ProfileView({ state }) {
 
             } catch (_) {
                 if (!cancelled) {
-                    setBalance(null);
+                    setOtherProfileBalance(null);
                     setReserveFunds(null);
                     setProfileRegisteredAt(null);
                 }
