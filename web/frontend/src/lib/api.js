@@ -76,6 +76,33 @@ function buildUrl(path, params) {
 // Removed remote fallback helpers (hard-fail policy)
 
 /**
+ * Auto-sync balance: if the API response contains a `balance` field and the
+ * request was for the logged-in user's own address, update localStorage and
+ * fire the balanceUpdated event so TopBar/MobileHeader stay in sync.
+ * @param {Record<string,any>=} params - GET query params
+ * @param {any=} body - POST body
+ * @param {any} data - parsed response
+ */
+function maybeSyncBalance(params, body, data) {
+    if (!data || typeof data !== 'object' || data.balance === undefined) return;
+    try {
+        const myAddr = localStorage.getItem('publicKey') || '';
+        if (!myAddr) return;
+        // Check address from query params (GET) or body (POST)
+        const reqAddr = String(
+            (params && (params.address || params.owner)) ||
+            (body && (body.address || body.owner)) ||
+            ''
+        );
+        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return;
+        const bal = Number(data.balance);
+        if (!Number.isFinite(bal)) return;
+        localStorage.setItem('user_balance', String(Math.max(0, Math.trunc(bal))));
+        window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: bal }));
+    } catch (_) {}
+}
+
+/**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
  * @property {Record<string,string>=} headers
@@ -96,7 +123,11 @@ async function get(path, params, options) {
             const ct = resp.headers.get('content-type') || '';
             // If HTML came back, likely misroute: attempt remote fallback
             if (!ct.includes('text/html')) {
-                if (ct.includes('application/json')) return await resp.json();
+                if (ct.includes('application/json')) {
+                    const json = await resp.json();
+                    maybeSyncBalance(params, undefined, json);
+                    return json;
+                }
                 return await resp.text();
             }
         }
@@ -127,7 +158,11 @@ async function post(path, body, options) {
         if (resp.ok) {
             const ct = resp.headers.get('content-type') || '';
             if (!ct.includes('text/html')) {
-                if (ct.includes('application/json')) return await resp.json();
+                if (ct.includes('application/json')) {
+                    const json = await resp.json();
+                    maybeSyncBalance(undefined, body, json);
+                    return json;
+                }
                 return await resp.text();
             }
         }

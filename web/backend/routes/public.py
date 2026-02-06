@@ -55,6 +55,16 @@ import urllib.parse as _up
 from user_agents import parse as parse_user_agent
 
 
+def _inject_balance(resp: dict, addr: str) -> dict:
+    """Add balance to response dict if address is provided."""
+    if addr and addr.lower() != "guest":
+        try:
+            resp["balance"] = int(_get_balance(addr))
+        except Exception:
+            pass
+    return resp
+
+
 def _query_chain_profile(addr: str) -> dict | None:
     """Query the chain directly for a profile's current state (including real-time subscription_expiry)."""
     try:
@@ -442,45 +452,43 @@ def get_profile():
 
         profile = _query_chain_profile_full(address.lower())
         if not profile:
-            return jsonify(
-                {
-                    "owner": address.lower(),
-                    "username": "",
-                    "level": 0,
-                    "followed_users": [],
-                    "followed_topics": [],
-                    "followed_moderators": [],
-                    "blocked_users": [],
-                    "blocked_posts": [],
-                    "quality_posts": [],
-                }
-            )
-
-        return jsonify(
-            {
-                "owner": profile.get("owner", address.lower()),
-                "username": profile.get("username", ""),
-                "level": int(profile.get("level", 0)),
-                "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
-                "subscription_expiry": int(
-                    profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)
-                ),
-                "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
-                "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
-                "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
-                "biography": profile.get("biography", ""),
-                "avatar": profile.get("avatar", ""),
-                "banner": profile.get("banner", ""),
-                "followed_users": profile.get("followed_users", []) or profile.get("followedUsers", []) or [],
-                "followed_topics": profile.get("followed_topics", []) or profile.get("followedTopics", []) or [],
-                "followed_moderators": profile.get("followed_moderators", [])
-                or profile.get("followedModerators", [])
-                or [],
-                "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
-                "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
-                "quality_posts": profile.get("quality_posts", []) or profile.get("qualityPosts", []) or [],
+            resp = {
+                "owner": address.lower(),
+                "username": "",
+                "level": 0,
+                "followed_users": [],
+                "followed_topics": [],
+                "followed_moderators": [],
+                "blocked_users": [],
+                "blocked_posts": [],
+                "quality_posts": [],
             }
-        )
+            return jsonify(_inject_balance(resp, address))
+
+        resp = {
+            "owner": profile.get("owner", address.lower()),
+            "username": profile.get("username", ""),
+            "level": int(profile.get("level", 0)),
+            "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
+            "subscription_expiry": int(
+                profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)
+            ),
+            "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
+            "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
+            "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
+            "biography": profile.get("biography", ""),
+            "avatar": profile.get("avatar", ""),
+            "banner": profile.get("banner", ""),
+            "followed_users": profile.get("followed_users", []) or profile.get("followedUsers", []) or [],
+            "followed_topics": profile.get("followed_topics", []) or profile.get("followedTopics", []) or [],
+            "followed_moderators": profile.get("followed_moderators", [])
+            or profile.get("followedModerators", [])
+            or [],
+            "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
+            "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
+            "quality_posts": profile.get("quality_posts", []) or profile.get("qualityPosts", []) or [],
+        }
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1869,7 +1877,7 @@ def get_user_followed():
             topics=len(followed_topics),
             users=len(followed_users),
         )
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_followed.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -1906,7 +1914,7 @@ def get_user_blocked():
             "blocked_users": blocked_users,
         }
         log_event(rid, "get_user_blocked.ok", posts=len(blocked_posts), users=len(blocked_users))
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_blocked.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -1955,7 +1963,7 @@ def get_preferences():
 
         resp = {"topics": topics, "authors": authors}
         log_event(rid, "get_preferences.ok", topics=len(topics), authors=len(authors))
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_preferences.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -3689,7 +3697,7 @@ def get_posts():
                 resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3890,7 +3898,8 @@ def get_user_posts():
             )
         conn.close()
         has_more = (page * limit) < total
-        return jsonify({"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total})
+        resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
+        return jsonify(_inject_balance(resp, viewer))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4446,7 +4455,7 @@ def get_comments():
             votes_ms=round(t_votes_ms, 1),
             total_ms=round(total_ms, 1),
         )
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "get_comments.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -4562,7 +4571,8 @@ def get_comment_context():
         blocked_users = _get_blocked_users(cur, address)
         chain = _fetch_parent_chain(cur, comment_id, max_depth, blocked_posts, blocked_users)
         conn.close()
-        return jsonify({"context": chain, "comment_id": comment_id})
+        resp = {"context": chain, "comment_id": comment_id}
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4710,17 +4720,16 @@ def get_inbox():
         total_ms = (time.time() - t_start) * 1000
         logger.info(f"[get_inbox] Total: {total_ms:.1f}ms, replies={len(replies)}, total_count={total}")
 
-        return jsonify(
-            {
-                "replies": replies,
-                "total": total,
-                "page": page,
-                "limit": limit,
-                "has_more": has_more,
-                "_perf_ms": round(total_ms, 1),
-                "_query_ms": round(query_ms, 1),
-            }
-        )
+        resp = {
+            "replies": replies,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "has_more": has_more,
+            "_perf_ms": round(total_ms, 1),
+            "_query_ms": round(query_ms, 1),
+        }
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         import traceback
 
@@ -5620,7 +5629,7 @@ def _get_stats_subscribers(rid: int):
         return jsonify({"error": str(e)}), 500
 
 
-def _get_stats_accounts(rid: int):
+def get_stats_accounts(rid: int):
     """Return top 100 accounts by wallet balance."""
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5764,7 +5773,7 @@ def get_stats():
     elif tab == "subscribers":
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
-        return _get_stats_accounts(rid)
+        return get_stats_accounts(rid)
     elif tab == "analytics":
         return _get_stats_analytics(rid)
     elif tab == "rewards":
@@ -6284,7 +6293,8 @@ def get_invite_codes():
 
         available_count = sum(1 for c in codes if not c["is_used"])
         log_event(rid, "invite.get_codes.ok", address=address[:12], total=len(codes), available=available_count)
-        return jsonify({"codes": codes, "total": len(codes), "available": available_count})
+        resp = {"codes": codes, "total": len(codes), "available": available_count}
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "invite.get_codes.err", error=str(e))
         return jsonify({"error": str(e)}), 500

@@ -28,11 +28,22 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify, request
 
+from bank import get_balance as _get_balance
 from db import connect_db
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
 from routes.core import get_user_level
+
+
+def _inject_balance(resp: dict, addr: str) -> dict:
+    """Add balance to response dict if address is provided."""
+    if addr and addr.lower() != "guest":
+        try:
+            resp["balance"] = int(_get_balance(addr))
+        except Exception:
+            pass
+    return resp
 
 
 quests_bp = Blueprint("quests", __name__)
@@ -524,15 +535,14 @@ def get_daily_quests():
         multiplier = _get_user_reward_multiplier(owner, ts)
 
         log_event(rid, "quests.daily.ok", owner=owner, quest_count=len(daily_quests))
-        return jsonify(
-            {
-                "suspended": False,
-                "daily_quests": daily_quests,
-                "seconds_until_reset": _get_seconds_until_reset(ts),
-                "reward_multiplier": round(multiplier, 4),
-                "debug": BACKEND_DEBUG,
-            }
-        )
+        resp = {
+            "suspended": False,
+            "daily_quests": daily_quests,
+            "seconds_until_reset": _get_seconds_until_reset(ts),
+            "reward_multiplier": round(multiplier, 4),
+            "debug": BACKEND_DEBUG,
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "quests.daily.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -658,12 +668,11 @@ def get_flash_quests():
         }
 
         log_event(rid, "quests.flash.ok", owner=owner, template_id=template_id)
-        return jsonify(
-            {
-                "suspended": False,
-                "flash_quest": flash_quest,
-            }
-        )
+        resp = {
+            "suspended": False,
+            "flash_quest": flash_quest,
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "quests.flash.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -723,7 +732,8 @@ def get_achievements():
             )
 
         log_event(rid, "achievements.ok", owner=owner, count=len(achievements))
-        return jsonify({"achievements": achievements})
+        resp = {"achievements": achievements}
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "achievements.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -809,17 +819,16 @@ def get_pending_rewards():
         claiming_available = distributor.is_configured()
 
         log_event(rid, "rewards.pending.ok", owner=owner, count=len(pending_rewards), total_mirage=total_mirage)
-        return jsonify(
-            {
-                "suspended": False,
-                "pending_rewards": pending_rewards,
-                "total_mirage": total_mirage,
-                "total_mirage_after_multiplier": total_mirage_after_multiplier,
-                "pending_invite_codes": pending_invite_codes,
-                "reward_multiplier": round(multiplier, 4),
-                "claiming_available": claiming_available,
-            }
-        )
+        resp = {
+            "suspended": False,
+            "pending_rewards": pending_rewards,
+            "total_mirage": total_mirage,
+            "total_mirage_after_multiplier": total_mirage_after_multiplier,
+            "pending_invite_codes": pending_invite_codes,
+            "reward_multiplier": round(multiplier, 4),
+            "claiming_available": claiming_available,
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "rewards.pending.err", error=str(e))
         return jsonify({"error": str(e)}), 500
@@ -960,13 +969,12 @@ def claim_rewards():
             reward_count=len(result.get("rewards", [])),
             tx_hash=result.get("tx_hash"),
         )
-        return jsonify(
-            {
-                "success": True,
-                "rewards": result.get("rewards", []),
-                "tx_hash": result.get("tx_hash"),
-            }
-        )
+        resp = {
+            "success": True,
+            "rewards": result.get("rewards", []),
+            "tx_hash": result.get("tx_hash"),
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "rewards.claim.err", error=str(e))
         return jsonify({"error": str(e)}), 500
