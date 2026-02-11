@@ -324,6 +324,17 @@ def _tx_error(
     return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), 400
 
 
+def _classify_exception(err_str: str):
+    """Return (message, http_status) for common chain exceptions.
+
+    Checks for admin-balance errors before falling through to the generic 500.
+    """
+    low = err_str.lower()
+    if "admin insufficient balance" in low:
+        return "admin insufficient balance: your account balance is too low to cover the transaction fee", 400
+    return err_str, 500
+
+
 def get_nonce_for_subscriber(last_block_hash: str) -> str:
     """For subscribers without PoW, use timestamp as nonce to ensure tx uniqueness."""
     if last_block_hash:
@@ -705,8 +716,10 @@ def core_set_username():
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "set_username.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        err_str = str(e)
+        log_event(rid, "set_username.err", error=err_str)
+        msg, status = _classify_exception(err_str)
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_moderator", methods=["POST"])
@@ -811,7 +824,8 @@ def core_follow_moderator():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_moderator.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_moderator", methods=["POST"])
@@ -907,7 +921,8 @@ def core_unfollow_moderator():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_moderator.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/block_post", methods=["POST"])
@@ -1026,7 +1041,8 @@ def core_block_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "block_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/block_user", methods=["POST"])
@@ -1145,7 +1161,8 @@ def core_block_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "block_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unblock_post", methods=["POST"])
@@ -1232,7 +1249,8 @@ def core_unblock_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unblock_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unblock_user", methods=["POST"])
@@ -1319,7 +1337,8 @@ def core_unblock_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unblock_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_user", methods=["POST"])
@@ -1416,7 +1435,8 @@ def core_follow_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_user", methods=["POST"])
@@ -1502,7 +1522,8 @@ def core_unfollow_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_topic", methods=["POST"])
@@ -1596,7 +1617,8 @@ def core_follow_topic():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_topic.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_topic", methods=["POST"])
@@ -1679,7 +1701,8 @@ def core_unfollow_topic():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_topic.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/delete_post", methods=["POST"])
@@ -1817,7 +1840,8 @@ def core_delete_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "delete_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/report", methods=["POST"])
@@ -1936,7 +1960,8 @@ def core_report():
         return jsonify({"success": True, "id": int(report_id)})
     except Exception as e:
         log_event(rid, "report.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/resolve_report", methods=["POST"])
@@ -1968,7 +1993,8 @@ def core_resolve_report():
         return jsonify({"success": True})
     except Exception as e:
         log_event(rid, "resolve_report.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/edit", methods=["POST"])
@@ -2156,7 +2182,8 @@ def core_edit():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "edit.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
@@ -2370,7 +2397,8 @@ def core_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/vote", methods=["POST"])
@@ -2549,7 +2577,8 @@ def core_vote():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "vote.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/send_tokens", methods=["POST"])
@@ -2699,7 +2728,8 @@ def core_send_tokens():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "send_tokens.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/upgrade_level", methods=["POST"])
@@ -2832,7 +2862,8 @@ def core_upgrade_level():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "upgrade_level.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/set_auto_renewal", methods=["POST"])
@@ -2948,7 +2979,8 @@ def core_set_auto_renewal():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "set_auto_renewal.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 def _lookup_ip_info(ip: str) -> dict:
@@ -3171,7 +3203,8 @@ def save_fingerprint():
 
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 __all__ = ["core_bp"]

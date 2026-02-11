@@ -64,5 +64,23 @@ referrals/airdrop_pending.csv
 referrals/payout_history.csv
 
 
+# Scripts - node-operator scripts are tracked; internal admin tools are not.
+# Everything on disk still gets packaged by Docker (COPY scripts/).
+scripts/*
+!scripts/__init__.py
+!scripts/status_dashboard.py
+!scripts/stake.py
+!scripts/unjail_validator.sh
+!scripts/check_validator_status.sh
+!scripts/get_persistent_peers.sh
+!scripts/backup_restore.py
+!scripts/create_snapshot.sh
+!scripts/reset_statesync.sh
+!scripts/restore_from_peer.sh
+!scripts/list_validators.sh
+!scripts/show_balances.py
+!scripts/verify_upgrade.py
+!scripts/check_grpc.py
+
 cursor.md.cursor/
 .cursor/

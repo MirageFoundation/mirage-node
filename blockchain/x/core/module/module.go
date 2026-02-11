@@ -180,13 +180,16 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	}
 
 	// Special rule for admins (level >= 100): deduct gas directly from on-chain balance,
-	// never from reserve and never downgrade. If balance is insufficient, FAIL the tx.
+	// never from reserve and never downgrade. If balance is insufficient, skip deduction
+	// but let the tx through -- admin operations should never be blocked over gas fees.
 	if userLevel >= 100 {
-		// Attempt to transfer fee from owner's balance to module, then burn it.
-		// If balance is insufficient or transfer fails, FAIL the tx.
 		if err := am.k.DeductFeeFromOwner(ctx, owner, fee); err != nil {
-			// Do not panic, return error to fail the tx gracefully
-			return fmt.Errorf("admin insufficient balance for relay fee: need >= %d umirage: %w", fee, err)
+			ctx.Logger().Warn("relay gas fee (admin): insufficient balance, skipping deduction",
+				"owner", owner,
+				"level", userLevel,
+				"fee", fee,
+				"err", err)
+			return nil
 		}
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
 			ctx.Logger().Warn("relay gas fee (admin): failed to burn from module after deduction",
@@ -575,7 +578,6 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	}
 	return nil
 }
-
 
 // processSubscriptions handles subscription renewals and expirations
 func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params) error {

@@ -1509,6 +1509,8 @@ class TransactionHandler {
                     const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
                     updateNotification(cleanMsg, 10, true);
+                } else if (/admin insufficient balance/i.test(errMsg)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(errMsg)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 } else {
@@ -1526,6 +1528,8 @@ class TransactionHandler {
                     const grpcMatch = msg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
                     updateNotification(cleanMsg, 10, true);
+                } else if (/admin insufficient balance/i.test(msg)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(msg)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 } else {
@@ -3482,6 +3486,8 @@ class TransactionHandler {
                 // Check for subscription/reserve errors in the full error string
                 if (/insufficient reserve/i.test(whole) || /subscription terminated/i.test(whole)) {
                     // Don't show notification here - let outer catch handle it to avoid duplicates
+                } else if (/admin insufficient balance/i.test(whole)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(whole)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 }
@@ -3508,6 +3514,8 @@ class TransactionHandler {
                     window.dispatchEvent(new CustomEvent('subscriptionStatusChanged', { detail: { level: 0 } }));
                 } catch (_) { }
                 updateNotification('Your subscription may have expired. Please try again - PoW will be used.', 8, true);
+            } else if (/admin insufficient balance/i.test(fullErr)) {
+                updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
             } else if (/insufficient funds/i.test(fullErr)) {
                 updateNotification('Node does not have enough gas for this transaction.', 6, true);
             } else {
