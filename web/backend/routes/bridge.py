@@ -19,6 +19,7 @@ from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody
 from shared.datatypes import MsgBridgeBurn
 from shared.canon import canon_signed_with_pow
 
+from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from params import expect_params
@@ -252,7 +253,7 @@ def bridge_config():
         return jsonify({"chains": chains, "attestation_threshold_bps": attestation_threshold})
     except Exception as e:
         log_event(rid, "bridge_config.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @bridge_bp.route("/api/bridge/status", methods=["GET"])
@@ -321,7 +322,7 @@ def get_bridge_status():
         return jsonify(result)
     except Exception as e:
         log_event(rid, "bridge_status.err", chain=chain, error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @bridge_bp.route("/api/bridge/burn", methods=["POST"])
@@ -491,4 +492,4 @@ def bridge_burn():
         )
     except Exception as e:
         log_event(rid, "bridge_burn.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
