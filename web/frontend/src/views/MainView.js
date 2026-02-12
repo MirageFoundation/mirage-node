@@ -1370,7 +1370,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
-        try { return Storage.load('invite_banner_collapsed', false); } catch (_) { return false; }
+        try { return Storage.load('invite_banner_collapsed', true); } catch (_) { return true; }
     });
     const [questCardCollapsed, setQuestCardCollapsed] = useState(() => {
         try { return Storage.load('quest_card_collapsed', false); } catch (_) { return false; }
