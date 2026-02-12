@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
+	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
@@ -15,9 +15,9 @@ import (
 
 const (
 	// 201600 blocks = 7 days at 3s/block
-	retentionBlocks         = int64(201600)
-	retentionBlockTimeSecs  = int64(3)
-	retentionDuration       = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
+	retentionBlocks        = int64(201600)
+	retentionBlockTimeSecs = int64(3)
+	retentionDuration      = time.Duration(retentionBlocks*retentionBlockTimeSecs) * time.Second
 
 	sdkRestoreUpgradeName = "v1.10.4-restore-sdk"
 )
@@ -1016,6 +1016,26 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.10.5 complete - cleanup of one-time upgrade code")
+			return toVM, nil
+		},
+	)
+
+	// v1.10.7: Admin gas fee non-blocking
+	// - Admin relay gas fee: skip deduction on insufficient balance instead of failing tx
+	// - Admin operations should never be blocked over gas fees
+	// - No state migration needed, binary-only change
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.10.7",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.10.7...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.10.7 complete - admin gas fee non-blocking")
 			return toVM, nil
 		},
 	)
