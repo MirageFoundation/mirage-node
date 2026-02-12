@@ -137,18 +137,18 @@ const InboxIcon = styled.svg`
 
 const UnreadBadge = styled.span`
     position: absolute;
-    top: -6px;
+    top: -4px;
     right: -8px;
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
     background: #FF3B30;
-    border-radius: 8px;
+    border-radius: 11px;
     border: 2px solid ${({ theme }) => theme?.colors?.panel || "#23272C"};
     color: #fff;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
-    line-height: 16px;
+    line-height: 18px;
     text-align: center;
     box-sizing: border-box;
 `;
