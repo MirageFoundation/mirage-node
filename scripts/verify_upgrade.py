@@ -3,12 +3,21 @@
 Verify Mirage Node Upgrade — strict + exhaustive.
 
 This script is intentionally "no hand-waving":
-- It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
+- It validates EVERY core param field (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
 - It checks that critical CLI commands are exposed.
 - It can optionally verify genesis export with --export-check (stops node, runs export, restarts).
 - It shows status of ALL registered upgrades.
+
+v1.10.7 additions (source-level checks):
+- Fingerprinting system fully removed (tables, columns, code references)
+- safe_error() helper used across all route files + global Flask handler
+- Spoiler tag support (||text|| syntax, remarkSpoiler plugin, Spoiler component)
+- Server-side inbox unread count (cache, middleware, migration, API sync)
+- Seed phrase security (SeedVault with 4 modes: insecure, password, memory, passkey)
+- Admin gas fee non-blocking (level >= 100 skip deduction in chain module)
+- Balance overflow fix (uvarint64 encoding, useBalance hook)
 
 NOTE: This does NOT submit transactions or mutate chain state.
 """
@@ -30,7 +39,7 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.4-restore-sdk"
+UPGRADE_NAME = "v1.10.7"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION_PREFIX = "v1.10"
 
@@ -59,11 +68,16 @@ ALL_UPGRADES = [
     "v1.10.0-remove-ibc",
     "v1.10.3-sdk-bloat",
     "v1.10.4-restore-sdk",
+    "v1.10.5",
+    "v1.10.7",
 ]
+
+# Repo root (scripts/ is one level below)
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.9.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.10.7"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read()
     return json.loads(data.decode("utf-8"))
@@ -1130,6 +1144,411 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         failures.append(f"Cannot verify MsgBridgeBurn proto: {e}")
 
 
+# ---------------------------------------------------------------------------
+# v1.10.7 feature checks (source-level verification)
+# ---------------------------------------------------------------------------
+
+
+def _file_contains(path: Path, pattern: str) -> bool:
+    """Return True if *path* exists and its text matches *pattern* (regex)."""
+    try:
+        if not path.exists():
+            return False
+        return bool(re.search(pattern, path.read_text()))
+    except Exception:
+        return False
+
+
+def _file_missing_pattern(path: Path, pattern: str) -> bool:
+    """Return True if *path* exists and does NOT match *pattern* (regex)."""
+    try:
+        if not path.exists():
+            return False
+        return not bool(re.search(pattern, path.read_text()))
+    except Exception:
+        return False
+
+
+def check_fingerprinting_removed(failures: list[str], warnings: list[str]) -> None:
+    """Verify that the device fingerprinting system has been fully removed."""
+    print("\n-> Checking fingerprinting removal...")
+
+    # 1. user_fingerprints table should be dropped in database.py
+    db_path = REPO_ROOT / "indexer" / "database.py"
+    if _file_contains(db_path, r"DROP TABLE IF EXISTS user_fingerprints"):
+        print("   [OK] database.py: DROP TABLE user_fingerprints present")
+    else:
+        print("   [FAIL] database.py: missing DROP TABLE user_fingerprints")
+        failures.append("fingerprinting: database.py does not drop user_fingerprints table")
+
+    # 2. PII columns (user_agent, ip_hash, referrer) should be dropped from stats_events
+    for col in ("user_agent", "ip_hash", "referrer"):
+        if _file_contains(db_path, rf"DROP COLUMN {col}"):
+            print(f"   [OK] database.py: stats_events.{col} dropped")
+        else:
+            print(f"   [FAIL] database.py: stats_events.{col} not dropped")
+            failures.append(f"fingerprinting: stats_events.{col} column not dropped in database.py")
+
+    # 3. Coarse device columns should be added instead
+    for col in ("browser_family", "os_family", "device_type"):
+        if _file_contains(db_path, rf"ADD COLUMN {col}"):
+            print(f"   [OK] database.py: coarse column {col} added")
+        else:
+            print(f"   [WARN] database.py: coarse column {col} not found")
+            warnings.append(f"fingerprinting: expected coarse column {col} in database.py")
+
+    # 4. No fingerprinting code in backend routes
+    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
+    public_py = routes_dir / "public.py"
+    if public_py.exists():
+        text = public_py.read_text()
+        for banned in ("fingerprint", "sock_puppet", "sock puppet", "user_profiling"):
+            if re.search(banned, text, re.IGNORECASE):
+                print(f"   [FAIL] public.py: still contains '{banned}'")
+                failures.append(f"fingerprinting: public.py still references '{banned}'")
+                break
+        else:
+            print("   [OK] public.py: no fingerprinting references")
+    else:
+        print("   [WARN] public.py not found")
+        warnings.append("fingerprinting: web/backend/routes/public.py not found")
+
+    # 5. Stats endpoint should use bot filtering, not fingerprinting
+    if _file_contains(public_py, r"_STATS_BOT_NAMES|bot.*filter"):
+        print("   [OK] public.py: server-side bot filtering present")
+    else:
+        print("   [WARN] public.py: bot filtering pattern not found")
+        warnings.append("fingerprinting: expected server-side bot filtering in public.py")
+
+
+def check_safe_error_coverage(failures: list[str], warnings: list[str]) -> None:
+    """Verify that safe_error() exists and is wired into all route files and the global handler."""
+    print("\n-> Checking sanitized error responses...")
+
+    # 1. error_utils.py must exist with safe_error()
+    error_utils = REPO_ROOT / "web" / "backend" / "error_utils.py"
+    if not error_utils.exists():
+        print("   [FAIL] error_utils.py: not found")
+        failures.append("safe_error: web/backend/error_utils.py not found")
+        return
+
+    text = error_utils.read_text()
+    if "def safe_error(" in text:
+        print("   [OK] error_utils.py: safe_error() defined")
+    else:
+        print("   [FAIL] error_utils.py: safe_error() not defined")
+        failures.append("safe_error: function not defined in error_utils.py")
+
+    if "request_id" in text:
+        print("   [OK] error_utils.py: returns request_id to client")
+    else:
+        print("   [FAIL] error_utils.py: missing request_id in response")
+        failures.append("safe_error: does not include request_id in error response")
+
+    # 2. Global error handler in factory.py
+    factory = REPO_ROOT / "web" / "backend" / "factory.py"
+    if _file_contains(factory, r"@app\.errorhandler\(Exception\)"):
+        print("   [OK] factory.py: global Exception handler registered")
+    else:
+        print("   [FAIL] factory.py: missing global Exception handler")
+        failures.append("safe_error: factory.py missing @app.errorhandler(Exception)")
+
+    if _file_contains(factory, r"safe_error"):
+        print("   [OK] factory.py: global handler uses safe_error()")
+    else:
+        print("   [FAIL] factory.py: global handler does not use safe_error()")
+        failures.append("safe_error: factory.py global handler does not call safe_error()")
+
+    # 3. Route files should import / use safe_error
+    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
+    route_files = ["public.py", "core.py", "bridge.py", "quests.py"]
+    for fname in route_files:
+        rpath = routes_dir / fname
+        if not rpath.exists():
+            print(f"   [WARN] routes/{fname}: not found")
+            warnings.append(f"safe_error: routes/{fname} not found")
+            continue
+        if _file_contains(rpath, r"safe_error"):
+            print(f"   [OK] routes/{fname}: uses safe_error()")
+        else:
+            print(f"   [FAIL] routes/{fname}: does not use safe_error()")
+            failures.append(f"safe_error: routes/{fname} does not use safe_error()")
+
+
+def check_spoiler_tags(failures: list[str], warnings: list[str]) -> None:
+    """Verify spoiler tag support in the markdown renderer."""
+    print("\n-> Checking spoiler tag support...")
+
+    renderer = REPO_ROOT / "web" / "frontend" / "src" / "components" / "MarkdownRenderer.js"
+    if not renderer.exists():
+        print("   [FAIL] MarkdownRenderer.js: not found")
+        failures.append("spoiler tags: MarkdownRenderer.js not found")
+        return
+
+    text = renderer.read_text()
+
+    # Spoiler component
+    if re.search(r"function\s+Spoiler", text):
+        print("   [OK] Spoiler component defined")
+    else:
+        print("   [FAIL] Spoiler component not found")
+        failures.append("spoiler tags: Spoiler component not defined in MarkdownRenderer.js")
+
+    # remarkSpoiler plugin
+    if re.search(r"function\s+remarkSpoiler", text):
+        print("   [OK] remarkSpoiler plugin defined")
+    else:
+        print("   [FAIL] remarkSpoiler plugin not found")
+        failures.append("spoiler tags: remarkSpoiler plugin not defined in MarkdownRenderer.js")
+
+    # Plugin registered in remarkPlugins
+    if "remarkSpoiler" in text and "remarkPlugins" in text:
+        print("   [OK] remarkSpoiler registered in remarkPlugins")
+    else:
+        print("   [FAIL] remarkSpoiler not registered in remarkPlugins")
+        failures.append("spoiler tags: remarkSpoiler not wired into remarkPlugins")
+
+    # Component mapping for spoiler-tag
+    if "'spoiler-tag'" in text or '"spoiler-tag"' in text:
+        print("   [OK] spoiler-tag component mapping present")
+    else:
+        print("   [FAIL] spoiler-tag component mapping missing")
+        failures.append("spoiler tags: spoiler-tag not mapped in components prop")
+
+    # ||text|| syntax (the regex pattern in the plugin)
+    if re.search(r"\|\|.*\|\|", text):
+        print("   [OK] ||double pipes|| syntax pattern present")
+    else:
+        print("   [WARN] ||double pipes|| syntax pattern not found")
+        warnings.append("spoiler tags: expected ||text|| pattern in remarkSpoiler")
+
+
+def check_inbox_server_side(failures: list[str], warnings: list[str]) -> None:
+    """Verify server-side inbox unread count tracking."""
+    print("\n-> Checking server-side inbox notifications...")
+
+    # 1. Backend: _get_new_inbox_count in public.py
+    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
+    if not public_py.exists():
+        print("   [FAIL] routes/public.py: not found")
+        failures.append("inbox: web/backend/routes/public.py not found")
+        return
+
+    text = public_py.read_text()
+
+    if "def _get_new_inbox_count(" in text:
+        print("   [OK] _get_new_inbox_count() defined")
+    else:
+        print("   [FAIL] _get_new_inbox_count() not found")
+        failures.append("inbox: _get_new_inbox_count() not defined in public.py")
+
+    if "_inbox_cache" in text:
+        print("   [OK] _inbox_cache present (60s server-side cache)")
+    else:
+        print("   [FAIL] _inbox_cache not found")
+        failures.append("inbox: _inbox_cache not found in public.py")
+
+    if "def _invalidate_inbox_cache(" in text:
+        print("   [OK] _invalidate_inbox_cache() defined")
+    else:
+        print("   [FAIL] _invalidate_inbox_cache() not found")
+        failures.append("inbox: _invalidate_inbox_cache() not defined in public.py")
+
+    if "mark_inbox_viewed" in text:
+        print("   [OK] mark_inbox_viewed endpoint present")
+    else:
+        print("   [FAIL] mark_inbox_viewed endpoint not found")
+        failures.append("inbox: /api/mark_inbox_viewed endpoint missing from public.py")
+
+    # 2. Middleware: factory.py injects new_inbox_items
+    factory = REPO_ROOT / "web" / "backend" / "factory.py"
+    if _file_contains(factory, r"new_inbox_items"):
+        print("   [OK] factory.py: new_inbox_items injected into responses")
+    else:
+        print("   [FAIL] factory.py: new_inbox_items injection missing")
+        failures.append("inbox: factory.py does not inject new_inbox_items into API responses")
+
+    if _file_contains(factory, r"@app\.after_request"):
+        print("   [OK] factory.py: after_request middleware registered")
+    else:
+        print("   [FAIL] factory.py: after_request middleware missing")
+        failures.append("inbox: factory.py missing @app.after_request middleware for inbox count")
+
+    # 3. Database migration for inbox_last_viewed_at
+    migration = REPO_ROOT / "indexer" / "migrations" / "v2_0_3_inbox_last_viewed.py"
+    if migration.exists():
+        print("   [OK] v2_0_3_inbox_last_viewed.py migration exists")
+        if _file_contains(migration, r"inbox_last_viewed_at"):
+            print("   [OK] migration adds inbox_last_viewed_at column")
+        else:
+            print("   [FAIL] migration missing inbox_last_viewed_at column")
+            failures.append("inbox: migration v2_0_3 does not add inbox_last_viewed_at")
+    else:
+        print("   [FAIL] v2_0_3_inbox_last_viewed.py migration not found")
+        failures.append("inbox: indexer/migrations/v2_0_3_inbox_last_viewed.py not found")
+
+    # 4. Frontend: api.js syncs inbox count from responses
+    api_js = REPO_ROOT / "web" / "frontend" / "src" / "lib" / "api.js"
+    if _file_contains(api_js, r"new_inbox_items|inboxCount"):
+        print("   [OK] api.js: inbox count sync from API responses")
+    else:
+        print("   [WARN] api.js: inbox count sync not found")
+        warnings.append("inbox: frontend api.js does not sync new_inbox_items")
+
+
+def check_seed_vault(failures: list[str], warnings: list[str]) -> None:
+    """Verify seed phrase security with four storage modes."""
+    print("\n-> Checking seed phrase security (SeedVault)...")
+
+    vault = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "SeedVault.js"
+    if not vault.exists():
+        print("   [FAIL] SeedVault.js: not found")
+        failures.append("seed vault: web/frontend/src/utils/SeedVault.js not found")
+        return
+
+    text = vault.read_text()
+
+    # Class / core structure
+    if "class SeedVault" in text:
+        print("   [OK] SeedVault class defined")
+    else:
+        print("   [FAIL] SeedVault class not found")
+        failures.append("seed vault: SeedVault class not defined")
+
+    # Four modes present
+    modes = ["insecure", "memory", "password", "passkey"]
+    found_modes = [m for m in modes if m in text]
+    missing_modes = [m for m in modes if m not in text]
+    if not missing_modes:
+        print(f"   [OK] All 4 storage modes present ({', '.join(modes)})")
+    else:
+        print(f"   [FAIL] Missing storage modes: {', '.join(missing_modes)}")
+        failures.append(f"seed vault: missing storage modes: {', '.join(missing_modes)}")
+
+    # getMode()
+    if "getMode()" in text or "getMode (" in text:
+        print("   [OK] getMode() defined")
+    else:
+        print("   [FAIL] getMode() not found")
+        failures.append("seed vault: getMode() not defined")
+
+    # AES-GCM / PBKDF2 for password mode
+    if "AES-GCM" in text or "aes-gcm" in text.lower():
+        print("   [OK] AES-GCM encryption present (password mode)")
+    else:
+        print("   [FAIL] AES-GCM encryption not found")
+        failures.append("seed vault: AES-GCM encryption not found for password mode")
+
+    if "PBKDF2" in text or "pbkdf2" in text.lower():
+        print("   [OK] PBKDF2 key derivation present")
+    else:
+        print("   [FAIL] PBKDF2 key derivation not found")
+        failures.append("seed vault: PBKDF2 key derivation not found")
+
+    # WebAuthn / PRF for passkey mode
+    if "PRF" in text or "prf" in text:
+        print("   [OK] PRF extension present (passkey mode)")
+    else:
+        print("   [FAIL] PRF extension not found")
+        failures.append("seed vault: PRF extension not found for passkey mode")
+
+    # Unlock prompt component
+    unlock = REPO_ROOT / "web" / "frontend" / "src" / "components" / "UnlockPrompt.js"
+    if unlock.exists():
+        print("   [OK] UnlockPrompt.js component exists")
+    else:
+        print("   [WARN] UnlockPrompt.js not found")
+        warnings.append("seed vault: UnlockPrompt.js component not found")
+
+
+def check_admin_gas_nonblocking(failures: list[str], warnings: list[str]) -> None:
+    """Verify admin gas fee deduction is non-blocking in the chain module."""
+    print("\n-> Checking admin gas fee (non-blocking)...")
+
+    # 1. Chain module: admin level check + skip deduction
+    module_go = REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go"
+    if not module_go.exists():
+        print("   [WARN] module.go: not found (expected in container deployments)")
+        warnings.append("admin gas: blockchain/x/core/module/module.go not found")
+    else:
+        text = module_go.read_text()
+        if re.search(r"userLevel\s*>=\s*100", text):
+            print("   [OK] module.go: admin level >= 100 check present")
+        else:
+            print("   [FAIL] module.go: admin level check not found")
+            failures.append("admin gas: module.go missing admin level >= 100 check")
+
+        if re.search(r"insufficient balance.*skipping deduction", text, re.IGNORECASE):
+            print("   [OK] module.go: skip deduction on insufficient balance")
+        else:
+            print("   [FAIL] module.go: skip-deduction logic not found")
+            failures.append("admin gas: module.go missing skip deduction for admin insufficient balance")
+
+    # 2. Upgrade handler registered for v1.10.7
+    upgrades_go = REPO_ROOT / "blockchain" / "app" / "upgrades.go"
+    if _file_contains(upgrades_go, r'"v1\.10\.7"'):
+        print("   [OK] upgrades.go: v1.10.7 upgrade handler registered")
+    else:
+        print("   [FAIL] upgrades.go: v1.10.7 upgrade handler not found")
+        failures.append("admin gas: upgrades.go missing v1.10.7 handler")
+
+    # 3. Backend: classify admin balance error as 400
+    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
+    if _file_contains(core_py, r"admin insufficient balance"):
+        print("   [OK] routes/core.py: admin insufficient balance -> 400")
+    else:
+        print("   [WARN] routes/core.py: admin balance error classification not found")
+        warnings.append("admin gas: routes/core.py does not classify admin balance error as 400")
+
+    # 4. Frontend: handles admin balance error
+    tx_handler = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js"
+    if _file_contains(tx_handler, r"admin insufficient balance"):
+        print("   [OK] TransactionHandler.js: admin balance error handling present")
+    else:
+        print("   [WARN] TransactionHandler.js: admin balance error handling not found")
+        warnings.append("admin gas: TransactionHandler.js does not handle admin balance error")
+
+
+def check_balance_overflow_fix(failures: list[str], warnings: list[str]) -> None:
+    """Verify balance uses 64-bit encoding and single source-of-truth hook."""
+    print("\n-> Checking balance overflow fix...")
+
+    # 1. TransactionHandler.js uses uvarint64 for amounts
+    tx_handler = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js"
+    if not tx_handler.exists():
+        print("   [FAIL] TransactionHandler.js: not found")
+        failures.append("balance fix: TransactionHandler.js not found")
+        return
+
+    text = tx_handler.read_text()
+    uvarint64_count = len(re.findall(r"uvarint64", text))
+    if uvarint64_count > 0:
+        print(f"   [OK] TransactionHandler.js: uvarint64 used ({uvarint64_count} occurrences)")
+    else:
+        print("   [FAIL] TransactionHandler.js: uvarint64 not found")
+        failures.append("balance fix: TransactionHandler.js does not use uvarint64 for amounts")
+
+    # 2. useBalance.js hook as single source of truth
+    use_balance = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "useBalance.js"
+    if not use_balance.exists():
+        print("   [FAIL] useBalance.js: not found")
+        failures.append("balance fix: useBalance.js not found")
+        return
+
+    balance_text = use_balance.read_text()
+    if "function useBalance" in balance_text or "export default function useBalance" in balance_text:
+        print("   [OK] useBalance.js: hook defined")
+    else:
+        print("   [FAIL] useBalance.js: useBalance hook not found")
+        failures.append("balance fix: useBalance() hook not defined in useBalance.js")
+
+    if "balanceUpdated" in balance_text:
+        print("   [OK] useBalance.js: balanceUpdated event listener")
+    else:
+        print("   [FAIL] useBalance.js: balanceUpdated event not found")
+        failures.append("balance fix: useBalance.js missing balanceUpdated CustomEvent listener")
+
+
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
     """Check orchestrator configuration if enabled."""
     print("\n-> Checking orchestrator config...")
@@ -1369,9 +1788,18 @@ def main() -> int:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
         check_deploy_migrations(home_dir, failures, warnings)
         check_orchestrator_config(home_dir, failures, warnings)
-    
+
     # Check Python protobuf definitions (always run)
     check_python_protobuf_definitions(failures, warnings)
+
+    # ---- v1.10.7 feature checks (source-level) ----
+    check_fingerprinting_removed(failures, warnings)
+    check_safe_error_coverage(failures, warnings)
+    check_spoiler_tags(failures, warnings)
+    check_inbox_server_side(failures, warnings)
+    check_seed_vault(failures, warnings)
+    check_admin_gas_nonblocking(failures, warnings)
+    check_balance_overflow_fix(failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
