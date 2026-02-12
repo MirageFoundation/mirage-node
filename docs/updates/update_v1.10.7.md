@@ -6,7 +6,9 @@ v1.10.7 is a privacy and security release. Your seed phrase—the key to your ac
 
 On the privacy side, we've ripped out the entire device fingerprinting system. No more browser fingerprints, no IP hashes, no raw user-agent strings, no sock puppet detection scripts. Stats are now simple DAU/MAU counts with coarse device categories—enough to understand usage patterns without profiling anyone. We understand that was a major concern, and since it was not used at all, we removed it entirely.
 
-This release also hardens the backend. Error messages no longer leak internal details to the client. Every exception is logged server-side with a request ID; the user only sees a clean, generic message. Combined with new spoiler tags in posts and server-side inbox notifications, v1.10.7 is a meaningful step toward a more private and polished experience.
+Posts now support spoiler tags—wrap text in `||double pipes||` and it stays hidden until the reader taps to reveal. And the inbox unread count badge is now real: tracked server-side, returned with every API response, and showing the actual number of new items instead of a generic dot.
+
+This release also hardens the backend. Error messages no longer leak internal details to the client. Every exception is logged server-side with a request ID; the user only sees a clean, generic message. v1.10.7 is a meaningful step toward a more private and polished experience.
 
 ---
 
