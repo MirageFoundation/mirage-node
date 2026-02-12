@@ -7,6 +7,7 @@ import { deriveKeysFromSeed } from '../utils/CryptoUtils.js';
 import { validateMnemonic } from 'bip39';
 import Api from '../lib/api';
 import Storage from '../utils/Storage';
+import seedVault from '../utils/SeedVault';
 import AuthPageShell from "../components/AuthPageShell";
 import Sidebar from "../components/Sidebar";
 import TopBar from "../components/TopBar";
@@ -77,10 +78,10 @@ function LoginView({ state, setCredentials }) {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // If user is already signed in, redirect to their profile
+    // If user is already signed in, redirect to home
     useEffect(() => {
         if (state.publicKey) {
-            navigate('/profile', { replace: true });
+            navigate('/', { replace: true });
         }
     }, [state.publicKey, navigate]);
 
@@ -125,12 +126,12 @@ function LoginView({ state, setCredentials }) {
             if (!username) {
                 // Account not found - redirect to create account with the provided seed
                 if (mountedRef.current) setLoading(false);
-                navigate('/create_account', { 
-                    state: { 
+                navigate('/create_account', {
+                    state: {
                         importedSeed: trimmedSeed,
-                        fromRecovery: true 
+                        fromRecovery: true
                     },
-                    replace: true 
+                    replace: true
                 });
                 return;
             }
@@ -170,7 +171,7 @@ function LoginView({ state, setCredentials }) {
 
                             <form onSubmit={handleSubmit}>
                                 <StyledTextArea
-                                    placeholder="Enter your 12-word recovery phrase here"
+                                    placeholder="Enter your 12-word recovery phrase"
                                     value={seedPhrase}
                                     onChange={(e) => {
                                         setSeedPhrase(e.target.value);
@@ -191,7 +192,21 @@ function LoginView({ state, setCredentials }) {
                                 </ButtonWrapper>
                             </form>
 
-                            <div style={{ marginTop: '1rem', fontSize: '0.6rem', color: '#999' }}>
+                            {seedVault.isLocked() && (
+                                <div style={{ marginTop: '1rem', fontSize: '0.6rem', color: '#999' }}>
+                                    Encrypted vault detected.{' '}
+                                    <span
+                                        style={{ color: '#4a9eff', cursor: 'pointer', fontSize: '0.6rem' }}
+                                        onMouseEnter={(e) => e.target.style.textDecoration = 'underline'}
+                                        onMouseLeave={(e) => e.target.style.textDecoration = 'none'}
+                                        onClick={() => window.dispatchEvent(new CustomEvent('showVaultUnlock'))}
+                                    >
+                                        Sign in with that instead
+                                    </span>?
+                                </div>
+                            )}
+
+                            <div style={{ marginTop: '0.25rem', fontSize: '0.6rem', color: '#999' }}>
                                 Don't have an account?{' '}
                                 <span
                                     style={{ color: '#4a9eff', cursor: 'pointer', fontSize: '0.6rem' }}
@@ -200,8 +215,7 @@ function LoginView({ state, setCredentials }) {
                                     onClick={() => navigate('/create_account')}
                                 >
                                     Create one here
-                                </span>.<br /><br />
-
+                                </span>.
                             </div>
                         </Centered>
                     </AuthPageShell>

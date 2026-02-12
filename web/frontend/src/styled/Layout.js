@@ -269,7 +269,8 @@ export const SearchRow = styled.div`
 `;
 
 export const SearchInput = styled.input`
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     padding: 0.55rem 0.85rem;
     border: 1px solid ${({ theme }) => theme?.colors?.border || "#333"};
     border-radius: 18px;

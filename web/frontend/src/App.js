@@ -5,10 +5,12 @@ import { GlobalStyle } from './styled/GlobalStyle';
 import { ThemeProvider } from 'styled-components';
 import styled from 'styled-components';
 import Storage from './utils/Storage';
+import seedVault from './utils/SeedVault';
 import Api from './lib/api';
 import * as tx from './utils/tx';
 import { sendDeviceFingerprint } from './utils/fp';
 import MobileBottomNav from './components/MobileBottomNav';
+import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
 import { getMaxUsernameSize } from './config/chainParams';
 
@@ -315,7 +317,8 @@ class App extends Component {
         this.state = {
             publicKey: Storage.load('publicKey', ''),
             username: Storage.load('username', ''),
-            seedPhrase: Storage.load('seedPhrase', ''),
+            seedPhrase: seedVault.getSeed() || '',
+            vaultLocked: false,
             posts: [],
             deletedPosts: new Set(), // Track locally deleted post IDs to filter them out
             shouldWarnOnLeave: false,
@@ -444,6 +447,35 @@ class App extends Component {
             Storage.touchLastSeen();
         } catch (_) { /* noop */ }
 
+        // Check if SeedVault needs unlock (password or passkey mode).
+        // Skip on /login — the user either navigated there directly or chose
+        // "sign in with recovery phrase instead". The login page shows a link
+        // back to the unlock screen if an encrypted seed exists.
+        if (seedVault.isLocked() && window.location.pathname !== '/login') {
+            // Stash publicKey/username out of the main localStorage keys so that
+            // nothing in the app (MainView, Sidebar, API calls, etc.) can access
+            // them until the vault is unlocked. This prevents a duplicated tab
+            // from leaking a logged-in session behind the unlock overlay.
+            const pk = Storage.load('publicKey', '');
+            const un = Storage.load('username', '');
+            if (pk && !Storage.load('vault_owner', null)) {
+                Storage.save('vault_owner', { publicKey: pk, username: un });
+            }
+            Storage.remove('publicKey');
+            Storage.remove('username');
+            this.setState({ vaultLocked: true, publicKey: '', username: '', seedPhrase: '' });
+        }
+
+        // Memory-only mode: user has credentials but no seed (tab was closed).
+        // Redirect to login so they can re-enter their recovery phrase.
+        if (seedVault.getMode() === 'memory' && !seedVault.getSeed() && this.state.publicKey) {
+            Storage.remove('publicKey');
+            Storage.remove('username');
+            this.setState({ publicKey: '', username: '', seedPhrase: '' });
+            window.location.replace('/login');
+            return;
+        }
+
         const version = APP_VERSION || 'dev';
         const buildId = APP_BUILD_ID || '';
         console.log('[Mirage] Frontend version:', version + (buildId ? ' (' + buildId + ')' : ''));
@@ -552,11 +584,22 @@ class App extends Component {
 
         // Add the "beforeunload" event listener
         window.addEventListener('beforeunload', this.handleBeforeUnload);
+
+        // Listen for LoginView requesting to show the vault unlock screen.
+        // Don't restore publicKey/username to state here — that would trigger
+        // LoginView's redirect to /profile. They get restored after successful unlock.
+        this._onShowVaultUnlock = () => {
+            if (seedVault.isLocked()) {
+                this.setState({ vaultLocked: true });
+            }
+        };
+        window.addEventListener('showVaultUnlock', this._onShowVaultUnlock);
     }
 
     componentWillUnmount() {
         try { window.removeEventListener('keydown', this._onKeyDown); } catch (_) { }
         try { window.removeEventListener('beforeunload', this.handleBeforeUnload); } catch (_) { }
+        try { window.removeEventListener('showVaultUnlock', this._onShowVaultUnlock); } catch (_) { }
         try { window.removeEventListener('themeModeChanged', this._onThemeModeChange); } catch (_) { }
         try {
             if (this._themeMql && this._themeMql.removeEventListener) {
@@ -591,7 +634,19 @@ class App extends Component {
 
         Storage.save('publicKey', publicKey);
         Storage.save('username', username);
-        Storage.save('seedPhrase', seedPhrase);
+        // Store seed through SeedVault (respects chosen security mode).
+        // If the current mode requires a secret we don't have (e.g. user re-entered
+        // seed via fallback login while mode is 'password'), fall back to insecure.
+        if (seedPhrase) {
+            seedVault.storeSeed(seedPhrase, seedVault.getMode(), null).catch((e) => {
+                console.warn('[SeedVault] Falling back to insecure mode:', e.message);
+                return seedVault.storeSeed(seedPhrase, 'insecure', null);
+            }).catch((e) => {
+                console.error('[SeedVault] Failed to store seed:', e);
+            });
+        } else {
+            seedVault.clear();
+        }
 
         // Clear old cached data (from previous wallet)
         Storage.remove('configData');
@@ -809,6 +864,45 @@ class App extends Component {
         }
     };
 
+    handleVaultUnlocked = () => {
+        const seed = seedVault.getSeed() || '';
+        // Restore credentials — either from vault_owner stash (after fallback login)
+        // or directly from localStorage (normal unlock on fresh tab).
+        const owner = Storage.load('vault_owner', null);
+        const pk = owner?.publicKey || Storage.load('publicKey', '');
+        const un = owner?.username || Storage.load('username', '');
+        if (owner) {
+            Storage.save('publicKey', pk);
+            Storage.save('username', un);
+            Storage.remove('vault_owner');
+        }
+        this.setState({ vaultLocked: false, seedPhrase: seed, publicKey: pk, username: un }, () => {
+            // Always go home after unlocking
+            window.history.replaceState(null, '', '/');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+    };
+
+    handleFallbackLogin = () => {
+        // Lock the vault (clear in-memory secrets) but keep the encrypted blobs
+        // in localStorage so the login page can offer a link back to the unlock screen.
+        // Stash publicKey/username under a separate key so they can be restored after
+        // unlock, but remove them from the main keys so the app doesn't leak a
+        // logged-in state (MainView etc. read publicKey directly from localStorage).
+        const pk = Storage.load('publicKey', '');
+        const un = Storage.load('username', '');
+        if (pk) Storage.save('vault_owner', { publicKey: pk, username: un });
+        Storage.remove('publicKey');
+        Storage.remove('username');
+
+        seedVault.lock();
+        this.setState({ vaultLocked: false, seedPhrase: '', publicKey: '', username: '' }, () => {
+            // Client-side navigate to /login (no full reload, no flicker)
+            window.history.replaceState(null, '', '/login');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+        });
+    };
+
     toggleTheme = () => {
         // Toggle between dark and light, but preserve themeMode
         this.setState((prev) => {
@@ -828,6 +922,14 @@ class App extends Component {
                     <div>
                         <GlobalStyle state={this.state} />
                         <Toast />
+
+                        {this.state.vaultLocked && (
+                            <UnlockPrompt
+                                mode={seedVault.getMode()}
+                                onUnlocked={this.handleVaultUnlocked}
+                                onFallbackLogin={this.handleFallbackLogin}
+                            />
+                        )}
 
                         <BrowserRouter>
                             <RouteTracker>

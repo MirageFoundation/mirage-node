@@ -5,6 +5,7 @@ import Button from "../components/Button";
 import { useNavigate, useLocation } from 'react-router-dom';
 import { generateMnemonic } from 'bip39';
 import Storage from "../utils/Storage.js";
+import seedVault from "../utils/SeedVault.js";
 import { updateNotification } from "../utils/notifications.js";
 import { deriveKeysFromSeed } from '../utils/CryptoUtils.js';
 import * as tx from "../utils/tx";
@@ -324,7 +325,7 @@ function CreateAccountView({ state, setCredentials }) {
         try {
             // Persist fresh credentials so TransactionHandler uses the correct signer
             try {
-                Storage.save('seedPhrase', seedPhrase);
+                seedVault.storeSeed(seedPhrase, 'insecure', null);
                 // Do not persist publicKey until confirmation
             } catch (_) { }
             // Defer to tx facade for PoW + relay
