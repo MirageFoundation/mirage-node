@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
+import seedVault from "../utils/SeedVault";
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from "../utils/CryptoUtils";
 import Api from '../lib/api';
 import * as tx from '../utils/tx';
@@ -313,7 +314,7 @@ export default function ProfileView({ state }) {
     const routeParams = useParams();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
-    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : Storage.load('seedPhrase', '');
+    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : (seedVault.getSeed() || '');
 
     // State for username resolution (for /u/:identity route)
     const [resolvedAddress, setResolvedAddress] = useState(null);
@@ -1119,7 +1120,7 @@ export default function ProfileView({ state }) {
                 pow_difficulty: powDifficulty >>> 0,
             };
 
-            const seedPhrase = Storage.load('seedPhrase', '');
+            const seedPhrase = seedVault.getSeed() || '';
             if (!seedPhrase) {
                 showError('No seed phrase found. Please sign in again.');
                 setIsRemovingModerator('');

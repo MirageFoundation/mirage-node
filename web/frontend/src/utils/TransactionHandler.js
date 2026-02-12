@@ -1,6 +1,7 @@
 /* global BigInt */
 import { updateNotification } from "../utils/notifications.js";
 import Storage from './Storage';
+import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
 import Api from '../lib/api';
@@ -311,7 +312,7 @@ class TransactionHandler {
      */
     async createUser(usernameRaw, inviteCode = "") {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return { success: false, error: "empty username" };
@@ -356,7 +357,7 @@ class TransactionHandler {
 
     async setUsername(usernameRaw) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return { success: false, error: "empty username" };
@@ -405,7 +406,7 @@ class TransactionHandler {
      */
     async blockPost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -456,7 +457,7 @@ class TransactionHandler {
 
     async unblockPost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -494,7 +495,7 @@ class TransactionHandler {
 
     async blockUser(address) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
@@ -541,7 +542,7 @@ class TransactionHandler {
 
     async unblockUser(address) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
@@ -579,7 +580,7 @@ class TransactionHandler {
 
     followUser(userAddress) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -620,7 +621,7 @@ class TransactionHandler {
 
     unfollowUser(userAddress) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -661,7 +662,7 @@ class TransactionHandler {
 
     followTopic(topic) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -702,7 +703,7 @@ class TransactionHandler {
 
     unfollowTopic(topic) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -749,7 +750,7 @@ class TransactionHandler {
      */
     async reportPost(txhash, reason) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             const why = String(reason || "").trim();
@@ -796,7 +797,7 @@ class TransactionHandler {
      */
     async sendTokens(targetAddress, amountMirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const targetTrimmed = String(targetAddress || "").trim().toLowerCase();
 
@@ -866,7 +867,7 @@ class TransactionHandler {
      */
     async upgradeLevel(level, monthlyFeeUmirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const targetLevel = Number(level);
 
             if (targetLevel < 1 || targetLevel > 3) {
@@ -904,7 +905,7 @@ class TransactionHandler {
      */
     async setAutoRenewal(autoRenew) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const last_block_hash = "";
             const tx = {
                 action: 'set_auto_renewal',
@@ -935,7 +936,7 @@ class TransactionHandler {
      */
     async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
 
             const chain = String(destinationChain || "").trim().toLowerCase();
             if (!chain) return { success: false, error: "destination_chain required" };
@@ -976,7 +977,7 @@ class TransactionHandler {
      */
     async deletePost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -1024,7 +1025,7 @@ class TransactionHandler {
      */
     async editPost(overrideId, changes) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
             if (!overrideLower || overrideLower.length !== 64) return { success: false, error: "invalid override id" };
@@ -1151,7 +1152,7 @@ class TransactionHandler {
         let action = "create_vote";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -1194,7 +1195,7 @@ class TransactionHandler {
         let action = "create_post";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return;
@@ -1230,7 +1231,7 @@ class TransactionHandler {
      */
     async createPostAsync(topic, title, content, tag = "") {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
                 return { success: false, error: "Not logged in" };
@@ -1276,7 +1277,7 @@ class TransactionHandler {
         let action = "create_comment";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return;
@@ -1303,7 +1304,7 @@ class TransactionHandler {
      */
     async createCommentAsync(parentId, content) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
                 return { success: false, error: "Not logged in" };
@@ -1401,7 +1402,7 @@ class TransactionHandler {
             let final_transaction = undefined;
             let challenge = undefined;
             // Derive signer address from current seed to ensure consistency with relay
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return Storage.load('publicKey', ''); } })();
             if (derivedAddress && derivedAddress !== Storage.load('publicKey', '')) {
                 try { Storage.save('publicKey', derivedAddress); } catch (_) { }

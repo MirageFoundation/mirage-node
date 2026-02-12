@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Helmet } from 'react-helmet-async';
 import styled from "styled-components";
-import { useLocation } from 'react-router-dom';
+import { useLocation, Navigate } from 'react-router-dom';
 import Storage from "../utils/Storage";
+import seedVault from "../utils/SeedVault";
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
 import MobileHeader from '../components/MobileHeader';
@@ -146,6 +147,220 @@ const HelperText = styled.span`
     font-size: 0.75rem;
 `;
 
+const SecurityBanner = styled.div`
+    background-color: rgba(245, 158, 11, 0.1);
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+`;
+
+const RadioGroup = styled.div`
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+`;
+
+const RadioLabel = styled.label`
+    display: inline-grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 0.5rem;
+    align-items: flex-start;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.85rem;
+    line-height: 1.25;
+    cursor: ${({ $disabled }) => $disabled ? 'not-allowed' : 'pointer'};
+    opacity: ${({ $disabled }) => $disabled ? 0.45 : 1};
+    user-select: none;
+`;
+
+const RadioInput = styled.input.attrs({ type: 'radio' })`
+    appearance: none;
+    -webkit-appearance: none;
+    width: 0.8rem;
+    height: 0.8rem;
+    flex: 0 0 0.8rem;
+    margin: 0;
+    margin-top: 0.15rem;
+    border-radius: 50%;
+    border: 1px solid ${({ theme }) => theme?.colors?.border || 'rgba(255,255,255,0.18)'};
+    background: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    box-sizing: border-box;
+    display: inline-block;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+
+    &:checked {
+        border-color: #3b82f6;
+        background: #3b82f6;
+    }
+
+    &:checked::after {
+        content: '';
+        width: 0.3rem;
+        height: 0.3rem;
+        background: #fff;
+        border-radius: 50%;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        transform: translate(-50%, -50%);
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+
+const RadioDescription = styled.span`
+    display: block;
+    font-size: 0.7rem;
+    color: ${({ theme }) => theme?.colors?.subtleText || '#777'};
+    font-style: italic;
+    margin-top: 0.1rem;
+`;
+
+const InlinePasswordRow = styled.div`
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+`;
+
+const PasswordInput = styled.input`
+    flex: 1;
+    min-width: 120px;
+    max-width: 220px;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8rem;
+    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 6px;
+    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    box-sizing: border-box;
+
+    &:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+    }
+`;
+
+const SmallButton = styled.button`
+    padding: 0.45rem 0.85rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    background: #3b82f6;
+    color: #fff;
+    transition: background 0.15s ease;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) {
+        background: #2563eb;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+`;
+
+const SecurityError = styled.div`
+    color: #f66;
+    font-size: 0.72rem;
+    margin-top: 0.35rem;
+`;
+
+const SecuritySuccess = styled.div`
+    background-color: rgba(34, 197, 94, 0.1);
+    border: 1px solid #22c55e;
+    border-radius: 3px;
+    padding: 0.5rem 0.75rem;
+    margin-top: 0.5rem;
+    color: #22c55e;
+    font-size: 0.78rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+`;
+
+const SeedGrid = styled.div`
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.4rem;
+    max-width: 100%;
+    margin: 0.5rem 0;
+    padding: 0.75rem;
+    background-color: ${({ theme }) => theme?.colors?.panel || '#1a1e23'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 4px;
+    position: relative;
+    box-sizing: border-box;
+
+    @media (max-width: 1000px) {
+        grid-template-columns: repeat(3, 1fr);
+        padding: 0.5rem;
+        gap: 0.3rem;
+    }
+`;
+
+const SeedWord = styled.div`
+    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2e33'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
+    border-radius: 3px;
+    padding: 0.3rem 0.2rem;
+    text-align: left;
+    font-size: 0.75rem;
+    color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    white-space: nowrap;
+    word-break: normal;
+    overflow-wrap: normal;
+
+    &:before {
+        content: attr(data-index);
+        color: ${({ theme }) => theme?.colors?.subtleText || '#9ca3af'};
+        font-size: 0.5rem;
+        min-width: 12px;
+        font-weight: bold;
+    }
+
+    @media (max-width: 400px) {
+        font-size: 0.7rem;
+        padding: 0.25rem 0.15rem;
+        gap: 0.1rem;
+        &:before {
+            font-size: 0.45rem;
+            min-width: 10px;
+        }
+    }
+`;
+
+const SeedWarning = styled.div`
+    color: #f59e0b;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    margin-bottom: 0.5rem;
+`;
+
+const Divider = styled.hr`
+    border: none;
+    border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    margin: 0.75rem 0;
+`;
+
 
 export default function SettingsView({ state }) {
     const location = useLocation();
@@ -245,6 +460,100 @@ export default function SettingsView({ state }) {
         }
     });
 
+    // ── Security: seed storage mode ────────────────────────────────────────
+    const [seedMode, setSeedMode] = useState(() => seedVault.getMode());
+    const [prfSupported] = useState(() => seedVault.isPRFSupported());
+    const [secPassword, setSecPassword] = useState('');
+    const [secPasswordConfirm, setSecPasswordConfirm] = useState('');
+    const [secPending, setSecPending] = useState(null);   // mode being switched to (shows inline UI)
+    const [secError, setSecError] = useState('');
+    const [secSuccess, setSecSuccess] = useState('');
+    const [secBusy, setSecBusy] = useState(false);
+    const [seedRevealed, setSeedRevealed] = useState(false);
+    const [seedCopied, setSeedCopied] = useState(false);
+
+    // Auto-hide seed after 60 seconds
+    useEffect(() => {
+        if (!seedRevealed) return;
+        const timer = setTimeout(() => setSeedRevealed(false), 60_000);
+        return () => clearTimeout(timer);
+    }, [seedRevealed]);
+
+    const commitModeSwitch = useCallback(async (newMode, password) => {
+        setSecBusy(true);
+        setSecError('');
+        setSecSuccess('');
+        try {
+            const seed = seedVault.getSeed();
+            if (!seed) {
+                setSecError('No seed phrase in memory. Please sign in first.');
+                setSecBusy(false);
+                return;
+            }
+            if (newMode === 'password') {
+                if (!password || password.length < 4) {
+                    setSecError('Password must be at least 4 characters.');
+                    setSecBusy(false);
+                    return;
+                }
+                await seedVault.storeSeed(seed, 'password', password);
+            } else if (newMode === 'passkey') {
+                await seedVault.registerPasskey(seed);
+            } else if (newMode === 'memory') {
+                await seedVault.storeSeed(seed, 'memory', null);
+            } else {
+                await seedVault.storeSeed(seed, 'insecure', null);
+            }
+            // Re-persist publicKey and username to localStorage — they may have been
+            // cleared by the memory-mode redirect in another tab (localStorage is shared).
+            if (state.publicKey) Storage.save('publicKey', state.publicKey);
+            if (state.username) Storage.save('username', state.username);
+
+            setSeedMode(newMode);
+            setSecPending(null);
+            setSecPassword('');
+            setSecPasswordConfirm('');
+            const modeLabels = { insecure: 'Unencrypted', password: 'Password', memory: 'Memory-only', passkey: 'Passkey' };
+            setSecSuccess(`${modeLabels[newMode] || 'Storage'} storage updated.`);
+            setTimeout(() => setSecSuccess(''), 5000);
+        } catch (e) {
+            const msg = String(e?.message || e || '');
+            // Don't show raw browser WebAuthn errors (e.g. "FallbackRequested",
+            // "The operation either timed out or was not allowed") — just reset.
+            if (newMode === 'passkey' && (
+                /cancel|abort|not.allowed|timeout|fallback/i.test(msg)
+            )) {
+                setSecPending(null);
+            } else {
+                setSecError(msg || 'Failed to switch mode');
+            }
+        } finally {
+            setSecBusy(false);
+        }
+    }, []);
+
+    const handleModeSelect = useCallback((newMode) => {
+        setSecError('');
+        setSecSuccess('');
+        if (newMode === seedMode) {
+            setSecPending(null);
+            return;
+        }
+        if (newMode === 'password') {
+            setSecPending('password');
+            setSecPassword('');
+            setSecPasswordConfirm('');
+        } else if (newMode === 'passkey') {
+            // Directly trigger passkey enrollment
+            setSecPending('passkey');
+            commitModeSwitch('passkey', null);
+        } else {
+            // insecure or memory — switch immediately
+            setSecPending(null);
+            commitModeSwitch(newMode, null);
+        }
+    }, [seedMode, commitModeSwitch]);
+
     // Apply full width mode on mount and when it changes
     useEffect(() => {
         const root = document.documentElement;
@@ -309,6 +618,10 @@ export default function SettingsView({ state }) {
         }
     };
 
+    if (!state.publicKey) {
+        return <Navigate to="/login" replace />;
+    }
+
     return (
         <ContentGrid>
             <Helmet>
@@ -322,6 +635,193 @@ export default function SettingsView({ state }) {
                     <TabbedContainer>
                         <ContainerTab>Settings</ContainerTab>
                         <ContainerBody>
+                            {/* ── Security rows (top of settings) ──────────── */}
+                            {seedMode === 'insecure' && state.publicKey && (
+                                <SecurityBanner>
+                                    Your recovery phrase is stored unencrypted in this browser. Consider enabling password or passkey protection below.
+                                </SecurityBanner>
+                            )}
+
+                            <Row>
+                                <Label style={{ whiteSpace: 'normal' }}>Seed phrase storage:</Label>
+                                <ValueBox>
+                                    <RadioGroup>
+                                        <RadioLabel>
+                                            <RadioInput
+                                                name="seed_mode"
+                                                value="insecure"
+                                                checked={seedMode === 'insecure' && secPending !== 'password'}
+                                                onChange={() => handleModeSelect('insecure')}
+                                                disabled={secBusy}
+                                            />
+                                            <span>
+                                                Unencrypted (default)
+                                                <RadioDescription>Fastest. Seed stored in plaintext in browser storage.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'insecure' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                        <RadioLabel>
+                                            <RadioInput
+                                                name="seed_mode"
+                                                value="password"
+                                                checked={seedMode === 'password' || secPending === 'password'}
+                                                onChange={() => handleModeSelect('password')}
+                                                disabled={secBusy}
+                                            />
+                                            <span>
+                                                Password encrypted
+                                                <RadioDescription>Seed encrypted with a password you choose. Enter it once per session to unlock.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+
+                                        {secPending === 'password' && (
+                                            <div style={{ paddingLeft: '1.3rem' }}>
+                                                <InlinePasswordRow>
+                                                    <PasswordInput
+                                                        type="password"
+                                                        placeholder="Password"
+                                                        value={secPassword}
+                                                        onChange={(e) => { setSecPassword(e.target.value); setSecError(''); }}
+                                                        disabled={secBusy}
+                                                        autoFocus
+                                                    />
+                                                </InlinePasswordRow>
+                                                <InlinePasswordRow>
+                                                    <PasswordInput
+                                                        type="password"
+                                                        placeholder="Confirm password"
+                                                        value={secPasswordConfirm}
+                                                        onChange={(e) => { setSecPasswordConfirm(e.target.value); setSecError(''); }}
+                                                        disabled={secBusy}
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === 'Enter') {
+                                                                e.preventDefault();
+                                                                if (secPassword !== secPasswordConfirm) {
+                                                                    setSecError('Passwords do not match.');
+                                                                } else {
+                                                                    commitModeSwitch('password', secPassword);
+                                                                }
+                                                            }
+                                                        }}
+                                                    />
+                                                    <SmallButton
+                                                        disabled={secBusy || !secPassword.trim()}
+                                                        onClick={() => {
+                                                            if (secPassword !== secPasswordConfirm) {
+                                                                setSecError('Passwords do not match.');
+                                                            } else {
+                                                                commitModeSwitch('password', secPassword);
+                                                            }
+                                                        }}
+                                                    >
+                                                        {secBusy ? 'Encrypting...' : 'Set Password'}
+                                                    </SmallButton>
+                                                </InlinePasswordRow>
+                                                {secError && <SecurityError>{secError}</SecurityError>}
+                                            </div>
+                                        )}
+                                        {secSuccess && seedMode === 'password' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                        <RadioLabel>
+                                            <RadioInput
+                                                name="seed_mode"
+                                                value="memory"
+                                                checked={seedMode === 'memory'}
+                                                onChange={() => handleModeSelect('memory')}
+                                                disabled={secBusy}
+                                            />
+                                            <span>
+                                                Memory only
+                                                <RadioDescription>Most secure. You must re-enter your 12-word phrase each session.</RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'memory' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+
+                                        <RadioLabel $disabled={!prfSupported}>
+                                            <RadioInput
+                                                name="seed_mode"
+                                                value="passkey"
+                                                checked={seedMode === 'passkey'}
+                                                onChange={() => handleModeSelect('passkey')}
+                                                disabled={secBusy || !prfSupported}
+                                            />
+                                            <span>
+                                                Passkey (Touch ID / Face ID / Security Key)
+                                                <RadioDescription>
+                                                    {prfSupported
+                                                        ? 'Seed encrypted with your passkey. Authenticate to unlock each session.'
+                                                        : 'Requires Chrome, Edge, or Safari. Not supported in Firefox yet.'}
+                                                </RadioDescription>
+                                            </span>
+                                        </RadioLabel>
+                                        {secSuccess && seedMode === 'passkey' && <SecuritySuccess><span>✓</span>{secSuccess}</SecuritySuccess>}
+                                    </RadioGroup>
+
+                                    {secError && secPending !== 'password' && <SecurityError>{secError}</SecurityError>}
+                                </ValueBox>
+                            </Row>
+
+                            {state.publicKey && (
+                                <Row>
+                                    <Label style={{ whiteSpace: 'normal' }}>Recovery phrase:</Label>
+                                    <ValueBox>
+                                        {!seedRevealed ? (
+                                            <>
+                                                <SmallButton
+                                                    onClick={() => {
+                                                        const s = seedVault.getSeed();
+                                                        if (!s) {
+                                                            setSecError('No seed phrase available. Please sign in first.');
+                                                            return;
+                                                        }
+                                                        setSeedRevealed(true);
+                                                        setSeedCopied(false);
+                                                    }}
+                                                >
+                                                    Reveal Recovery Phrase
+                                                </SmallButton>
+                                                <ExplanationText>Show your 12-word recovery phrase so you can back it up.</ExplanationText>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <SeedWarning>
+                                                    Anyone with this phrase can access your account. Do not share it. It will be hidden automatically after 60 seconds.
+                                                </SeedWarning>
+                                                <SeedGrid>
+                                                    {(seedVault.getSeed() || '').split(' ').map((word, i) => (
+                                                        <SeedWord key={i} data-index={i + 1}>
+                                                            {word}
+                                                        </SeedWord>
+                                                    ))}
+                                                </SeedGrid>
+                                                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.35rem' }}>
+                                                    <SmallButton
+                                                        onClick={async () => {
+                                                            try {
+                                                                await navigator.clipboard.writeText(seedVault.getSeed() || '');
+                                                                setSeedCopied(true);
+                                                                setTimeout(() => setSeedCopied(false), 2000);
+                                                            } catch (_) { }
+                                                        }}
+                                                    >
+                                                        {seedCopied ? 'Copied!' : 'Copy'}
+                                                    </SmallButton>
+                                                    <SmallButton
+                                                        onClick={() => { setSeedRevealed(false); setSeedCopied(false); }}
+                                                        style={{ background: 'transparent', border: '1px solid #555', color: '#ccc' }}
+                                                    >
+                                                        Hide
+                                                    </SmallButton>
+                                                </div>
+                                            </>
+                                        )}
+                                    </ValueBox>
+                                </Row>
+                            )}
+
+                            <Divider />
+
                             <Row>
                                 <Label>Theme:</Label>
                                 <ValueBox>
