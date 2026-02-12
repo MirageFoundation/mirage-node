@@ -21,12 +21,8 @@ function SignOutView({ state, setCredentials }) {
 
     React.useEffect(() => {
         seedVault.clear();
-        try { Storage.remove('vault_owner'); } catch (_) { }
+        Storage.clear();
         setCredentials("", "", "");
-        try { localStorage.removeItem('user_balance'); } catch (_) { }
-        try { Storage.remove('votes'); } catch (_) { }
-        try { Storage.remove('username_pending'); } catch (_) { }
-        try { Storage.remove('publicKey_pending'); } catch (_) { }
         navigate("/");
     }, [navigate, setCredentials]);
 
