@@ -175,7 +175,9 @@ export function useRewards() {
                 };
             } else {
                 clearOptimisticClaimBalance('claim_failed');
-                setError(response.message || response.error || 'Claim failed');
+                // Don't setError() here — claim failures are returned to the caller
+                // and displayed via claimError in the component. Setting the shared
+                // error state would hide the quests UI with a generic "load" error.
                 return { success: false, error: response.error, message: response.message };
             }
         } catch (err) {
@@ -191,7 +193,7 @@ export function useRewards() {
                     errorMessage = parsed.message;
                 }
             } catch (_) { /* ignore parse errors */ }
-            setError(errorMessage || errorCode || 'Failed to claim rewards');
+            // Don't setError() — return to caller for display via claimError
             return { success: false, error: errorCode, message: errorMessage };
         } finally {
             setClaiming(false);

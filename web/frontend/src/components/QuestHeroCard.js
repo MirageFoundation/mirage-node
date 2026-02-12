@@ -885,7 +885,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 </QuestHeader>
                 {!collapsed && (
                     <EmptyState>
-                        {questsError ? 'Unable to load quests' : 'No quests available yet. Check back soon!'}
+                        {questsError
+                            ? `⚠️ ${typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.'}`
+                            : 'No quests available yet. Check back soon!'}
                     </EmptyState>
                 )}
             </QuestCardContainer>
