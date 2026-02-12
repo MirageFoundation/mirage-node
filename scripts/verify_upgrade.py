@@ -39,9 +39,9 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.7"
+UPGRADE_NAME = "v1.10.8"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION = "v1.10.7"
+EXPECTED_VERSION = "v1.10.8"
 
 # All registered upgrade names in chronological order
 ALL_UPGRADES = [
