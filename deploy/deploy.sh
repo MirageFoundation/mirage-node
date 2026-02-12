@@ -884,7 +884,7 @@ else
   
   HEALTH_CHECK_SCRIPT='
 set -euo pipefail
-max_attempts=30
+max_attempts=6
 wait_secs=5
 attempt=1
 
