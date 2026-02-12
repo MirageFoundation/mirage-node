@@ -127,21 +127,30 @@ const InboxLink = styled.a`
     }
 `;
 
+const formatBadgeCount = (n) => n > 99 ? '99+' : String(n);
+
 const InboxIcon = styled.svg`
     width: 1.1rem;
     height: 1.1rem;
     fill: currentColor;
 `;
 
-const UnreadDot = styled.span`
+const UnreadBadge = styled.span`
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 10px;
-    height: 10px;
+    top: -6px;
+    right: -8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
     background: #FF3B30;
-    border-radius: 50%;
+    border-radius: 8px;
     border: 2px solid ${({ theme }) => theme?.colors?.panel || "#23272C"};
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-sizing: border-box;
 `;
 
 const MenuWrapper = styled.div`
@@ -312,16 +321,7 @@ function TopBar({ state }) {
     const showAuthButton = !hasPublicKey && !isAuthRoute;
 
     const [menuOpen, setMenuOpen] = useState(false);
-    const [hasUnreadReplies, setHasUnreadReplies] = useState(() => {
-        try {
-            const unreadCount = Number(Storage.load('inbox_unread_count', 0));
-            const latestTs = Number(Storage.load('inbox_latest_ts', 0));
-            const lastViewed = Number(Storage.load('inbox_last_viewed_at', 0));
-            return unreadCount > 0 || (latestTs > lastViewed);
-        } catch (_) {
-            return false;
-        }
-    });
+    const [inboxCount, setInboxCount] = useState(0);
     const [searchQuery, setSearchQuery] = useState('');
     const { displayBalance } = useBalance();
     const menuRef = useRef(null);
@@ -358,67 +358,21 @@ function TopBar({ state }) {
         };
     }, []);
 
-    // Listen for inbox timestamp from get_posts response (piggybacked to avoid separate call)
+    // Listen for server-side inbox count from every API response
     useEffect(() => {
         if (!publicKey) {
-            setHasUnreadReplies(false);
+            setInboxCount(0);
             return;
         }
 
-        const recompute = (latestTsFromEvent = null, unreadCountFromEvent = null) => {
+        const handleInboxCount = (e) => {
             if (!mountedRef.current) return;
-            try {
-                const latestTsStored = Number(Storage.load('inbox_latest_ts', 0));
-                const lastViewed = Number(Storage.load('inbox_last_viewed_at', 0));
-                const unreadCountStored = Number(Storage.load('inbox_unread_count', 0));
-                const latestTs = (typeof latestTsFromEvent === 'number' && latestTsFromEvent > 0) ? latestTsFromEvent : latestTsStored;
-                const unreadCount = (typeof unreadCountFromEvent === 'number' && unreadCountFromEvent >= 0) ? unreadCountFromEvent : unreadCountStored;
-                setHasUnreadReplies(unreadCount > 0 || (latestTs > lastViewed));
-            } catch (_) {
-                setHasUnreadReplies(true);
-            }
+            const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
+            setInboxCount(count);
         };
 
-        const handleInboxTimestamp = (e) => {
-            const latestTs = e.detail;
-            if (typeof latestTs === 'number' && latestTs > 0) {
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            recompute(latestTs, null);
-        };
-
-        const handleInboxViewed = () => {
-            recompute(null, null);
-        };
-
-        const handleInboxUpdated = (e) => {
-            const unreadCount = e?.detail?.unreadCount;
-            const latestTs = e?.detail?.latestTs;
-            if (typeof unreadCount === 'number' && unreadCount >= 0) {
-                Storage.save('inbox_unread_count', unreadCount);
-            }
-            if (typeof latestTs === 'number' && latestTs > 0) {
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            recompute(latestTs ?? null, unreadCount ?? null);
-        };
-
-        const handleStorage = () => recompute(null, null);
-
-        window.addEventListener('inboxTimestamp', handleInboxTimestamp);
-        window.addEventListener('inboxViewed', handleInboxViewed);
-        window.addEventListener('inboxUpdated', handleInboxUpdated);
-        window.addEventListener('storage', handleStorage);
-
-        // Check storage on mount (in case values were set before listeners were added)
-        recompute(null, null);
-
-        return () => {
-            window.removeEventListener('inboxTimestamp', handleInboxTimestamp);
-            window.removeEventListener('inboxViewed', handleInboxViewed);
-            window.removeEventListener('inboxUpdated', handleInboxUpdated);
-            window.removeEventListener('storage', handleStorage);
-        };
+        window.addEventListener('inboxCount', handleInboxCount);
+        return () => window.removeEventListener('inboxCount', handleInboxCount);
     }, [publicKey]);
 
     useEffect(() => {
@@ -512,7 +466,7 @@ function TopBar({ state }) {
                         </CreateButtonHideMobile>
                         <InboxLink
                             href="/inbox"
-                            $hasUnread={hasUnreadReplies}
+                            $hasUnread={inboxCount > 0}
                             title="Inbox"
                             onClick={(e) => {
                                 // Allow right-click, ctrl+click, cmd+click, middle-click to work natively
@@ -525,7 +479,7 @@ function TopBar({ state }) {
                             <InboxIcon viewBox="0 0 24 24">
                                 <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
                             </InboxIcon>
-                            {hasUnreadReplies && <UnreadDot />}
+                            {inboxCount > 0 && <UnreadBadge>{formatBadgeCount(inboxCount)}</UnreadBadge>}
                         </InboxLink>
                         <MenuWrapper ref={menuRef}>
                             <Avatar

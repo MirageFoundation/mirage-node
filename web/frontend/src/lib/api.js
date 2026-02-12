@@ -103,6 +103,18 @@ function maybeSyncBalance(params, body, data) {
 }
 
 /**
+ * Auto-sync inbox count: if the API response contains `new_inbox_items`,
+ * dispatch an event so TopBar/MobileBottomNav can update the badge.
+ * @param {any} data - parsed response
+ */
+function maybeSyncInbox(data) {
+    if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
+    try {
+        window.dispatchEvent(new CustomEvent('inboxCount', { detail: data.new_inbox_items }));
+    } catch (_) {}
+}
+
+/**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
  * @property {Record<string,string>=} headers
@@ -126,6 +138,7 @@ async function get(path, params, options) {
                 if (ct.includes('application/json')) {
                     const json = await resp.json();
                     maybeSyncBalance(params, undefined, json);
+                    maybeSyncInbox(json);
                     return json;
                 }
                 return await resp.text();
@@ -161,6 +174,7 @@ async function post(path, body, options) {
                 if (ct.includes('application/json')) {
                     const json = await resp.json();
                     maybeSyncBalance(undefined, body, json);
+                    maybeSyncInbox(json);
                     return json;
                 }
                 return await resp.text();

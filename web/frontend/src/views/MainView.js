@@ -1752,10 +1752,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const forcedHard = !!forceHardRefreshRef.current;
             const arr = (data && Array.isArray(data.posts)) ? data.posts : [];
 
-            // Dispatch inbox timestamp for badge notification (avoid separate get_inbox call)
-            if (data && typeof data.latest_inbox_timestamp === 'number') {
-                window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-            }
             const hasMore = !!(data && data.has_more);
             if (!isMountedRef.current) return;
             setHasMorePosts(hasMore);

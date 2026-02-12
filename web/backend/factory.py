@@ -6,9 +6,10 @@ Functions:
 - create_app(init_runtime=True): Initialize Flask app, register blueprints, init runtime.
 """
 
+import json
 import os
 import sys
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -51,6 +52,43 @@ def create_app(init_runtime: bool = True) -> Flask:
     app.register_blueprint(core_bp)
     app.register_blueprint(bridge_bp)
     app.register_blueprint(quests_bp)
+
+    # Middleware: inject new_inbox_items into every JSON response for logged-in users
+    @app.after_request
+    def _inject_inbox_count(response):
+        try:
+            addr = request.args.get("address") or ""
+            if not addr or addr.lower() == "guest":
+                return response
+            ct = response.content_type or ""
+            if "application/json" not in ct:
+                return response
+            if response.status_code >= 400:
+                return response
+
+            import time as _time
+            from routes.public import _inbox_cache, _get_new_inbox_count
+
+            # Check cache first to avoid opening a DB connection on every request
+            viewer = addr.lower()
+            cached = _inbox_cache.get(viewer)
+            if cached and cached[1] > _time.time():
+                count = cached[0]
+            else:
+                from db import connect_db
+
+                conn = connect_db(timeout=3.0, busy_timeout_ms=5000)
+                cur = conn.cursor()
+                count = _get_new_inbox_count(cur, addr)
+                conn.close()
+
+            data = response.get_json(silent=True)
+            if isinstance(data, dict) and "new_inbox_items" not in data:
+                data["new_inbox_items"] = count
+                response.set_data(json.dumps(data, separators=(",", ":")))
+        except Exception:
+            pass
+        return response
 
     if init_runtime:
         initialize_runtime()

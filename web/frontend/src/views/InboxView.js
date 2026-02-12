@@ -193,18 +193,11 @@ export default function InboxView({ state }) {
                     setReplies(prev => [...prev, ...res.replies]);
                 } else {
                     setReplies(res.replies);
+                    // Mark inbox as viewed on first page load so server resets unread count
+                    Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
                 }
                 setHasMoreReplies(res.has_more || false);
                 setError('');
-
-                const viewedReplyIds = Storage.getViewedReplyIds();
-                const unreadCount = res.replies.reduce((acc, r) => acc + (viewedReplyIds.includes(r.reply_id) ? 0 : 1), 0);
-                Storage.save('inbox_unread_count', unreadCount);
-                const latestTs = res.replies.length ? Math.max(...res.replies.map(r => r.reply_timestamp || 0)) : 0;
-                if (latestTs > 0) {
-                    Storage.save('inbox_latest_ts', latestTs);
-                }
-                window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount, latestTs } }));
             } else {
                 setError('Invalid response from server');
             }
@@ -230,32 +223,14 @@ export default function InboxView({ state }) {
         const allReplyIds = replies.map(r => r.reply_id);
         Storage.markAllRepliesAsViewed(allReplyIds);
         setReplies(prev => prev.map(r => ({ ...r, isUnread: false })));
-        const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : 0;
-        Storage.save('inbox_unread_count', 0);
-        if (latestTs > 0) {
-            Storage.save('inbox_last_viewed_at', String(latestTs));
-            Storage.save('inbox_latest_ts', latestTs);
-        }
-        window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
+        // Tell server to reset inbox viewed timestamp
+        Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
     };
 
     const handleMarkOneAsRead = (e, reply) => {
         e.preventDefault();
         e.stopPropagation();
         Storage.addViewedReplyId(reply.reply_id);
-        const newViewedIds = Storage.getViewedReplyIds();
-        const newUnreadCount = replies.reduce((acc, r) => acc + (newViewedIds.includes(r.reply_id) ? 0 : 1), 0);
-        Storage.save('inbox_unread_count', newUnreadCount);
-        if (newUnreadCount === 0) {
-            const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : 0;
-            if (latestTs > 0) {
-                Storage.save('inbox_last_viewed_at', String(latestTs));
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
-        } else {
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: newUnreadCount } }));
-        }
         setReplies(prev => [...prev]);
     };
 
@@ -267,20 +242,6 @@ export default function InboxView({ state }) {
                 Storage.setPendingPostHighlight(reply.reply_id);
             } catch (_) { }
             setActiveReplyId(reply.reply_id);
-        }
-        // Update unread count and last viewed when all read
-        const viewedReplyIds = Storage.getViewedReplyIds();
-        const unreadCount = replies.reduce((acc, r) => acc + (viewedReplyIds.includes(r.reply_id) ? 0 : 1), 0);
-        Storage.save('inbox_unread_count', unreadCount);
-        if (unreadCount === 0) {
-            const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : (reply.reply_timestamp || 0);
-            if (latestTs > 0) {
-                Storage.save('inbox_last_viewed_at', String(latestTs));
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
-        } else {
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount } }));
         }
         // Use new clean URL with depth=1 to show reply with immediate parent context
         navigate(`/p/${reply.reply_id}?depth=1`);
