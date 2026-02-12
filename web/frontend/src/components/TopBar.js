@@ -137,18 +137,18 @@ const InboxIcon = styled.svg`
 
 const UnreadBadge = styled.span`
     position: absolute;
-    top: -4px;
-    right: -8px;
-    min-width: 22px;
-    height: 22px;
+    top: -5px;
+    right: -9px;
+    min-width: 24px;
+    height: 24px;
     padding: 0 6px;
     background: #FF3B30;
-    border-radius: 11px;
+    border-radius: 12px;
     border: 2px solid ${({ theme }) => theme?.colors?.panel || "#23272C"};
     color: #fff;
     font-size: 11px;
     font-weight: 700;
-    line-height: 18px;
+    line-height: 20px;
     text-align: center;
     box-sizing: border-box;
 `;
@@ -321,7 +321,12 @@ function TopBar({ state }) {
     const showAuthButton = !hasPublicKey && !isAuthRoute;
 
     const [menuOpen, setMenuOpen] = useState(false);
-    const [inboxCount, setInboxCount] = useState(0);
+    const [inboxCount, setInboxCount] = useState(() => {
+        try {
+            const stored = localStorage.getItem('inbox_count');
+            return stored ? Math.max(0, parseInt(stored, 10) || 0) : 0;
+        } catch (_) { return 0; }
+    });
     const [searchQuery, setSearchQuery] = useState('');
     const { displayBalance } = useBalance();
     const menuRef = useRef(null);
