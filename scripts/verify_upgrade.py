@@ -41,7 +41,7 @@ import urllib.request
 # Current upgrade being verified (set via --upgrade or defaults to latest)
 UPGRADE_NAME = "v1.10.7"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION_PREFIX = "v1.10"
+EXPECTED_VERSION = "v1.10.7"
 
 # All registered upgrade names in chronological order
 ALL_UPGRADES = [
@@ -347,17 +347,17 @@ def _fmt_value(v: Any) -> str:
 
 
 def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
-    """Check that miraged binary version matches expected version."""
+    """Check that miraged binary version matches the exact expected version."""
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
         version = p.stdout.strip() or p.stderr.strip()
-        if version.startswith(EXPECTED_VERSION_PREFIX):
+        if version == EXPECTED_VERSION:
             print(f"   [OK] Binary version: {version}")
             return version
         else:
-            print(f"   [FAIL] Binary version: {version} (expected {EXPECTED_VERSION_PREFIX}*)")
-            failures.append(f"Binary version {version} does not match expected {EXPECTED_VERSION_PREFIX}")
+            print(f"   [FAIL] Binary version: {version} (expected exactly {EXPECTED_VERSION})")
+            failures.append(f"Binary version {version!r} does not match expected {EXPECTED_VERSION!r}")
             return version
     except Exception as e:
         print(f"   [FAIL] Cannot check version: {e}")
