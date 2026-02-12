@@ -1,6 +1,7 @@
 /* global BigInt */
 import { updateNotification } from "../utils/notifications.js";
 import Storage from './Storage';
+import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
 import Api from '../lib/api';
@@ -64,6 +65,26 @@ class TransactionHandler {
             TransactionHandler.instance = this;
         }
         return TransactionHandler.instance;
+    }
+
+    _persistUserBalance(balanceVal, { normalizeStorage = false, updateLastOnchain = true } = {}) {
+        if (balanceVal === undefined || balanceVal === null) return;
+        if (normalizeStorage) {
+            const balanceNum = Number(balanceVal);
+            const normalized = Number.isFinite(balanceNum) ? Math.max(0, Math.trunc(balanceNum)) : 0;
+            if (updateLastOnchain) {
+                this.lastOnchainBalanceUmirage = normalized;
+            }
+            Storage.save('user_balance', String(normalized));
+            window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: normalized }));
+            return;
+        }
+        Storage.save('user_balance', String(balanceVal));
+        const balanceNum = Number(balanceVal);
+        if (updateLastOnchain && Number.isFinite(balanceNum)) {
+            this.lastOnchainBalanceUmirage = Math.max(0, Math.trunc(balanceNum));
+        }
+        window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: balanceVal }));
     }
 
     // Vote tracking methods
@@ -291,7 +312,7 @@ class TransactionHandler {
      */
     async createUser(usernameRaw, inviteCode = "") {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return { success: false, error: "empty username" };
@@ -308,8 +329,7 @@ class TransactionHandler {
 
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -337,7 +357,7 @@ class TransactionHandler {
 
     async setUsername(usernameRaw) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const username = String(usernameRaw || "").trim();
             if (!username) return { success: false, error: "empty username" };
@@ -355,8 +375,7 @@ class TransactionHandler {
                 pow_difficulty2 = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -387,7 +406,7 @@ class TransactionHandler {
      */
     async blockPost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -413,8 +432,7 @@ class TransactionHandler {
                 pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -439,7 +457,7 @@ class TransactionHandler {
 
     async unblockPost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -477,7 +495,7 @@ class TransactionHandler {
 
     async blockUser(address) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
@@ -524,7 +542,7 @@ class TransactionHandler {
 
     async unblockUser(address) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
@@ -562,7 +580,7 @@ class TransactionHandler {
 
     followUser(userAddress) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -603,7 +621,7 @@ class TransactionHandler {
 
     unfollowUser(userAddress) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -644,7 +662,7 @@ class TransactionHandler {
 
     followTopic(topic) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -685,7 +703,7 @@ class TransactionHandler {
 
     unfollowTopic(topic) {
         const publicKey = Storage.load("publicKey", "");
-        const seedPhrase = Storage.load("seedPhrase", "");
+        const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -732,7 +750,7 @@ class TransactionHandler {
      */
     async reportPost(txhash, reason) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             const why = String(reason || "").trim();
@@ -779,7 +797,7 @@ class TransactionHandler {
      */
     async sendTokens(targetAddress, amountMirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const targetTrimmed = String(targetAddress || "").trim().toLowerCase();
 
@@ -849,7 +867,7 @@ class TransactionHandler {
      */
     async upgradeLevel(level, monthlyFeeUmirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const targetLevel = Number(level);
 
             if (targetLevel < 1 || targetLevel > 3) {
@@ -887,7 +905,7 @@ class TransactionHandler {
      */
     async setAutoRenewal(autoRenew) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const last_block_hash = "";
             const tx = {
                 action: 'set_auto_renewal',
@@ -918,14 +936,14 @@ class TransactionHandler {
      */
     async bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
-            
+            const seedPhrase = seedVault.getSeed() || "";
+
             const chain = String(destinationChain || "").trim().toLowerCase();
             if (!chain) return { success: false, error: "destination_chain required" };
-            
+
             const address = String(destinationAddress || "").trim();
             if (!address) return { success: false, error: "destination_address required" };
-            
+
             const amount = Number(amountUmirage) || 0;
             if (amount <= 0) return { success: false, error: "amount must be positive" };
 
@@ -959,7 +977,7 @@ class TransactionHandler {
      */
     async deletePost(txhash) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -976,8 +994,7 @@ class TransactionHandler {
                 pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
-                    Storage.save('user_balance', String(this.lastOnchainBalanceUmirage));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
                 } catch (_) { }
             }
 
@@ -1008,7 +1025,7 @@ class TransactionHandler {
      */
     async editPost(overrideId, changes) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const overrideLower = String(overrideId || "").trim().toLowerCase();
             if (!overrideLower || overrideLower.length !== 64) return { success: false, error: "invalid override id" };
@@ -1106,12 +1123,7 @@ class TransactionHandler {
         // Handle both 'balance' (from get_user_status) and 'user_balance' (legacy)
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {
-            Storage.save('user_balance', String(balanceVal));
-            // Also update TransactionHandler's balance tracking
-            const balanceNum = Number(balanceVal);
-            if (Number.isFinite(balanceNum)) {
-                this.lastOnchainBalanceUmirage = balanceNum >>> 0;
-            }
+            this._persistUserBalance(balanceVal);
         }
         if (data.block_time !== undefined) Storage.save('block_time_seconds', String(data.block_time));
         if (data.pow_difficulty !== undefined) Storage.save('pow_difficulty_cached', String(data.pow_difficulty));
@@ -1140,7 +1152,7 @@ class TransactionHandler {
         let action = "create_vote";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return Promise.resolve({ success: false, error: "Not logged in" });
@@ -1183,7 +1195,7 @@ class TransactionHandler {
         let action = "create_post";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return;
@@ -1219,7 +1231,7 @@ class TransactionHandler {
      */
     async createPostAsync(topic, title, content, tag = "") {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
                 return { success: false, error: "Not logged in" };
@@ -1265,7 +1277,7 @@ class TransactionHandler {
         let action = "create_comment";
 
         let publicKey = Storage.load("publicKey", "");
-        let seedPhrase = Storage.load("seedPhrase", "");
+        let seedPhrase = seedVault.getSeed() || "";
         if ((!publicKey) || (!seedPhrase)) {
             updateNotification("Not logged in");
             return;
@@ -1292,7 +1304,7 @@ class TransactionHandler {
      */
     async createCommentAsync(parentId, content) {
         try {
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             if (!publicKey || !seedPhrase) {
                 return { success: false, error: "Not logged in" };
@@ -1367,15 +1379,15 @@ class TransactionHandler {
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = Number(status.pow_difficulty || 0);
-                    const onChainBalance = Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'));
-                    const prevOnChain = this.lastOnchainBalanceUmirage >>> 0;
-                    this.lastOnchainBalanceUmirage = onChainBalance >>> 0;
+                    const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
+                    const prevOnChain = this.lastOnchainBalanceUmirage;
+                    this.lastOnchainBalanceUmirage = onChainBalance;
                     if (this.pendingFeeUmirage > 0) {
                         const spentIncluded = onChainBalance <= Math.max(0, prevOnChain - this.pendingFeeUmirage);
                         if (spentIncluded) this.pendingFeeUmirage = 0;
                     }
-                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - (this.pendingFeeUmirage >>> 0));
-                    Storage.save('user_balance', String(effectiveBalance));
+                    const effectiveBalance = Math.max(0, this.lastOnchainBalanceUmirage - Math.max(0, this.pendingFeeUmirage));
+                    this._persistUserBalance(effectiveBalance, { normalizeStorage: true, updateLastOnchain: false });
                 } catch (error) {
                     const msg = (error && error.message) ? error.message : 'network error';
                     updateNotification(msg, 5, true);
@@ -1390,7 +1402,7 @@ class TransactionHandler {
             let final_transaction = undefined;
             let challenge = undefined;
             // Derive signer address from current seed to ensure consistency with relay
-            const seedPhrase = Storage.load("seedPhrase", "");
+            const seedPhrase = seedVault.getSeed() || "";
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return Storage.load('publicKey', ''); } })();
             if (derivedAddress && derivedAddress !== Storage.load('publicKey', '')) {
                 try { Storage.save('publicKey', derivedAddress); } catch (_) { }
@@ -1498,6 +1510,8 @@ class TransactionHandler {
                     const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
                     updateNotification(cleanMsg, 10, true);
+                } else if (/admin insufficient balance/i.test(errMsg)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(errMsg)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 } else {
@@ -1515,6 +1529,8 @@ class TransactionHandler {
                     const grpcMatch = msg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
                     updateNotification(cleanMsg, 10, true);
+                } else if (/admin insufficient balance/i.test(msg)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(msg)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 } else {
@@ -3471,6 +3487,8 @@ class TransactionHandler {
                 // Check for subscription/reserve errors in the full error string
                 if (/insufficient reserve/i.test(whole) || /subscription terminated/i.test(whole)) {
                     // Don't show notification here - let outer catch handle it to avoid duplicates
+                } else if (/admin insufficient balance/i.test(whole)) {
+                    updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
                 } else if (/insufficient funds/i.test(whole)) {
                     updateNotification('Unfortunately the node does not have enough gas available to complete this transaction.', 6, true);
                 }
@@ -3497,6 +3515,8 @@ class TransactionHandler {
                     window.dispatchEvent(new CustomEvent('subscriptionStatusChanged', { detail: { level: 0 } }));
                 } catch (_) { }
                 updateNotification('Your subscription may have expired. Please try again - PoW will be used.', 8, true);
+            } else if (/admin insufficient balance/i.test(fullErr)) {
+                updateNotification('Your account balance is too low to cover the transaction fee. Please fund your account.', 8, true);
             } else if (/insufficient funds/i.test(fullErr)) {
                 updateNotification('Node does not have enough gas for this transaction.', 6, true);
             } else {

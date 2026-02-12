@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import styled from "styled-components"
 import { useNavigate } from 'react-router-dom';
 import Storage from "../utils/Storage";
+import seedVault from "../utils/SeedVault";
 
 const StyledMainContainer = styled.div`
     margin-top: 0.5em;
@@ -19,11 +20,9 @@ function SignOutView({ state, setCredentials }) {
     let navigate = useNavigate();
 
     React.useEffect(() => {
+        seedVault.clear();
+        Storage.clear();
         setCredentials("", "", "");
-        try { localStorage.removeItem('user_balance'); } catch (_) { }
-        try { Storage.remove('votes'); } catch (_) { }
-        try { Storage.remove('username_pending'); } catch (_) { }
-        try { Storage.remove('publicKey_pending'); } catch (_) { }
         navigate("/");
     }, [navigate, setCredentials]);
 

@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from flask import Blueprint, jsonify, request
 
+from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import require_runtime, find_local_operator_address, find_local_consensus_address
 from params import load_params, expect_params
@@ -53,6 +54,16 @@ import base64
 import urllib.request as _ur
 import urllib.parse as _up
 from user_agents import parse as parse_user_agent
+
+
+def _inject_balance(resp: dict, addr: str) -> dict:
+    """Add balance to response dict if address is provided."""
+    if addr and addr.lower() != "guest":
+        try:
+            resp["balance"] = int(_get_balance(addr))
+        except Exception:
+            pass
+    return resp
 
 
 def _query_chain_profile(addr: str) -> dict | None:
@@ -327,7 +338,7 @@ def reload_params():
         return jsonify({"status": "ok", "params": params})
     except Exception as e:
         log_event(rid, "reload_params.error", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_followed_moderators(cur, address: str) -> list[str]:
@@ -380,33 +391,60 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
-def _get_latest_inbox_timestamp(cur, address: str) -> int | None:
-    """Get the timestamp of the most recent reply to posts owned by the address.
-    Returns None if no address provided or no replies found."""
-    if not address or address.lower() == "guest":
-        return None
+# ---- Inbox count cache (60s TTL per address) ----
+_inbox_cache: dict[str, tuple[int, float]] = {}
+_INBOX_CACHE_TTL = 60.0
+_INBOX_CACHE_MAX = 10000
 
-    viewer_lower = address.lower()
+
+def _get_new_inbox_count(cur, address: str) -> int:
+    """Count replies to user's posts that arrived after their last inbox view.
+    Results are cached in-memory for 60s per address."""
+    if not address or address.lower() == "guest":
+        return 0
+
+    viewer = address.lower()
+    now = time.time()
+
+    cached = _inbox_cache.get(viewer)
+    if cached and cached[1] > now:
+        return cached[0]
+
     try:
-        # Find the most recent reply to any post owned by this user
-        # Uses the same logic as get_inbox but just gets the max timestamp
         cur.execute(
             """
-            SELECT MAX(r.created_at)
+            SELECT COUNT(*)
             FROM posts r
             JOIN posts p ON r.target = p.txhash
+            JOIN profiles pr ON LOWER(pr.owner) = %s
             WHERE LOWER(p.owner) = %s
               AND LOWER(r.owner) != %s
               AND r.deleted = FALSE
+              AND r.created_at > pr.inbox_last_viewed_at
             """,
-            (viewer_lower, viewer_lower),
+            (viewer, viewer, viewer),
         )
         row = cur.fetchone()
-        if row and row[0]:
-            return int(row[0])
+        count = int(row[0]) if row and row[0] else 0
     except Exception:
-        pass
-    return None
+        count = 0
+
+    # Evict expired entries if cache is too large
+    if len(_inbox_cache) >= _INBOX_CACHE_MAX:
+        expired = [k for k, v in _inbox_cache.items() if v[1] <= now]
+        for k in expired:
+            del _inbox_cache[k]
+        # If still too large after eviction, clear entirely
+        if len(_inbox_cache) >= _INBOX_CACHE_MAX:
+            _inbox_cache.clear()
+
+    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL)
+    return count
+
+
+def _invalidate_inbox_cache(address: str) -> None:
+    """Remove a user's inbox count from cache so it refreshes immediately."""
+    _inbox_cache.pop(address.lower(), None)
 
 
 @public_bp.route("/api/get_blocked_users")
@@ -426,7 +464,7 @@ def get_blocked_users():
         conn.close()
         return jsonify({"blocked_users": blocked_users})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_profile")
@@ -442,47 +480,43 @@ def get_profile():
 
         profile = _query_chain_profile_full(address.lower())
         if not profile:
-            return jsonify(
-                {
-                    "owner": address.lower(),
-                    "username": "",
-                    "level": 0,
-                    "followed_users": [],
-                    "followed_topics": [],
-                    "followed_moderators": [],
-                    "blocked_users": [],
-                    "blocked_posts": [],
-                    "quality_posts": [],
-                }
-            )
-
-        return jsonify(
-            {
-                "owner": profile.get("owner", address.lower()),
-                "username": profile.get("username", ""),
-                "level": int(profile.get("level", 0)),
-                "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
-                "subscription_expiry": int(
-                    profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)
-                ),
-                "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
-                "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
-                "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
-                "biography": profile.get("biography", ""),
-                "avatar": profile.get("avatar", ""),
-                "banner": profile.get("banner", ""),
-                "followed_users": profile.get("followed_users", []) or profile.get("followedUsers", []) or [],
-                "followed_topics": profile.get("followed_topics", []) or profile.get("followedTopics", []) or [],
-                "followed_moderators": profile.get("followed_moderators", [])
-                or profile.get("followedModerators", [])
-                or [],
-                "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
-                "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
-                "quality_posts": profile.get("quality_posts", []) or profile.get("qualityPosts", []) or [],
+            resp = {
+                "owner": address.lower(),
+                "username": "",
+                "level": 0,
+                "followed_users": [],
+                "followed_topics": [],
+                "followed_moderators": [],
+                "blocked_users": [],
+                "blocked_posts": [],
+                "quality_posts": [],
             }
-        )
+            return jsonify(_inject_balance(resp, address))
+
+        resp = {
+            "owner": profile.get("owner", address.lower()),
+            "username": profile.get("username", ""),
+            "level": int(profile.get("level", 0)),
+            "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
+            "subscription_expiry": int(profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)),
+            "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
+            "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
+            "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
+            "biography": profile.get("biography", ""),
+            "avatar": profile.get("avatar", ""),
+            "banner": profile.get("banner", ""),
+            "followed_users": profile.get("followed_users", []) or profile.get("followedUsers", []) or [],
+            "followed_topics": profile.get("followed_topics", []) or profile.get("followedTopics", []) or [],
+            "followed_moderators": profile.get("followed_moderators", [])
+            or profile.get("followedModerators", [])
+            or [],
+            "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
+            "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
+            "quality_posts": profile.get("quality_posts", []) or profile.get("qualityPosts", []) or [],
+        }
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ============================================================================
@@ -1676,22 +1710,12 @@ def get_tx_status():
         if code != 0:
             out["error_details"] = _classify_reject(raw_log)
 
-        # Include inbox timestamp if address provided
-        if address and conn:
-            try:
-                cur = conn.cursor()
-                inbox_ts = _get_latest_inbox_timestamp(cur, address)
-                if inbox_ts is not None:
-                    out["latest_inbox_timestamp"] = inbox_ts
-            except Exception:
-                pass
-
         log_event(rid, "get_tx_status.ok", tx_hash=tx_hash, tx_type=tx_type, indexed=indexed)
         return jsonify(out)
 
     except Exception as e:
         log_event(rid, "get_tx_status.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_parameters")
@@ -1716,7 +1740,7 @@ def get_parameters():
         return jsonify(payload)
     except Exception as e:
         log_event(rid, "get_parameters.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_status")
@@ -1800,7 +1824,6 @@ def get_user_status():
                             "timestamp": int(ts or 0),
                         }
                     )
-            inbox_ts = _get_latest_inbox_timestamp(cur, addr)
             conn.close()
         except Exception:
             pass
@@ -1815,13 +1838,11 @@ def get_user_status():
             "profile_registered_at": profile_registered_at,
             "recent_votes": recent_votes,
         }
-        if inbox_ts is not None:
-            resp["latest_inbox_timestamp"] = inbox_ts
         log_event(rid, "get_user_status.ok", user_level=user_level)
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_user_status.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_followed")
@@ -1869,10 +1890,10 @@ def get_user_followed():
             topics=len(followed_topics),
             users=len(followed_users),
         )
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_followed.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_blocked")
@@ -1906,10 +1927,10 @@ def get_user_blocked():
             "blocked_users": blocked_users,
         }
         log_event(rid, "get_user_blocked.ok", posts=len(blocked_posts), users=len(blocked_users))
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_blocked.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_preferences")
@@ -1955,10 +1976,10 @@ def get_preferences():
 
         resp = {"topics": topics, "authors": authors}
         log_event(rid, "get_preferences.ok", topics=len(topics), authors=len(authors))
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_preferences.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_similar_users")
@@ -2012,7 +2033,7 @@ def get_similar_users():
 
     except Exception as e:
         log_event(rid, "get_similar_users.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_network_stats")
@@ -2055,7 +2076,7 @@ def get_network_stats():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_network_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for supply history (30 second TTL)
@@ -2118,7 +2139,7 @@ def get_supply_history():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_supply_history.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for circulation stats (expensive query)
@@ -2261,7 +2282,7 @@ def get_circulation_stats():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_circulation_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_config")
@@ -2290,7 +2311,7 @@ def get_config():
             tiers = p["tiers"]
         except Exception as e:
             log_event(rid, "get_config.params_err", error=str(e))
-            return jsonify({"error": f"failed to read params cache: {e}"}), 500
+            return safe_error(e, context="get_config.params")
 
         rt = require_runtime()
         diff_info = _get_difficulty_info()
@@ -2354,7 +2375,7 @@ def get_config():
         return out
     except Exception as e:
         log_event(rid, "get_config.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
@@ -2406,7 +2427,7 @@ def get_peers():
         peers = [_get_peer_info(p) for p in peers_data]
         return jsonify({"peers": peers})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for difficulty history (1 minute TTL)
@@ -2505,7 +2526,7 @@ def get_address_from_username():
             return jsonify({"exists": True, "address": row[0], "username": username})
         return jsonify({"exists": False, "address": None, "username": username})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_username_from_address", methods=["GET", "POST"])
@@ -2569,7 +2590,7 @@ def get_username_from_address():
             return jsonify({"username": row[0], "address": address})
         return jsonify({"username": None, "address": address})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Removed compatibility alias endpoints for username resolution (no fallbacks)
@@ -2631,7 +2652,7 @@ def get_users():
 
         return jsonify({"users": users, "page": page, "limit": limit, "has_more": has_more, "total": total})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_topics")
@@ -2731,19 +2752,22 @@ def get_topics():
         if topics_dict:
             cur.execute(
                 f"""
-                SELECT p.topic, COUNT(1) as comment_count
+                SELECT p.root_topic, COUNT(1) as comment_count
                 FROM posts p
                 WHERE COALESCE(p.target, '') != ''
-                  AND p.topic IS NOT NULL
-                  AND LENGTH(TRIM(p.topic)) > 0
+                  AND p.root_topic IS NOT NULL
+                  AND LENGTH(TRIM(p.root_topic)) > 0
                   {deleted_clause}
-                GROUP BY p.topic
+                GROUP BY p.root_topic
                 """
             )
+            # root_topic is stored lowercase; build a lookup from the original-case topic keys
+            lower_to_topic = {k.lower(): k for k in topics_dict}
             for row in cur.fetchall():
-                topic, count = row[0], row[1]
-                if topic in topics_dict:
-                    topics_dict[topic]["comment_count"] = count or 0
+                root_topic, count = row[0], row[1]
+                key = lower_to_topic.get((root_topic or "").lower())
+                if key:
+                    topics_dict[key]["comment_count"] = count or 0
 
         if topics_dict:
             lower_to_key = {k.lower(): k for k in topics_dict.keys()}
@@ -2764,7 +2788,7 @@ def get_topics():
 
         return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/search_topics")
@@ -2854,7 +2878,7 @@ def search_topics():
         conn.close()
         return jsonify({"topics": topics})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/search")
@@ -3182,7 +3206,7 @@ def search():
         conn.close()
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, deleted_bare):
@@ -3374,11 +3398,6 @@ def get_posts():
                     sort_mode=sort_mode,
                 )
 
-            # Add inbox timestamp for notification badge (only if user is logged in)
-            if address and address.lower() != "guest":
-                inbox_ts = _get_latest_inbox_timestamp(cur, address)
-                if inbox_ts is not None:
-                    resp["latest_inbox_timestamp"] = inbox_ts
             conn.close()
             return jsonify(resp)
 
@@ -3681,17 +3700,12 @@ def get_posts():
 
         has_more = (page * limit) < total
 
-        # Add inbox timestamp for notification badge (only if user is logged in)
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
-        if address and address.lower() != "guest":
-            inbox_ts = _get_latest_inbox_timestamp(cur, address)
-            if inbox_ts is not None:
-                resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_posts")
@@ -3890,9 +3904,10 @@ def get_user_posts():
             )
         conn.close()
         has_more = (page * limit) < total
-        return jsonify({"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total})
+        resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
+        return jsonify(_inject_balance(resp, viewer))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_reports")
@@ -3958,7 +3973,7 @@ def get_reports():
             except Exception:
                 pass
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _fetch_post(
@@ -4424,12 +4439,7 @@ def get_comments():
                 apply_votes(children)
         t_votes_ms = (time.time() - t_votes) * 1000
 
-        # Add inbox timestamp for notification badge (only if user is logged in)
         resp = {"root": root, "children": children}
-        if address and address.lower() != "guest":
-            inbox_ts = _get_latest_inbox_timestamp(cur, address)
-            if inbox_ts is not None:
-                resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
 
@@ -4446,10 +4456,10 @@ def get_comments():
             votes_ms=round(t_votes_ms, 1),
             total_ms=round(total_ms, 1),
         )
-        return jsonify(resp)
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "get_comments.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _find_root_post_id(cur, comment_id: str):
@@ -4530,7 +4540,7 @@ def get_root_post_id():
             return jsonify({"error": "Comment not found or invalid"}), 404
         return jsonify({"root_post_id": root_id, "comment_id": comment_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_comment_context")
@@ -4562,9 +4572,10 @@ def get_comment_context():
         blocked_users = _get_blocked_users(cur, address)
         chain = _fetch_parent_chain(cur, comment_id, max_depth, blocked_posts, blocked_users)
         conn.close()
-        return jsonify({"context": chain, "comment_id": comment_id})
+        resp = {"context": chain, "comment_id": comment_id}
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_inbox")
@@ -4710,22 +4721,47 @@ def get_inbox():
         total_ms = (time.time() - t_start) * 1000
         logger.info(f"[get_inbox] Total: {total_ms:.1f}ms, replies={len(replies)}, total_count={total}")
 
-        return jsonify(
-            {
-                "replies": replies,
-                "total": total,
-                "page": page,
-                "limit": limit,
-                "has_more": has_more,
-                "_perf_ms": round(total_ms, 1),
-                "_query_ms": round(query_ms, 1),
-            }
-        )
+        resp = {
+            "replies": replies,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "has_more": has_more,
+            "_perf_ms": round(total_ms, 1),
+            "_query_ms": round(query_ms, 1),
+        }
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        import traceback
+        return safe_error(e, context="get_inbox")
 
-        logger.error(f"[get_inbox] Error: {e}\n{traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
+
+@public_bp.route("/api/mark_inbox_viewed", methods=["POST"])
+def mark_inbox_viewed():
+    """Set the user's inbox_last_viewed_at to now, clearing their unread count."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip()
+    if not address:
+        return jsonify({"error": "address is required"}), 400
+
+    addr_lower = address.lower()
+    now_ts = int(time.time())
+
+    try:
+        conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE profiles SET inbox_last_viewed_at = %s WHERE LOWER(owner) = %s",
+            (now_ts, addr_lower),
+        )
+        conn.commit()
+        conn.close()
+        _invalidate_inbox_cache(addr_lower)
+        log_event(rid, "mark_inbox_viewed.ok", address=addr_lower)
+        return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
+    except Exception as e:
+        log_event(rid, "mark_inbox_viewed.err", error=str(e))
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_upload_url", methods=["POST"])
@@ -4764,7 +4800,7 @@ def get_upload_url():
 
             if response.status_code != 200:
                 log_event(rid, "get_upload_url.err", error=f"cloudflare_stream_api_error_{response.status_code}")
-                return jsonify({"error": f"Cloudflare Stream API error: {response.status_code}"}), 500
+                return jsonify({"error": "Upload service error"}), 500
 
             result = response.json()
             # Stream responses typically contain result.uploadURL and sometimes result.uid
@@ -4794,14 +4830,14 @@ def get_upload_url():
 
         if response.status_code != 200:
             log_event(rid, "get_upload_url.err", error=f"cloudflare_api_error_{response.status_code}")
-            return jsonify({"error": f"Cloudflare API error: {response.status_code}"}), 500
+            return jsonify({"error": "Upload service error"}), 500
 
         result = response.json()
         if not result.get("success"):
             errors = result.get("errors", [])
             error_msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
             log_event(rid, "get_upload_url.err", error=f"cloudflare_error_{error_msg}")
-            return jsonify({"error": f"Cloudflare error: {error_msg}"}), 500
+            return jsonify({"error": "Upload service error"}), 500
 
         upload_data = result.get("result", {})
         upload_url = upload_data.get("uploadURL", "")
@@ -4815,7 +4851,7 @@ def get_upload_url():
         return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})
     except Exception as e:
         log_event(rid, "get_upload_url.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/stream_proxy/<video_uid>", defaults={"path": ""})
@@ -4972,23 +5008,71 @@ def stream_proxy(video_uid, path):
         return Response(response.iter_content(chunk_size=8192), status=response.status_code, headers=resp_headers)
     except Exception as e:
         log_event(rid, "stream_proxy.err", error=str(e), video_uid=video_uid[:20], path=path[:50] if path else "")
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
+
+
+_STATS_BOT_NAMES = {
+    "googlebot",
+    "applebot",
+    "bingbot",
+    "yandexbot",
+    "baiduspider",
+    "duckduckbot",
+    "slurp",
+    "facebook",
+    "facebookexternalhit",
+    "facebot",
+    "twitterbot",
+    "twitter",
+    "linkedinbot",
+    "pinterest",
+    "semrushbot",
+    "ahrefsbot",
+    "mj12bot",
+    "dotbot",
+    "petalbot",
+    "bytespider",
+}
 
 
 @public_bp.route("/api/stats/event", methods=["POST"])
 def stats_event():
-    """Record analytics events (visits, sessions, page views)."""
+    """Record analytics events (visits, sessions, page views). Bot requests are silently discarded.
+
+    The raw User-Agent is never stored. Only coarse categories are persisted
+    (e.g. "Chrome", "Windows", "desktop") which are shared by millions of users.
+    """
     rid = next_request_id()
     try:
+        # Server-side: parse User-Agent for bot detection + coarse category extraction
+        ua_string = request.headers.get("User-Agent", "")
+        browser_family = None
+        os_family = None
+        device_type = None
+        if ua_string:
+            try:
+                ua = parse_user_agent(ua_string)
+                if ua.is_bot or (ua.browser.family or "").lower() in _STATS_BOT_NAMES:
+                    return jsonify({"success": True})
+                # Extract coarse categories only (never store the raw UA string)
+                browser_family = ua.browser.family or None
+                os_family = ua.os.family or None
+                if ua.is_mobile:
+                    device_type = "mobile"
+                elif ua.is_tablet:
+                    device_type = "tablet"
+                elif ua.is_pc:
+                    device_type = "desktop"
+                else:
+                    device_type = "other"
+            except Exception:
+                pass
+
         data = request.get_json(force=True) or {}
         event_type = str(data.get("event_type", "")).strip()
         session_id = str(data.get("session_id", "")).strip()
         user_address = data.get("user_address")
         user_address = str(user_address).strip().lower() if user_address else None
-        user_agent = data.get("user_agent")
-        user_agent = str(user_agent).strip() if user_agent else None
-        referrer = data.get("referrer")
-        referrer = str(referrer).strip() if referrer else None
         page_path = data.get("page_path")
         page_path = str(page_path).strip() if page_path else None
 
@@ -4998,13 +5082,6 @@ def stats_event():
         if event_type not in ("visit", "session_start", "session_end", "page_view"):
             return jsonify({"error": "invalid event_type"}), 400
 
-        ip_hash = None
-        if request.remote_addr:
-            try:
-                ip_hash = hashlib.sha256(request.remote_addr.encode()).hexdigest()[:16]
-            except Exception:
-                pass
-
         timestamp = int(time.time())
 
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5012,10 +5089,10 @@ def stats_event():
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO stats_events(event_type, user_address, session_id, created_at, user_agent, ip_hash, referrer, page_path)
+                INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
                 VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (event_type, user_address, session_id, timestamp, user_agent, ip_hash, referrer, page_path),
+                (event_type, user_address, session_id, timestamp, page_path, browser_family, os_family, device_type),
             )
             conn.commit()
         finally:
@@ -5024,14 +5101,14 @@ def stats_event():
         return jsonify({"success": True})
     except Exception as e:
         log_event(rid, "stats_event.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_analytics(rid: int):
-    """Return analytics stats from stats_events (DAU/MAU, device/browser/OS breakdown).
+    """Return analytics stats from stats_events (DAU/MAU, browser/OS/device breakdown).
 
-    This is a separate endpoint because stats_events processing is expensive.
-    The frontend loads this lazily after showing core stats.
+    Bots are filtered at ingest time so all stored events are from real users.
+    Only coarse categories are stored (e.g. "Chrome", "Windows", "desktop").
     """
     now = int(time.time())
 
@@ -5050,78 +5127,31 @@ def _get_stats_analytics(rid: int):
 
             stats: dict[str, Any] = {}
 
-            # Check if we have stats_events
-            cur.execute("SELECT COUNT(*) FROM stats_events")
-            has_stats_events = cur.fetchone()[0] > 0
+            # Fetch events from last 30 days (bots already filtered at ingest)
+            cur.execute(
+                """
+                SELECT session_id, user_address, created_at, event_type, browser_family, os_family, device_type
+                FROM stats_events
+                WHERE created_at >= %s
+                """,
+                (thirty_days_ago,),
+            )
+            all_events = cur.fetchall()
 
-            if has_stats_events:
-                # Known bots/crawlers to exclude
-                bot_names = {
-                    "googlebot",
-                    "applebot",
-                    "bingbot",
-                    "yandexbot",
-                    "baiduspider",
-                    "duckduckbot",
-                    "slurp",
-                    "facebook",
-                    "facebookexternalhit",
-                    "facebot",
-                    "twitterbot",
-                    "twitter",
-                    "linkedinbot",
-                    "pinterest",
-                    "semrushbot",
-                    "ahrefsbot",
-                    "mj12bot",
-                    "dotbot",
-                    "petalbot",
-                    "bytespider",
-                }
-
-                # Fetch all events from last 30 days
-                cur.execute(
-                    """
-                    SELECT session_id, user_address, user_agent, created_at, event_type
-                    FROM stats_events
-                    WHERE created_at >= %s
-                    """,
-                    (thirty_days_ago,),
-                )
-                all_events = cur.fetchall()
-
-                # First pass: identify bot sessions and parse user agents
-                session_ua: dict[str, Any] = {}
-                bot_sessions: set[str] = set()
-                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
-                    if sess_id in session_ua or sess_id in bot_sessions:
-                        continue
-                    if not ua_string or not ua_string.strip():
-                        continue
-                    try:
-                        ua = parse_user_agent(ua_string)
-                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
-                            bot_sessions.add(sess_id)
-                        else:
-                            session_ua[sess_id] = ua
-                    except Exception:
-                        pass
-
-                # Filter to non-bot events only
-                clean_events = [
-                    (sess_id, user_addr, created_at, event_type)
-                    for sess_id, user_addr, _ua, created_at, event_type in all_events
-                    if sess_id not in bot_sessions
-                ]
-
-                # Calculate DAU/MAU from clean events
+            if all_events:
+                # Calculate DAU/MAU
                 dau_today_set: set[str] = set()
                 dau_yesterday_set: set[str] = set()
                 mau_set: set[str] = set()
                 dau_reg_set: set[str] = set()
                 unreg_sessions: set[str] = set()
 
-                for sess_id, user_addr, created_at, event_type in clean_events:
+                # Track coarse categories per session (deduplicated)
+                session_browser: dict[str, str] = {}
+                session_os: dict[str, str] = {}
+                session_device: dict[str, str] = {}
+
+                for sess_id, user_addr, created_at, event_type, browser, os_fam, dev_type in all_events:
                     if event_type not in ("visit", "session_start", "page_view"):
                         continue
                     user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
@@ -5139,6 +5169,14 @@ def _get_stats_analytics(rid: int):
                     if not user_addr or not user_addr.strip():
                         unreg_sessions.add(sess_id)
 
+                    # Store first seen category per session
+                    if browser and sess_id not in session_browser:
+                        session_browser[sess_id] = browser
+                    if os_fam and sess_id not in session_os:
+                        session_os[sess_id] = os_fam
+                    if dev_type and sess_id not in session_device:
+                        session_device[sess_id] = dev_type
+
                 stats["dau_today"] = len(dau_today_set)
                 stats["dau_any_today"] = len(dau_today_set)
                 stats["dau_yesterday"] = len(dau_yesterday_set)
@@ -5146,26 +5184,11 @@ def _get_stats_analytics(rid: int):
                 stats["dau_registered_today"] = len(dau_reg_set)
                 stats["unregistered_users"] = len(unreg_sessions)
 
-                # Browser/device/OS breakdown
+                # Browser breakdown
                 browser_counts: dict[str, int] = {}
-                os_counts: dict[str, int] = {}
-                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
-
-                for sess_id, ua in session_ua.items():
-                    browser = ua.browser.family or "Unknown"
-                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
-                    os_family = ua.os.family or "Unknown"
-                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
-                    if ua.is_mobile:
-                        device_counts["mobile"] += 1
-                    elif ua.is_tablet:
-                        device_counts["tablet"] += 1
-                    elif ua.is_pc:
-                        device_counts["desktop"] += 1
-                    else:
-                        device_counts["other"] += 1
-
-                total_sessions = len(session_ua) or 1
+                for b in session_browser.values():
+                    browser_counts[b] = browser_counts.get(b, 0) + 1
+                total_sessions = len(session_browser) or 1
                 browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
                 browser_pcts.sort(key=lambda x: x[1], reverse=True)
                 top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
@@ -5175,7 +5198,12 @@ def _get_stats_analytics(rid: int):
                         top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
                 stats["browser_breakdown"] = top_browsers
 
-                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
+                # OS breakdown
+                os_counts: dict[str, int] = {}
+                for o in session_os.values():
+                    os_counts[o] = os_counts.get(o, 0) + 1
+                total_os = len(session_os) or 1
+                os_pcts = [(k, round(v / total_os * 100, 1)) for k, v in os_counts.items()]
                 os_pcts.sort(key=lambda x: x[1], reverse=True)
                 top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
                 if len(os_pcts) > 4:
@@ -5184,6 +5212,13 @@ def _get_stats_analytics(rid: int):
                         top_os.append({"name": "Other", "pct": f"{other_pct}%"})
                 stats["os_breakdown"] = top_os
 
+                # Device type breakdown
+                device_counts: dict[str, int] = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
+                for d in session_device.values():
+                    if d in device_counts:
+                        device_counts[d] += 1
+                    else:
+                        device_counts["other"] += 1
                 device_total = sum(device_counts.values()) or 1
                 stats["device_breakdown"] = {
                     k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
@@ -5211,7 +5246,7 @@ def _get_stats_analytics(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.analytics.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_rewards(rid: int):
@@ -5344,7 +5379,7 @@ def _get_stats_rewards(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.rewards.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_rewards_history(rid: int):
@@ -5407,7 +5442,7 @@ def _get_stats_rewards_history(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.rewards_history.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_signups(rid: int):
@@ -5531,7 +5566,7 @@ def _get_stats_signups(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.signups.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_subscribers(rid: int):
@@ -5617,10 +5652,10 @@ def _get_stats_subscribers(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.subscribers.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
-def _get_stats_accounts(rid: int):
+def get_stats_accounts(rid: int):
     """Return top 100 accounts by wallet balance."""
     try:
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5673,7 +5708,7 @@ def _get_stats_accounts(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.accounts.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_welcome_stats")
@@ -5748,7 +5783,7 @@ def get_welcome_stats():
             conn.close()
     except Exception as e:
         log_event(rid, "get_welcome_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_stats")
@@ -5764,7 +5799,7 @@ def get_stats():
     elif tab == "subscribers":
         return _get_stats_subscribers(rid)
     elif tab == "accounts":
-        return _get_stats_accounts(rid)
+        return get_stats_accounts(rid)
     elif tab == "analytics":
         return _get_stats_analytics(rid)
     elif tab == "rewards":
@@ -6041,7 +6076,7 @@ def get_stats():
         return jsonify(stats)
     except Exception as e:
         log_event(rid, "get_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # =============================================================================
@@ -6232,7 +6267,7 @@ def get_referral_stats():
         return jsonify(result)
     except Exception as e:
         log_event(rid, "referral.stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # =============================================================================
@@ -6284,10 +6319,11 @@ def get_invite_codes():
 
         available_count = sum(1 for c in codes if not c["is_used"])
         log_event(rid, "invite.get_codes.ok", address=address[:12], total=len(codes), available=available_count)
-        return jsonify({"codes": codes, "total": len(codes), "available": available_count})
+        resp = {"codes": codes, "total": len(codes), "available": available_count}
+        return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "invite.get_codes.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/validate_invite_code", methods=["POST"])
@@ -6329,7 +6365,7 @@ def validate_invite_code():
         return jsonify({"valid": True, "owner": owner})
     except Exception as e:
         log_event(rid, "invite.validate.err", error=str(e))
-        return jsonify({"valid": False, "error": str(e)}), 500
+        return safe_error(e, context="validate_invite_code")
 
 
 __all__ = ["public_bp"]

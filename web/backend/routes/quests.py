@@ -3,10 +3,8 @@ from __future__ import annotations
 """Quest and Rewards API endpoints.
 
 User endpoints:
-- GET /api/rewards/daily: Get user's daily quest status
-- GET /api/rewards/flash: Get active flash quests and user progress
+- GET /api/rewards/summary: Daily quests, flash quest, and pending rewards in one call
 - GET /api/rewards/achievements: Get all achievements with unlock status
-- GET /api/rewards/pending: Get user's pending/claimable rewards
 - POST /api/rewards/claim: Claim pending rewards
 
 Admin endpoints (require level >= 100):
@@ -28,11 +26,23 @@ from typing import Any, Dict, List, Optional
 
 from flask import Blueprint, jsonify, request
 
+from bank import get_balance as _get_balance
 from db import connect_db
+from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
 from routes.core import get_user_level
+
+
+def _inject_balance(resp: dict, addr: str) -> dict:
+    """Add balance to response dict if address is provided."""
+    if addr and addr.lower() != "guest":
+        try:
+            resp["balance"] = int(_get_balance(addr))
+        except Exception:
+            pass
+    return resp
 
 
 quests_bp = Blueprint("quests", __name__)
@@ -408,24 +418,30 @@ def _assign_daily_quests_if_needed(
             return quest_ids
 
 
-@quests_bp.route("/api/rewards/daily", methods=["GET"])
-def get_daily_quests():
-    """Get user's daily quest status.
+@quests_bp.route("/api/rewards/summary", methods=["GET"])
+def get_rewards_summary():
+    """Combined endpoint: daily quests + flash quest + pending rewards in one call.
 
     Query params:
     - owner: User address (required)
     """
     rid = next_request_id()
-    log_event(rid, "quests.daily.begin")
+    log_event(rid, "rewards.summary.begin")
 
-    # Check if quests are enabled
+    # -- disabled check --
     if not QUESTS_ENABLED:
         return jsonify(
             {
                 "disabled": True,
                 "daily_quests": [],
+                "flash_quest": None,
+                "pending_rewards": [],
                 "seconds_until_reset": 0,
                 "reward_multiplier": 1,
+                "total_mirage": 0,
+                "total_mirage_after_multiplier": 0,
+                "pending_invite_codes": 0,
+                "claiming_available": False,
                 "debug": BACKEND_DEBUG,
             }
         )
@@ -438,7 +454,7 @@ def get_daily_quests():
         ts = int(time.time())
         day_utc = _get_utc_julian_day(ts)
 
-        # Check if suspended
+        # -- suspension check (shared across all sections) --
         if _is_user_suspended(owner, ts):
             suspension = _get_suspension_info(owner)
             return jsonify(
@@ -446,22 +462,28 @@ def get_daily_quests():
                     "suspended": True,
                     "suspension": suspension,
                     "daily_quests": [],
+                    "flash_quest": None,
+                    "pending_rewards": [],
                     "seconds_until_reset": _get_seconds_until_reset(ts),
                     "reward_multiplier": 1.0,
+                    "total_mirage": 0,
+                    "total_mirage_after_multiplier": 0,
+                    "pending_invite_codes": 0,
+                    "claiming_available": False,
                     "debug": BACKEND_DEBUG,
                 }
             )
 
-        # Load quest definitions
+        # -- load quest definitions once --
         defs = _load_quest_definitions()
         daily_defs = {q["id"]: q for q in defs.get("daily_quests", [])}
         special_defs = {q["id"]: q for q in defs.get("special_quests", [])}
+        flash_defs = {q["id"]: q for q in defs.get("flash_quest_templates", [])}
+        all_defs = {**daily_defs, **special_defs}
 
-        # Assign quests if user doesn't have any for today
-        # Use random rolls on localhost for easier testing
+        # ===== DAILY QUESTS =====
         _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
-        # Get user's assigned quests for today
         with connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -473,23 +495,17 @@ def get_daily_quests():
                     """,
                     (owner, day_utc),
                 )
-                rows = cur.fetchall()
-
-        # Merge daily_defs and special_defs for lookup
-        all_defs = {**daily_defs, **special_defs}
+                daily_rows = cur.fetchall()
 
         daily_quests = []
-        for row in rows:
+        for row in daily_rows:
             quest_id = row[0]
             progress = row[1]
             progress_meta = row[2] if isinstance(row[2], dict) else {}
             completed_at = row[3]
-
             quest_def = all_defs.get(quest_id, {})
             if not quest_def:
                 continue
-
-            # Calculate target for balanced_vote
             quest_data = {
                 "id": quest_id,
                 "title": quest_def.get("title", ""),
@@ -498,7 +514,6 @@ def get_daily_quests():
                 "progress": progress,
                 "completed": completed_at is not None,
                 "rewards": quest_def.get("rewards", []),
-                # Additional requirements for display
                 "min_content_length": quest_def.get("min_content_length"),
                 "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
                 "unique_target": quest_def.get("unique_target"),
@@ -506,167 +521,148 @@ def get_daily_quests():
                 "quality_threshold": quest_def.get("quality_threshold"),
                 "count_vote_changes": quest_def.get("count_vote_changes", True),
             }
-
             if quest_def.get("action_type") == "balanced_vote":
                 target_up = quest_def.get("target_upvotes", 0) or 0
                 target_down = quest_def.get("target_downvotes", 0) or 0
                 quest_data["target"] = target_up + target_down
-                # Include breakdown for balanced_vote quests
                 quest_data["upvotes"] = progress_meta.get("upvotes", 0)
                 quest_data["downvotes"] = progress_meta.get("downvotes", 0)
                 quest_data["target_upvotes"] = target_up
                 quest_data["target_downvotes"] = target_down
             else:
                 quest_data["target"] = quest_def.get("target_count", 1)
-
             daily_quests.append(quest_data)
 
-        multiplier = _get_user_reward_multiplier(owner, ts)
-
-        log_event(rid, "quests.daily.ok", owner=owner, quest_count=len(daily_quests))
-        return jsonify(
-            {
-                "suspended": False,
-                "daily_quests": daily_quests,
-                "seconds_until_reset": _get_seconds_until_reset(ts),
-                "reward_multiplier": round(multiplier, 4),
-                "debug": BACKEND_DEBUG,
-            }
-        )
-    except Exception as e:
-        log_event(rid, "quests.daily.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-@quests_bp.route("/api/rewards/flash", methods=["GET"])
-def get_flash_quests():
-    """Get active flash quests and user progress.
-
-    Query params:
-    - owner: User address (required)
-    """
-    rid = next_request_id()
-    log_event(rid, "quests.flash.begin")
-
-    # Check if quests are enabled
-    if not QUESTS_ENABLED:
-        return jsonify(
-            {
-                "disabled": True,
-                "flash_quest": None,
-            }
-        )
-
-    try:
-        owner = (request.args.get("owner") or "").strip().lower()
-        if not owner:
-            return jsonify({"error": "owner required"}), 400
-
-        ts = int(time.time())
-
-        # Check if suspended
-        if _is_user_suspended(owner, ts):
-            return jsonify(
-                {
-                    "suspended": True,
-                    "flash_quest": None,
-                }
-            )
-
-        # Load quest definitions
-        defs = _load_quest_definitions()
-        flash_defs = {q["id"]: q for q in defs.get("flash_quest_templates", [])}
-
-        # Get user's active flash quest
+        # ===== FLASH QUEST =====
+        flash_quest_data = None
         with connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
                     FROM user_flash_quests
-                    WHERE LOWER(owner) = LOWER(%s)
-                      AND ends_at > %s
+                    WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
                     ORDER BY starts_at DESC
                     LIMIT 1
                     """,
                     (owner, ts),
                 )
-                row = cur.fetchone()
+                flash_row = cur.fetchone()
 
-        # If no active flash quest, try to assign one
-        if not row:
+        if not flash_row:
             assigned = _maybe_assign_flash_quest(owner, ts, flash_defs)
             if assigned:
-                # Re-query the newly assigned quest
                 with connect_db() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
                             SELECT template_id, starts_at, ends_at, progress, progress_meta, completed_at
                             FROM user_flash_quests
-                            WHERE LOWER(owner) = LOWER(%s)
-                              AND ends_at > %s
+                            WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
                             ORDER BY starts_at DESC
                             LIMIT 1
                             """,
                             (owner, ts),
                         )
-                        row = cur.fetchone()
+                        flash_row = cur.fetchone()
 
-        if not row:
-            return jsonify(
+        if flash_row:
+            template_id = flash_row[0]
+            quest_def = flash_defs.get(template_id, {})
+            if quest_def:
+                flash_quest_data = {
+                    "id": template_id,
+                    "title": quest_def.get("title", ""),
+                    "description": quest_def.get("description", ""),
+                    "action_type": quest_def.get("action_type", ""),
+                    "progress": flash_row[3],
+                    "target": quest_def.get("target_count", 1),
+                    "completed": flash_row[5] is not None,
+                    "starts_at": flash_row[1],
+                    "ends_at": flash_row[2],
+                    "seconds_remaining": max(0, flash_row[2] - ts),
+                    "rewards": quest_def.get("rewards", []),
+                    "min_content_length": quest_def.get("min_content_length"),
+                    "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
+                    "unique_target": quest_def.get("unique_target"),
+                    "unique_topics_min": quest_def.get("unique_topics_min"),
+                    "quality_threshold": quest_def.get("quality_threshold"),
+                    "count_vote_changes": quest_def.get("count_vote_changes", True),
+                }
+
+        # ===== PENDING REWARDS =====
+        with connect_db() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, reward_type, reward_data, reason, created_at
+                    FROM pending_rewards
+                    WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
+                    ORDER BY created_at ASC
+                    """,
+                    (owner,),
+                )
+                reward_rows = cur.fetchall()
+
+        pending_rewards = []
+        total_mirage_with_multiplier = 0
+        total_mirage_no_multiplier = 0
+        pending_invite_codes = 0
+
+        for row in reward_rows:
+            reward_data = row[2] if isinstance(row[2], dict) else {}
+            pending_rewards.append(
                 {
-                    "suspended": False,
-                    "flash_quest": None,
+                    "id": row[0],
+                    "type": row[1],
+                    "data": reward_data,
+                    "reason": row[3],
+                    "created_at": row[4],
                 }
             )
+            if row[1] == "mirage":
+                amount = reward_data.get("amount", 0)
+                apply_multiplier = reward_data.get("apply_multiplier", True)
+                if apply_multiplier:
+                    total_mirage_with_multiplier += amount
+                else:
+                    total_mirage_no_multiplier += amount
+            elif row[1] == "invite_code":
+                pending_invite_codes += reward_data.get("amount", 1)
 
-        template_id = row[0]
-        starts_at = row[1]
-        ends_at = row[2]
-        progress = row[3]
-        completed_at = row[5]
+        # -- shared multiplier --
+        multiplier = _get_user_reward_multiplier(owner, ts)
+        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
+        total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 
-        quest_def = flash_defs.get(template_id, {})
-        if not quest_def:
-            return jsonify(
-                {
-                    "suspended": False,
-                    "flash_quest": None,
-                }
-            )
+        distributor = get_distributor()
+        claiming_available = distributor.is_configured()
 
-        flash_quest = {
-            "id": template_id,
-            "title": quest_def.get("title", ""),
-            "description": quest_def.get("description", ""),
-            "action_type": quest_def.get("action_type", ""),
-            "progress": progress,
-            "target": quest_def.get("target_count", 1),
-            "completed": completed_at is not None,
-            "starts_at": starts_at,
-            "ends_at": ends_at,
-            "seconds_remaining": max(0, ends_at - ts),
-            "rewards": quest_def.get("rewards", []),
-            # Additional requirements for display
-            "min_content_length": quest_def.get("min_content_length"),
-            "time_spacing_minutes": quest_def.get("time_spacing_minutes"),
-            "unique_target": quest_def.get("unique_target"),
-            "unique_topics_min": quest_def.get("unique_topics_min"),
-            "quality_threshold": quest_def.get("quality_threshold"),
-            "count_vote_changes": quest_def.get("count_vote_changes", True),
-        }
-
-        log_event(rid, "quests.flash.ok", owner=owner, template_id=template_id)
-        return jsonify(
-            {
-                "suspended": False,
-                "flash_quest": flash_quest,
-            }
+        log_event(
+            rid,
+            "rewards.summary.ok",
+            owner=owner,
+            daily=len(daily_quests),
+            flash=flash_quest_data is not None,
+            pending=len(pending_rewards),
         )
+        resp = {
+            "suspended": False,
+            "daily_quests": daily_quests,
+            "flash_quest": flash_quest_data,
+            "pending_rewards": pending_rewards,
+            "seconds_until_reset": _get_seconds_until_reset(ts),
+            "reward_multiplier": round(multiplier, 4),
+            "total_mirage": total_mirage,
+            "total_mirage_after_multiplier": total_mirage_after_multiplier,
+            "pending_invite_codes": pending_invite_codes,
+            "claiming_available": claiming_available,
+            "debug": BACKEND_DEBUG,
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
-        log_event(rid, "quests.flash.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        log_event(rid, "rewards.summary.err", error=str(e))
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/achievements", methods=["GET"])
@@ -723,106 +719,11 @@ def get_achievements():
             )
 
         log_event(rid, "achievements.ok", owner=owner, count=len(achievements))
-        return jsonify({"achievements": achievements})
+        resp = {"achievements": achievements}
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "achievements.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-@quests_bp.route("/api/rewards/pending", methods=["GET"])
-def get_pending_rewards():
-    """Get user's pending/claimable rewards.
-
-    Query params:
-    - owner: User address (required)
-    """
-    rid = next_request_id()
-    log_event(rid, "rewards.pending.begin")
-
-    try:
-        owner = (request.args.get("owner") or "").strip().lower()
-        if not owner:
-            return jsonify({"error": "owner required"}), 400
-
-        ts = int(time.time())
-
-        # Check if suspended
-        if _is_user_suspended(owner, ts):
-            suspension = _get_suspension_info(owner)
-            return jsonify(
-                {
-                    "suspended": True,
-                    "suspension": suspension,
-                    "pending_rewards": [],
-                    "total_mirage": 0,
-                    "reward_multiplier": 1.0,
-                }
-            )
-
-        # Get pending rewards
-        with connect_db() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, reward_type, reward_data, reason, created_at
-                    FROM pending_rewards
-                    WHERE LOWER(owner) = LOWER(%s) AND claimed_at IS NULL
-                    ORDER BY created_at ASC
-                    """,
-                    (owner,),
-                )
-                rows = cur.fetchall()
-
-        pending_rewards = []
-        total_mirage_with_multiplier = 0
-        total_mirage_no_multiplier = 0
-        pending_invite_codes = 0
-
-        for row in rows:
-            reward_data = row[2] if isinstance(row[2], dict) else {}
-            reward = {
-                "id": row[0],
-                "type": row[1],
-                "data": reward_data,
-                "reason": row[3],
-                "created_at": row[4],
-            }
-            pending_rewards.append(reward)
-
-            if row[1] == "mirage":
-                amount = reward_data.get("amount", 0)
-                apply_multiplier = reward_data.get("apply_multiplier", True)
-                if apply_multiplier:
-                    total_mirage_with_multiplier += amount
-                else:
-                    total_mirage_no_multiplier += amount
-            elif row[1] == "invite_code":
-                pending_invite_codes += reward_data.get("amount", 1)
-
-        multiplier = _get_user_reward_multiplier(owner, ts)
-        total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
-        # Apply multiplier only to rewards that allow it
-        total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
-
-        # Check if claiming is available
-        distributor = get_distributor()
-        claiming_available = distributor.is_configured()
-
-        log_event(rid, "rewards.pending.ok", owner=owner, count=len(pending_rewards), total_mirage=total_mirage)
-        return jsonify(
-            {
-                "suspended": False,
-                "pending_rewards": pending_rewards,
-                "total_mirage": total_mirage,
-                "total_mirage_after_multiplier": total_mirage_after_multiplier,
-                "pending_invite_codes": pending_invite_codes,
-                "reward_multiplier": round(multiplier, 4),
-                "claiming_available": claiming_available,
-            }
-        )
-    except Exception as e:
-        log_event(rid, "rewards.pending.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/claim", methods=["POST"])
@@ -960,16 +861,15 @@ def claim_rewards():
             reward_count=len(result.get("rewards", [])),
             tx_hash=result.get("tx_hash"),
         )
-        return jsonify(
-            {
-                "success": True,
-                "rewards": result.get("rewards", []),
-                "tx_hash": result.get("tx_hash"),
-            }
-        )
+        resp = {
+            "success": True,
+            "rewards": result.get("rewards", []),
+            "tx_hash": result.get("tx_hash"),
+        }
+        return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "rewards.claim.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ========== Admin Endpoints ==========
@@ -1051,7 +951,7 @@ def admin_suspend_rewards():
         )
     except Exception as e:
         log_event(rid, "admin.suspend.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/admin/rewards/unsuspend", methods=["POST"])
@@ -1120,7 +1020,7 @@ def admin_unsuspend_rewards():
         )
     except Exception as e:
         log_event(rid, "admin.unsuspend.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/admin/rewards/suspensions", methods=["GET"])
@@ -1176,7 +1076,7 @@ def admin_list_suspensions():
         return jsonify({"suspensions": suspensions})
     except Exception as e:
         log_event(rid, "admin.suspensions.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ==================== Debug Endpoints (localhost only) ====================
@@ -1305,7 +1205,7 @@ def debug_quests_info():
         )
     except Exception as e:
         log_event(rid, "debug.quests.info.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/complete", methods=["POST"])
@@ -1399,7 +1299,7 @@ def debug_complete_quest():
         return jsonify({"success": True, "quest_id": quest_id})
     except Exception as e:
         log_event(rid, "debug.quests.complete.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/reset", methods=["POST"])
@@ -1441,7 +1341,7 @@ def debug_reset_quests():
         return jsonify({"success": True, "deleted_count": deleted_count})
     except Exception as e:
         log_event(rid, "debug.quests.reset.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/set_completed", methods=["POST"])
@@ -1522,4 +1422,4 @@ def debug_set_completed_count():
         return jsonify({"success": True, "old_count": current_count, "new_count": new_count})
     except Exception as e:
         log_event(rid, "debug.quests.set_completed.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)

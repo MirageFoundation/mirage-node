@@ -41,7 +41,6 @@ export const GlobalStyle = createGlobalStyle`
       ${({ theme }) => (theme && theme.colors && theme.colors.text) ? theme.colors.text : '#FFFFFF'};
     background-color: 
       ${({ theme }) => (theme && theme.colors && theme.colors.bg) ? theme.colors.bg : '#1A1A1A'};
-    overscroll-behavior: contain; 
     word-break: normal;      /* do not break words into pieces */
     overflow-wrap: normal;   /* wrap only at normal break points (spaces) */
     text-indent: 0;

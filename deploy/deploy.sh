@@ -122,16 +122,12 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Fail fast if there are uncommitted changes (only scripts/deploy_all_prod.sh is allowed)
+# Fail fast if there are uncommitted changes
 dirty_files="$(git -C "$REPO_ROOT" diff --name-only 2>/dev/null; git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null)"
 if [ -n "$dirty_files" ]; then
-  # Check if the only dirty file is scripts/deploy_all_prod.sh
-  other_dirty="$(echo "$dirty_files" | grep -v '^scripts/deploy_all_prod.sh$' || true)"
-  if [ -n "$other_dirty" ]; then
-    echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
-    git -C "$REPO_ROOT" status --short >&2
-    exit 1
-  fi
+  echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
+  git -C "$REPO_ROOT" status --short >&2
+  exit 1
 fi
 
 GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
@@ -202,15 +198,19 @@ maybe_proto_gen_and_go_build() {
 
   # Step 2: Compute Go hash AFTER proto-gen (so it includes fresh .pb.go files)
   # This is critical: if proto-gen updated any .pb.go files, the hash will change
+  # Also include the git version string so that adding a tag forces a rebuild
+  # (the version is baked into the binary via ldflags at compile time)
+  local git_version
+  git_version="$(git -C "$REPO_ROOT/blockchain" describe --tags --always --dirty 2>/dev/null || echo "unknown")"
   local new_go_hash
-  new_go_hash="$(hash_tree \
+  new_go_hash="$(echo "$git_version" | cat - <(hash_tree \
     "$REPO_ROOT/blockchain/go.mod" \
     "$REPO_ROOT/blockchain/go.sum" \
     "$REPO_ROOT/blockchain/app" \
     "$REPO_ROOT/blockchain/cmd" \
     "$REPO_ROOT/blockchain/orchestrator" \
     "$REPO_ROOT/blockchain/x" \
-  )"
+  ) | sha256sum | awk '{print $1}')"
 
   local miraged_bin="$REPO_ROOT/blockchain/bin/miraged"
   local orchestrator_bin="$REPO_ROOT/blockchain/bin/orchestrator"
@@ -807,132 +807,46 @@ if [ "$LOCAL_MODE" -eq 0 ]; then
   run_ssh "chmod +x /tmp/enable_fail2ban.sh && /tmp/enable_fail2ban.sh && rm /tmp/enable_fail2ban.sh"
 fi
 
-# =============================================================================
-# Service Health Check
-# =============================================================================
-# Verify all critical services are healthy before declaring deployment successful.
-# Uses status_dashboard.py --json for programmatic health checking.
-
-service_health_check() {
-  local max_attempts=30
-  local wait_secs=5
-  local attempt=1
-  
-  echo "==> Waiting for services to become healthy..."
-  echo "    Required: CometBFT, Validator, PostgreSQL, Backend, Indexer, Caddy, Endpoints"
-  echo ""
-  
-  while [ $attempt -le $max_attempts ]; do
-    echo "[$attempt/$max_attempts] Running health check..."
-    
-    # Run health check inside container
-    local result
-    if result=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1); then
-      # Parse JSON result
-      local healthy
-      healthy=$(echo "$result" | python3 -c "import sys, json; d=json.load(sys.stdin); print('true' if d.get('healthy') else 'false')" 2>/dev/null || echo "false")
-      
-      if [ "$healthy" = "true" ]; then
-        echo "  -> All services healthy!"
-        echo ""
-        # Show service summary
-        echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for name, info in d.get('services', {}).items():
-    status = info.get('status', 'unknown').upper()
-    msg = info.get('message', '')
-    symbol = '✓' if info.get('healthy') else '✗'
-    print(f'    {symbol} {name}: {status} - {msg}')
-" 2>/dev/null || true
-        return 0
-      else
-        echo "  -> Some services not healthy yet:"
-        echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for err in d.get('errors', []):
-    print(f'      - {err}')
-" 2>/dev/null || echo "      (could not parse errors)"
-      fi
-    else
-      echo "  -> Health check script failed (services may still be starting)"
-      echo "     $result" | head -3 | sed 's/^/      /'
-    fi
-    
-    if [ $attempt -lt $max_attempts ]; then
-      echo "  -> Retrying in ${wait_secs}s..."
-      sleep $wait_secs
-    fi
-    attempt=$((attempt + 1))
-  done
-  
-  echo ""
-  echo "ERROR: Services did not become healthy after $((max_attempts * wait_secs))s" >&2
-  echo "Final health check result:" >&2
-  docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | head -50 >&2 || true
-  return 1
-}
-
+# Health check: best-effort only. Log status but never block the deploy.
+# During software upgrades the chain halts until 2/3+ validators restart,
+# so hard-failing here would prevent sequential multi-server deploys.
+echo "==> Running post-deploy health check (non-blocking)..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
-  service_health_check
+  sleep 5
+  docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    for name, info in d.get('services', {}).items():
+        status = info.get('status', 'unknown').upper()
+        msg = info.get('message', '')
+        symbol = '✓' if info.get('healthy') else '✗'
+        print(f'    {symbol} {name}: {status} - {msg}')
+    if not d.get('healthy'):
+        print()
+        print('    Note: some services unhealthy — expected during upgrade halts')
+except Exception:
+    print('    (could not parse health check output)')
+" 2>/dev/null || echo "    (health check not available yet)"
 else
-  # For remote: run health check via SSH
-  echo "==> Waiting for services to become healthy..."
-  echo "    Required: CometBFT, Validator, PostgreSQL, Backend, Indexer, Caddy, Endpoints"
-  echo ""
-  
-  HEALTH_CHECK_SCRIPT='
-set -euo pipefail
-max_attempts=30
-wait_secs=5
-attempt=1
-
-while [ $attempt -le $max_attempts ]; do
-  echo "[$attempt/$max_attempts] Running health check..."
-  
-  if result=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1); then
-    healthy=$(echo "$result" | python3 -c "import sys, json; d=json.load(sys.stdin); print(\"true\" if d.get(\"healthy\") else \"false\")" 2>/dev/null || echo "false")
-    
-    if [ "$healthy" = "true" ]; then
-      echo "  -> All services healthy!"
-      echo ""
-      echo "$result" | python3 -c "
+  run_ssh '
+    sleep 5
+    docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
 import sys, json
-d = json.load(sys.stdin)
-for name, info in d.get(\"services\", {}).items():
-    status = info.get(\"status\", \"unknown\").upper()
-    msg = info.get(\"message\", \"\")
-    symbol = \"✓\" if info.get(\"healthy\") else \"✗\"
-    print(f\"    {symbol} {name}: {status} - {msg}\")
-" 2>/dev/null || true
-      exit 0
-    else
-      echo "  -> Some services not healthy yet:"
-      echo "$result" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-for err in d.get(\"errors\", []):
-    print(f\"      - {err}\")
-" 2>/dev/null || echo "      (could not parse errors)"
-    fi
-  else
-    echo "  -> Health check script failed (services may still be starting)"
-  fi
-  
-  if [ $attempt -lt $max_attempts ]; then
-    echo "  -> Retrying in ${wait_secs}s..."
-    sleep $wait_secs
-  fi
-  attempt=$((attempt + 1))
-done
-
-echo ""
-echo "ERROR: Services did not become healthy after $((max_attempts * wait_secs))s" >&2
-docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | head -50 >&2 || true
-exit 1
-'
-  run_ssh "bash -c '$HEALTH_CHECK_SCRIPT'"
+try:
+    d = json.load(sys.stdin)
+    for name, info in d.get(\"services\", {}).items():
+        status = info.get(\"status\", \"unknown\").upper()
+        msg = info.get(\"message\", \"\")
+        symbol = \"✓\" if info.get(\"healthy\") else \"✗\"
+        print(f\"    {symbol} {name}: {status} - {msg}\")
+    if not d.get(\"healthy\"):
+        print()
+        print(\"    Note: some services unhealthy — expected during upgrade halts\")
+except Exception:
+    print(\"    (could not parse health check output)\")
+" 2>/dev/null || echo "    (health check not available yet)"
+  '
 fi
 
 if [ "$LOCAL_MODE" -eq 1 ]; then

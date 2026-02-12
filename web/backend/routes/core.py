@@ -324,6 +324,18 @@ def _tx_error(
     return jsonify({"error": message, "details": info, "tx_hash": tx_hash}), 400
 
 
+def _classify_exception(err_str: str):
+    """Return (message, http_status) for common chain exceptions.
+
+    Checks for known error patterns and returns user-safe messages.
+    Unknown exceptions get a generic message (details are in server logs).
+    """
+    low = err_str.lower()
+    if "admin insufficient balance" in low:
+        return "admin insufficient balance: your account balance is too low to cover the transaction fee", 400
+    return "Internal server error", 500
+
+
 def get_nonce_for_subscriber(last_block_hash: str) -> str:
     """For subscribers without PoW, use timestamp as nonce to ensure tx uniqueness."""
     if last_block_hash:
@@ -705,8 +717,10 @@ def core_set_username():
 
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "set_username.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        err_str = str(e)
+        log_event(rid, "set_username.err", error=err_str)
+        msg, status = _classify_exception(err_str)
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_moderator", methods=["POST"])
@@ -811,7 +825,8 @@ def core_follow_moderator():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_moderator.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_moderator", methods=["POST"])
@@ -907,7 +922,8 @@ def core_unfollow_moderator():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_moderator.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/block_post", methods=["POST"])
@@ -1026,7 +1042,8 @@ def core_block_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "block_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/block_user", methods=["POST"])
@@ -1145,7 +1162,8 @@ def core_block_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "block_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unblock_post", methods=["POST"])
@@ -1232,7 +1250,8 @@ def core_unblock_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unblock_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unblock_user", methods=["POST"])
@@ -1319,7 +1338,8 @@ def core_unblock_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unblock_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_user", methods=["POST"])
@@ -1416,7 +1436,8 @@ def core_follow_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_user", methods=["POST"])
@@ -1502,7 +1523,8 @@ def core_unfollow_user():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_user.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/follow_topic", methods=["POST"])
@@ -1596,7 +1618,8 @@ def core_follow_topic():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "follow_topic.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/unfollow_topic", methods=["POST"])
@@ -1679,7 +1702,8 @@ def core_unfollow_topic():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "unfollow_topic.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/delete_post", methods=["POST"])
@@ -1817,7 +1841,8 @@ def core_delete_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "delete_post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/report", methods=["POST"])
@@ -1936,7 +1961,8 @@ def core_report():
         return jsonify({"success": True, "id": int(report_id)})
     except Exception as e:
         log_event(rid, "report.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/resolve_report", methods=["POST"])
@@ -1968,7 +1994,8 @@ def core_resolve_report():
         return jsonify({"success": True})
     except Exception as e:
         log_event(rid, "resolve_report.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/edit", methods=["POST"])
@@ -2156,7 +2183,8 @@ def core_edit():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "edit.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
@@ -2370,7 +2398,8 @@ def core_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/vote", methods=["POST"])
@@ -2549,7 +2578,8 @@ def core_vote():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "vote.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/send_tokens", methods=["POST"])
@@ -2699,7 +2729,8 @@ def core_send_tokens():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "send_tokens.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/upgrade_level", methods=["POST"])
@@ -2832,7 +2863,8 @@ def core_upgrade_level():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "upgrade_level.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 @core_bp.route("/api/core/set_auto_renewal", methods=["POST"])
@@ -2948,230 +2980,8 @@ def core_set_auto_renewal():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "set_auto_renewal.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
-
-
-def _lookup_ip_info(ip: str) -> dict:
-    """Lookup IP metadata using ip-api.com (free, no API key).
-
-    Returns dict with: country, countryCode, isp, org, mobile, proxy, hosting, reverse DNS.
-    On failure, returns empty dict (non-blocking).
-
-    Rate limit: 45 requests/minute on free tier.
-    """
-    if not ip or ip in ("127.0.0.1", "::1", "localhost"):
-        return {}
-
-    result = {}
-
-    # Try reverse DNS first (fast, local)
-    try:
-        hostname = socket.gethostbyaddr(ip)[0]
-        result["rdns"] = hostname
-    except (socket.herror, socket.gaierror, OSError):
-        pass
-
-    # Lookup via ip-api.com (free tier, no key needed)
-    try:
-        url = (
-            f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,region,city,isp,org,as,mobile,proxy,hosting"
-        )
-        req = _ur.Request(url, headers={"User-Agent": "mirage-backend/1.0"})
-        with _ur.urlopen(req, timeout=2) as resp:
-            data = json.loads(resp.read().decode())
-            if data.get("status") == "success":
-                result["country"] = data.get("country")
-                result["countryCode"] = data.get("countryCode")
-                result["region"] = data.get("region")
-                result["city"] = data.get("city")
-                result["isp"] = data.get("isp")
-                result["org"] = data.get("org")
-                result["asn"] = data.get("as")
-                result["mobile"] = data.get("mobile", False)
-                result["proxy"] = data.get("proxy", False)
-                result["hosting"] = data.get("hosting", False)
-    except Exception:
-        # Non-blocking - if lookup fails, we just don't have the metadata
-        pass
-
-    return result
-
-
-def _compute_fp_hash(data: dict, attributes: dict) -> str:
-    """Compute fingerprint hash from material fields.
-
-    Includes both legacy fields and key attributes from the extended JSONB blob.
-    """
-    parts = [
-        str(data.get("ip_hash") or ""),
-        str(data.get("canvas_hash") or ""),
-        str(data.get("webgl_hash") or ""),
-        str(data.get("screen_width") or ""),
-        str(data.get("screen_height") or ""),
-        str(data.get("timezone") or ""),
-        str(data.get("user_agent_hash") or ""),
-    ]
-    # Add key attributes from extended fingerprint
-    if attributes:
-        plugins = attributes.get("plugins", {})
-        webgl = attributes.get("webgl", {})
-        audio = attributes.get("audio", {})
-        parts.extend(
-            [
-                str(plugins.get("hash") or ""),
-                str(webgl.get("extensionsHash") or ""),
-                str(audio.get("codecsHash") or ""),
-                str(attributes.get("mathHash") or ""),
-            ]
-        )
-    combined = "|".join(parts)
-    return hashlib.sha256(combined.encode()).hexdigest()[:32]
-
-
-@core_bp.route("/api/core/fp", methods=["POST"])
-def save_fingerprint():
-    """Save device fingerprint for fraud detection. Appends new record on material change."""
-    try:
-        data = request.get_json() or {}
-        user_address = (data.get("user_address") or "").strip().lower()
-        if not user_address:
-            return jsonify({"error": "missing user_address"}), 400
-
-        now_ts = int(time.time())
-
-        # Extract from request headers
-        ip_raw = request.headers.get("X-Forwarded-For", request.headers.get("X-Real-IP", request.remote_addr or ""))
-        ip_raw = ip_raw.split(",")[0].strip() if ip_raw else ""
-        ip_hash = hashlib.sha256(ip_raw.encode()).hexdigest()[:32] if ip_raw else None
-
-        # Lookup IP metadata (country, ISP, proxy detection, etc.)
-        ip_info = _lookup_ip_info(ip_raw) if ip_raw else {}
-
-        user_agent = request.headers.get("User-Agent", "")[:500]
-        user_agent_hash = hashlib.sha256(user_agent.encode()).hexdigest()[:32] if user_agent else None
-
-        # Capture additional HTTP headers for fingerprinting
-        http_headers = {
-            "accept": request.headers.get("Accept", ""),
-            "acceptLanguage": request.headers.get("Accept-Language", ""),
-            "acceptEncoding": request.headers.get("Accept-Encoding", ""),
-            "dnt": request.headers.get("DNT", ""),
-            "secChUa": request.headers.get("Sec-CH-UA", ""),
-            "secChUaPlatform": request.headers.get("Sec-CH-UA-Platform", ""),
-            "secChUaMobile": request.headers.get("Sec-CH-UA-Mobile", ""),
-        }
-
-        # Frontend-provided data (legacy fields for indexed columns)
-        fp_data = {
-            "ip_hash": ip_hash,
-            "user_agent": user_agent,
-            "user_agent_hash": user_agent_hash,
-            "screen_width": data.get("screenWidth"),
-            "screen_height": data.get("screenHeight"),
-            "color_depth": data.get("colorDepth"),
-            "pixel_ratio": data.get("pixelRatio"),
-            "timezone": data.get("timezone"),
-            "timezone_offset": data.get("timezoneOffset"),
-            "language": data.get("language"),
-            "languages": json.dumps(data.get("languages")) if data.get("languages") else None,
-            "platform": data.get("platform"),
-            "hardware_concurrency": data.get("hardwareConcurrency"),
-            "device_memory": data.get("deviceMemory"),
-            "touch_support": data.get("touchSupport"),
-            "canvas_hash": data.get("canvasHash"),
-            "webgl_vendor": data.get("webglVendor"),
-            "webgl_renderer": data.get("webglRenderer"),
-            "webgl_hash": data.get("webglHash"),
-        }
-
-        # Extended attributes from frontend (stored as JSONB)
-        frontend_attributes = data.get("attributes", {})
-
-        # Combine frontend attributes with server-side captured data
-        attributes = {
-            **frontend_attributes,
-            "httpHeaders": http_headers,
-            "serverTimestamp": now_ts,
-        }
-
-        # Add IP metadata if available (country, ISP, proxy/VPN detection)
-        if ip_info:
-            attributes["ipInfo"] = ip_info
-
-        fingerprint_hash = _compute_fp_hash(fp_data, attributes)
-        attributes_jsonb = Jsonb(attributes or {})
-
-        with connect_db() as conn:
-            with conn.cursor() as cur:
-                # Check for existing fingerprint with same hash
-                cur.execute(
-                    """
-                    SELECT id, fingerprint_hash FROM user_fingerprints
-                    WHERE user_address = %s
-                    ORDER BY last_seen DESC
-                    LIMIT 1
-                    """,
-                    (user_address,),
-                )
-                row = cur.fetchone()
-
-                if row and row[1] == fingerprint_hash:
-                    # Same fingerprint, update last_seen, seen_count, and attributes
-                    cur.execute(
-                        """
-                        UPDATE user_fingerprints
-                        SET last_seen = %s, seen_count = seen_count + 1, attributes = %s
-                        WHERE id = %s
-                        """,
-                        (now_ts, attributes_jsonb, row[0]),
-                    )
-                else:
-                    # New or changed fingerprint, insert new row
-                    cur.execute(
-                        """
-                        INSERT INTO user_fingerprints (
-                            user_address, ip_hash, user_agent, user_agent_hash,
-                            screen_width, screen_height, color_depth, pixel_ratio,
-                            timezone, timezone_offset, language, languages,
-                            platform, hardware_concurrency, device_memory, touch_support,
-                            canvas_hash, webgl_vendor, webgl_renderer, webgl_hash,
-                            fingerprint_hash, first_seen, last_seen, seen_count, attributes
-                        ) VALUES (
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s
-                        )
-                        """,
-                        (
-                            user_address,
-                            fp_data["ip_hash"],
-                            fp_data["user_agent"],
-                            fp_data["user_agent_hash"],
-                            fp_data["screen_width"],
-                            fp_data["screen_height"],
-                            fp_data["color_depth"],
-                            fp_data["pixel_ratio"],
-                            fp_data["timezone"],
-                            fp_data["timezone_offset"],
-                            fp_data["language"],
-                            fp_data["languages"],
-                            fp_data["platform"],
-                            fp_data["hardware_concurrency"],
-                            fp_data["device_memory"],
-                            fp_data["touch_support"],
-                            fp_data["canvas_hash"],
-                            fp_data["webgl_vendor"],
-                            fp_data["webgl_renderer"],
-                            fp_data["webgl_hash"],
-                            fingerprint_hash,
-                            now_ts,
-                            now_ts,
-                            attributes_jsonb,
-                        ),
-                    )
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
 
 
 __all__ = ["core_bp"]

@@ -76,6 +76,54 @@ function buildUrl(path, params) {
 // Removed remote fallback helpers (hard-fail policy)
 
 /**
+ * Auto-sync balance: if the API response contains a `balance` field and the
+ * request was for the logged-in user's own address, update localStorage and
+ * fire the balanceUpdated event so TopBar/MobileHeader stay in sync.
+ * @param {Record<string,any>=} params - GET query params
+ * @param {any=} body - POST body
+ * @param {any} data - parsed response
+ */
+function maybeSyncBalance(params, body, data) {
+    if (!data || typeof data !== 'object' || data.balance === undefined) return;
+    try {
+        const myAddr = localStorage.getItem('publicKey') || '';
+        if (!myAddr) return;
+        // Check address from query params (GET) or body (POST)
+        const reqAddr = String(
+            (params && (params.address || params.owner)) ||
+            (body && (body.address || body.owner)) ||
+            ''
+        );
+        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return;
+        const bal = Number(data.balance);
+        if (!Number.isFinite(bal)) return;
+        localStorage.setItem('user_balance', String(Math.max(0, Math.trunc(bal))));
+        window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: bal }));
+    } catch (_) { }
+}
+
+/**
+ * Auto-sync inbox count: if the API response contains `new_inbox_items`,
+ * persist to localStorage and dispatch an event so TopBar/MobileBottomNav
+ * can update the badge (survives component remounts across navigation).
+ *
+ * Skips the update if the count was explicitly set client-side within the
+ * last 5 seconds (e.g. mark-as-read), so a stale server response from a
+ * request that was in-flight before the mark can't flash the old count.
+ * @param {any} data - parsed response
+ */
+function maybeSyncInbox(data) {
+    if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
+    try {
+        const setAt = parseInt(localStorage.getItem('inbox_count_set_at'), 10);
+        if (setAt && (Date.now() - setAt) < 5000) return;
+        const count = Math.max(0, data.new_inbox_items);
+        localStorage.setItem('inbox_count', String(count));
+        window.dispatchEvent(new CustomEvent('inboxCount', { detail: count }));
+    } catch (_) { }
+}
+
+/**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
  * @property {Record<string,string>=} headers
@@ -96,7 +144,12 @@ async function get(path, params, options) {
             const ct = resp.headers.get('content-type') || '';
             // If HTML came back, likely misroute: attempt remote fallback
             if (!ct.includes('text/html')) {
-                if (ct.includes('application/json')) return await resp.json();
+                if (ct.includes('application/json')) {
+                    const json = await resp.json();
+                    maybeSyncBalance(params, undefined, json);
+                    maybeSyncInbox(json);
+                    return json;
+                }
                 return await resp.text();
             }
         }
@@ -127,7 +180,12 @@ async function post(path, body, options) {
         if (resp.ok) {
             const ct = resp.headers.get('content-type') || '';
             if (!ct.includes('text/html')) {
-                if (ct.includes('application/json')) return await resp.json();
+                if (ct.includes('application/json')) {
+                    const json = await resp.json();
+                    maybeSyncBalance(undefined, body, json);
+                    maybeSyncInbox(json);
+                    return json;
+                }
                 return await resp.text();
             }
         }

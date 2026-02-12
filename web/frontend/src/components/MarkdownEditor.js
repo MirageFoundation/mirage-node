@@ -183,6 +183,14 @@ const OlIcon = () => (
     </IconWrap>
 );
 
+const SpoilerIcon = () => (
+    <IconWrap title="Spoiler">
+        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+        <circle cx="12" cy="12" r="3" />
+        <line x1="1" y1="1" x2="23" y2="23" />
+    </IconWrap>
+);
+
 const EditorContainer = styled.div`
 	display: flex;
 	flex-direction: column;
@@ -817,46 +825,46 @@ export default function MarkdownEditor({
             e.preventDefault();
             const ta = areaRef.current;
             if (!ta) return;
-            
+
             const style = getComputedStyle(ta);
             const lineHeight = parseFloat(style.lineHeight) || 20;
             const linesPerPage = Math.floor(window.innerHeight / lineHeight) - 2;
-            
+
             const text = ta.value || '';
             const lines = text.split('\n');
             const textBeforeCursor = text.substring(0, ta.selectionStart);
             const currentLine = (textBeforeCursor.match(/\n/g) || []).length;
             const columnInLine = ta.selectionStart - textBeforeCursor.lastIndexOf('\n') - 1;
-            
+
             let newLine;
             if (e.key === "PageDown") {
                 newLine = Math.min(currentLine + linesPerPage, lines.length - 1);
             } else {
                 newLine = Math.max(currentLine - linesPerPage, 0);
             }
-            
+
             // Calculate new cursor position
             let newPos = 0;
             for (let i = 0; i < newLine; i++) {
                 newPos += lines[i].length + 1;
             }
             newPos += Math.min(columnInLine, lines[newLine].length);
-            
+
             ta.setSelectionRange(newPos, newPos);
-            
+
             // Now scroll to cursor
             setTimeout(() => {
                 const rect = ta.getBoundingClientRect();
                 const paddingTop = parseFloat(style.paddingTop) || 8;
                 const margin = lineHeight * 2;
                 const targetY = rect.top + paddingTop + (newLine * lineHeight);
-                
+
                 // If near bottom, show Save button
                 let scrollTarget = targetY;
                 if (newLine >= lines.length - 3) {
                     scrollTarget = rect.bottom + lineHeight * 4;
                 }
-                
+
                 if (scrollTarget < margin) {
                     window.scrollBy({ top: scrollTarget - margin, behavior: 'instant' });
                 } else if (scrollTarget > window.innerHeight - margin) {
@@ -869,13 +877,13 @@ export default function MarkdownEditor({
             setTimeout(() => {
                 const ta = areaRef.current;
                 if (!ta) return;
-                
+
                 const rect = ta.getBoundingClientRect();
                 const style = getComputedStyle(ta);
                 const lineHeight = parseFloat(style.lineHeight) || 20;
                 const paddingTop = parseFloat(style.paddingTop) || 8;
                 const margin = lineHeight * 2;
-                
+
                 let targetY;
                 if (key === "End") {
                     // Scroll to bottom of textarea, plus extra space to show Save button below
@@ -888,14 +896,14 @@ export default function MarkdownEditor({
                     const textBeforeCursor = (ta.value || '').substring(0, ta.selectionStart);
                     const lineNumber = (textBeforeCursor.match(/\n/g) || []).length;
                     targetY = rect.top + paddingTop + (lineNumber * lineHeight);
-                    
+
                     // If cursor is near bottom of textarea, add extra space for Save button
                     const totalLines = ((ta.value || '').match(/\n/g) || []).length;
                     if (lineNumber >= totalLines - 2) {
                         targetY = rect.bottom + lineHeight * 4;
                     }
                 }
-                
+
                 // Scroll if target is outside visible area
                 if (targetY < margin) {
                     window.scrollBy({ top: targetY - margin, behavior: 'instant' });
@@ -956,6 +964,9 @@ export default function MarkdownEditor({
                 </ToolButton>
                 <ToolButton type="button" tabIndex={-1} onClick={() => toggleList(true)} disabled={disabled} aria-label="Numbered list">
                     <OlIcon />
+                </ToolButton>
+                <ToolButton type="button" tabIndex={-1} onClick={() => applyWrap("||")} disabled={disabled} aria-label="Spoiler">
+                    <SpoilerIcon />
                 </ToolButton>
                 {showUploadButton ? (
                     <ToolButton

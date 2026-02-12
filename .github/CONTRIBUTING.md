@@ -2,12 +2,14 @@
 
 ## Contribution Policy
 
-**This repository does not accept contributions or pull requests.**
+**All pull requests are welcome.**
 
-- No pull requests will be reviewed
-- No issues will be addressed
-- No feature requests will be considered
-- No bug reports will be processed
-- No maintainer contact information is provided
+We welcome issues, bug reports, and feature requests as well.
 
-This policy exists to prevent contribution-related notifications and emails.
+## Pull Request Guidelines
+
+- Target the `dev` branch for all changes.
+- Keep PRs focused and reasonably small.
+- Include tests or clear manual verification steps.
+- Update docs when behavior or APIs change.
+- Explain the why and user impact in the PR description.

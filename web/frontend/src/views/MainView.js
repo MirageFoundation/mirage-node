@@ -580,7 +580,6 @@ const HomeFeedInfoCard = styled.div`
 
 // NSFW welcome hero - shown once to logged-in users on home feed
 const NsfwWelcomeHero = styled.div`
-    margin-top: 1rem;
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 127, 0.08) 100%);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 12px;
@@ -597,7 +596,6 @@ const NsfwWelcomeHero = styled.div`
     @media (max-width: 768px) {
         border-radius: 8px;
         padding: 0.85rem 1rem;
-        margin-top: 0.5rem;
     }
 `;
 
@@ -1372,7 +1370,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     // Collapse state for hero cards (persisted)
     const [inviteBannerCollapsed, setInviteBannerCollapsed] = useState(() => {
-        try { return Storage.load('invite_banner_collapsed', false); } catch (_) { return false; }
+        try { return Storage.load('invite_banner_collapsed', true); } catch (_) { return true; }
     });
     const [questCardCollapsed, setQuestCardCollapsed] = useState(() => {
         try { return Storage.load('quest_card_collapsed', false); } catch (_) { return false; }
@@ -1752,10 +1750,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const forcedHard = !!forceHardRefreshRef.current;
             const arr = (data && Array.isArray(data.posts)) ? data.posts : [];
 
-            // Dispatch inbox timestamp for badge notification (avoid separate get_inbox call)
-            if (data && typeof data.latest_inbox_timestamp === 'number') {
-                window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-            }
             const hasMore = !!(data && data.has_more);
             if (!isMountedRef.current) return;
             setHasMorePosts(hasMore);

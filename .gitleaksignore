@@ -1,5 +1,1 @@
-# False positives: Cosmos genesis pubkey fields use JSON key named "key"
-blockchain/genesis/genesis.json:generic-api-key:341
-blockchain/genesis/genesis.json:generic-api-key:361
-
 

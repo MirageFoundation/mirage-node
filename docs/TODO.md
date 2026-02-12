@@ -62,3 +62,20 @@ generally optimize website. Find any bottlenecks. Use firefox profiler.
 ----------
 
 we need to add the relaying node into the blockchain history. this way we can prevent botting in the future. like a rogue node - e.g. if a node is known to facilite spammers, then a separate script can create a moderator that excludes these posts.
+
+
+
+----------
+
+we need to allow for galleries / multiple pics and videos
+add blocking keywords (in topics or posts)
+add blocking topics
+
+----------
+
+we need to integrate @ a user for notification (whether its in the topic or body)
+
+----------
+
+add all the quotes! from obsidian
+

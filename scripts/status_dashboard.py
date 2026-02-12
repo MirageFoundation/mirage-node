@@ -631,11 +631,40 @@ def check_node() -> ServiceStatus:
             status = Status.WARN
             message = "Syncing"
 
-        # Even if CometBFT reports catching_up=false, a stale last block is still unhealthy.
+        # Even if CometBFT reports catching_up=false, a stale last block is still unhealthy
+        # — unless the chain is halted for a software upgrade, which is expected.
         if block_age_secs is not None:
             if block_age_secs >= NODE_LAST_BLOCK_ERROR_SECS:
-                status = Status.ERROR
-                message = "No new blocks"
+                # Before marking ERROR, check if the chain is halted for an upgrade.
+                # During a coordinated upgrade, all validators stop at the upgrade
+                # height and no new blocks are produced until 2/3+ restart with the
+                # new binary.  This is a normal, healthy state.
+                upgrade_halt = False
+                try:
+                    plan_resp = requests.get(
+                        "http://127.0.0.1:1317/cosmos/upgrade/v1beta1/current_plan",
+                        timeout=2,
+                    )
+                    if plan_resp.status_code == 200:
+                        plan = plan_resp.json().get("plan")
+                        if plan and plan.get("name"):
+                            plan_height = int(plan.get("height", 0))
+                            current_height = int(height) if str(height).isdigit() else 0
+                            # Upgrade halt: plan height matches current height
+                            # (or we're within 1 block of it)
+                            if plan_height > 0 and abs(current_height - plan_height) <= 1:
+                                upgrade_halt = True
+                                details["upgrade_plan"] = plan.get("name")
+                                details["upgrade_height"] = plan_height
+                except Exception as e:
+                    debug_log(f"node: upgrade plan query failed: {e}")
+
+                if upgrade_halt:
+                    status = Status.WARN
+                    message = f"Upgrade halt ({details['upgrade_plan']})"
+                else:
+                    status = Status.ERROR
+                    message = "No new blocks"
             elif block_age_secs >= NODE_LAST_BLOCK_WARN_SECS and status != Status.ERROR:
                 status = Status.WARN
                 message = "Slow blocks"

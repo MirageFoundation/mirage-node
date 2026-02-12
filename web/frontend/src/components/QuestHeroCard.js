@@ -4,7 +4,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import styled, { keyframes, css } from 'styled-components';
-import { useQuests, usePendingRewards } from '../utils/useQuests';
+import { useRewards } from '../utils/useQuests';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import Api from '../lib/api';
@@ -679,17 +679,13 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         suspensionInfo: questsSuspensionInfo,
         disabled: questsDisabled,
         debug: debugEnabled,
-        refresh: refreshQuests,
-    } = useQuests();
-
-    const {
         totalAfterMultiplier,
         pendingInviteCodes,
         claiming,
         claimRewards,
         claimingAvailable,
-        refresh: refreshRewards,
-    } = usePendingRewards();
+        refresh: refreshAll,
+    } = useRewards();
 
     const [showCelebration, setShowCelebration] = useState(false);
     const [claimedAmount, setClaimedAmount] = useState(0);
@@ -723,20 +719,18 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         try {
             await Api.post('/rewards/debug/complete', { owner: userAddress, quest_id: questId });
             await fetchDebugInfo();
-            refreshQuests();
-            refreshRewards();
+            refreshAll();
         } catch (e) {
             console.error('Failed to complete quest:', e);
         }
-    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+    }, [userAddress, fetchDebugInfo, refreshAll]);
 
     const debugResetQuests = useCallback(async () => {
         if (!userAddress) return;
         setDebugLoading(true);
         try {
             await Api.post('/rewards/debug/reset', { owner: userAddress });
-            refreshQuests();
-            refreshRewards();
+            refreshAll();
             setTimeout(async () => {
                 await fetchDebugInfo();
                 setDebugLoading(false);
@@ -745,7 +739,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             console.error('Failed to reset quests:', e);
             setDebugLoading(false);
         }
-    }, [userAddress, fetchDebugInfo, refreshQuests, refreshRewards]);
+    }, [userAddress, fetchDebugInfo, refreshAll]);
 
     const debugSetCompletedCount = useCallback(async () => {
         if (!userAddress) return;
@@ -754,11 +748,11 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
         try {
             await Api.post('/rewards/debug/set_completed', { owner: userAddress, count });
             await fetchDebugInfo();
-            refreshQuests();
+            refreshAll();
         } catch (e) {
             console.error('Failed to set completed count:', e);
         }
-    }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshQuests]);
+    }, [userAddress, targetCompletedCount, fetchDebugInfo, refreshAll]);
 
     useEffect(() => {
         if (showDebug && debugEnabled) {
@@ -784,8 +778,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             setShowCelebration(true);
 
             // Refresh data
-            refreshQuests();
-            refreshRewards();
+            refreshAll();
 
             // If invite codes were claimed, notify other components to refresh
             if (inviteCodesCount > 0) {
@@ -798,7 +791,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
             // Clear error after 10 seconds
             setTimeout(() => setClaimError(null), 10000);
         }
-    }, [claimRewards, refreshQuests, refreshRewards]);
+    }, [claimRewards, refreshAll]);
 
     const closeCelebration = useCallback(() => {
         setShowCelebration(false);
@@ -892,7 +885,9 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                 </QuestHeader>
                 {!collapsed && (
                     <EmptyState>
-                        {questsError ? 'Unable to load quests' : 'No quests available yet. Check back soon!'}
+                        {questsError
+                            ? `⚠️ ${typeof questsError === 'string' ? questsError : 'Unable to load quests. Please try again later.'}`
+                            : 'No quests available yet. Check back soon!'}
                     </EmptyState>
                 )}
             </QuestCardContainer>

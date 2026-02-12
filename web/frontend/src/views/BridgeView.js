@@ -11,6 +11,7 @@ import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
 import { bridgeBurn, pollTxStatus } from '../utils/tx';
+import transactionHandler from '../utils/TransactionHandler';
 
 // Lazy import for Solana bridge - only loads when needed
 const loadSolanaBridge = () => import('../utils/solanaBridge');
@@ -888,7 +889,7 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
     const [bridgeAmount, setBridgeAmount] = useState(''); // Store amount at bridge time
 
     // Track Mirage chain balance separately from Solana wallet balances
-    const [mirageChainBalance, setMirageChainBalance] = useState(null);
+    const [, setMirageChainBalance] = useState(null);
 
     const refreshMirageBalance = useCallback(async (reason = 'init') => {
         if (!mirageAddress) {
@@ -2005,6 +2006,8 @@ export default function BridgeView({ state }) {
                 throw new Error('Invalid balance from get_user_status');
             }
             setBalance(balanceVal);
+            // Also sync to TopBar/MobileHeader via cacheConfigData → _persistUserBalance → balanceUpdated event
+            try { transactionHandler.cacheConfigData(data); } catch (_) { }
             setBalanceError(null);
             console.debug('[Bridge] Balance updated', { balance: balanceVal });
         } catch (e) {

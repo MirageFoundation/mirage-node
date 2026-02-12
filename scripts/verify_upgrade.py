@@ -3,12 +3,21 @@
 Verify Mirage Node Upgrade — strict + exhaustive.
 
 This script is intentionally "no hand-waving":
-- It validates EVERY core param field introduced/used by v1.9.x (including every tier field).
+- It validates EVERY core param field (including every tier field).
 - It validates bridge query commands (`miraged q bridge ...`) exist and return consistent data.
 - It validates upgrade state (pre vs post) and local config consistency.
 - It checks that critical CLI commands are exposed.
 - It can optionally verify genesis export with --export-check (stops node, runs export, restarts).
 - It shows status of ALL registered upgrades.
+
+v1.10.7 additions (source-level checks):
+- Fingerprinting system fully removed (tables, columns, code references)
+- safe_error() helper used across all route files + global Flask handler
+- Spoiler tag support (||text|| syntax, remarkSpoiler plugin, Spoiler component)
+- Server-side inbox unread count (cache, middleware, migration, API sync)
+- Seed phrase security (SeedVault with 4 modes: insecure, password, memory, passkey)
+- Admin gas fee non-blocking (level >= 100 skip deduction in chain module)
+- Balance overflow fix (uvarint64 encoding, useBalance hook)
 
 NOTE: This does NOT submit transactions or mutate chain state.
 """
@@ -30,9 +39,9 @@ import urllib.request
 
 
 # Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.4-restore-sdk"
+UPGRADE_NAME = "v1.10.7"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION_PREFIX = "v1.10"
+EXPECTED_VERSION = "v1.10.7"
 
 # All registered upgrade names in chronological order
 ALL_UPGRADES = [
@@ -59,11 +68,16 @@ ALL_UPGRADES = [
     "v1.10.0-remove-ibc",
     "v1.10.3-sdk-bloat",
     "v1.10.4-restore-sdk",
+    "v1.10.5",
+    "v1.10.7",
 ]
+
+# Repo root (scripts/ is one level below)
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.9.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.10.7"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read()
     return json.loads(data.decode("utf-8"))
@@ -121,7 +135,9 @@ def _restart_miraged(node_home: Path) -> bool:
         pass
     # Fallback: start in background
     try:
-        subprocess.Popen(["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         return True
     except Exception:
         return False
@@ -333,17 +349,17 @@ def _fmt_value(v: Any) -> str:
 
 
 def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
-    """Check that miraged binary version matches expected version."""
+    """Check that miraged binary version matches the exact expected version."""
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
         version = p.stdout.strip() or p.stderr.strip()
-        if version.startswith(EXPECTED_VERSION_PREFIX):
+        if version == EXPECTED_VERSION:
             print(f"   [OK] Binary version: {version}")
             return version
         else:
-            print(f"   [FAIL] Binary version: {version} (expected {EXPECTED_VERSION_PREFIX}*)")
-            failures.append(f"Binary version {version} does not match expected {EXPECTED_VERSION_PREFIX}")
+            print(f"   [FAIL] Binary version: {version} (expected exactly {EXPECTED_VERSION})")
+            failures.append(f"Binary version {version!r} does not match expected {EXPECTED_VERSION!r}")
             return version
     except Exception as e:
         print(f"   [FAIL] Cannot check version: {e}")
@@ -354,14 +370,14 @@ def check_binary_version(miraged: str, failures: list[str], warnings: list[str])
 def check_bridge_commands(miraged: str, failures: list[str], warnings: list[str]) -> None:
     """Check that new bridge CLI commands exist."""
     print("\n-> Checking bridge CLI commands...")
-    
+
     # Check query commands exist (should show help, not error)
     query_cmds = [
         ([miraged, "q", "bridge", "--help"], "q bridge"),
         ([miraged, "q", "bridge", "status", "--help"], "q bridge status"),
         ([miraged, "q", "bridge", "config", "--help"], "q bridge config"),
     ]
-    
+
     for cmd, name in query_cmds:
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -374,12 +390,12 @@ def check_bridge_commands(miraged: str, failures: list[str], warnings: list[str]
         except Exception as e:
             print(f"   [FAIL] {name}: {e}")
             failures.append(f"Bridge command '{name}' check failed: {e}")
-    
+
     # Check tx commands exist
     tx_cmds = [
         ([miraged, "tx", "bridge", "--help"], "tx bridge"),
     ]
-    
+
     for cmd, name in tx_cmds:
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -429,7 +445,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
     """Check status of all registered upgrades. Returns dict of upgrade_name -> applied_height (0 if not applied)."""
     print("\n-> Checking all upgrade statuses...")
     results = {}
-    
+
     for upgrade_name in ALL_UPGRADES:
         try:
             applied = _run_json([miraged, "q", "upgrade", "applied", upgrade_name, "--node", rpc, "-o", "json"])
@@ -443,7 +459,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
         except Exception:
             results[upgrade_name] = 0
             print(f"   [--] {upgrade_name}: not applied")
-    
+
     # Check current plan
     try:
         plan = _run_json([miraged, "q", "upgrade", "plan", "--node", rpc, "-o", "json"])
@@ -454,7 +470,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
             print(f"\n   [PENDING] Current plan: {plan_name} @ height {plan_height}")
     except Exception:
         pass
-    
+
     return results
 
 
@@ -951,15 +967,16 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
 def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
     """Check that Python protobuf definitions are complete and importable."""
     print("\n-> Checking Python protobuf definitions...")
-    
+
     try:
         from shared import datatypes
+
         print("   [OK] shared.datatypes imported")
     except ImportError as e:
         print(f"   [WARN] Cannot import shared.datatypes: {e}")
         warnings.append(f"Cannot import shared.datatypes: {e}")
         return
-    
+
     # Check all required message classes exist
     required_classes = [
         # Transaction messages
@@ -998,7 +1015,7 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         "QueryDifficultyRequest",
         "QueryDifficultyResponse",
     ]
-    
+
     missing = []
     for cls_name in required_classes:
         if hasattr(datatypes, cls_name):
@@ -1006,13 +1023,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             if cls is not None:
                 continue
         missing.append(cls_name)
-    
+
     if missing:
         print(f"   [FAIL] Missing classes: {', '.join(missing)}")
         failures.append(f"datatypes.py missing classes: {', '.join(missing)}")
     else:
         print(f"   [OK] All {len(required_classes)} message classes present")
-    
+
     # Check Params has all required fields
     try:
         params_cls = datatypes.Params
@@ -1029,25 +1046,25 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             "bridge_attestation_threshold",
             # bridge_fee removed - now per-chain in BridgeChainConfig.fee
         ]
-        
+
         # Check if field descriptors exist
         descriptor = params_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         missing_fields = [f for f in required_param_fields if f not in field_names]
         if missing_fields:
             print(f"   [FAIL] Params missing fields: {', '.join(missing_fields)}")
             failures.append(f"Params proto missing fields: {', '.join(missing_fields)}")
         else:
             print(f"   [OK] Params has all required fields")
-        
+
         # Check bridge_chains is a repeated field
         bridge_chains_field = None
         for f in descriptor.fields:
             if f.name == "bridge_chains":
                 bridge_chains_field = f
                 break
-        
+
         if bridge_chains_field is None:
             print("   [FAIL] Params.bridge_chains field missing")
             failures.append("Params proto missing bridge_chains field")
@@ -1056,17 +1073,17 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             failures.append("Params.bridge_chains should be repeated field")
         else:
             print("   [OK] Params.bridge_chains is repeated")
-            
+
     except Exception as e:
         print(f"   [FAIL] Cannot verify Params fields: {e}")
         failures.append(f"Cannot verify Params proto fields: {e}")
-    
+
     # Check BridgeChainConfig has required fields
     try:
         bcc_cls = datatypes.BridgeChainConfig
         descriptor = bcc_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_bcc_fields = ["chain_id", "enabled", "fee"]
         missing_bcc = [f for f in required_bcc_fields if f not in field_names]
         if missing_bcc:
@@ -1077,13 +1094,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify BridgeChainConfig: {e}")
         failures.append(f"Cannot verify BridgeChainConfig proto: {e}")
-    
+
     # Check MsgBridgeAttestBurned has required fields (used by orchestrator for inbound)
     try:
         attest_cls = datatypes.MsgBridgeAttestBurned
         descriptor = attest_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_attest_fields = ["validator", "source_chain", "burn_id", "mirage_recipient", "amount"]
         missing_attest = [f for f in required_attest_fields if f not in field_names]
         if missing_attest:
@@ -1094,13 +1111,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify MsgBridgeAttestBurned: {e}")
         failures.append(f"Cannot verify MsgBridgeAttestBurned proto: {e}")
-    
+
     # Check MsgBridgeAttestMinted has required fields (used by orchestrator for outbound)
     try:
         attest_cls = datatypes.MsgBridgeAttestMinted
         descriptor = attest_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_attest_fields = ["validator", "burn_id", "destination_chain", "destination_tx"]
         missing_attest = [f for f in required_attest_fields if f not in field_names]
         if missing_attest:
@@ -1111,13 +1128,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify MsgBridgeAttestMinted: {e}")
         failures.append(f"Cannot verify MsgBridgeAttestMinted proto: {e}")
-    
+
     # Check MsgBridgeBurn has required fields (user bridge transactions)
     try:
         burn_cls = datatypes.MsgBridgeBurn
         descriptor = burn_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_burn_fields = ["destination_chain", "destination_address", "amount"]
         missing_burn = [f for f in required_burn_fields if f not in field_names]
         if missing_burn:
@@ -1130,22 +1147,441 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         failures.append(f"Cannot verify MsgBridgeBurn proto: {e}")
 
 
+# ---------------------------------------------------------------------------
+# v1.10.7 feature checks (source-level verification)
+# ---------------------------------------------------------------------------
+
+
+def _file_contains(path: Path, pattern: str) -> bool:
+    """Return True if *path* exists and its text matches *pattern* (regex)."""
+    try:
+        if not path.exists():
+            return False
+        return bool(re.search(pattern, path.read_text()))
+    except Exception:
+        return False
+
+
+def _file_missing_pattern(path: Path, pattern: str) -> bool:
+    """Return True if *path* exists and does NOT match *pattern* (regex)."""
+    try:
+        if not path.exists():
+            return False
+        return not bool(re.search(pattern, path.read_text()))
+    except Exception:
+        return False
+
+
+def check_fingerprinting_removed(failures: list[str], warnings: list[str]) -> None:
+    """Verify that the device fingerprinting system has been fully removed."""
+    print("\n-> Checking fingerprinting removal...")
+
+    # 1. user_fingerprints table should be dropped in database.py
+    db_path = REPO_ROOT / "indexer" / "database.py"
+    if _file_contains(db_path, r"DROP TABLE IF EXISTS user_fingerprints"):
+        print("   [OK] database.py: DROP TABLE user_fingerprints present")
+    else:
+        print("   [FAIL] database.py: missing DROP TABLE user_fingerprints")
+        failures.append("fingerprinting: database.py does not drop user_fingerprints table")
+
+    # 2. PII columns (user_agent, ip_hash, referrer) should be dropped from stats_events.
+    #    The source uses an f-string loop: for col in ("user_agent", "ip_hash", "referrer")
+    #    so we check for the column names in the iteration tuple AND the DROP COLUMN statement.
+    if _file_contains(db_path, r"DROP COLUMN"):
+        print("   [OK] database.py: DROP COLUMN statement present")
+    else:
+        print("   [FAIL] database.py: no DROP COLUMN statement found")
+        failures.append("fingerprinting: database.py has no DROP COLUMN for PII columns")
+    for col in ("user_agent", "ip_hash", "referrer"):
+        if _file_contains(db_path, rf'"{col}"'):
+            print(f"   [OK] database.py: column {col} referenced in drop loop")
+        else:
+            print(f"   [FAIL] database.py: column {col} not referenced")
+            failures.append(f"fingerprinting: stats_events.{col} not referenced in database.py drop loop")
+
+    # 3. Coarse device columns should be added instead.
+    #    Same f-string loop pattern: for col in ("browser_family", "os_family", "device_type")
+    if _file_contains(db_path, r"ADD COLUMN"):
+        print("   [OK] database.py: ADD COLUMN statement present for coarse categories")
+    else:
+        print("   [WARN] database.py: no ADD COLUMN for coarse categories")
+        warnings.append("fingerprinting: database.py has no ADD COLUMN for coarse device columns")
+    for col in ("browser_family", "os_family", "device_type"):
+        if _file_contains(db_path, rf'"{col}"'):
+            print(f"   [OK] database.py: coarse column {col} referenced")
+        else:
+            print(f"   [WARN] database.py: coarse column {col} not found")
+            warnings.append(f"fingerprinting: expected coarse column {col} in database.py")
+
+    # 4. No fingerprinting code in backend routes
+    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
+    public_py = routes_dir / "public.py"
+    if public_py.exists():
+        text = public_py.read_text()
+        for banned in ("fingerprint", "sock_puppet", "sock puppet", "user_profiling"):
+            if re.search(banned, text, re.IGNORECASE):
+                print(f"   [FAIL] public.py: still contains '{banned}'")
+                failures.append(f"fingerprinting: public.py still references '{banned}'")
+                break
+        else:
+            print("   [OK] public.py: no fingerprinting references")
+    else:
+        print("   [WARN] public.py not found")
+        warnings.append("fingerprinting: web/backend/routes/public.py not found")
+
+    # 5. Stats endpoint should use bot filtering, not fingerprinting
+    if _file_contains(public_py, r"_STATS_BOT_NAMES|bot.*filter"):
+        print("   [OK] public.py: server-side bot filtering present")
+    else:
+        print("   [WARN] public.py: bot filtering pattern not found")
+        warnings.append("fingerprinting: expected server-side bot filtering in public.py")
+
+
+def check_safe_error_coverage(failures: list[str], warnings: list[str]) -> None:
+    """Verify that safe_error() exists and is wired into all route files and the global handler."""
+    print("\n-> Checking sanitized error responses...")
+
+    # 1. error_utils.py must exist with safe_error()
+    error_utils = REPO_ROOT / "web" / "backend" / "error_utils.py"
+    if not error_utils.exists():
+        print("   [FAIL] error_utils.py: not found")
+        failures.append("safe_error: web/backend/error_utils.py not found")
+        return
+
+    text = error_utils.read_text()
+    if "def safe_error(" in text:
+        print("   [OK] error_utils.py: safe_error() defined")
+    else:
+        print("   [FAIL] error_utils.py: safe_error() not defined")
+        failures.append("safe_error: function not defined in error_utils.py")
+
+    if "request_id" in text:
+        print("   [OK] error_utils.py: returns request_id to client")
+    else:
+        print("   [FAIL] error_utils.py: missing request_id in response")
+        failures.append("safe_error: does not include request_id in error response")
+
+    # 2. Global error handler in factory.py
+    factory = REPO_ROOT / "web" / "backend" / "factory.py"
+    if _file_contains(factory, r"@app\.errorhandler\(Exception\)"):
+        print("   [OK] factory.py: global Exception handler registered")
+    else:
+        print("   [FAIL] factory.py: missing global Exception handler")
+        failures.append("safe_error: factory.py missing @app.errorhandler(Exception)")
+
+    if _file_contains(factory, r"safe_error"):
+        print("   [OK] factory.py: global handler uses safe_error()")
+    else:
+        print("   [FAIL] factory.py: global handler does not use safe_error()")
+        failures.append("safe_error: factory.py global handler does not call safe_error()")
+
+    # 3. Route files should sanitize errors — either via safe_error() directly or
+    #    via a local _classify_exception() helper that also strips raw exception text.
+    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
+    route_files = ["public.py", "core.py", "bridge.py", "quests.py"]
+    for fname in route_files:
+        rpath = routes_dir / fname
+        if not rpath.exists():
+            print(f"   [WARN] routes/{fname}: not found")
+            warnings.append(f"safe_error: routes/{fname} not found")
+            continue
+        has_safe_error = _file_contains(rpath, r"safe_error")
+        has_classify = _file_contains(rpath, r"_classify_exception")
+        if has_safe_error:
+            print(f"   [OK] routes/{fname}: uses safe_error()")
+        elif has_classify:
+            print(f"   [OK] routes/{fname}: uses _classify_exception() (sanitized)")
+        else:
+            print(f"   [FAIL] routes/{fname}: no error sanitization found")
+            failures.append(f"safe_error: routes/{fname} has no safe_error() or _classify_exception()")
+
+
+def check_spoiler_tags(failures: list[str], warnings: list[str]) -> None:
+    """Verify spoiler tag support in the markdown renderer."""
+    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
+    renderer = frontend_src / "components" / "MarkdownRenderer.js"
+    if not frontend_src.exists() or not renderer.exists():
+        return
+
+    print("\n-> Checking spoiler tag support...")
+
+    text = renderer.read_text()
+
+    # Spoiler component
+    if re.search(r"function\s+Spoiler", text):
+        print("   [OK] Spoiler component defined")
+    else:
+        print("   [FAIL] Spoiler component not found")
+        failures.append("spoiler tags: Spoiler component not defined in MarkdownRenderer.js")
+
+    # remarkSpoiler plugin
+    if re.search(r"function\s+remarkSpoiler", text):
+        print("   [OK] remarkSpoiler plugin defined")
+    else:
+        print("   [FAIL] remarkSpoiler plugin not found")
+        failures.append("spoiler tags: remarkSpoiler plugin not defined in MarkdownRenderer.js")
+
+    # Plugin registered in remarkPlugins
+    if "remarkSpoiler" in text and "remarkPlugins" in text:
+        print("   [OK] remarkSpoiler registered in remarkPlugins")
+    else:
+        print("   [FAIL] remarkSpoiler not registered in remarkPlugins")
+        failures.append("spoiler tags: remarkSpoiler not wired into remarkPlugins")
+
+    # Component mapping for spoiler-tag
+    if "'spoiler-tag'" in text or '"spoiler-tag"' in text:
+        print("   [OK] spoiler-tag component mapping present")
+    else:
+        print("   [FAIL] spoiler-tag component mapping missing")
+        failures.append("spoiler tags: spoiler-tag not mapped in components prop")
+
+    # ||text|| syntax (the regex pattern in the plugin)
+    if re.search(r"\|\|.*\|\|", text):
+        print("   [OK] ||double pipes|| syntax pattern present")
+    else:
+        print("   [WARN] ||double pipes|| syntax pattern not found")
+        warnings.append("spoiler tags: expected ||text|| pattern in remarkSpoiler")
+
+
+def check_inbox_server_side(failures: list[str], warnings: list[str]) -> None:
+    """Verify server-side inbox unread count tracking."""
+    print("\n-> Checking server-side inbox notifications...")
+
+    # 1. Backend: _get_new_inbox_count in public.py
+    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
+    if not public_py.exists():
+        print("   [FAIL] routes/public.py: not found")
+        failures.append("inbox: web/backend/routes/public.py not found")
+        return
+
+    text = public_py.read_text()
+
+    if "def _get_new_inbox_count(" in text:
+        print("   [OK] _get_new_inbox_count() defined")
+    else:
+        print("   [FAIL] _get_new_inbox_count() not found")
+        failures.append("inbox: _get_new_inbox_count() not defined in public.py")
+
+    if "_inbox_cache" in text:
+        print("   [OK] _inbox_cache present (60s server-side cache)")
+    else:
+        print("   [FAIL] _inbox_cache not found")
+        failures.append("inbox: _inbox_cache not found in public.py")
+
+    if "def _invalidate_inbox_cache(" in text:
+        print("   [OK] _invalidate_inbox_cache() defined")
+    else:
+        print("   [FAIL] _invalidate_inbox_cache() not found")
+        failures.append("inbox: _invalidate_inbox_cache() not defined in public.py")
+
+    if "mark_inbox_viewed" in text:
+        print("   [OK] mark_inbox_viewed endpoint present")
+    else:
+        print("   [FAIL] mark_inbox_viewed endpoint not found")
+        failures.append("inbox: /api/mark_inbox_viewed endpoint missing from public.py")
+
+    # 2. Middleware: factory.py injects new_inbox_items
+    factory = REPO_ROOT / "web" / "backend" / "factory.py"
+    if _file_contains(factory, r"new_inbox_items"):
+        print("   [OK] factory.py: new_inbox_items injected into responses")
+    else:
+        print("   [FAIL] factory.py: new_inbox_items injection missing")
+        failures.append("inbox: factory.py does not inject new_inbox_items into API responses")
+
+    if _file_contains(factory, r"@app\.after_request"):
+        print("   [OK] factory.py: after_request middleware registered")
+    else:
+        print("   [FAIL] factory.py: after_request middleware missing")
+        failures.append("inbox: factory.py missing @app.after_request middleware for inbox count")
+
+    # 3. Database migration for inbox_last_viewed_at
+    migration = REPO_ROOT / "indexer" / "migrations" / "v2_0_3_inbox_last_viewed.py"
+    if migration.exists():
+        print("   [OK] v2_0_3_inbox_last_viewed.py migration exists")
+        if _file_contains(migration, r"inbox_last_viewed_at"):
+            print("   [OK] migration adds inbox_last_viewed_at column")
+        else:
+            print("   [FAIL] migration missing inbox_last_viewed_at column")
+            failures.append("inbox: migration v2_0_3 does not add inbox_last_viewed_at")
+    else:
+        print("   [FAIL] v2_0_3_inbox_last_viewed.py migration not found")
+        failures.append("inbox: indexer/migrations/v2_0_3_inbox_last_viewed.py not found")
+
+    # 4. Frontend: api.js syncs inbox count from responses (only when source is present)
+    api_js = REPO_ROOT / "web" / "frontend" / "src" / "lib" / "api.js"
+    if api_js.exists():
+        if _file_contains(api_js, r"new_inbox_items|inboxCount"):
+            print("   [OK] api.js: inbox count sync from API responses")
+        else:
+            print("   [WARN] api.js: inbox count sync not found")
+            warnings.append("inbox: frontend api.js does not sync new_inbox_items")
+
+
+def check_seed_vault(failures: list[str], warnings: list[str]) -> None:
+    """Verify seed phrase security with four storage modes."""
+    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
+    vault = frontend_src / "utils" / "SeedVault.js"
+    if not frontend_src.exists() or not vault.exists():
+        return
+
+    print("\n-> Checking seed phrase security (SeedVault)...")
+
+    text = vault.read_text()
+
+    # Class / core structure
+    if "class SeedVault" in text:
+        print("   [OK] SeedVault class defined")
+    else:
+        print("   [FAIL] SeedVault class not found")
+        failures.append("seed vault: SeedVault class not defined")
+
+    # Four modes present
+    modes = ["insecure", "memory", "password", "passkey"]
+    found_modes = [m for m in modes if m in text]
+    missing_modes = [m for m in modes if m not in text]
+    if not missing_modes:
+        print(f"   [OK] All 4 storage modes present ({', '.join(modes)})")
+    else:
+        print(f"   [FAIL] Missing storage modes: {', '.join(missing_modes)}")
+        failures.append(f"seed vault: missing storage modes: {', '.join(missing_modes)}")
+
+    # getMode()
+    if "getMode()" in text or "getMode (" in text:
+        print("   [OK] getMode() defined")
+    else:
+        print("   [FAIL] getMode() not found")
+        failures.append("seed vault: getMode() not defined")
+
+    # AES-GCM / PBKDF2 for password mode
+    if "AES-GCM" in text or "aes-gcm" in text.lower():
+        print("   [OK] AES-GCM encryption present (password mode)")
+    else:
+        print("   [FAIL] AES-GCM encryption not found")
+        failures.append("seed vault: AES-GCM encryption not found for password mode")
+
+    if "PBKDF2" in text or "pbkdf2" in text.lower():
+        print("   [OK] PBKDF2 key derivation present")
+    else:
+        print("   [FAIL] PBKDF2 key derivation not found")
+        failures.append("seed vault: PBKDF2 key derivation not found")
+
+    # WebAuthn / PRF for passkey mode
+    if "PRF" in text or "prf" in text:
+        print("   [OK] PRF extension present (passkey mode)")
+    else:
+        print("   [FAIL] PRF extension not found")
+        failures.append("seed vault: PRF extension not found for passkey mode")
+
+    # Unlock prompt component
+    unlock = frontend_src / "components" / "UnlockPrompt.js"
+    if unlock.exists():
+        print("   [OK] UnlockPrompt.js component exists")
+    else:
+        print("   [WARN] UnlockPrompt.js not found")
+        warnings.append("seed vault: UnlockPrompt.js component not found")
+
+
+def check_admin_gas_nonblocking(failures: list[str], warnings: list[str]) -> None:
+    """Verify admin gas fee deduction is non-blocking in the chain module."""
+    print("\n-> Checking admin gas fee (non-blocking)...")
+
+    # 1. Chain module: admin level check + skip deduction (only when Go source is present)
+    module_go = REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go"
+    if module_go.exists():
+        text = module_go.read_text()
+        if re.search(r"userLevel\s*>=\s*100", text):
+            print("   [OK] module.go: admin level >= 100 check present")
+        else:
+            print("   [FAIL] module.go: admin level check not found")
+            failures.append("admin gas: module.go missing admin level >= 100 check")
+
+        if re.search(r"insufficient balance.*skipping deduction", text, re.IGNORECASE):
+            print("   [OK] module.go: skip deduction on insufficient balance")
+        else:
+            print("   [FAIL] module.go: skip-deduction logic not found")
+            failures.append("admin gas: module.go missing skip deduction for admin insufficient balance")
+
+    # 2. Upgrade handler registered for v1.10.7 (only when Go source is present)
+    upgrades_go = REPO_ROOT / "blockchain" / "app" / "upgrades.go"
+    if upgrades_go.exists():
+        if _file_contains(upgrades_go, r"v1\.10\.7"):
+            print("   [OK] upgrades.go: v1.10.7 upgrade handler registered")
+        else:
+            print("   [FAIL] upgrades.go: v1.10.7 upgrade handler not found")
+            failures.append("admin gas: upgrades.go missing v1.10.7 handler")
+
+    # 3. Backend: classify admin balance error as 400
+    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
+    if _file_contains(core_py, r"admin insufficient balance"):
+        print("   [OK] routes/core.py: admin insufficient balance -> 400")
+    else:
+        print("   [WARN] routes/core.py: admin balance error classification not found")
+        warnings.append("admin gas: routes/core.py does not classify admin balance error as 400")
+
+    # 4. Frontend: handles admin balance error (only when source is present)
+    tx_handler = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js"
+    if tx_handler.exists():
+        if _file_contains(tx_handler, r"admin insufficient balance"):
+            print("   [OK] TransactionHandler.js: admin balance error handling present")
+        else:
+            print("   [WARN] TransactionHandler.js: admin balance error handling not found")
+            warnings.append("admin gas: TransactionHandler.js does not handle admin balance error")
+
+
+def check_balance_overflow_fix(failures: list[str], warnings: list[str]) -> None:
+    """Verify balance uses 64-bit encoding and single source-of-truth hook."""
+    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
+    tx_handler = frontend_src / "utils" / "TransactionHandler.js"
+    if not frontend_src.exists() or not tx_handler.exists():
+        return
+
+    print("\n-> Checking balance overflow fix...")
+
+    text = tx_handler.read_text()
+    uvarint64_count = len(re.findall(r"uvarint64", text))
+    if uvarint64_count > 0:
+        print(f"   [OK] TransactionHandler.js: uvarint64 used ({uvarint64_count} occurrences)")
+    else:
+        print("   [FAIL] TransactionHandler.js: uvarint64 not found")
+        failures.append("balance fix: TransactionHandler.js does not use uvarint64 for amounts")
+
+    # 2. useBalance.js hook as single source of truth
+    use_balance = frontend_src / "utils" / "useBalance.js"
+    if not use_balance.exists():
+        print("   [FAIL] useBalance.js: not found")
+        failures.append("balance fix: useBalance.js not found")
+        return
+
+    balance_text = use_balance.read_text()
+    if "function useBalance" in balance_text or "export default function useBalance" in balance_text:
+        print("   [OK] useBalance.js: hook defined")
+    else:
+        print("   [FAIL] useBalance.js: useBalance hook not found")
+        failures.append("balance fix: useBalance() hook not defined in useBalance.js")
+
+    if "balanceUpdated" in balance_text:
+        print("   [OK] useBalance.js: balanceUpdated event listener")
+    else:
+        print("   [FAIL] useBalance.js: balanceUpdated event not found")
+        failures.append("balance fix: useBalance.js missing balanceUpdated CustomEvent listener")
+
+
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
     """Check orchestrator configuration if enabled."""
     print("\n-> Checking orchestrator config...")
-    
+
     orchestrator_env = home_dir / "env" / "orchestrator.env"
     if not orchestrator_env.exists():
         print("   [INFO] orchestrator.env not found (orchestrator not configured)")
         return
-    
+
     try:
         content = orchestrator_env.read_text()
     except Exception as e:
         print(f"   [WARN] Cannot read orchestrator.env: {e}")
         warnings.append(f"Cannot read orchestrator.env: {e}")
         return
-    
+
     # Parse env file
     env_values = {}
     for line in content.splitlines():
@@ -1155,22 +1591,22 @@ def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: lis
         if "=" in line:
             key, _, value = line.partition("=")
             env_values[key.strip()] = value.strip()
-    
+
     # Check if enabled
     enabled = env_values.get("ORCHESTRATOR_ENABLED", "").lower()
     if enabled not in ("true", "1", "yes"):
         print("   [INFO] Orchestrator disabled (ORCHESTRATOR_ENABLED != true)")
         return
-    
+
     print("   [OK] Orchestrator enabled")
-    
+
     # Check required fields
     required_fields = [
         ("ORCHESTRATOR_SOLANA_PROGRAM_ID", "Solana program ID"),
         ("ORCHESTRATOR_SOLANA_RPC", "Solana RPC endpoint"),
         ("ORCHESTRATOR_SOLANA_KEYPAIR", "Solana keypair path"),
     ]
-    
+
     for field, desc in required_fields:
         value = env_values.get(field, "")
         if value:
@@ -1180,7 +1616,7 @@ def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: lis
         else:
             print(f"   [FAIL] {field}: not set ({desc})")
             failures.append(f"Orchestrator enabled but {field} not set")
-    
+
     # Check keypair file exists
     keypair_path = env_values.get("ORCHESTRATOR_SOLANA_KEYPAIR", "")
     if keypair_path:
@@ -1319,16 +1755,16 @@ def main() -> int:
 
     # Check binary version first
     check_binary_version(miraged, failures, warnings)
-    
+
     # Check bridge CLI commands exist
     check_bridge_commands(miraged, failures, warnings)
 
     rpc_chain_id, _ = check_node_health(rpc, failures, warnings)
-    
+
     # Show all upgrade statuses if requested
     if args.list_all:
         check_all_upgrades(miraged, rpc, warnings)
-    
+
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
 
@@ -1369,9 +1805,18 @@ def main() -> int:
         check_local_config(home_dir, rpc_chain_id, failures, warnings)
         check_deploy_migrations(home_dir, failures, warnings)
         check_orchestrator_config(home_dir, failures, warnings)
-    
+
     # Check Python protobuf definitions (always run)
     check_python_protobuf_definitions(failures, warnings)
+
+    # ---- v1.10.7 feature checks (source-level) ----
+    check_fingerprinting_removed(failures, warnings)
+    check_safe_error_coverage(failures, warnings)
+    check_spoiler_tags(failures, warnings)
+    check_inbox_server_side(failures, warnings)
+    check_seed_vault(failures, warnings)
+    check_admin_gas_nonblocking(failures, warnings)
+    check_balance_overflow_fix(failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")

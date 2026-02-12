@@ -161,7 +161,7 @@ function ChangeUsernameView({ state }) {
     useEffect(() => {
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: publicKey }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 });
                 if (data) {
                     setUserLevel(parseInt(data.user_level || 0));
                 }
@@ -280,7 +280,9 @@ function ChangeUsernameView({ state }) {
 
             if (!result || !result.success) {
                 const msg = String((result && result.error) || "Submit failed");
-                if (/insufficient funds/i.test(msg)) {
+                if (/admin insufficient balance/i.test(msg)) {
+                    setSubmitError("Your account balance is too low to cover the transaction fee.");
+                } else if (/insufficient funds/i.test(msg)) {
                     setSubmitError("Insufficient funds to complete this transaction.");
                 } else {
                     setSubmitError(msg);

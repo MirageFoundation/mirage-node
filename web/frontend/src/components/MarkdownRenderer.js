@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import styled from "styled-components";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -49,6 +49,77 @@ const Container = styled.div`
 		border-top: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
 	}
 `;
+
+const SpoilerSpan = styled.span`
+	background-color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+	color: transparent;
+	cursor: pointer;
+	border-radius: 3px;
+	padding: 0 0.2em;
+	transition: background-color 0.3s ease, color 0.3s ease;
+	user-select: none;
+
+	&.revealed {
+		background-color: ${({ theme }) => theme?.colors?.panelAlt || '#2a2d31'};
+		color: ${({ theme }) => theme?.colors?.text || '#ccc'};
+		user-select: text;
+	}
+`;
+
+function Spoiler({ children }) {
+    const [revealed, setRevealed] = useState(false);
+    return (
+        <SpoilerSpan
+            className={revealed ? 'revealed' : ''}
+            onClick={() => setRevealed(r => !r)}
+            title={revealed ? 'Click to hide' : 'Click to reveal spoiler'}
+        >
+            {children}
+        </SpoilerSpan>
+    );
+}
+
+/**
+ * Remark plugin: converts ||spoiler text|| into inline spoiler nodes.
+ * The node uses data.hName = 'spoiler-tag' so react-markdown maps it
+ * through the components prop to our interactive <Spoiler> component.
+ */
+function remarkSpoiler() {
+    return (tree) => {
+        visit(tree, 'text', (node, index, parent) => {
+            if (!node.value || typeof node.value !== 'string') return;
+            if (!node.value.includes('||')) return;
+
+            const regex = /\|\|(.+?)\|\|/g;
+            const parts = [];
+            let lastIndex = 0;
+            let match;
+
+            while ((match = regex.exec(node.value)) !== null) {
+                if (match.index > lastIndex) {
+                    parts.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
+                }
+                parts.push({
+                    type: 'spoiler',
+                    data: { hName: 'spoiler-tag' },
+                    children: [{ type: 'text', value: match[1] }],
+                });
+                lastIndex = match.index + match[0].length;
+            }
+
+            if (lastIndex === 0) return; // no spoilers found
+
+            if (lastIndex < node.value.length) {
+                parts.push({ type: 'text', value: node.value.slice(lastIndex) });
+            }
+
+            if (parent && Array.isArray(parent.children)) {
+                parent.children.splice(index, 1, ...parts);
+                return index + parts.length;
+            }
+        });
+    };
+}
 
 /**
  * AST transformation to treat soft line breaks (single newlines) as hard breaks.
@@ -133,7 +204,7 @@ export default function MarkdownRenderer({ text }) {
     return (
         <Container>
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkSoftBreaks]}
+                remarkPlugins={[remarkGfm, remarkSpoiler, remarkSoftBreaks]}
                 components={{
                     img: ({ src }) => <InlineMedia url={src} />,
                     a: ({ href, children }) => (
@@ -142,6 +213,7 @@ export default function MarkdownRenderer({ text }) {
                             {children}
                         </a>
                     ),
+                    'spoiler-tag': ({ children }) => <Spoiler>{children}</Spoiler>,
                 }}
             >
                 {normalized}

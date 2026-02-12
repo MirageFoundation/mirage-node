@@ -28,10 +28,6 @@ At minimum, for a chain upgrade you need:
 - **Upgrade handler** in `blockchain/app/upgrades.go`:
   - `app.UpgradeKeeper.SetUpgradeHandler("<upgrade-name>", func(...) {...})`
   - Put all required on-chain param/state updates here.
-- **Genesis updates** (optional):
-  - Only relevant for *new* chains / local fresh init.
-  - Existing chains will not read `blockchain/genesis/genesis.json` again.
-
 If your upgrade adds/removes stores (module KV stores), you must also ensure the app is wired to handle store upgrades. (For simple param changes, you usually don’t need store-loader wiring.)
 
 ### Step 2 — (If needed) add a deploy migration

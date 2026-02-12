@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import styled from 'styled-components';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
@@ -167,6 +167,33 @@ export default function InboxView({ state }) {
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const viewerAddress = Storage.load('publicKey', '');
     const [activeReplyId, setActiveReplyId] = useState('');
+    const badgeCountRef = useRef((() => {
+        try {
+            return Math.max(0, parseInt(localStorage.getItem('inbox_count'), 10) || 0);
+        } catch (_) { return 0; }
+    })());
+
+    // Persist inbox count to localStorage and dispatch event to update badge.
+    // Also sets a cooldown timestamp so maybeSyncInbox in api.js won't
+    // overwrite with a stale server value from an in-flight request.
+    const setBadgeCount = useCallback((count) => {
+        const n = Math.max(0, count);
+        badgeCountRef.current = n;
+        try {
+            localStorage.setItem('inbox_count', String(n));
+            localStorage.setItem('inbox_count_set_at', String(Date.now()));
+        } catch (_) { }
+        window.dispatchEvent(new CustomEvent('inboxCount', { detail: n }));
+    }, []);
+
+    // Track server-side badge count so we can decrement it on individual mark-read
+    useEffect(() => {
+        const handler = (e) => {
+            if (typeof e.detail === 'number') badgeCountRef.current = Math.max(0, e.detail);
+        };
+        window.addEventListener('inboxCount', handler);
+        return () => window.removeEventListener('inboxCount', handler);
+    }, []);
 
     const fetchInbox = useCallback(async (page = 1, append = false) => {
         if (!viewerAddress) {
@@ -193,18 +220,13 @@ export default function InboxView({ state }) {
                     setReplies(prev => [...prev, ...res.replies]);
                 } else {
                     setReplies(res.replies);
+                    // Mark inbox as viewed on first page load so server resets unread count
+                    Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+                    // Clear badge immediately — don't wait for next API response
+                    setBadgeCount(0);
                 }
                 setHasMoreReplies(res.has_more || false);
                 setError('');
-
-                const viewedReplyIds = Storage.getViewedReplyIds();
-                const unreadCount = res.replies.reduce((acc, r) => acc + (viewedReplyIds.includes(r.reply_id) ? 0 : 1), 0);
-                Storage.save('inbox_unread_count', unreadCount);
-                const latestTs = res.replies.length ? Math.max(...res.replies.map(r => r.reply_timestamp || 0)) : 0;
-                if (latestTs > 0) {
-                    Storage.save('inbox_latest_ts', latestTs);
-                }
-                window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount, latestTs } }));
             } else {
                 setError('Invalid response from server');
             }
@@ -230,57 +252,33 @@ export default function InboxView({ state }) {
         const allReplyIds = replies.map(r => r.reply_id);
         Storage.markAllRepliesAsViewed(allReplyIds);
         setReplies(prev => prev.map(r => ({ ...r, isUnread: false })));
-        const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : 0;
-        Storage.save('inbox_unread_count', 0);
-        if (latestTs > 0) {
-            Storage.save('inbox_last_viewed_at', String(latestTs));
-            Storage.save('inbox_latest_ts', latestTs);
-        }
-        window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
+        // Tell server to reset inbox viewed timestamp
+        Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+        // Clear badge immediately
+        setBadgeCount(0);
     };
 
     const handleMarkOneAsRead = (e, reply) => {
         e.preventDefault();
         e.stopPropagation();
         Storage.addViewedReplyId(reply.reply_id);
-        const newViewedIds = Storage.getViewedReplyIds();
-        const newUnreadCount = replies.reduce((acc, r) => acc + (newViewedIds.includes(r.reply_id) ? 0 : 1), 0);
-        Storage.save('inbox_unread_count', newUnreadCount);
-        if (newUnreadCount === 0) {
-            const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : 0;
-            if (latestTs > 0) {
-                Storage.save('inbox_last_viewed_at', String(latestTs));
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
-        } else {
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: newUnreadCount } }));
-        }
         setReplies(prev => [...prev]);
+        // Decrement badge immediately
+        setBadgeCount(badgeCountRef.current - 1);
     };
 
     const handleReplyClick = (reply) => {
         if (!reply) return;
+        const wasUnread = !Storage.getViewedReplyIds().includes(reply.reply_id);
         Storage.addViewedReplyId(reply.reply_id);
+        if (wasUnread) {
+            setBadgeCount(badgeCountRef.current - 1);
+        }
         if (reply.root_post_id) {
             try {
                 Storage.setPendingPostHighlight(reply.reply_id);
             } catch (_) { }
             setActiveReplyId(reply.reply_id);
-        }
-        // Update unread count and last viewed when all read
-        const viewedReplyIds = Storage.getViewedReplyIds();
-        const unreadCount = replies.reduce((acc, r) => acc + (viewedReplyIds.includes(r.reply_id) ? 0 : 1), 0);
-        Storage.save('inbox_unread_count', unreadCount);
-        if (unreadCount === 0) {
-            const latestTs = replies.length ? Math.max(...replies.map(r => r.reply_timestamp || 0)) : (reply.reply_timestamp || 0);
-            if (latestTs > 0) {
-                Storage.save('inbox_last_viewed_at', String(latestTs));
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount: 0, latestTs } }));
-        } else {
-            window.dispatchEvent(new CustomEvent('inboxUpdated', { detail: { unreadCount } }));
         }
         // Use new clean URL with depth=1 to show reply with immediate parent context
         navigate(`/p/${reply.reply_id}?depth=1`);

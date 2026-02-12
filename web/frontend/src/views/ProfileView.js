@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
+import seedVault from "../utils/SeedVault";
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from "../utils/CryptoUtils";
 import Api from '../lib/api';
 import * as tx from '../utils/tx';
@@ -313,7 +314,7 @@ export default function ProfileView({ state }) {
     const routeParams = useParams();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
-    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : Storage.load('seedPhrase', '');
+    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : (seedVault.getSeed() || '');
 
     // State for username resolution (for /u/:identity route)
     const [resolvedAddress, setResolvedAddress] = useState(null);
@@ -674,7 +675,7 @@ export default function ProfileView({ state }) {
         let cancelled = false;
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: profileAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: profileAddress, _cb: Date.now() }, { timeoutMs: 10000 });
                 if (!data || cancelled) return;
 
                 if (isOwnProfile) {
@@ -689,7 +690,7 @@ export default function ProfileView({ state }) {
                     setProfileUsername(username || '');
                 }
 
-                // Handle both 'balance' (new) and 'user_balance' (legacy)
+                // Set balance from API response (works for both own and other profiles)
                 const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
                 if (typeof balanceVal !== 'undefined') {
                     const asInt = Number(balanceVal);
@@ -1119,7 +1120,7 @@ export default function ProfileView({ state }) {
                 pow_difficulty: powDifficulty >>> 0,
             };
 
-            const seedPhrase = Storage.load('seedPhrase', '');
+            const seedPhrase = seedVault.getSeed() || '';
             if (!seedPhrase) {
                 showError('No seed phrase found. Please sign in again.');
                 setIsRemovingModerator('');

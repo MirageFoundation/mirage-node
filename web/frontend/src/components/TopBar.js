@@ -5,25 +5,7 @@ import { SearchContainer, SearchRow, SearchInput } from "../styled/Layout";
 import Storage from "../utils/Storage";
 import Button from "./Button";
 import { formatMirageBalance } from "../utils/formatters";
-
-const OPTIMISTIC_CLAIM_KEY = 'user_balance_optimistic_claim';
-
-const resolveOptimisticDelta = (currentBalance) => {
-    const payload = Storage.load(OPTIMISTIC_CLAIM_KEY, null);
-    if (!payload || typeof payload !== 'object') return 0;
-    const delta = Number(payload.delta_umirage);
-    const base = Number(payload.base_umirage);
-    const expiresAt = Number(payload.expires_at_ms);
-    if (!Number.isFinite(delta) || delta <= 0 || !Number.isFinite(expiresAt) || Date.now() > expiresAt) {
-        Storage.remove(OPTIMISTIC_CLAIM_KEY);
-        return 0;
-    }
-    if (Number.isFinite(currentBalance) && Number.isFinite(base) && currentBalance !== base) {
-        Storage.remove(OPTIMISTIC_CLAIM_KEY);
-        return 0;
-    }
-    return delta;
-};
+import useBalance from "../utils/useBalance";
 
 const UserControls = styled.div`
     display: flex;
@@ -145,21 +127,30 @@ const InboxLink = styled.a`
     }
 `;
 
+const formatBadgeCount = (n) => n > 99 ? '99+' : String(n);
+
 const InboxIcon = styled.svg`
     width: 1.1rem;
     height: 1.1rem;
     fill: currentColor;
 `;
 
-const UnreadDot = styled.span`
+const UnreadBadge = styled.span`
     position: absolute;
-    top: -2px;
-    right: -2px;
-    width: 10px;
-    height: 10px;
+    top: -5px;
+    right: -9px;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 6px;
     background: #FF3B30;
-    border-radius: 50%;
+    border-radius: 12px;
     border: 2px solid ${({ theme }) => theme?.colors?.panel || "#23272C"};
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    box-sizing: border-box;
 `;
 
 const MenuWrapper = styled.div`
@@ -330,23 +321,14 @@ function TopBar({ state }) {
     const showAuthButton = !hasPublicKey && !isAuthRoute;
 
     const [menuOpen, setMenuOpen] = useState(false);
-    const [hasUnreadReplies, setHasUnreadReplies] = useState(() => {
+    const [inboxCount, setInboxCount] = useState(() => {
         try {
-            const unreadCount = Number(Storage.load('inbox_unread_count', 0));
-            const latestTs = Number(Storage.load('inbox_latest_ts', 0));
-            const lastViewed = Number(Storage.load('inbox_last_viewed_at', 0));
-            return unreadCount > 0 || (latestTs > lastViewed);
-        } catch (_) {
-            return false;
-        }
+            const stored = localStorage.getItem('inbox_count');
+            return stored ? Math.max(0, parseInt(stored, 10) || 0) : 0;
+        } catch (_) { return 0; }
     });
     const [searchQuery, setSearchQuery] = useState('');
-    const [userBalance, setUserBalance] = useState(() => {
-        const stored = Storage.load('user_balance', null);
-        if (stored === null) return null; // Not loaded yet
-        return Number(stored) || 0;
-    });
-    const [optimisticDeltaUmirage, setOptimisticDeltaUmirage] = useState(0);
+    const { displayBalance } = useBalance();
     const menuRef = useRef(null);
     const mountedRef = useRef(true);
 
@@ -381,67 +363,21 @@ function TopBar({ state }) {
         };
     }, []);
 
-    // Listen for inbox timestamp from get_posts response (piggybacked to avoid separate call)
+    // Listen for server-side inbox count from every API response
     useEffect(() => {
         if (!publicKey) {
-            setHasUnreadReplies(false);
+            setInboxCount(0);
             return;
         }
 
-        const recompute = (latestTsFromEvent = null, unreadCountFromEvent = null) => {
+        const handleInboxCount = (e) => {
             if (!mountedRef.current) return;
-            try {
-                const latestTsStored = Number(Storage.load('inbox_latest_ts', 0));
-                const lastViewed = Number(Storage.load('inbox_last_viewed_at', 0));
-                const unreadCountStored = Number(Storage.load('inbox_unread_count', 0));
-                const latestTs = (typeof latestTsFromEvent === 'number' && latestTsFromEvent > 0) ? latestTsFromEvent : latestTsStored;
-                const unreadCount = (typeof unreadCountFromEvent === 'number' && unreadCountFromEvent >= 0) ? unreadCountFromEvent : unreadCountStored;
-                setHasUnreadReplies(unreadCount > 0 || (latestTs > lastViewed));
-            } catch (_) {
-                setHasUnreadReplies(true);
-            }
+            const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
+            setInboxCount(count);
         };
 
-        const handleInboxTimestamp = (e) => {
-            const latestTs = e.detail;
-            if (typeof latestTs === 'number' && latestTs > 0) {
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            recompute(latestTs, null);
-        };
-
-        const handleInboxViewed = () => {
-            recompute(null, null);
-        };
-
-        const handleInboxUpdated = (e) => {
-            const unreadCount = e?.detail?.unreadCount;
-            const latestTs = e?.detail?.latestTs;
-            if (typeof unreadCount === 'number' && unreadCount >= 0) {
-                Storage.save('inbox_unread_count', unreadCount);
-            }
-            if (typeof latestTs === 'number' && latestTs > 0) {
-                Storage.save('inbox_latest_ts', latestTs);
-            }
-            recompute(latestTs ?? null, unreadCount ?? null);
-        };
-
-        const handleStorage = () => recompute(null, null);
-
-        window.addEventListener('inboxTimestamp', handleInboxTimestamp);
-        window.addEventListener('inboxViewed', handleInboxViewed);
-        window.addEventListener('inboxUpdated', handleInboxUpdated);
-        window.addEventListener('storage', handleStorage);
-
-        // Check storage on mount (in case values were set before listeners were added)
-        recompute(null, null);
-
-        return () => {
-            window.removeEventListener('inboxTimestamp', handleInboxTimestamp);
-            window.removeEventListener('inboxViewed', handleInboxViewed);
-            window.removeEventListener('inboxUpdated', handleInboxUpdated);
-            window.removeEventListener('storage', handleStorage);
-        };
+        window.addEventListener('inboxCount', handleInboxCount);
+        return () => window.removeEventListener('inboxCount', handleInboxCount);
     }, [publicKey]);
 
     useEffect(() => {
@@ -459,62 +395,6 @@ function TopBar({ state }) {
     useEffect(() => {
         setMenuOpen(false);
     }, [pathname]);
-
-    // Track user balance changes
-    useEffect(() => {
-        if (!hasPublicKey) {
-            setUserBalance(null);
-            setOptimisticDeltaUmirage(0);
-            Storage.remove(OPTIMISTIC_CLAIM_KEY);
-            return;
-        }
-
-        const applyBalanceUpdate = (storedValue) => {
-            if (storedValue === null || storedValue === undefined) {
-                setUserBalance(null);
-                setOptimisticDeltaUmirage(0);
-                return;
-            }
-            const balance = Number(storedValue);
-            if (!Number.isFinite(balance)) {
-                setUserBalance(0);
-                setOptimisticDeltaUmirage(0);
-                return;
-            }
-            const optimisticDelta = resolveOptimisticDelta(balance);
-            setUserBalance(balance);
-            setOptimisticDeltaUmirage(optimisticDelta);
-        };
-
-        const checkBalance = () => {
-            const stored = Storage.load('user_balance', null);
-            if (stored === null) return; // Not loaded yet, keep showing "~"
-            applyBalanceUpdate(stored);
-        };
-
-        // Poll for changes (TransactionHandler updates this)
-        const interval = setInterval(checkBalance, 2000);
-
-        // Also listen for storage events (cross-tab sync)
-        const handleStorage = (e) => {
-            if (e.key === 'user_balance') {
-                applyBalanceUpdate(e.newValue);
-            }
-        };
-        const handleOptimisticUpdate = () => {
-            const stored = Storage.load('user_balance', null);
-            if (stored === null) return;
-            applyBalanceUpdate(stored);
-        };
-        window.addEventListener('storage', handleStorage);
-        window.addEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
-
-        return () => {
-            clearInterval(interval);
-            window.removeEventListener('storage', handleStorage);
-            window.removeEventListener('optimisticBalanceUpdate', handleOptimisticUpdate);
-        };
-    }, [hasPublicKey]);
 
     const getInitials = (name) => {
         if (!name) return '?';
@@ -556,8 +436,6 @@ function TopBar({ state }) {
         return pathname === path;
     };
 
-    const displayBalance = userBalance === null ? null : userBalance + optimisticDeltaUmirage;
-
     return (
         <SearchContainer>
             <SearchRow>
@@ -593,7 +471,7 @@ function TopBar({ state }) {
                         </CreateButtonHideMobile>
                         <InboxLink
                             href="/inbox"
-                            $hasUnread={hasUnreadReplies}
+                            $hasUnread={inboxCount > 0}
                             title="Inbox"
                             onClick={(e) => {
                                 // Allow right-click, ctrl+click, cmd+click, middle-click to work natively
@@ -606,7 +484,7 @@ function TopBar({ state }) {
                             <InboxIcon viewBox="0 0 24 24">
                                 <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z" />
                             </InboxIcon>
-                            {hasUnreadReplies && <UnreadDot />}
+                            {inboxCount > 0 && <UnreadBadge>{formatBadgeCount(inboxCount)}</UnreadBadge>}
                         </InboxLink>
                         <MenuWrapper ref={menuRef}>
                             <Avatar

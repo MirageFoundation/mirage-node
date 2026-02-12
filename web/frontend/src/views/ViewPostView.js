@@ -825,32 +825,6 @@ const ConfirmButtons = styled.div`
     justify-content: flex-end;
 `;
 
-const InlineCancelButton = styled.button`
-    background: transparent;
-    border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#666'};
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.35rem 0.4rem;
-    cursor: pointer;
-    line-height: 1;
-
-    &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    }
-
-    &:focus {
-        outline: none;
-    }
-
-    &:focus-visible {
-        outline: 2px solid rgba(245, 158, 11, 0.5);
-        outline-offset: 2px;
-        border-radius: 6px;
-    }
-`;
-
-
 const ReportInput = styled.input`
     display: block;
     width: 100%;
@@ -2079,9 +2053,6 @@ function ViewPostView({ state, updatePost }) {
                                 if (data) {
                                     setRoot(data.root);
                                     setChildren(data.children);
-                                    if (typeof data.latest_inbox_timestamp === 'number') {
-                                        window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-                                    }
                                 }
                             }
                         } catch (_) { }
@@ -2283,10 +2254,6 @@ function ViewPostView({ state, updatePost }) {
                         const f = tx && tx['reconcileAfterCommentsFetch'];
                         if (typeof f === 'function') f(post_id, data.root, data.children);
                     } catch (_) { }
-                    // Dispatch inbox timestamp for notification badge update
-                    if (data && typeof data.latest_inbox_timestamp === 'number') {
-                        window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-                    }
                     // Mark current comment count as visited
                     if (data.root && data.root.comments !== undefined) {
                         try {
@@ -2612,8 +2579,6 @@ function ViewPostView({ state, updatePost }) {
         if (commentId) {
             try {
                 Storage.addViewedReplyId(commentId);
-                // Dispatch event to update inbox indicator in header
-                window.dispatchEvent(new CustomEvent('inboxUpdated'));
             } catch (_) { }
         }
     }, [focusedCommentId, location.hash]);
