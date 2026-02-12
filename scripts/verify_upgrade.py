@@ -135,7 +135,9 @@ def _restart_miraged(node_home: Path) -> bool:
         pass
     # Fallback: start in background
     try:
-        subprocess.Popen(["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen(
+            ["miraged", "start", "--home", str(node_home)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
         return True
     except Exception:
         return False
@@ -368,14 +370,14 @@ def check_binary_version(miraged: str, failures: list[str], warnings: list[str])
 def check_bridge_commands(miraged: str, failures: list[str], warnings: list[str]) -> None:
     """Check that new bridge CLI commands exist."""
     print("\n-> Checking bridge CLI commands...")
-    
+
     # Check query commands exist (should show help, not error)
     query_cmds = [
         ([miraged, "q", "bridge", "--help"], "q bridge"),
         ([miraged, "q", "bridge", "status", "--help"], "q bridge status"),
         ([miraged, "q", "bridge", "config", "--help"], "q bridge config"),
     ]
-    
+
     for cmd, name in query_cmds:
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -388,12 +390,12 @@ def check_bridge_commands(miraged: str, failures: list[str], warnings: list[str]
         except Exception as e:
             print(f"   [FAIL] {name}: {e}")
             failures.append(f"Bridge command '{name}' check failed: {e}")
-    
+
     # Check tx commands exist
     tx_cmds = [
         ([miraged, "tx", "bridge", "--help"], "tx bridge"),
     ]
-    
+
     for cmd, name in tx_cmds:
         try:
             p = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -443,7 +445,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
     """Check status of all registered upgrades. Returns dict of upgrade_name -> applied_height (0 if not applied)."""
     print("\n-> Checking all upgrade statuses...")
     results = {}
-    
+
     for upgrade_name in ALL_UPGRADES:
         try:
             applied = _run_json([miraged, "q", "upgrade", "applied", upgrade_name, "--node", rpc, "-o", "json"])
@@ -457,7 +459,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
         except Exception:
             results[upgrade_name] = 0
             print(f"   [--] {upgrade_name}: not applied")
-    
+
     # Check current plan
     try:
         plan = _run_json([miraged, "q", "upgrade", "plan", "--node", rpc, "-o", "json"])
@@ -468,7 +470,7 @@ def check_all_upgrades(miraged: str, rpc: str, warnings: list[str]) -> dict[str,
             print(f"\n   [PENDING] Current plan: {plan_name} @ height {plan_height}")
     except Exception:
         pass
-    
+
     return results
 
 
@@ -965,15 +967,16 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
 def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) -> None:
     """Check that Python protobuf definitions are complete and importable."""
     print("\n-> Checking Python protobuf definitions...")
-    
+
     try:
         from shared import datatypes
+
         print("   [OK] shared.datatypes imported")
     except ImportError as e:
         print(f"   [WARN] Cannot import shared.datatypes: {e}")
         warnings.append(f"Cannot import shared.datatypes: {e}")
         return
-    
+
     # Check all required message classes exist
     required_classes = [
         # Transaction messages
@@ -1012,7 +1015,7 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
         "QueryDifficultyRequest",
         "QueryDifficultyResponse",
     ]
-    
+
     missing = []
     for cls_name in required_classes:
         if hasattr(datatypes, cls_name):
@@ -1020,13 +1023,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             if cls is not None:
                 continue
         missing.append(cls_name)
-    
+
     if missing:
         print(f"   [FAIL] Missing classes: {', '.join(missing)}")
         failures.append(f"datatypes.py missing classes: {', '.join(missing)}")
     else:
         print(f"   [OK] All {len(required_classes)} message classes present")
-    
+
     # Check Params has all required fields
     try:
         params_cls = datatypes.Params
@@ -1043,25 +1046,25 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             "bridge_attestation_threshold",
             # bridge_fee removed - now per-chain in BridgeChainConfig.fee
         ]
-        
+
         # Check if field descriptors exist
         descriptor = params_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         missing_fields = [f for f in required_param_fields if f not in field_names]
         if missing_fields:
             print(f"   [FAIL] Params missing fields: {', '.join(missing_fields)}")
             failures.append(f"Params proto missing fields: {', '.join(missing_fields)}")
         else:
             print(f"   [OK] Params has all required fields")
-        
+
         # Check bridge_chains is a repeated field
         bridge_chains_field = None
         for f in descriptor.fields:
             if f.name == "bridge_chains":
                 bridge_chains_field = f
                 break
-        
+
         if bridge_chains_field is None:
             print("   [FAIL] Params.bridge_chains field missing")
             failures.append("Params proto missing bridge_chains field")
@@ -1070,17 +1073,17 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             failures.append("Params.bridge_chains should be repeated field")
         else:
             print("   [OK] Params.bridge_chains is repeated")
-            
+
     except Exception as e:
         print(f"   [FAIL] Cannot verify Params fields: {e}")
         failures.append(f"Cannot verify Params proto fields: {e}")
-    
+
     # Check BridgeChainConfig has required fields
     try:
         bcc_cls = datatypes.BridgeChainConfig
         descriptor = bcc_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_bcc_fields = ["chain_id", "enabled", "fee"]
         missing_bcc = [f for f in required_bcc_fields if f not in field_names]
         if missing_bcc:
@@ -1091,13 +1094,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify BridgeChainConfig: {e}")
         failures.append(f"Cannot verify BridgeChainConfig proto: {e}")
-    
+
     # Check MsgBridgeAttestBurned has required fields (used by orchestrator for inbound)
     try:
         attest_cls = datatypes.MsgBridgeAttestBurned
         descriptor = attest_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_attest_fields = ["validator", "source_chain", "burn_id", "mirage_recipient", "amount"]
         missing_attest = [f for f in required_attest_fields if f not in field_names]
         if missing_attest:
@@ -1108,13 +1111,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify MsgBridgeAttestBurned: {e}")
         failures.append(f"Cannot verify MsgBridgeAttestBurned proto: {e}")
-    
+
     # Check MsgBridgeAttestMinted has required fields (used by orchestrator for outbound)
     try:
         attest_cls = datatypes.MsgBridgeAttestMinted
         descriptor = attest_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_attest_fields = ["validator", "burn_id", "destination_chain", "destination_tx"]
         missing_attest = [f for f in required_attest_fields if f not in field_names]
         if missing_attest:
@@ -1125,13 +1128,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
     except Exception as e:
         print(f"   [FAIL] Cannot verify MsgBridgeAttestMinted: {e}")
         failures.append(f"Cannot verify MsgBridgeAttestMinted proto: {e}")
-    
+
     # Check MsgBridgeBurn has required fields (user bridge transactions)
     try:
         burn_cls = datatypes.MsgBridgeBurn
         descriptor = burn_cls.DESCRIPTOR
         field_names = [f.name for f in descriptor.fields]
-        
+
         required_burn_fields = ["destination_chain", "destination_address", "amount"]
         missing_burn = [f for f in required_burn_fields if f not in field_names]
         if missing_burn:
@@ -1566,19 +1569,19 @@ def check_balance_overflow_fix(failures: list[str], warnings: list[str]) -> None
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
     """Check orchestrator configuration if enabled."""
     print("\n-> Checking orchestrator config...")
-    
+
     orchestrator_env = home_dir / "env" / "orchestrator.env"
     if not orchestrator_env.exists():
         print("   [INFO] orchestrator.env not found (orchestrator not configured)")
         return
-    
+
     try:
         content = orchestrator_env.read_text()
     except Exception as e:
         print(f"   [WARN] Cannot read orchestrator.env: {e}")
         warnings.append(f"Cannot read orchestrator.env: {e}")
         return
-    
+
     # Parse env file
     env_values = {}
     for line in content.splitlines():
@@ -1588,22 +1591,22 @@ def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: lis
         if "=" in line:
             key, _, value = line.partition("=")
             env_values[key.strip()] = value.strip()
-    
+
     # Check if enabled
     enabled = env_values.get("ORCHESTRATOR_ENABLED", "").lower()
     if enabled not in ("true", "1", "yes"):
         print("   [INFO] Orchestrator disabled (ORCHESTRATOR_ENABLED != true)")
         return
-    
+
     print("   [OK] Orchestrator enabled")
-    
+
     # Check required fields
     required_fields = [
         ("ORCHESTRATOR_SOLANA_PROGRAM_ID", "Solana program ID"),
         ("ORCHESTRATOR_SOLANA_RPC", "Solana RPC endpoint"),
         ("ORCHESTRATOR_SOLANA_KEYPAIR", "Solana keypair path"),
     ]
-    
+
     for field, desc in required_fields:
         value = env_values.get(field, "")
         if value:
@@ -1613,7 +1616,7 @@ def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: lis
         else:
             print(f"   [FAIL] {field}: not set ({desc})")
             failures.append(f"Orchestrator enabled but {field} not set")
-    
+
     # Check keypair file exists
     keypair_path = env_values.get("ORCHESTRATOR_SOLANA_KEYPAIR", "")
     if keypair_path:
@@ -1752,16 +1755,16 @@ def main() -> int:
 
     # Check binary version first
     check_binary_version(miraged, failures, warnings)
-    
+
     # Check bridge CLI commands exist
     check_bridge_commands(miraged, failures, warnings)
 
     rpc_chain_id, _ = check_node_health(rpc, failures, warnings)
-    
+
     # Show all upgrade statuses if requested
     if args.list_all:
         check_all_upgrades(miraged, rpc, warnings)
-    
+
     # Check specific upgrade
     check_upgrade_state(miraged, rpc, args.phase, upgrade_name, failures)
 
