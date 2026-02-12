@@ -305,6 +305,12 @@ for i in $(seq 1 120); do
 done
 
 if [ "$RPC_READY" -eq 0 ]; then
+  if [ "${SKIP_PEERS:-}" = "1" ]; then
+    echo "WARNING: Node RPC not ready after 120s (local mode - keeping container alive)" >&2
+    # Local testnet: external scripts manage services via tmux, so don't exit
+    # (exiting triggers container restart which destroys the tmux session)
+    while true; do sleep 60; done
+  fi
   echo "ERROR: Node RPC not ready after 120s" >&2
   exit 1
 fi

@@ -1117,7 +1117,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const fetchUserSuspensionStatus = async (userId) => {
         if (!userId) return;
         try {
-            const response = await Api.get(`/rewards/pending?owner=${encodeURIComponent(userId)}`);
+            const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
             setUserSuspendedStatus(response.suspended === true);
         } catch (err) {
             console.error('Error fetching suspension status:', err);
