@@ -327,12 +327,13 @@ def _tx_error(
 def _classify_exception(err_str: str):
     """Return (message, http_status) for common chain exceptions.
 
-    Checks for admin-balance errors before falling through to the generic 500.
+    Checks for known error patterns and returns user-safe messages.
+    Unknown exceptions get a generic message (details are in server logs).
     """
     low = err_str.lower()
     if "admin insufficient balance" in low:
         return "admin insufficient balance: your account balance is too low to cover the transaction fee", 400
-    return err_str, 500
+    return "Internal server error", 500
 
 
 def get_nonce_for_subscriber(last_block_hash: str) -> str:

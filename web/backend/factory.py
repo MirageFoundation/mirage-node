@@ -9,7 +9,7 @@ Functions:
 import json
 import os
 import sys
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -52,6 +52,13 @@ def create_app(init_runtime: bool = True) -> Flask:
     app.register_blueprint(core_bp)
     app.register_blueprint(bridge_bp)
     app.register_blueprint(quests_bp)
+
+    # Global safety net: catch any unhandled exception and return a generic error
+    @app.errorhandler(Exception)
+    def _handle_unhandled(e):
+        from error_utils import safe_error
+
+        return safe_error(e, context="unhandled")
 
     # Middleware: inject new_inbox_items into every JSON response for logged-in users
     @app.after_request

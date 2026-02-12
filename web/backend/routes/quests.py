@@ -30,6 +30,7 @@ from flask import Blueprint, jsonify, request
 
 from bank import get_balance as _get_balance
 from db import connect_db
+from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
@@ -545,7 +546,7 @@ def get_daily_quests():
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "quests.daily.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/flash", methods=["GET"])
@@ -675,7 +676,7 @@ def get_flash_quests():
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "quests.flash.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/achievements", methods=["GET"])
@@ -736,7 +737,7 @@ def get_achievements():
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "achievements.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/pending", methods=["GET"])
@@ -831,7 +832,7 @@ def get_pending_rewards():
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "rewards.pending.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/claim", methods=["POST"])
@@ -977,7 +978,7 @@ def claim_rewards():
         return jsonify(_inject_balance(resp, owner))
     except Exception as e:
         log_event(rid, "rewards.claim.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ========== Admin Endpoints ==========
@@ -1059,7 +1060,7 @@ def admin_suspend_rewards():
         )
     except Exception as e:
         log_event(rid, "admin.suspend.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/admin/rewards/unsuspend", methods=["POST"])
@@ -1128,7 +1129,7 @@ def admin_unsuspend_rewards():
         )
     except Exception as e:
         log_event(rid, "admin.unsuspend.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/admin/rewards/suspensions", methods=["GET"])
@@ -1184,7 +1185,7 @@ def admin_list_suspensions():
         return jsonify({"suspensions": suspensions})
     except Exception as e:
         log_event(rid, "admin.suspensions.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ==================== Debug Endpoints (localhost only) ====================
@@ -1313,7 +1314,7 @@ def debug_quests_info():
         )
     except Exception as e:
         log_event(rid, "debug.quests.info.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/complete", methods=["POST"])
@@ -1407,7 +1408,7 @@ def debug_complete_quest():
         return jsonify({"success": True, "quest_id": quest_id})
     except Exception as e:
         log_event(rid, "debug.quests.complete.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/reset", methods=["POST"])
@@ -1449,7 +1450,7 @@ def debug_reset_quests():
         return jsonify({"success": True, "deleted_count": deleted_count})
     except Exception as e:
         log_event(rid, "debug.quests.reset.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @quests_bp.route("/api/rewards/debug/set_completed", methods=["POST"])
@@ -1530,4 +1531,4 @@ def debug_set_completed_count():
         return jsonify({"success": True, "old_count": current_count, "new_count": new_count})
     except Exception as e:
         log_event(rid, "debug.quests.set_completed.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)

@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import requests
 from flask import Blueprint, jsonify, request
 
+from error_utils import safe_error
 from logging_utils import log_event, next_request_id
 from node import require_runtime, find_local_operator_address, find_local_consensus_address
 from params import load_params, expect_params
@@ -337,7 +338,7 @@ def reload_params():
         return jsonify({"status": "ok", "params": params})
     except Exception as e:
         log_event(rid, "reload_params.error", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_followed_moderators(cur, address: str) -> list[str]:
@@ -463,7 +464,7 @@ def get_blocked_users():
         conn.close()
         return jsonify({"blocked_users": blocked_users})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_profile")
@@ -515,7 +516,7 @@ def get_profile():
         }
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # ============================================================================
@@ -1714,7 +1715,7 @@ def get_tx_status():
 
     except Exception as e:
         log_event(rid, "get_tx_status.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_parameters")
@@ -1739,7 +1740,7 @@ def get_parameters():
         return jsonify(payload)
     except Exception as e:
         log_event(rid, "get_parameters.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_status")
@@ -1841,7 +1842,7 @@ def get_user_status():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_user_status.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_followed")
@@ -1892,7 +1893,7 @@ def get_user_followed():
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_followed.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_blocked")
@@ -1929,7 +1930,7 @@ def get_user_blocked():
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_user_blocked.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_preferences")
@@ -1978,7 +1979,7 @@ def get_preferences():
         return jsonify(_inject_balance(resp, addr))
     except Exception as e:
         log_event(rid, "get_preferences.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_similar_users")
@@ -2032,7 +2033,7 @@ def get_similar_users():
 
     except Exception as e:
         log_event(rid, "get_similar_users.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_network_stats")
@@ -2075,7 +2076,7 @@ def get_network_stats():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_network_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for supply history (30 second TTL)
@@ -2138,7 +2139,7 @@ def get_supply_history():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_supply_history.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for circulation stats (expensive query)
@@ -2281,7 +2282,7 @@ def get_circulation_stats():
         return jsonify(resp)
     except Exception as e:
         log_event(rid, "get_circulation_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_config")
@@ -2310,7 +2311,7 @@ def get_config():
             tiers = p["tiers"]
         except Exception as e:
             log_event(rid, "get_config.params_err", error=str(e))
-            return jsonify({"error": f"failed to read params cache: {e}"}), 500
+            return safe_error(e, context="get_config.params")
 
         rt = require_runtime()
         diff_info = _get_difficulty_info()
@@ -2374,7 +2375,7 @@ def get_config():
         return out
     except Exception as e:
         log_event(rid, "get_config.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_peer_info(peer: Dict[str, str]) -> Dict[str, str]:
@@ -2426,7 +2427,7 @@ def get_peers():
         peers = [_get_peer_info(p) for p in peers_data]
         return jsonify({"peers": peers})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Cache for difficulty history (1 minute TTL)
@@ -2525,7 +2526,7 @@ def get_address_from_username():
             return jsonify({"exists": True, "address": row[0], "username": username})
         return jsonify({"exists": False, "address": None, "username": username})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_username_from_address", methods=["GET", "POST"])
@@ -2589,7 +2590,7 @@ def get_username_from_address():
             return jsonify({"username": row[0], "address": address})
         return jsonify({"username": None, "address": address})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # Removed compatibility alias endpoints for username resolution (no fallbacks)
@@ -2651,7 +2652,7 @@ def get_users():
 
         return jsonify({"users": users, "page": page, "limit": limit, "has_more": has_more, "total": total})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_topics")
@@ -2784,7 +2785,7 @@ def get_topics():
 
         return jsonify({"topics": topics, "small_topics_count": small_topics_count, "min_posts": min_posts})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/search_topics")
@@ -2874,7 +2875,7 @@ def search_topics():
         conn.close()
         return jsonify({"topics": topics})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/search")
@@ -3202,7 +3203,7 @@ def search():
         conn.close()
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, deleted_bare):
@@ -3701,7 +3702,7 @@ def get_posts():
         conn.close()
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_user_posts")
@@ -3903,7 +3904,7 @@ def get_user_posts():
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
         return jsonify(_inject_balance(resp, viewer))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_reports")
@@ -3969,7 +3970,7 @@ def get_reports():
             except Exception:
                 pass
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _fetch_post(
@@ -4455,7 +4456,7 @@ def get_comments():
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "get_comments.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _find_root_post_id(cur, comment_id: str):
@@ -4536,7 +4537,7 @@ def get_root_post_id():
             return jsonify({"error": "Comment not found or invalid"}), 404
         return jsonify({"root_post_id": root_id, "comment_id": comment_id})
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_comment_context")
@@ -4571,7 +4572,7 @@ def get_comment_context():
         resp = {"context": chain, "comment_id": comment_id}
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_inbox")
@@ -4728,10 +4729,7 @@ def get_inbox():
         }
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
-        import traceback
-
-        logger.error(f"[get_inbox] Error: {e}\n{traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e, context="get_inbox")
 
 
 @public_bp.route("/api/mark_inbox_viewed", methods=["POST"])
@@ -4760,7 +4758,7 @@ def mark_inbox_viewed():
         return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
     except Exception as e:
         log_event(rid, "mark_inbox_viewed.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_upload_url", methods=["POST"])
@@ -4799,7 +4797,7 @@ def get_upload_url():
 
             if response.status_code != 200:
                 log_event(rid, "get_upload_url.err", error=f"cloudflare_stream_api_error_{response.status_code}")
-                return jsonify({"error": f"Cloudflare Stream API error: {response.status_code}"}), 500
+                return jsonify({"error": "Upload service error"}), 500
 
             result = response.json()
             # Stream responses typically contain result.uploadURL and sometimes result.uid
@@ -4829,14 +4827,14 @@ def get_upload_url():
 
         if response.status_code != 200:
             log_event(rid, "get_upload_url.err", error=f"cloudflare_api_error_{response.status_code}")
-            return jsonify({"error": f"Cloudflare API error: {response.status_code}"}), 500
+            return jsonify({"error": "Upload service error"}), 500
 
         result = response.json()
         if not result.get("success"):
             errors = result.get("errors", [])
             error_msg = errors[0].get("message", "Unknown error") if errors else "Unknown error"
             log_event(rid, "get_upload_url.err", error=f"cloudflare_error_{error_msg}")
-            return jsonify({"error": f"Cloudflare error: {error_msg}"}), 500
+            return jsonify({"error": "Upload service error"}), 500
 
         upload_data = result.get("result", {})
         upload_url = upload_data.get("uploadURL", "")
@@ -4850,7 +4848,7 @@ def get_upload_url():
         return jsonify({"uploadURL": upload_url, "id": upload_id, "accountHash": account_hash})
     except Exception as e:
         log_event(rid, "get_upload_url.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/stream_proxy/<video_uid>", defaults={"path": ""})
@@ -5007,7 +5005,7 @@ def stream_proxy(video_uid, path):
         return Response(response.iter_content(chunk_size=8192), status=response.status_code, headers=resp_headers)
     except Exception as e:
         log_event(rid, "stream_proxy.err", error=str(e), video_uid=video_uid[:20], path=path[:50] if path else "")
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/stats/event", methods=["POST"])
@@ -5059,7 +5057,7 @@ def stats_event():
         return jsonify({"success": True})
     except Exception as e:
         log_event(rid, "stats_event.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_analytics(rid: int):
@@ -5246,7 +5244,7 @@ def _get_stats_analytics(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.analytics.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_rewards(rid: int):
@@ -5379,7 +5377,7 @@ def _get_stats_rewards(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.rewards.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_rewards_history(rid: int):
@@ -5442,7 +5440,7 @@ def _get_stats_rewards_history(rid: int):
 
     except Exception as e:
         log_event(rid, "get_stats.rewards_history.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_signups(rid: int):
@@ -5566,7 +5564,7 @@ def _get_stats_signups(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.signups.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def _get_stats_subscribers(rid: int):
@@ -5652,7 +5650,7 @@ def _get_stats_subscribers(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.subscribers.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 def get_stats_accounts(rid: int):
@@ -5708,7 +5706,7 @@ def get_stats_accounts(rid: int):
         )
     except Exception as e:
         log_event(rid, "get_stats.accounts.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_welcome_stats")
@@ -5783,7 +5781,7 @@ def get_welcome_stats():
             conn.close()
     except Exception as e:
         log_event(rid, "get_welcome_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/get_stats")
@@ -6076,7 +6074,7 @@ def get_stats():
         return jsonify(stats)
     except Exception as e:
         log_event(rid, "get_stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # =============================================================================
@@ -6267,7 +6265,7 @@ def get_referral_stats():
         return jsonify(result)
     except Exception as e:
         log_event(rid, "referral.stats.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 # =============================================================================
@@ -6323,7 +6321,7 @@ def get_invite_codes():
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
         log_event(rid, "invite.get_codes.err", error=str(e))
-        return jsonify({"error": str(e)}), 500
+        return safe_error(e)
 
 
 @public_bp.route("/api/validate_invite_code", methods=["POST"])
@@ -6365,7 +6363,7 @@ def validate_invite_code():
         return jsonify({"valid": True, "owner": owner})
     except Exception as e:
         log_event(rid, "invite.validate.err", error=str(e))
-        return jsonify({"valid": False, "error": str(e)}), 500
+        return safe_error(e, context="validate_invite_code")
 
 
 __all__ = ["public_bp"]

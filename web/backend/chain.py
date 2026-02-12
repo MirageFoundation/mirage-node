@@ -195,10 +195,15 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
 
 
 def classify_reject(raw_log: str) -> Dict[str, Any]:
-    # Normalize to string and precompute lowercased view for pattern matching.
+    """Classify a chain broadcast rejection into a safe, user-facing message.
+
+    Returns a dict with at least 'reason' and 'message' keys.
+    The 'message' is always a sanitized string safe to return to clients.
+    Raw chain logs are never included (they are logged server-side by callers).
+    """
     raw = "" if raw_log is None else str(raw_log)
     msg = raw.lower()
-    out: Dict[str, Any] = {"reason": "rejected", "message": raw}
+    out: Dict[str, Any] = {"reason": "rejected", "message": "transaction rejected"}
     try:
         import re as _re
 
@@ -240,8 +245,7 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # If we reach here and the raw log is empty or just whitespace, surface that explicitly
-    # so callers are not left with an empty error string.
+    # If the raw log is empty, note that explicitly.
     if not raw.strip():
         out["message"] = "chain returned empty error log for this transaction"
     return out
