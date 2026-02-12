@@ -8,7 +8,7 @@ import Storage from './utils/Storage';
 import seedVault from './utils/SeedVault';
 import Api from './lib/api';
 import * as tx from './utils/tx';
-import { sendDeviceFingerprint } from './utils/fp';
+
 import MobileBottomNav from './components/MobileBottomNav';
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
@@ -201,8 +201,6 @@ function RouteTracker({ children }) {
                 }
 
                 const userAddress = Storage.load('publicKey', null);
-                const userAgent = navigator.userAgent || null;
-                const referrer = document.referrer || null;
                 const pagePath = location.pathname;
 
                 // Track visit and session_start only on first page load of new session
@@ -212,8 +210,6 @@ function RouteTracker({ children }) {
                         event_type: 'visit',
                         session_id: sessionId,
                         user_address: userAddress,
-                        user_agent: userAgent,
-                        referrer: referrer,
                         page_path: pagePath
                     }, { timeoutMs: 5000 });
                 }
@@ -224,8 +220,6 @@ function RouteTracker({ children }) {
                         event_type: 'page_view',
                         session_id: sessionId,
                         user_address: userAddress,
-                        user_agent: userAgent,
-                        referrer: referrer,
                         page_path: pagePath
                     }, { timeoutMs: 5000 });
                 }
@@ -345,16 +339,12 @@ class App extends Component {
                 if (!sessionId) return;
 
                 const userAddress = this.state.publicKey || null;
-                const userAgent = navigator.userAgent || null;
-                const referrer = document.referrer || null;
                 const pagePath = window.location.pathname;
 
                 const data = JSON.stringify({
                     event_type: 'session_end',
                     session_id: sessionId,
                     user_address: userAddress,
-                    user_agent: userAgent,
-                    referrer: referrer,
                     page_path: pagePath
                 });
 
@@ -497,11 +487,6 @@ class App extends Component {
         // Stats tracking is handled by RouteTracker to avoid duplicate requests
         // Only set up session end tracking via sendBeacon
         this.setupSessionEndTracking();
-
-        // Send device fingerprint if user is already logged in (existing session)
-        if (this.state.publicKey) {
-            sendDeviceFingerprint(this.state.publicKey);
-        }
 
         // Keybind: Ctrl+. to toggle theme
         this._onKeyDown = (e) => {
@@ -668,9 +653,6 @@ class App extends Component {
                     .catch((err) => {
                         console.error('[App] Config fetch failed:', err);
                     });
-
-                // Send device fingerprint for fraud detection
-                sendDeviceFingerprint(publicKey);
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 })

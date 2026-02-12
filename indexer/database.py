@@ -346,7 +346,9 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_target_lower ON reports(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC)")
 
-                # stats_events
+                # stats_events (bot requests are filtered at ingest, no raw user-agent/IP stored)
+                # browser_family, os_family, device_type are coarse categories only
+                # (e.g. "Chrome", "Windows", "desktop") -- not identifying
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS stats_events (
@@ -355,10 +357,10 @@ class DatabaseManager:
                         user_address TEXT,
                         session_id TEXT NOT NULL,
                         created_at BIGINT NOT NULL,
-                        user_agent TEXT,
-                        ip_hash TEXT,
-                        referrer TEXT,
-                        page_path TEXT
+                        page_path TEXT,
+                        browser_family TEXT,
+                        os_family TEXT,
+                        device_type TEXT
                     )
                     """
                 )
@@ -366,6 +368,38 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_session_id ON stats_events(session_id)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_user_address ON stats_events(user_address)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_stats_events_event_type ON stats_events(event_type)")
+                # Migration: add coarse UA category columns and drop invasive columns
+                for col in ("browser_family", "os_family", "device_type"):
+                    cur.execute(
+                        f"""
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'stats_events' AND column_name = '{col}'
+                            ) THEN
+                                ALTER TABLE stats_events ADD COLUMN {col} TEXT;
+                            END IF;
+                        END $$;
+                        """
+                    )
+                # Drop columns that stored raw user-agent, IP hashes, and referrers
+                for col in ("user_agent", "ip_hash", "referrer"):
+                    cur.execute(
+                        f"""
+                        DO $$
+                        BEGIN
+                            IF EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_name = 'stats_events' AND column_name = '{col}'
+                            ) THEN
+                                ALTER TABLE stats_events DROP COLUMN {col};
+                            END IF;
+                        END $$;
+                        """
+                    )
+                # Drop the entire fingerprints table if it exists
+                cur.execute("DROP TABLE IF EXISTS user_fingerprints")
 
                 # difficulty_history - tracks PoW difficulty and message count over time
                 cur.execute(
@@ -612,58 +646,6 @@ class DatabaseManager:
                     GROUP BY LOWER(owner), LOWER(root_topic)
                     ON CONFLICT (owner, topic) DO UPDATE SET
                         post_count = EXCLUDED.post_count
-                    """
-                )
-
-                # user_fingerprints: device fingerprints for fraud detection
-                cur.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS user_fingerprints (
-                        id SERIAL PRIMARY KEY,
-                        user_address VARCHAR(128) NOT NULL,
-                        ip_hash VARCHAR(64),
-                        user_agent TEXT,
-                        user_agent_hash VARCHAR(64),
-                        screen_width INTEGER,
-                        screen_height INTEGER,
-                        color_depth INTEGER,
-                        pixel_ratio REAL,
-                        timezone VARCHAR(64),
-                        timezone_offset INTEGER,
-                        language VARCHAR(32),
-                        languages TEXT,
-                        platform VARCHAR(64),
-                        hardware_concurrency INTEGER,
-                        device_memory REAL,
-                        touch_support BOOLEAN,
-                        canvas_hash VARCHAR(64),
-                        webgl_vendor VARCHAR(128),
-                        webgl_renderer VARCHAR(256),
-                        webgl_hash VARCHAR(64),
-                        fingerprint_hash VARCHAR(64),
-                        first_seen BIGINT,
-                        last_seen BIGINT,
-                        seen_count INTEGER DEFAULT 1,
-                        attributes JSONB DEFAULT '{}'
-                    )
-                    """
-                )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_user ON user_fingerprints(user_address)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_hash ON user_fingerprints(fingerprint_hash)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_ip ON user_fingerprints(ip_hash)")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_canvas ON user_fingerprints(canvas_hash)")
-                # Add JSONB column if missing (migration for existing tables)
-                cur.execute(
-                    """
-                    DO $$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM information_schema.columns 
-                            WHERE table_name = 'user_fingerprints' AND column_name = 'attributes'
-                        ) THEN
-                            ALTER TABLE user_fingerprints ADD COLUMN attributes JSONB DEFAULT '{}';
-                        END IF;
-                    END $$;
                     """
                 )
 
@@ -1718,20 +1700,29 @@ class DatabaseManager:
         session_id: str,
         created_at: int,
         user_address: str | None = None,
-        user_agent: str | None = None,
-        ip_hash: str | None = None,
-        referrer: str | None = None,
         page_path: str | None = None,
+        browser_family: str | None = None,
+        os_family: str | None = None,
+        device_type: str | None = None,
     ) -> None:
         """Insert a stats event."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO stats_events(event_type, user_address, session_id, created_at, user_agent, ip_hash, referrer, page_path)
+                    INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
                     VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (event_type, user_address, session_id, int(created_at), user_agent, ip_hash, referrer, page_path),
+                    (
+                        event_type,
+                        user_address,
+                        session_id,
+                        int(created_at),
+                        page_path,
+                        browser_family,
+                        os_family,
+                        device_type,
+                    ),
                 )
 
     def upsert_difficulty(self, height: int, difficulty: int, msg_count: int, created_at: int) -> None:

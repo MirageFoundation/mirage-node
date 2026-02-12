@@ -2752,19 +2752,22 @@ def get_topics():
         if topics_dict:
             cur.execute(
                 f"""
-                SELECT p.topic, COUNT(1) as comment_count
+                SELECT p.root_topic, COUNT(1) as comment_count
                 FROM posts p
                 WHERE COALESCE(p.target, '') != ''
-                  AND p.topic IS NOT NULL
-                  AND LENGTH(TRIM(p.topic)) > 0
+                  AND p.root_topic IS NOT NULL
+                  AND LENGTH(TRIM(p.root_topic)) > 0
                   {deleted_clause}
-                GROUP BY p.topic
+                GROUP BY p.root_topic
                 """
             )
+            # root_topic is stored lowercase; build a lookup from the original-case topic keys
+            lower_to_topic = {k.lower(): k for k in topics_dict}
             for row in cur.fetchall():
-                topic, count = row[0], row[1]
-                if topic in topics_dict:
-                    topics_dict[topic]["comment_count"] = count or 0
+                root_topic, count = row[0], row[1]
+                key = lower_to_topic.get((root_topic or "").lower())
+                if key:
+                    topics_dict[key]["comment_count"] = count or 0
 
         if topics_dict:
             lower_to_key = {k.lower(): k for k in topics_dict.keys()}
@@ -5008,20 +5011,68 @@ def stream_proxy(video_uid, path):
         return safe_error(e)
 
 
+_STATS_BOT_NAMES = {
+    "googlebot",
+    "applebot",
+    "bingbot",
+    "yandexbot",
+    "baiduspider",
+    "duckduckbot",
+    "slurp",
+    "facebook",
+    "facebookexternalhit",
+    "facebot",
+    "twitterbot",
+    "twitter",
+    "linkedinbot",
+    "pinterest",
+    "semrushbot",
+    "ahrefsbot",
+    "mj12bot",
+    "dotbot",
+    "petalbot",
+    "bytespider",
+}
+
+
 @public_bp.route("/api/stats/event", methods=["POST"])
 def stats_event():
-    """Record analytics events (visits, sessions, page views)."""
+    """Record analytics events (visits, sessions, page views). Bot requests are silently discarded.
+
+    The raw User-Agent is never stored. Only coarse categories are persisted
+    (e.g. "Chrome", "Windows", "desktop") which are shared by millions of users.
+    """
     rid = next_request_id()
     try:
+        # Server-side: parse User-Agent for bot detection + coarse category extraction
+        ua_string = request.headers.get("User-Agent", "")
+        browser_family = None
+        os_family = None
+        device_type = None
+        if ua_string:
+            try:
+                ua = parse_user_agent(ua_string)
+                if ua.is_bot or (ua.browser.family or "").lower() in _STATS_BOT_NAMES:
+                    return jsonify({"success": True})
+                # Extract coarse categories only (never store the raw UA string)
+                browser_family = ua.browser.family or None
+                os_family = ua.os.family or None
+                if ua.is_mobile:
+                    device_type = "mobile"
+                elif ua.is_tablet:
+                    device_type = "tablet"
+                elif ua.is_pc:
+                    device_type = "desktop"
+                else:
+                    device_type = "other"
+            except Exception:
+                pass
+
         data = request.get_json(force=True) or {}
         event_type = str(data.get("event_type", "")).strip()
         session_id = str(data.get("session_id", "")).strip()
         user_address = data.get("user_address")
         user_address = str(user_address).strip().lower() if user_address else None
-        user_agent = data.get("user_agent")
-        user_agent = str(user_agent).strip() if user_agent else None
-        referrer = data.get("referrer")
-        referrer = str(referrer).strip() if referrer else None
         page_path = data.get("page_path")
         page_path = str(page_path).strip() if page_path else None
 
@@ -5031,13 +5082,6 @@ def stats_event():
         if event_type not in ("visit", "session_start", "session_end", "page_view"):
             return jsonify({"error": "invalid event_type"}), 400
 
-        ip_hash = None
-        if request.remote_addr:
-            try:
-                ip_hash = hashlib.sha256(request.remote_addr.encode()).hexdigest()[:16]
-            except Exception:
-                pass
-
         timestamp = int(time.time())
 
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -5045,10 +5089,10 @@ def stats_event():
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO stats_events(event_type, user_address, session_id, created_at, user_agent, ip_hash, referrer, page_path)
+                INSERT INTO stats_events(event_type, user_address, session_id, created_at, page_path, browser_family, os_family, device_type)
                 VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (event_type, user_address, session_id, timestamp, user_agent, ip_hash, referrer, page_path),
+                (event_type, user_address, session_id, timestamp, page_path, browser_family, os_family, device_type),
             )
             conn.commit()
         finally:
@@ -5061,10 +5105,10 @@ def stats_event():
 
 
 def _get_stats_analytics(rid: int):
-    """Return analytics stats from stats_events (DAU/MAU, device/browser/OS breakdown).
+    """Return analytics stats from stats_events (DAU/MAU, browser/OS/device breakdown).
 
-    This is a separate endpoint because stats_events processing is expensive.
-    The frontend loads this lazily after showing core stats.
+    Bots are filtered at ingest time so all stored events are from real users.
+    Only coarse categories are stored (e.g. "Chrome", "Windows", "desktop").
     """
     now = int(time.time())
 
@@ -5083,78 +5127,31 @@ def _get_stats_analytics(rid: int):
 
             stats: dict[str, Any] = {}
 
-            # Check if we have stats_events
-            cur.execute("SELECT COUNT(*) FROM stats_events")
-            has_stats_events = cur.fetchone()[0] > 0
+            # Fetch events from last 30 days (bots already filtered at ingest)
+            cur.execute(
+                """
+                SELECT session_id, user_address, created_at, event_type, browser_family, os_family, device_type
+                FROM stats_events
+                WHERE created_at >= %s
+                """,
+                (thirty_days_ago,),
+            )
+            all_events = cur.fetchall()
 
-            if has_stats_events:
-                # Known bots/crawlers to exclude
-                bot_names = {
-                    "googlebot",
-                    "applebot",
-                    "bingbot",
-                    "yandexbot",
-                    "baiduspider",
-                    "duckduckbot",
-                    "slurp",
-                    "facebook",
-                    "facebookexternalhit",
-                    "facebot",
-                    "twitterbot",
-                    "twitter",
-                    "linkedinbot",
-                    "pinterest",
-                    "semrushbot",
-                    "ahrefsbot",
-                    "mj12bot",
-                    "dotbot",
-                    "petalbot",
-                    "bytespider",
-                }
-
-                # Fetch all events from last 30 days
-                cur.execute(
-                    """
-                    SELECT session_id, user_address, user_agent, created_at, event_type
-                    FROM stats_events
-                    WHERE created_at >= %s
-                    """,
-                    (thirty_days_ago,),
-                )
-                all_events = cur.fetchall()
-
-                # First pass: identify bot sessions and parse user agents
-                session_ua: dict[str, Any] = {}
-                bot_sessions: set[str] = set()
-                for sess_id, _user_addr, ua_string, _created_at, _event_type in all_events:
-                    if sess_id in session_ua or sess_id in bot_sessions:
-                        continue
-                    if not ua_string or not ua_string.strip():
-                        continue
-                    try:
-                        ua = parse_user_agent(ua_string)
-                        if ua.is_bot or (ua.browser.family or "").lower() in bot_names:
-                            bot_sessions.add(sess_id)
-                        else:
-                            session_ua[sess_id] = ua
-                    except Exception:
-                        pass
-
-                # Filter to non-bot events only
-                clean_events = [
-                    (sess_id, user_addr, created_at, event_type)
-                    for sess_id, user_addr, _ua, created_at, event_type in all_events
-                    if sess_id not in bot_sessions
-                ]
-
-                # Calculate DAU/MAU from clean events
+            if all_events:
+                # Calculate DAU/MAU
                 dau_today_set: set[str] = set()
                 dau_yesterday_set: set[str] = set()
                 mau_set: set[str] = set()
                 dau_reg_set: set[str] = set()
                 unreg_sessions: set[str] = set()
 
-                for sess_id, user_addr, created_at, event_type in clean_events:
+                # Track coarse categories per session (deduplicated)
+                session_browser: dict[str, str] = {}
+                session_os: dict[str, str] = {}
+                session_device: dict[str, str] = {}
+
+                for sess_id, user_addr, created_at, event_type, browser, os_fam, dev_type in all_events:
                     if event_type not in ("visit", "session_start", "page_view"):
                         continue
                     user_key = user_addr.lower() if user_addr and user_addr.strip() else sess_id
@@ -5172,6 +5169,14 @@ def _get_stats_analytics(rid: int):
                     if not user_addr or not user_addr.strip():
                         unreg_sessions.add(sess_id)
 
+                    # Store first seen category per session
+                    if browser and sess_id not in session_browser:
+                        session_browser[sess_id] = browser
+                    if os_fam and sess_id not in session_os:
+                        session_os[sess_id] = os_fam
+                    if dev_type and sess_id not in session_device:
+                        session_device[sess_id] = dev_type
+
                 stats["dau_today"] = len(dau_today_set)
                 stats["dau_any_today"] = len(dau_today_set)
                 stats["dau_yesterday"] = len(dau_yesterday_set)
@@ -5179,26 +5184,11 @@ def _get_stats_analytics(rid: int):
                 stats["dau_registered_today"] = len(dau_reg_set)
                 stats["unregistered_users"] = len(unreg_sessions)
 
-                # Browser/device/OS breakdown
+                # Browser breakdown
                 browser_counts: dict[str, int] = {}
-                os_counts: dict[str, int] = {}
-                device_counts = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
-
-                for sess_id, ua in session_ua.items():
-                    browser = ua.browser.family or "Unknown"
-                    browser_counts[browser] = browser_counts.get(browser, 0) + 1
-                    os_family = ua.os.family or "Unknown"
-                    os_counts[os_family] = os_counts.get(os_family, 0) + 1
-                    if ua.is_mobile:
-                        device_counts["mobile"] += 1
-                    elif ua.is_tablet:
-                        device_counts["tablet"] += 1
-                    elif ua.is_pc:
-                        device_counts["desktop"] += 1
-                    else:
-                        device_counts["other"] += 1
-
-                total_sessions = len(session_ua) or 1
+                for b in session_browser.values():
+                    browser_counts[b] = browser_counts.get(b, 0) + 1
+                total_sessions = len(session_browser) or 1
                 browser_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in browser_counts.items()]
                 browser_pcts.sort(key=lambda x: x[1], reverse=True)
                 top_browsers = [{"name": k, "pct": f"{p}%"} for k, p in browser_pcts[:4]]
@@ -5208,7 +5198,12 @@ def _get_stats_analytics(rid: int):
                         top_browsers.append({"name": "Other", "pct": f"{other_pct}%"})
                 stats["browser_breakdown"] = top_browsers
 
-                os_pcts = [(k, round(v / total_sessions * 100, 1)) for k, v in os_counts.items()]
+                # OS breakdown
+                os_counts: dict[str, int] = {}
+                for o in session_os.values():
+                    os_counts[o] = os_counts.get(o, 0) + 1
+                total_os = len(session_os) or 1
+                os_pcts = [(k, round(v / total_os * 100, 1)) for k, v in os_counts.items()]
                 os_pcts.sort(key=lambda x: x[1], reverse=True)
                 top_os = [{"name": k, "pct": f"{p}%"} for k, p in os_pcts[:4]]
                 if len(os_pcts) > 4:
@@ -5217,6 +5212,13 @@ def _get_stats_analytics(rid: int):
                         top_os.append({"name": "Other", "pct": f"{other_pct}%"})
                 stats["os_breakdown"] = top_os
 
+                # Device type breakdown
+                device_counts: dict[str, int] = {"desktop": 0, "mobile": 0, "tablet": 0, "other": 0}
+                for d in session_device.values():
+                    if d in device_counts:
+                        device_counts[d] += 1
+                    else:
+                        device_counts["other"] += 1
                 device_total = sum(device_counts.values()) or 1
                 stats["device_breakdown"] = {
                     k: f"{round(v / device_total * 100, 1)}%" for k, v in device_counts.items()
