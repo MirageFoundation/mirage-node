@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Helmet } from 'react-helmet-async';
 import styled from 'styled-components';
 import { useNavigate, useLocation, Navigate } from 'react-router-dom';
@@ -167,6 +167,33 @@ export default function InboxView({ state }) {
     const [isLoadingMore, setIsLoadingMore] = useState(false);
     const viewerAddress = Storage.load('publicKey', '');
     const [activeReplyId, setActiveReplyId] = useState('');
+    const badgeCountRef = useRef((() => {
+        try {
+            return Math.max(0, parseInt(localStorage.getItem('inbox_count'), 10) || 0);
+        } catch (_) { return 0; }
+    })());
+
+    // Persist inbox count to localStorage and dispatch event to update badge.
+    // Also sets a cooldown timestamp so maybeSyncInbox in api.js won't
+    // overwrite with a stale server value from an in-flight request.
+    const setBadgeCount = useCallback((count) => {
+        const n = Math.max(0, count);
+        badgeCountRef.current = n;
+        try {
+            localStorage.setItem('inbox_count', String(n));
+            localStorage.setItem('inbox_count_set_at', String(Date.now()));
+        } catch (_) { }
+        window.dispatchEvent(new CustomEvent('inboxCount', { detail: n }));
+    }, []);
+
+    // Track server-side badge count so we can decrement it on individual mark-read
+    useEffect(() => {
+        const handler = (e) => {
+            if (typeof e.detail === 'number') badgeCountRef.current = Math.max(0, e.detail);
+        };
+        window.addEventListener('inboxCount', handler);
+        return () => window.removeEventListener('inboxCount', handler);
+    }, []);
 
     const fetchInbox = useCallback(async (page = 1, append = false) => {
         if (!viewerAddress) {
@@ -195,6 +222,8 @@ export default function InboxView({ state }) {
                     setReplies(res.replies);
                     // Mark inbox as viewed on first page load so server resets unread count
                     Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+                    // Clear badge immediately — don't wait for next API response
+                    setBadgeCount(0);
                 }
                 setHasMoreReplies(res.has_more || false);
                 setError('');
@@ -225,6 +254,8 @@ export default function InboxView({ state }) {
         setReplies(prev => prev.map(r => ({ ...r, isUnread: false })));
         // Tell server to reset inbox viewed timestamp
         Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+        // Clear badge immediately
+        setBadgeCount(0);
     };
 
     const handleMarkOneAsRead = (e, reply) => {
@@ -232,11 +263,17 @@ export default function InboxView({ state }) {
         e.stopPropagation();
         Storage.addViewedReplyId(reply.reply_id);
         setReplies(prev => [...prev]);
+        // Decrement badge immediately
+        setBadgeCount(badgeCountRef.current - 1);
     };
 
     const handleReplyClick = (reply) => {
         if (!reply) return;
+        const wasUnread = !Storage.getViewedReplyIds().includes(reply.reply_id);
         Storage.addViewedReplyId(reply.reply_id);
+        if (wasUnread) {
+            setBadgeCount(badgeCountRef.current - 1);
+        }
         if (reply.root_post_id) {
             try {
                 Storage.setPendingPostHighlight(reply.reply_id);

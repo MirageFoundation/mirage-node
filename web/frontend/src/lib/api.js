@@ -99,19 +99,28 @@ function maybeSyncBalance(params, body, data) {
         if (!Number.isFinite(bal)) return;
         localStorage.setItem('user_balance', String(Math.max(0, Math.trunc(bal))));
         window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: bal }));
-    } catch (_) {}
+    } catch (_) { }
 }
 
 /**
  * Auto-sync inbox count: if the API response contains `new_inbox_items`,
- * dispatch an event so TopBar/MobileBottomNav can update the badge.
+ * persist to localStorage and dispatch an event so TopBar/MobileBottomNav
+ * can update the badge (survives component remounts across navigation).
+ *
+ * Skips the update if the count was explicitly set client-side within the
+ * last 5 seconds (e.g. mark-as-read), so a stale server response from a
+ * request that was in-flight before the mark can't flash the old count.
  * @param {any} data - parsed response
  */
 function maybeSyncInbox(data) {
     if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
     try {
-        window.dispatchEvent(new CustomEvent('inboxCount', { detail: data.new_inbox_items }));
-    } catch (_) {}
+        const setAt = parseInt(localStorage.getItem('inbox_count_set_at'), 10);
+        if (setAt && (Date.now() - setAt) < 5000) return;
+        const count = Math.max(0, data.new_inbox_items);
+        localStorage.setItem('inbox_count', String(count));
+        window.dispatchEvent(new CustomEvent('inboxCount', { detail: count }));
+    } catch (_) { }
 }
 
 /**

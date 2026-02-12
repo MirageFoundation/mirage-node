@@ -218,13 +218,13 @@ const CreateLabel = styled(Label)`
 // Unread badge with count
 const UnreadBadge = styled.span`
     position: absolute;
-    top: -4px;
-    right: -10px;
-    min-width: 22px;
-    height: 22px;
+    top: -5px;
+    right: -11px;
+    min-width: 24px;
+    height: 24px;
     padding: 0 6px;
     background: #FF3B30;
-    border-radius: 11px;
+    border-radius: 12px;
     border: 2px solid ${({ theme }) =>
         theme?.name === 'dark'
             ? 'rgba(26, 26, 26, 0.92)'
@@ -232,7 +232,7 @@ const UnreadBadge = styled.span`
     color: #fff;
     font-size: 11px;
     font-weight: 700;
-    line-height: 18px;
+    line-height: 20px;
     text-align: center;
     box-sizing: border-box;
 `;
@@ -342,8 +342,13 @@ function MobileBottomNav({ state }) {
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // State for unread inbox count (server-side)
-    const [inboxCount, setInboxCount] = useState(0);
+    // State for unread inbox count (server-side, initialized from localStorage to survive remounts)
+    const [inboxCount, setInboxCount] = useState(() => {
+        try {
+            const stored = localStorage.getItem('inbox_count');
+            return stored ? Math.max(0, parseInt(stored, 10) || 0) : 0;
+        } catch (_) { return 0; }
+    });
     const mountedRef = useRef(true);
 
     // Bottom-sheet profile menu visibility

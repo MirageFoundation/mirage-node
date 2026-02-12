@@ -580,7 +580,6 @@ const HomeFeedInfoCard = styled.div`
 
 // NSFW welcome hero - shown once to logged-in users on home feed
 const NsfwWelcomeHero = styled.div`
-    margin-top: 1rem;
     background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 127, 0.08) 100%);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 12px;
@@ -597,7 +596,6 @@ const NsfwWelcomeHero = styled.div`
     @media (max-width: 768px) {
         border-radius: 8px;
         padding: 0.85rem 1rem;
-        margin-top: 0.5rem;
     }
 `;
 
