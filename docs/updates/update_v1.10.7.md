@@ -12,7 +12,7 @@ This release also hardens the backend. Error messages no longer leak internal de
 
 ### Seed Phrase Security
 
-- Four storage modes: plaintext (legacy), password-encrypted, memory-only, and passkey (WebAuthn)
+- Four storage modes: plaintext (default), password-encrypted, memory-only, and passkey (WebAuthn)
 - Password mode uses AES-GCM with PBKDF2 key derivation—unlock once per session
 - Passkey mode uses hardware-backed encryption via Touch ID, Face ID, or security keys
 - Memory-only mode never persists the seed—re-enter it each session
