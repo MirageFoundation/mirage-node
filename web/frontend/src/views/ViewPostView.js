@@ -2053,9 +2053,6 @@ function ViewPostView({ state, updatePost }) {
                                 if (data) {
                                     setRoot(data.root);
                                     setChildren(data.children);
-                                    if (typeof data.latest_inbox_timestamp === 'number') {
-                                        window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-                                    }
                                 }
                             }
                         } catch (_) { }
@@ -2257,10 +2254,6 @@ function ViewPostView({ state, updatePost }) {
                         const f = tx && tx['reconcileAfterCommentsFetch'];
                         if (typeof f === 'function') f(post_id, data.root, data.children);
                     } catch (_) { }
-                    // Dispatch inbox timestamp for notification badge update
-                    if (data && typeof data.latest_inbox_timestamp === 'number') {
-                        window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: data.latest_inbox_timestamp }));
-                    }
                     // Mark current comment count as visited
                     if (data.root && data.root.comments !== undefined) {
                         try {
@@ -2586,8 +2579,6 @@ function ViewPostView({ state, updatePost }) {
         if (commentId) {
             try {
                 Storage.addViewedReplyId(commentId);
-                // Dispatch event to update inbox indicator in header
-                window.dispatchEvent(new CustomEvent('inboxUpdated'));
             } catch (_) { }
         }
     }, [focusedCommentId, location.hash]);

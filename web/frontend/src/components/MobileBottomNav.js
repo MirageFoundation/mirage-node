@@ -215,20 +215,29 @@ const CreateLabel = styled(Label)`
     color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
 `;
 
-// Unread badge
+// Unread badge with count
 const UnreadBadge = styled.span`
     position: absolute;
-    top: -2px;
-    right: -6px;
-    min-width: 8px;
-    height: 8px;
+    top: -6px;
+    right: -10px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
     background: #FF3B30;
-    border-radius: 50%;
+    border-radius: 8px;
     border: 2px solid ${({ theme }) =>
         theme?.name === 'dark'
             ? 'rgba(26, 26, 26, 0.92)'
             : 'rgba(255, 255, 255, 0.92)'};
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 16px;
+    text-align: center;
+    box-sizing: border-box;
 `;
+
+const formatBadgeCount = (n) => n > 99 ? '99+' : String(n);
 
 // Lock icon for gated profile
 const LockIcon = styled.svg`
@@ -333,8 +342,8 @@ function MobileBottomNav({ state }) {
         return () => window.removeEventListener('resize', checkMobile);
     }, []);
 
-    // State for unread inbox badge
-    const [hasUnread, setHasUnread] = useState(false);
+    // State for unread inbox count (server-side)
+    const [inboxCount, setInboxCount] = useState(0);
     const mountedRef = useRef(true);
 
     // Bottom-sheet profile menu visibility
@@ -485,46 +494,22 @@ function MobileBottomNav({ state }) {
         return () => { mountedRef.current = false; };
     }, []);
 
-    // Listen for inbox timestamp from get_posts response (piggybacked to avoid separate call)
+    // Listen for server-side inbox count from every API response
     useEffect(() => {
         if (!isMobile) return;
         if (!publicKey) {
-            setHasUnread(false);
+            setInboxCount(0);
             return;
         }
 
-        const handleInboxTimestamp = (e) => {
+        const handleInboxCount = (e) => {
             if (!mountedRef.current) return;
-            const latestTs = e.detail;
-            if (typeof latestTs !== 'number' || latestTs <= 0) {
-                setHasUnread(false);
-                return;
-            }
-            // Compare with last time user viewed inbox
-            const lastViewed = Number(Storage.load('inbox_last_viewed_at', '0'));
-            setHasUnread(latestTs > lastViewed);
+            const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
+            setInboxCount(count);
         };
 
-        // Also clear badge when user views inbox
-        const handleInboxViewed = () => {
-            if (!mountedRef.current) return;
-            setHasUnread(false);
-        };
-
-        window.addEventListener('inboxTimestamp', handleInboxTimestamp);
-        window.addEventListener('inboxViewed', handleInboxViewed);
-
-        // Check storage on mount (in case values were set before listeners were added)
-        const latestTs = Number(Storage.load('inbox_latest_ts', 0));
-        const lastViewed = Number(Storage.load('inbox_last_viewed_at', 0));
-        if (latestTs > 0 && latestTs > lastViewed) {
-            setHasUnread(true);
-        }
-
-        return () => {
-            window.removeEventListener('inboxTimestamp', handleInboxTimestamp);
-            window.removeEventListener('inboxViewed', handleInboxViewed);
-        };
+        window.addEventListener('inboxCount', handleInboxCount);
+        return () => window.removeEventListener('inboxCount', handleInboxCount);
     }, [isMobile, publicKey]);
 
     // Close the profile sheet on any route change
@@ -656,7 +641,7 @@ function MobileBottomNav({ state }) {
                     <InboxNavItem
                         href="/inbox"
                         $active={isInboxActive}
-                        aria-label={hasUnread ? 'Inbox - has unread messages' : 'Inbox'}
+                        aria-label={inboxCount > 0 ? `Inbox - ${inboxCount} unread` : 'Inbox'}
                         aria-current={isInboxActive ? 'page' : undefined}
                         onClick={(e) => {
                             handleNavItemClick();
@@ -675,7 +660,7 @@ function MobileBottomNav({ state }) {
                                     <path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H4V8l8 5 8-5v10zm-8-7L4 6h16l-8 5z" />
                                 )}
                             </Icon>
-                            {hasUnread && hasPublicKey && <UnreadBadge aria-hidden="true" />}
+                            {inboxCount > 0 && hasPublicKey && <UnreadBadge aria-hidden="true">{formatBadgeCount(inboxCount)}</UnreadBadge>}
                         </IconWrapper>
                         <Label>Inbox</Label>
                     </InboxNavItem>

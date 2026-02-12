@@ -230,11 +230,6 @@ export async function pollTxStatus(txHash, options = {}) {
 
             const res = await Api.get('get_tx_status', params, { timeoutMs });
 
-            // Dispatch inbox timestamp if present
-            if (res && typeof res.latest_inbox_timestamp === 'number') {
-                window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: res.latest_inbox_timestamp }));
-            }
-
             if (res && res.found) {
                 if (!res.success) {
                     return {

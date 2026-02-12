@@ -599,7 +599,6 @@ class App extends Component {
         Storage.remove('user_balance');
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
-        Storage.remove('inbox_last_viewed_at');
 
         // Fetch latest status on login
         try {
@@ -632,13 +631,6 @@ class App extends Component {
                         // Update username in state if returned from backend
                         if (typeof userStatus.username === 'string' && userStatus.username) {
                             this.setState({ username: userStatus.username });
-                        }
-
-                        // Dispatch inbox timestamp for notification badge
-                        if (typeof userStatus.latest_inbox_timestamp === 'number') {
-                            // Save to storage first (in case TopBar not mounted yet)
-                            Storage.save('inbox_latest_ts', userStatus.latest_inbox_timestamp);
-                            window.dispatchEvent(new CustomEvent('inboxTimestamp', { detail: userStatus.latest_inbox_timestamp }));
                         }
 
                         // Prime recent votes for local highlight (only on login)

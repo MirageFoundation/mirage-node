@@ -390,33 +390,60 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
-def _get_latest_inbox_timestamp(cur, address: str) -> int | None:
-    """Get the timestamp of the most recent reply to posts owned by the address.
-    Returns None if no address provided or no replies found."""
-    if not address or address.lower() == "guest":
-        return None
+# ---- Inbox count cache (60s TTL per address) ----
+_inbox_cache: dict[str, tuple[int, float]] = {}
+_INBOX_CACHE_TTL = 60.0
+_INBOX_CACHE_MAX = 10000
 
-    viewer_lower = address.lower()
+
+def _get_new_inbox_count(cur, address: str) -> int:
+    """Count replies to user's posts that arrived after their last inbox view.
+    Results are cached in-memory for 60s per address."""
+    if not address or address.lower() == "guest":
+        return 0
+
+    viewer = address.lower()
+    now = time.time()
+
+    cached = _inbox_cache.get(viewer)
+    if cached and cached[1] > now:
+        return cached[0]
+
     try:
-        # Find the most recent reply to any post owned by this user
-        # Uses the same logic as get_inbox but just gets the max timestamp
         cur.execute(
             """
-            SELECT MAX(r.created_at)
+            SELECT COUNT(*)
             FROM posts r
             JOIN posts p ON r.target = p.txhash
+            JOIN profiles pr ON LOWER(pr.owner) = %s
             WHERE LOWER(p.owner) = %s
               AND LOWER(r.owner) != %s
               AND r.deleted = FALSE
+              AND r.created_at > pr.inbox_last_viewed_at
             """,
-            (viewer_lower, viewer_lower),
+            (viewer, viewer, viewer),
         )
         row = cur.fetchone()
-        if row and row[0]:
-            return int(row[0])
+        count = int(row[0]) if row and row[0] else 0
     except Exception:
-        pass
-    return None
+        count = 0
+
+    # Evict expired entries if cache is too large
+    if len(_inbox_cache) >= _INBOX_CACHE_MAX:
+        expired = [k for k, v in _inbox_cache.items() if v[1] <= now]
+        for k in expired:
+            del _inbox_cache[k]
+        # If still too large after eviction, clear entirely
+        if len(_inbox_cache) >= _INBOX_CACHE_MAX:
+            _inbox_cache.clear()
+
+    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL)
+    return count
+
+
+def _invalidate_inbox_cache(address: str) -> None:
+    """Remove a user's inbox count from cache so it refreshes immediately."""
+    _inbox_cache.pop(address.lower(), None)
 
 
 @public_bp.route("/api/get_blocked_users")
@@ -470,9 +497,7 @@ def get_profile():
             "username": profile.get("username", ""),
             "level": int(profile.get("level", 0)),
             "created_at": int(profile.get("created_at", 0) or profile.get("createdAt", 0)),
-            "subscription_expiry": int(
-                profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)
-            ),
+            "subscription_expiry": int(profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)),
             "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
             "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
             "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
@@ -1684,16 +1709,6 @@ def get_tx_status():
         if code != 0:
             out["error_details"] = _classify_reject(raw_log)
 
-        # Include inbox timestamp if address provided
-        if address and conn:
-            try:
-                cur = conn.cursor()
-                inbox_ts = _get_latest_inbox_timestamp(cur, address)
-                if inbox_ts is not None:
-                    out["latest_inbox_timestamp"] = inbox_ts
-            except Exception:
-                pass
-
         log_event(rid, "get_tx_status.ok", tx_hash=tx_hash, tx_type=tx_type, indexed=indexed)
         return jsonify(out)
 
@@ -1808,7 +1823,6 @@ def get_user_status():
                             "timestamp": int(ts or 0),
                         }
                     )
-            inbox_ts = _get_latest_inbox_timestamp(cur, addr)
             conn.close()
         except Exception:
             pass
@@ -1823,8 +1837,6 @@ def get_user_status():
             "profile_registered_at": profile_registered_at,
             "recent_votes": recent_votes,
         }
-        if inbox_ts is not None:
-            resp["latest_inbox_timestamp"] = inbox_ts
         log_event(rid, "get_user_status.ok", user_level=user_level)
         return jsonify(resp)
     except Exception as e:
@@ -3382,11 +3394,6 @@ def get_posts():
                     sort_mode=sort_mode,
                 )
 
-            # Add inbox timestamp for notification badge (only if user is logged in)
-            if address and address.lower() != "guest":
-                inbox_ts = _get_latest_inbox_timestamp(cur, address)
-                if inbox_ts is not None:
-                    resp["latest_inbox_timestamp"] = inbox_ts
             conn.close()
             return jsonify(resp)
 
@@ -3689,12 +3696,7 @@ def get_posts():
 
         has_more = (page * limit) < total
 
-        # Add inbox timestamp for notification badge (only if user is logged in)
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
-        if address and address.lower() != "guest":
-            inbox_ts = _get_latest_inbox_timestamp(cur, address)
-            if inbox_ts is not None:
-                resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
         return jsonify(_inject_balance(resp, address))
@@ -4433,12 +4435,7 @@ def get_comments():
                 apply_votes(children)
         t_votes_ms = (time.time() - t_votes) * 1000
 
-        # Add inbox timestamp for notification badge (only if user is logged in)
         resp = {"root": root, "children": children}
-        if address and address.lower() != "guest":
-            inbox_ts = _get_latest_inbox_timestamp(cur, address)
-            if inbox_ts is not None:
-                resp["latest_inbox_timestamp"] = inbox_ts
 
         conn.close()
 
@@ -4734,6 +4731,35 @@ def get_inbox():
         import traceback
 
         logger.error(f"[get_inbox] Error: {e}\n{traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+
+@public_bp.route("/api/mark_inbox_viewed", methods=["POST"])
+def mark_inbox_viewed():
+    """Set the user's inbox_last_viewed_at to now, clearing their unread count."""
+    rid = next_request_id()
+    data = request.get_json(silent=True) or {}
+    address = (data.get("address") or "").strip()
+    if not address:
+        return jsonify({"error": "address is required"}), 400
+
+    addr_lower = address.lower()
+    now_ts = int(time.time())
+
+    try:
+        conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE profiles SET inbox_last_viewed_at = %s WHERE LOWER(owner) = %s",
+            (now_ts, addr_lower),
+        )
+        conn.commit()
+        conn.close()
+        _invalidate_inbox_cache(addr_lower)
+        log_event(rid, "mark_inbox_viewed.ok", address=addr_lower)
+        return jsonify({"ok": True, "inbox_last_viewed_at": now_ts})
+    except Exception as e:
+        log_event(rid, "mark_inbox_viewed.err", error=str(e))
         return jsonify({"error": str(e)}), 500
 
 
