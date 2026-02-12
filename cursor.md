@@ -198,21 +198,18 @@ All paths below are relative to `public/mirage-node/`.
    - Add to `DefaultParams()` with sensible default
    - Add validation in `Validate()` if needed
 
-3. **Genesis** (`blockchain/genesis/genesis.json`):
-   - Add param with value in `app_state.core.params`
-
-4. **Upgrade handler** (`blockchain/app/upgrades.go`):
+3. **Upgrade handler** (`blockchain/app/upgrades.go`):
    - For existing chains, set default value in upgrade handler
 
-5. **Python datatypes** (`shared/datatypes.py`):
+4. **Python datatypes** (`shared/datatypes.py`):
    - Add field to `Params` message definition with SAME field number as proto
    - Export any new message types
 
-6. **Backend params** (`web/backend/params.py`):
+5. **Backend params** (`web/backend/params.py`):
    - Add to `_REQUIRED_INT_PARAMS` or `_REQUIRED_FLOAT_PARAMS`
    - Backend MUST fail hard if param is missing
 
-7. **Query endpoints** - ALL params must be queryable via:
+6. **Query endpoints** - ALL params must be queryable via:
    - **gRPC**: `Query/Params` returns all params
    - **REST**: `/mirage/core/v1/params` (auto-generated from gRPC)
    - **CLI**: `miraged q core params`

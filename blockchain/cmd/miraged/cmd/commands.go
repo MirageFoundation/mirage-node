@@ -31,7 +31,6 @@ import (
 	genutilcli "github.com/cosmos/cosmos-sdk/x/genutil/client/cli"
 
 	"mirage/app"
-	"mirage/genesis"
 	coremodule "mirage/x/core/module"
 )
 
@@ -80,29 +79,10 @@ func initRootCmd(
 	initOriginalRunE := initCmd.RunE
 	initCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		_ = cmd.Flags().Set("chain-id", "mirage-1")
-		// Run default init first to create directories and default files
 		if initOriginalRunE != nil {
-			if err := initOriginalRunE(cmd, args); err != nil {
-				return err
-			}
-		} else {
-			initCmd.Run(cmd, args)
+			return initOriginalRunE(cmd, args)
 		}
-
-		// After init, write embedded canonical genesis.json
-		homeDir := app.DefaultNodeHome
-		if cmd.Flags().Lookup(flags.FlagHome) != nil {
-			if hval, err := cmd.Flags().GetString(flags.FlagHome); err == nil && strings.TrimSpace(hval) != "" {
-				homeDir = hval
-			}
-		}
-		genPath := filepath.Join(homeDir, "config", "genesis.json")
-		if err := os.MkdirAll(filepath.Dir(genPath), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(genPath, genesis.CanonicalGenesis, 0o644); err != nil {
-			return err
-		}
+		initCmd.Run(cmd, args)
 		return nil
 	}
 
