@@ -1295,8 +1295,8 @@ def check_network_charts(failures: list[str], warnings: list[str]) -> None:
 
     nv = REPO_ROOT / "web" / "frontend" / "src" / "views" / "NetworkView.js"
     if not nv.exists():
-        print("   [FAIL] NetworkView.js not found")
-        failures.append("network charts: NetworkView.js not found")
+        print("   [WARN] NetworkView.js not found (frontend source not present)")
+        warnings.append("network charts: NetworkView.js not found (frontend source not on this host)")
         return
     text = nv.read_text()
 
@@ -1392,14 +1392,18 @@ def check_quest_settings_rename(failures: list[str], warnings: list[str]) -> Non
         else:
             print(f"   [OK] old name {name} removed")
 
-    # Check quest_tracker.py uses new names
+    # Check quest_tracker.py uses new names (word-boundary match to avoid
+    # false positives where e.g. INVITE_RECRUIT_CHANCE is a substring of
+    # QUEST_INVITE_RECRUIT_CHANCE)
     tracker_py = REPO_ROOT / "indexer" / "quest_tracker.py"
     if tracker_py.exists():
         tracker_text = tracker_py.read_text()
         for old in old_names:
-            if old in tracker_text:
+            if re.search(rf"(?<![A-Z_]){old}(?![A-Z_])", tracker_text):
                 print(f"   [FAIL] quest_tracker.py still references {old}")
                 failures.append(f"quest settings: quest_tracker.py still uses {old}")
+            else:
+                print(f"   [OK] quest_tracker.py: no bare {old}")
 
     # Check quests.py uses consistent names (no double-prefix like QUEST_QUEST_*)
     quests_py = REPO_ROOT / "web" / "backend" / "routes" / "quests.py"
