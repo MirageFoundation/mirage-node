@@ -123,6 +123,23 @@ function maybeSyncInbox(data) {
     } catch (_) { }
 }
 
+function withInboxLastViewed(params) {
+    if (!params || typeof params !== 'object') return params;
+    try {
+        const myAddr = localStorage.getItem('publicKey') || '';
+        if (!myAddr) return params;
+        const reqAddr = String((params.address || params.owner) || '').trim();
+        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return params;
+        if (params.inbox_last_viewed_at !== undefined && params.inbox_last_viewed_at !== null) return params;
+        const seenRaw = localStorage.getItem('inbox_last_viewed_at');
+        const seen = parseInt(seenRaw, 10);
+        if (!Number.isFinite(seen) || seen <= 0) return params;
+        return { ...params, inbox_last_viewed_at: seen };
+    } catch (_) {
+        return params;
+    }
+}
+
 /**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
@@ -135,7 +152,7 @@ function maybeSyncInbox(data) {
  * @param {RequestOptions=} options
  */
 async function get(path, params, options) {
-    const url = buildUrl(path, params);
+    const url = buildUrl(path, withInboxLastViewed(params));
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 10000)));
     try {

@@ -186,6 +186,14 @@ export default function InboxView({ state }) {
         window.dispatchEvent(new CustomEvent('inboxCount', { detail: n }));
     }, []);
 
+    const persistInboxLastViewed = useCallback((value) => {
+        const ts = Math.max(0, Number(value) || 0);
+        if (!ts) return;
+        try {
+            localStorage.setItem('inbox_last_viewed_at', String(ts));
+        } catch (_) { }
+    }, []);
+
     // Track server-side badge count so we can decrement it on individual mark-read
     useEffect(() => {
         const handler = (e) => {
@@ -221,7 +229,13 @@ export default function InboxView({ state }) {
                 } else {
                     setReplies(res.replies);
                     // Mark inbox as viewed on first page load so server resets unread count
-                    Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+                    Api.post('mark_inbox_viewed', { address: viewerAddress })
+                        .then((res) => {
+                            if (res && typeof res.inbox_last_viewed_at === 'number') {
+                                persistInboxLastViewed(res.inbox_last_viewed_at);
+                            }
+                        })
+                        .catch(() => { });
                     // Clear badge immediately — don't wait for next API response
                     setBadgeCount(0);
                 }
@@ -236,7 +250,7 @@ export default function InboxView({ state }) {
             setLoading(false);
             setIsLoadingMore(false);
         }
-    }, [viewerAddress]);
+    }, [viewerAddress, persistInboxLastViewed]);
 
     useEffect(() => {
         fetchInbox(1, false);
@@ -253,7 +267,13 @@ export default function InboxView({ state }) {
         Storage.markAllRepliesAsViewed(allReplyIds);
         setReplies(prev => prev.map(r => ({ ...r, isUnread: false })));
         // Tell server to reset inbox viewed timestamp
-        Api.post('mark_inbox_viewed', { address: viewerAddress }).catch(() => { });
+        Api.post('mark_inbox_viewed', { address: viewerAddress })
+            .then((res) => {
+                if (res && typeof res.inbox_last_viewed_at === 'number') {
+                    persistInboxLastViewed(res.inbox_last_viewed_at);
+                }
+            })
+            .catch(() => { });
         // Clear badge immediately
         setBadgeCount(0);
     };
