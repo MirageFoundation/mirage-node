@@ -447,8 +447,8 @@ def get_backend_env(key: str) -> str | None:
 
 
 def update_backend_env(address: str) -> bool:
-    """Update QUEST_REWARDS_POOL_ADDRESS in backend.env."""
-    set_backend_env("QUEST_REWARDS_POOL_ADDRESS", address)
+    """Update QUESTS_REWARDS_POOL_ADDRESS in backend.env."""
+    set_backend_env("QUESTS_REWARDS_POOL_ADDRESS", address)
     return True
 
 
@@ -465,16 +465,16 @@ def configure_backend(address: str) -> None:
     changed = False
 
     # Ask about address
-    current_address = get_backend_env("QUEST_REWARDS_POOL_ADDRESS")
+    current_address = get_backend_env("QUESTS_REWARDS_POOL_ADDRESS")
     if current_address == address:
-        print(f"  QUEST_REWARDS_POOL_ADDRESS = {address}")
+        print(f"  QUESTS_REWARDS_POOL_ADDRESS = {address}")
     else:
-        print(f"  QUEST_REWARDS_POOL_ADDRESS = {current_address or '(not set)'}")
+        print(f"  QUESTS_REWARDS_POOL_ADDRESS = {current_address or '(not set)'}")
         print(f"  New address: {address}")
     confirm = input("  Update address? [Y/n]: ").strip().lower()
     if confirm != "n":
-        set_backend_env("QUEST_REWARDS_POOL_ADDRESS", address)
-        ok("QUEST_REWARDS_POOL_ADDRESS updated")
+        set_backend_env("QUESTS_REWARDS_POOL_ADDRESS", address)
+        ok("QUESTS_REWARDS_POOL_ADDRESS updated")
         changed = True
     else:
         print("  Skipped.")
@@ -497,7 +497,7 @@ def configure_backend(address: str) -> None:
 
     # Ask about quest payouts
     print()
-    current_payouts = get_backend_env("QUEST_PAYOUTS_ENABLED") or "false"
+    current_payouts = get_backend_env("QUESTS_PAYOUTS_ENABLED") or "false"
     default_payouts = "Y/n" if current_payouts == "true" else "y/N"
     confirm = input(f"  Enable quest payouts? [{default_payouts}]: ").strip().lower()
     if current_payouts == "true":
@@ -507,8 +507,8 @@ def configure_backend(address: str) -> None:
         # Currently disabled, default to keep disabled
         new_value = "true" if confirm == "y" else "false"
     if new_value != current_payouts:
-        set_backend_env("QUEST_PAYOUTS_ENABLED", new_value)
-        ok(f"QUEST_PAYOUTS_ENABLED={new_value}")
+        set_backend_env("QUESTS_PAYOUTS_ENABLED", new_value)
+        ok(f"QUESTS_PAYOUTS_ENABLED={new_value}")
         changed = True
 
     print()
@@ -607,13 +607,13 @@ def main():
             print()
             if BACKEND_ENV.exists():
                 content = BACKEND_ENV.read_text()
-                if f"QUEST_REWARDS_POOL_ADDRESS={address}" in content:
+                if f"QUESTS_REWARDS_POOL_ADDRESS={address}" in content:
                     ok("backend.env already configured")
-                elif "QUEST_REWARDS_POOL_ADDRESS=" in content:
-                    warn("backend.env has different QUEST_REWARDS_POOL_ADDRESS")
+                elif "QUESTS_REWARDS_POOL_ADDRESS=" in content:
+                    warn("backend.env has different QUESTS_REWARDS_POOL_ADDRESS")
                     print(f"  Update {BACKEND_ENV} if needed")
                 else:
-                    warn("QUEST_REWARDS_POOL_ADDRESS not in backend.env")
+                    warn("QUESTS_REWARDS_POOL_ADDRESS not in backend.env")
                     confirm = input("  Add to backend.env? [Y/n]: ").strip().lower()
                     if confirm != "n":
                         update_backend_env(address)
