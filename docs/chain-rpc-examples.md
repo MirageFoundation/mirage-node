@@ -29,7 +29,7 @@ RPC_WS="ws://${NODE_HOST}:26657/websocket"
 REST_HTTP="http://${NODE_HOST}:1317"
 ```
 
-> **Deprecation Notice**: The legacy paths `/rpc` and `/lcd` are deprecated and will be removed after **2026-02-20**. Use `/chain/rpc` and `/chain/rest` instead.
+> **Note**: The legacy paths `/rpc` and `/lcd` have been removed as of v1.10.0. Use `/chain/rpc` and `/chain/rest`.
 
 ### CometBFT RPC (port 26657)
 
