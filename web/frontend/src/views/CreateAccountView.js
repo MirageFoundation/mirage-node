@@ -119,19 +119,6 @@ function CreateAccountView({ state, setCredentials }) {
         return () => window.removeEventListener('configUpdated', handler);
     }, []);
 
-    // If nodeConfig is missing (stale cache or empty localStorage), fetch it ourselves.
-    // App.js may skip the fetch if it thinks params are valid and not stale (24h TTL).
-    React.useEffect(() => {
-        if (nodeConfig) return;
-        (async () => {
-            try {
-                const cfg = await Api.get('get_config', { _cb: Date.now() }, { timeoutMs: 10000 });
-                if (!cfg || typeof cfg !== 'object') return;
-                try { await tx.cacheConfigData(cfg); } catch (_) { }
-            } catch (_) { }
-        })();
-    }, [nodeConfig]);
-
     // Read node config from localStorage (set by get_config API)
     // Both fields must be explicitly present (boolean) — no silent defaults.
     const nodeConfig = React.useMemo(() => {
@@ -150,6 +137,19 @@ function CreateAccountView({ state, setCredentials }) {
     }, [configUpdateTrigger]);
     const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
     const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
+
+    // If nodeConfig is missing (stale cache or empty localStorage), fetch it ourselves.
+    // App.js may skip the fetch if it thinks params are valid and not stale (24h TTL).
+    React.useEffect(() => {
+        if (nodeConfig) return;
+        (async () => {
+            try {
+                const cfg = await Api.get('get_config', { _cb: Date.now() }, { timeoutMs: 10000 });
+                if (!cfg || typeof cfg !== 'object') return;
+                try { await tx.cacheConfigData(cfg); } catch (_) { }
+            } catch (_) { }
+        })();
+    }, [nodeConfig]);
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
