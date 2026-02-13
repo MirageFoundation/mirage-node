@@ -380,11 +380,13 @@ function CreatePostView({ state, setPosts, updatePost }) {
         };
     }, []);
 
-    // Rely on global config/user-status cache (App.js) and listen for updates
+    // Fetch chain config lazily if not cached (e.g. first visit after login)
     useEffect(() => {
-        // No direct API call here; limits update when chainConfig or user_level changes via events above.
-        void state.publicKey;
-    }, [state.publicKey]);
+        if (localStorage.getItem('chainConfig')) return;
+        Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+            .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+            .catch(() => { });
+    }, []);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const limits = React.useMemo(() => {

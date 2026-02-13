@@ -547,25 +547,10 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch configs if not cached or stale (> 24h)
+        // Fetch node config if not cached or stale (> 24h)
+        // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
         try {
             const nowMs = Date.now();
-            const isLoggedIn = !!Storage.load('publicKey', '');
-
-            // Chain config only matters for logged-in users (post/comment limits)
-            if (isLoggedIn) {
-                const chainCachedAt = Number(Storage.load('chain_config_cached_at', '0') || 0);
-                const chainStale = !chainCachedAt || (nowMs - chainCachedAt) > 86400_000;
-                const hasValidParams = getMaxUsernameSize() !== null;
-
-                if (!hasValidParams || chainStale) {
-                    Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
-                        .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
-                        .catch(() => { });
-                }
-            }
-
-            // Node config needed for all pages (registration flags, etc.)
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
             const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 86400_000;
             if (nodeStale) {
@@ -653,14 +638,8 @@ class App extends Component {
         // Fetch latest status on login
         try {
             if (publicKey) {
-                // Fetch chain config and node config in parallel
-                Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
-                    .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
-                    .catch((err) => { console.error('[App] Chain config fetch failed:', err); });
-
-                Api.get('get_node_config', undefined, { timeoutMs: 10000 })
-                    .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })
-                    .catch((err) => { console.error('[App] Node config fetch failed:', err); });
+                // Node config already fetched by componentDidMount; no need to re-fetch on login.
+                // Chain config fetched lazily by views that need it.
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 })

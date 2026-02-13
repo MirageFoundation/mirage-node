@@ -1213,7 +1213,7 @@ function ViewPostView({ state, updatePost }) {
     const replyErrorClearTimeoutRef = useRef({}); // { postId: timeoutId }
     const mobileReplyOverlayRef = useRef(null);
 
-    // Listen for chain config updates from ProfileView or other sources
+    // Listen for chain config updates and fetch lazily if not cached
     useEffect(() => {
         const handleConfigUpdate = () => {
             setConfigUpdateTrigger(prev => prev + 1);
@@ -1221,6 +1221,13 @@ function ViewPostView({ state, updatePost }) {
 
         window.addEventListener('chainConfigUpdated', handleConfigUpdate);
         window.addEventListener('userStatusUpdated', handleConfigUpdate);
+
+        // Fetch chain config if not cached (e.g. first visit after login)
+        if (!localStorage.getItem('chainConfig')) {
+            Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+                .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+                .catch(() => { });
+        }
 
         return () => {
             window.removeEventListener('chainConfigUpdated', handleConfigUpdate);

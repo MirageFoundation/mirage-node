@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Helmet } from 'react-helmet-async';
 import CardView from "../components/CardView";
 import Sidebar from "../components/Sidebar";
@@ -1353,6 +1353,27 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     const isLoggedIn = viewerAddress && viewerAddress !== 'guest';
 
+    const [nodeConfigTick, setNodeConfigTick] = useState(0);
+
+    useEffect(() => {
+        const handler = () => setNodeConfigTick(prev => prev + 1);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
+    }, []);
+
+    const nodeConfig = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }, [nodeConfigTick]);
+
+    const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
+
     // Invite code state
     const [inviteCodes, setInviteCodes] = useState([]);
     const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -1388,7 +1409,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     // Fetch invite codes for logged-in users
     useEffect(() => {
-        if (!isLoggedIn) return;
+        if (!isLoggedIn || !inviteCodesEnabled) {
+            setInviteCodes([]);
+            return;
+        }
         let cancelled = false;
         const loadInviteCodes = async () => {
             try {
@@ -1411,7 +1435,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             cancelled = true;
             window.removeEventListener('inviteCodesUpdated', handleInviteCodesUpdated);
         };
-    }, [isLoggedIn, viewerAddress]);
+    }, [isLoggedIn, viewerAddress, inviteCodesEnabled]);
 
     // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
     // Uses lightweight endpoint that only returns essential counts (fast, cached)
@@ -2660,8 +2684,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </TopicHeroCard>
                         )}
 
-                        {/* Invite-only banner - permanent, shown to all logged-in users on home/following feeds */}
-                        {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
+                        {/* Invite-only banner - shown only when invite codes are enabled on this node */}
+                        {isLoggedIn && inviteCodesEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
                             <InviteOnlyBanner $size={cardSize} role="region" aria-label="Invite-only announcement">
                                 <HomeFeedHeaderRow>
                                     <HomeFeedInfoTitle>
@@ -2694,8 +2718,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                             </InviteOnlyBanner>
                         )}
 
-                        {/* Quest hero card - shown to logged-in users on home/following feeds */}
-                        {isLoggedIn && (urlTopic === 'home' || urlTopic === 'following') && (
+                        {/* Quest hero card - only when quests are enabled on this node */}
+                        {isLoggedIn && questsEnabled && (urlTopic === 'home' || urlTopic === 'following') && (
                             <QuestHeroCard
                                 collapsed={questCardCollapsed}
                                 onToggleCollapse={toggleQuestCard}
