@@ -24,7 +24,7 @@ Usage:
 Backup storage:
     Backups are organized by source server in folders:
     ~/.mirage/backups/{server}/{server}-{YYYYMMDD}-{HHMMSS}.tgz
-    
+
     Example:
     ~/.mirage/backups/mirage.vote/mirage.vote-20260123-143052.tgz
     ~/.mirage/backups/139.59.9.96/139.59.9.96-20260123-144530.tgz
@@ -83,31 +83,28 @@ def status(msg: str):
 
 def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120) -> None:
     """Verify a server is fully healthy after backup.
-    
+
+    Curls the real endpoints directly (no SSH) to test end-to-end connectivity.
+
     Checks:
     - RPC is responding
     - Node has peers
-    - Backend health endpoint responds
     - Node is not stuck (block height increasing)
-    
+
     Raises exception if health check fails.
     """
-    conn = f"{ssh_user}@{host}"
     start_time = time.time()
-    
-    rpc_status_url = "http://127.0.0.1/chain/rpc/status"
-    rpc_net_info_url = "http://127.0.0.1/chain/rpc/net_info"
-    backend_health_url = "http://127.0.0.1:5000/health"
+
+    rpc_status_url = f"http://{host}/chain/rpc/status"
+    rpc_net_info_url = f"http://{host}/chain/rpc/net_info"
 
     # Wait for RPC to be available (max 60s)
-    status(f"  Waiting for RPC on {host}...")
-    status(f"  DEBUG: RPC status URL is {rpc_status_url}")
+    status(f"  Waiting for RPC on {host} ({rpc_status_url})...")
     rpc_ready = False
     for _ in range(20):
         try:
             result = subprocess.run(
-                f"ssh {conn} 'curl -sf {rpc_status_url} 2>/dev/null'",
-                shell=True,
+                ["curl", "-sf", rpc_status_url],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -119,17 +116,15 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
         except Exception:
             pass
         time.sleep(3)
-    
+
     if not rpc_ready:
         raise RuntimeError(f"RPC not responding on {host} after 60s")
     status(f"  RPC is responding on {host}")
-    
+
     # Check node has peers
     try:
-        status(f"  DEBUG: RPC net_info URL is {rpc_net_info_url}")
         result = subprocess.run(
-            f"ssh {conn} 'curl -sf {rpc_net_info_url}'",
-            shell=True,
+            ["curl", "-sf", rpc_net_info_url],
             check=True,
             capture_output=True,
             text=True,
@@ -143,30 +138,11 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
             status(f"  {host} has {n_peers} peer(s)")
     except Exception as e:
         status(f"  WARNING: Could not check peers on {host}: {e}")
-    
-    # Check backend health
-    try:
-        status(f"  DEBUG: Backend health URL is {backend_health_url}")
-        result = subprocess.run(
-            f"ssh {conn} 'curl -sf {backend_health_url}'",
-            shell=True,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode == 0:
-            status(f"  Backend health OK on {host}")
-        else:
-            status(f"  WARNING: Backend health check failed on {host}")
-    except Exception as e:
-        status(f"  WARNING: Could not check backend on {host}: {e}")
-    
+
     # Check block height is increasing (node not stuck)
     try:
         result1 = subprocess.run(
-            f"ssh {conn} 'curl -sf {rpc_status_url}'",
-            shell=True,
+            ["curl", "-sf", rpc_status_url],
             check=True,
             capture_output=True,
             text=True,
@@ -174,12 +150,11 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
         )
         status1 = json.loads(result1.stdout)
         height1 = int(status1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-        
+
         time.sleep(6)  # Wait for at least 1 block
-        
+
         result2 = subprocess.run(
-            f"ssh {conn} 'curl -sf {rpc_status_url}'",
-            shell=True,
+            ["curl", "-sf", rpc_status_url],
             check=True,
             capture_output=True,
             text=True,
@@ -187,14 +162,14 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
         )
         status2 = json.loads(result2.stdout)
         height2 = int(status2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-        
+
         if height2 > height1:
             status(f"  Node is progressing: {height1} -> {height2}")
         else:
             status(f"  WARNING: Block height not increasing on {host} ({height1} -> {height2})")
     except Exception as e:
         status(f"  WARNING: Could not verify block progression on {host}: {e}")
-    
+
     elapsed = time.time() - start_time
     status(f"  Health check complete for {host} ({elapsed:.0f}s)")
 
@@ -236,14 +211,14 @@ def validate_mnemonic(mnemonic: str) -> None:
 
 def find_latest_backup(target_host: str) -> Path:
     """Find the most recent backup file for a specific server.
-    
+
     Args:
         target_host: Server hostname - looks in BACKUP_DIR/{target_host}/
-    
+
     Exits if none found.
     """
     server_dir = BACKUP_DIR / target_host
-    
+
     if not server_dir.exists():
         print(f"ERROR: No backup folder for '{target_host}'", file=sys.stderr)
         print(f"       Expected: {server_dir}", file=sys.stderr)
@@ -274,7 +249,7 @@ def find_latest_backup(target_host: str) -> Path:
 
 def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     """Create full backup from a remote server.
-    
+
     Streams tar directly to local machine to avoid needing disk space on remote.
     Saves to BACKUP_DIR/{source_host}/{source_host}-{timestamp}.tgz
     """
@@ -417,7 +392,7 @@ def restore(
     image_override: str | None = None,
 ):
     """Restore a backup to a remote server.
-    
+
     Args:
         target_host: Server hostname to restore to
         backup_file: Path to backup .tgz file
@@ -441,7 +416,7 @@ def restore(
     # Step 1: Warning and mnemonic prompt (fail fast before any uploads)
     # -------------------------------------------------------------------------
     mnemonic = None
-    
+
     if debug_skip:
         status("DEBUG MODE: Skipping mnemonic prompt")
     elif migrate:
@@ -772,16 +747,17 @@ echo "PostgreSQL restore complete"
     # -------------------------------------------------------------------------
     # Step 13: Wait for node to start
     # -------------------------------------------------------------------------
-    status("Waiting for node to start (15s)...")
+    rpc_url = f"http://{target_host}/chain/rpc/status"
+    status(f"Waiting for node to start ({rpc_url})...")
     for i in range(5):
         time.sleep(3)
         try:
             result = subprocess.run(
-                f"ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/status'",
-                shell=True,
+                ["curl", "-sf", rpc_url],
                 check=False,
                 capture_output=True,
                 text=True,
+                timeout=10,
             )
             if result.returncode == 0 and "latest_block_height" in result.stdout:
                 status("Node is running!")
@@ -797,9 +773,9 @@ echo "PostgreSQL restore complete"
     status(f"Restore complete on {target_host}")
     print("\nVerification commands:")
     print(f"  # Check peers:")
-    print(f"  ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/net_info | jq .result.n_peers'")
+    print(f"  curl -sf http://{target_host}/chain/rpc/net_info | jq .result.n_peers")
     print(f"  # Check sync status:")
-    print(f"  ssh {conn} 'curl -sf http://127.0.0.1/chain/rpc/status | jq .result.sync_info'")
+    print(f"  curl -sf http://{target_host}/chain/rpc/status | jq .result.sync_info")
     print(f"  # Check backend health:")
     print(f"  ssh {conn} 'docker exec mirage curl -sf http://127.0.0.1:5000/health'")
 
@@ -831,23 +807,23 @@ def list_backups():
 
     # Get all server directories
     server_dirs = sorted([d for d in BACKUP_DIR.iterdir() if d.is_dir()])
-    
+
     if not server_dirs:
         print("No backups found.")
         return
 
     print(f"Backups in {BACKUP_DIR}:\n")
-    
+
     for server_dir in server_dirs:
         backups = sorted(
             server_dir.glob("*.tgz"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        
+
         if not backups:
             continue
-            
+
         print(f"  {server_dir.name}/")
         for i, b in enumerate(backups):
             size_gb = b.stat().st_size / (1024**3)
@@ -855,7 +831,6 @@ def list_backups():
             marker = " (latest)" if i == 0 else ""
             print(f"    {b.name}  {size_gb:.2f} GB  {mtime}{marker}")
         print()
-
 
 
 # =============================================================================
@@ -947,11 +922,11 @@ Examples:
                 try:
                     backup_path = backup(server, args.user)
                     results.append((server, "OK", backup_path))
-                    
+
                     # Verify the server is healthy before proceeding
                     status(f"Verifying {server} is healthy after backup...")
                     verify_server_health(server, args.user)
-                    
+
                     # Wait 2 minutes between servers to ensure stability
                     if i < len(ALL_SERVERS):
                         status(f"Waiting 2 minutes before next backup...")
@@ -959,7 +934,7 @@ Examples:
                 except Exception as e:
                     print(f"ERROR: Backup failed for {server}: {e}", file=sys.stderr)
                     results.append((server, "FAILED", str(e)))
-            
+
             # Summary
             print(f"\n{'='*60}")
             print("Backup Summary")
@@ -970,7 +945,7 @@ Examples:
                     print(f"  {server}: OK ({size_gb:.2f} GB)")
                 else:
                     print(f"  {server}: FAILED - {path_or_error}")
-            
+
             failed = [r for r in results if r[1] == "FAILED"]
             if failed:
                 print(f"\n{len(failed)} backup(s) failed!")
@@ -982,7 +957,7 @@ Examples:
         if args.migrate and args.latest:
             print("ERROR: --migrate requires --file (specify which server's backup to use)", file=sys.stderr)
             sys.exit(1)
-        
+
         # Determine backup file
         if args.latest:
             # Same-server restore: find latest backup in target's folder
