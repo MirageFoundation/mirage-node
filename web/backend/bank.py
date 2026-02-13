@@ -9,6 +9,11 @@ from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_g
 from node import require_runtime
 
 
+# Validator info cache (moniker, tokens, status) — keyed by valoper address.
+# Cached permanently (until restart); moniker changes require MsgEditValidator.
+_VALIDATOR_CACHE: dict[str, dict] = {}
+
+
 def get_balance(address: Optional[str]) -> int:
     if not address:
         return 0
@@ -94,9 +99,15 @@ def get_validator(valoper: str) -> dict:
     """Get a single validator's info by operator address via gRPC.
 
     Returns dict with 'moniker', 'tokens', etc. Empty dict on failure.
+    Cached permanently per valoper address (until process restart).
     """
     if not valoper:
         return {}
+
+    cached = _VALIDATOR_CACHE.get(valoper)
+    if cached is not None:
+        return cached
+
     try:
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
@@ -109,11 +120,13 @@ def get_validator(valoper: str) -> dict:
             v = resp.validator
             if not v:
                 return {}
-            return {
+            result = {
                 "moniker": v.description.moniker if v.description else "",
                 "tokens": str(v.tokens) if v.tokens else "0",
                 "status": int(v.status),
             }
+            _VALIDATOR_CACHE[valoper] = result
+            return result
     except Exception:
         return {}
 
