@@ -313,6 +313,21 @@ def require_runtime() -> Runtime:
     return _RUNTIME
 
 
+_GRPC_CHANNEL = None
+
+
+def get_grpc_channel():
+    """Return a persistent gRPC channel to the local node.
+
+    gRPC channels are thread-safe and handle reconnection internally.
+    Reusing a single channel avoids TCP + HTTP/2 handshake on every call.
+    """
+    global _GRPC_CHANNEL
+    if _GRPC_CHANNEL is None:
+        _GRPC_CHANNEL = _grpc.insecure_channel(require_runtime().grpc_target)
+    return _GRPC_CHANNEL
+
+
 def assert_grpc_ready(timeout_s: float = 2.0, max_retries: int = 360, retry_interval: float = 10.0) -> None:
     """Wait for gRPC to be ready, retrying for up to 1 hour by default."""
     import logging
@@ -349,4 +364,5 @@ __all__ = [
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",
+    "get_grpc_channel",
 ]

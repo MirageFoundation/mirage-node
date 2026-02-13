@@ -2323,17 +2323,34 @@ def get_circulation_stats():
         return safe_error(e)
 
 
+_GET_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_GET_CONFIG_CACHE_TIME: float = 0.0
+_GET_CONFIG_CACHE_TTL: float = 60.0  # seconds — frontend caches 24h, so 60s server-side is fine
+
+
 @public_bp.route("/api/get_config")
 def get_config():
     """Get static blockchain/server config. Cached 24h on frontend.
 
+    Response is cached server-side for 60s to avoid repeated gRPC/HTTP calls.
     For dynamic user data, use get_user_status instead.
     For follow/block lists, use get_user_followed/get_user_blocked.
     For network stats, use get_network_stats.
     """
+    global _GET_CONFIG_CACHE, _GET_CONFIG_CACHE_TIME
+
     rid = next_request_id()
     log_event(rid, "get_config.begin")
     try:
+        now = time.monotonic()
+        if _GET_CONFIG_CACHE is not None and (now - _GET_CONFIG_CACHE_TIME) < _GET_CONFIG_CACHE_TTL:
+            log_event(rid, "get_config.cached")
+            out = jsonify(_GET_CONFIG_CACHE)
+            out.headers["Cache-Control"] = "no-store, max-age=0"
+            out.headers["Pragma"] = "no-cache"
+            out.headers["Expires"] = "0"
+            return out
+
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
@@ -2396,6 +2413,10 @@ def get_config():
             "quests_enabled": QUESTS_ENABLED,
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         }
+
+        _GET_CONFIG_CACHE = resp
+        _GET_CONFIG_CACHE_TIME = now
+
         log_event(rid, "get_config.ok")
         out = jsonify(resp)
         # Prevent browser/CDN caching: frontend already does its own localStorage caching and should

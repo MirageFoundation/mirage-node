@@ -13,7 +13,6 @@ from typing import Tuple
 import hashlib as _hashlib
 import math as _math
 
-import grpc as _grpc
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
@@ -23,7 +22,7 @@ from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
 from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2 as auth_query_pb2
 from cosmpy.protos.cosmos.auth.v1beta1 import query_pb2_grpc as auth_query_pb2_grpc
 
-from node import min_gas_price_umirage, require_runtime
+from node import min_gas_price_umirage, require_runtime, get_grpc_channel
 
 
 def estimate_total_gas_limit(body_bytes: bytes, content_len: int) -> int:
@@ -83,46 +82,40 @@ def build_tx_bytes(body_bytes: bytes, gas_limit: int) -> bytes:
 
 
 def simulate_gas(tx_bytes: bytes) -> int:
-    target = require_runtime().grpc_target
-    with _grpc.insecure_channel(target) as ch:
-        stub = ServiceStub(ch)
-        req = SimulateRequest(tx_bytes=tx_bytes)
-        resp = stub.Simulate(req)
-        return int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+    stub = ServiceStub(get_grpc_channel())
+    req = SimulateRequest(tx_bytes=tx_bytes)
+    resp = stub.Simulate(req)
+    return int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
 
 
 def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
     """Broadcast transaction asynchronously (fire-and-forget).
-    
+
     The tx_hash is computed deterministically from the transaction bytes,
     so we don't need to wait for the node's response to know it.
     """
     tx_hash = _hashlib.sha256(tx_bytes).hexdigest().lower()
-    target = require_runtime().grpc_target
     try:
-        with _grpc.insecure_channel(target) as ch:
-            stub = ServiceStub(ch)
-            req = BroadcastTxRequest(tx_bytes=tx_bytes, mode=BroadcastMode.BROADCAST_MODE_ASYNC)
-            stub.BroadcastTx(req)
-            return tx_hash, 0, 0, ""
+        stub = ServiceStub(get_grpc_channel())
+        req = BroadcastTxRequest(tx_bytes=tx_bytes, mode=BroadcastMode.BROADCAST_MODE_ASYNC)
+        stub.BroadcastTx(req)
+        return tx_hash, 0, 0, ""
     except Exception as e:
         return tx_hash, 1, 0, str(e)
 
 
 def _get_tx_size_cost_per_byte() -> int:
     """Fetch tx_size_cost_per_byte from chain via gRPC (auth module params)."""
-    target = require_runtime().grpc_target
     try:
-        with _grpc.insecure_channel(target) as ch:
-            stub = auth_query_pb2_grpc.QueryStub(ch)
-            req = auth_query_pb2.QueryParamsRequest()
-            resp = stub.Params(req)
-            params = getattr(resp, "params", None)
-            value = getattr(params, "tx_size_cost_per_byte", 0) if params is not None else 0
-            v = int(value or 0)
-            if v <= 0:
-                return 10
-            return v
+        stub = auth_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = auth_query_pb2.QueryParamsRequest()
+        resp = stub.Params(req)
+        params = getattr(resp, "params", None)
+        value = getattr(params, "tx_size_cost_per_byte", 0) if params is not None else 0
+        v = int(value or 0)
+        if v <= 0:
+            return 10
+        return v
     except Exception:
         return 10
 
@@ -137,25 +130,25 @@ def get_account_info(address: str) -> tuple[int, int]:
     """Query the account sequence and account number from the chain.
     Returns (account_number, sequence).
     """
-    target = require_runtime().grpc_target
     try:
-        with _grpc.insecure_channel(target) as ch:
-            stub = auth_query_pb2_grpc.QueryStub(ch)
-            req = auth_query_pb2.QueryAccountRequest(address=str(address))
-            resp = stub.Account(req)
-            account = resp.account
-            if account.type_url == "/cosmos.auth.v1beta1.BaseAccount":
-                from cosmpy.protos.cosmos.auth.v1beta1.auth_pb2 import BaseAccount
-                base_account = BaseAccount()
-                account.Unpack(base_account)
-                return int(base_account.account_number), int(base_account.sequence)
-            elif account.type_url == "/ethermint.types.v1.EthAccount":
-                from cosmpy.protos.ethermint.types.v1.account_pb2 import EthAccount
-                eth_account = EthAccount()
-                account.Unpack(eth_account)
-                return int(eth_account.base_account.account_number), int(eth_account.base_account.sequence)
-            else:
-                return 0, 0
+        stub = auth_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = auth_query_pb2.QueryAccountRequest(address=str(address))
+        resp = stub.Account(req)
+        account = resp.account
+        if account.type_url == "/cosmos.auth.v1beta1.BaseAccount":
+            from cosmpy.protos.cosmos.auth.v1beta1.auth_pb2 import BaseAccount
+
+            base_account = BaseAccount()
+            account.Unpack(base_account)
+            return int(base_account.account_number), int(base_account.sequence)
+        elif account.type_url == "/ethermint.types.v1.EthAccount":
+            from cosmpy.protos.ethermint.types.v1.account_pb2 import EthAccount
+
+            eth_account = EthAccount()
+            account.Unpack(eth_account)
+            return int(eth_account.base_account.account_number), int(eth_account.base_account.sequence)
+        else:
+            return 0, 0
     except Exception:
         return 0, 0
 
