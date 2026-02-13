@@ -9,7 +9,26 @@ Variables:
 - IGNORE_MOD_BLOCKED_USERS: Show content from users even if blocked by followed mods.
 """
 
-# Fee-related settings removed
+import os
+
+
+def require_bool_env(key: str) -> bool:
+    """Read a required boolean env var. Crashes if missing or not 'true'/'false'."""
+    raw = os.environ[key]  # KeyError if missing
+    low = raw.strip().lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    raise ValueError(f"Env var {key} must be 'true' or 'false', got '{raw}'")
+
+
+# ── Required env vars (validated at import time) ────────────────────────────
+
+REGISTRATION_ENABLED = require_bool_env("REGISTRATION_ENABLED")
+REGISTRATION_INVITE_CODE_REQUIRED = require_bool_env("REGISTRATION_INVITE_CODE_REQUIRED")
+QUESTS_ENABLED = require_bool_env("QUESTS_ENABLED")
+QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
 
 # Moderation Settings
 # When false (default), standard moderation rules apply:

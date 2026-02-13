@@ -31,6 +31,10 @@ from settings import (
     IGNORE_DELETIONS,
     IGNORE_MOD_BLOCKED_POSTS,
     IGNORE_MOD_BLOCKED_USERS,
+    REGISTRATION_ENABLED,
+    REGISTRATION_INVITE_CODE_REQUIRED,
+    QUESTS_ENABLED,
+    QUESTS_PAYOUTS_ENABLED,
 )
 import time
 import hashlib
@@ -2383,13 +2387,12 @@ def get_config():
             "validator_moniker": validator_moniker,
             # Public API keys (for client-side features)
             "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
-            # Node-specific feature flags (from env vars)
+            # Node-specific feature flags (validated at startup in settings.py)
             "node": {
-                "registration_enabled": os.environ.get("REGISTRATION_ENABLED", "").lower() == "true",
-                "registration_invite_code_required": os.environ.get("REGISTRATION_INVITE_CODE_REQUIRED", "").lower()
-                == "true",
-                "quests_enabled": os.environ.get("QUESTS_ENABLED", "").lower() == "true",
-                "quest_payouts_enabled": os.environ.get("QUEST_PAYOUTS_ENABLED", "").lower() == "true",
+                "registration_enabled": REGISTRATION_ENABLED,
+                "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+                "quests_enabled": QUESTS_ENABLED,
+                "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
             },
         }
         log_event(rid, "get_config.ok")

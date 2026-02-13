@@ -33,6 +33,7 @@ from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
 from routes.core import get_user_level
+from settings import QUESTS_ENABLED, require_bool_env
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
@@ -47,20 +48,19 @@ def _inject_balance(resp: dict, addr: str) -> dict:
 
 quests_bp = Blueprint("quests", __name__)
 
-# Backend debug switch (default false; must be explicitly enabled)
-BACKEND_DEBUG = os.environ.get("BACKEND_DEBUG", "").lower() == "true"
+# Backend debug switch
+BACKEND_DEBUG = require_bool_env("BACKEND_DEBUG")
 
-# Quest system configuration (from environment)
-QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
-QUESTS_DAILY_COUNT = int(os.environ.get("QUESTS_DAILY_COUNT", "2"))
-QUESTS_FLASH_COUNT = int(os.environ.get("QUESTS_FLASH_COUNT", "1"))
-QUESTS_FLASH_MIN_INTERVAL_HOURS = int(os.environ.get("QUESTS_FLASH_MIN_INTERVAL_HOURS", "5"))
-QUESTS_FLASH_MAX_INTERVAL_HOURS = int(os.environ.get("QUESTS_FLASH_MAX_INTERVAL_HOURS", "7"))
+# Quest system configuration (from environment — crash if missing)
+QUESTS_DAILY_COUNT = int(os.environ["QUESTS_DAILY_COUNT"])
+QUESTS_FLASH_COUNT = int(os.environ["QUESTS_FLASH_COUNT"])
+QUESTS_FLASH_MIN_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MIN_INTERVAL_HOURS"])
+QUESTS_FLASH_MAX_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MAX_INTERVAL_HOURS"])
 
 # Special quest gating
-QUESTS_INVITE_RECRUIT_CHANCE = float(os.environ.get("QUESTS_INVITE_RECRUIT_CHANCE", "0.30"))
-QUESTS_INVITE_EARNER_INTERVAL = int(os.environ.get("QUESTS_INVITE_EARNER_INTERVAL", "10"))
-QUESTS_INVITE_EARNER_CHANCE = float(os.environ.get("QUESTS_INVITE_EARNER_CHANCE", "0.30"))
+QUESTS_INVITE_RECRUIT_CHANCE = float(os.environ["QUESTS_INVITE_RECRUIT_CHANCE"])
+QUESTS_INVITE_EARNER_INTERVAL = int(os.environ["QUESTS_INVITE_EARNER_INTERVAL"])
+QUESTS_INVITE_EARNER_CHANCE = float(os.environ["QUESTS_INVITE_EARNER_CHANCE"])
 
 
 def _get_utc_julian_day(ts: int) -> int:
