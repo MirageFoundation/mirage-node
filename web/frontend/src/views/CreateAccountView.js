@@ -110,24 +110,44 @@ const UsernameLabel = styled.div`
 function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
+    const [configUpdateTrigger, setConfigUpdateTrigger] = React.useState(0);
+
+    // Re-read config when App.js fetches fresh data
+    React.useEffect(() => {
+        const handler = () => setConfigUpdateTrigger(prev => prev + 1);
+        window.addEventListener('configUpdated', handler);
+        return () => window.removeEventListener('configUpdated', handler);
+    }, []);
+
+    // If nodeConfig is missing (stale cache or empty localStorage), fetch it ourselves.
+    // App.js may skip the fetch if it thinks params are valid and not stale (24h TTL).
+    React.useEffect(() => {
+        if (nodeConfig) return;
+        (async () => {
+            try {
+                const cfg = await Api.get('get_config', { _cb: Date.now() }, { timeoutMs: 10000 });
+                if (!cfg || typeof cfg !== 'object') return;
+                try { await tx.cacheConfigData(cfg); } catch (_) { }
+            } catch (_) { }
+        })();
+    }, [nodeConfig]);
 
     // Read node config from localStorage (set by get_config API)
     // Both fields must be explicitly present (boolean) — no silent defaults.
     const nodeConfig = React.useMemo(() => {
+        void configUpdateTrigger;
         try {
             const raw = localStorage.getItem('configData');
             if (raw) {
                 const parsed = JSON.parse(raw);
-                const node = parsed.node;
-                if (node &&
-                    typeof node.registration_enabled === 'boolean' &&
-                    typeof node.registration_invite_code_required === 'boolean') {
-                    return node;
+                if (typeof parsed.registration_enabled === 'boolean' &&
+                    typeof parsed.registration_invite_code_required === 'boolean') {
+                    return parsed;
                 }
             }
         } catch (_) { }
         return null;  // null = config not loaded
-    }, []);
+    }, [configUpdateTrigger]);
     const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
     const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
@@ -420,7 +440,9 @@ function CreateAccountView({ state, setCredentials }) {
 
     const usernameFinal = (usernameInput || "").trim();
 
-    // Node config must be loaded before we can show anything
+    // Node config must be loaded before we can show anything.
+    // configUpdateTrigger > 0 means the configUpdated event fired at least once (fetch finished).
+    const configFetchDone = configUpdateTrigger > 0;
     if (!nodeConfig) {
         return (
             <ContentGrid>
@@ -435,10 +457,16 @@ function CreateAccountView({ state, setCredentials }) {
                         <AuthPageShell activeTab="create">
                             <Centered>
                                 <StyledInfo>
-                                    <WelcomeTitle>Loading...</WelcomeTitle>
-                                    <IntroP>
-                                        Unable to load node configuration. Please refresh the page.
-                                    </IntroP>
+                                    {configFetchDone ? (
+                                        <>
+                                            <WelcomeTitle>Unavailable</WelcomeTitle>
+                                            <IntroP>
+                                                Unable to load node configuration. Please refresh the page.
+                                            </IntroP>
+                                        </>
+                                    ) : (
+                                        <WelcomeTitle>Loading...</WelcomeTitle>
+                                    )}
                                 </StyledInfo>
                             </Centered>
                         </AuthPageShell>

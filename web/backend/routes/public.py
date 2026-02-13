@@ -2355,10 +2355,13 @@ def get_config():
         diff_info = _get_difficulty_info()
         block_time = _get_block_time_seconds()
 
+        # Validator addresses (cached after first call — static per node)
+        valoper = find_local_operator_address()
+        valcons = find_local_consensus_address()
+
         # Get current site's validator moniker
         validator_moniker = ""
         try:
-            valoper = find_local_operator_address()
             if valoper:
                 val_info = _get_validator(valoper)
                 validator_moniker = val_info.get("moniker", "")
@@ -2382,18 +2385,16 @@ def get_config():
             "tiers": tiers,
             # Validator info (static per node)
             "validator_account_address": rt.validator_payer_addr,
-            "validator_operator_address": find_local_operator_address(),
-            "validator_consensus_address": find_local_consensus_address(),
+            "validator_operator_address": valoper,
+            "validator_consensus_address": valcons,
             "validator_moniker": validator_moniker,
             # Public API keys (for client-side features)
             "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
             # Node-specific feature flags (validated at startup in settings.py)
-            "node": {
-                "registration_enabled": REGISTRATION_ENABLED,
-                "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
-                "quests_enabled": QUESTS_ENABLED,
-                "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
-            },
+            "registration_enabled": REGISTRATION_ENABLED,
+            "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+            "quests_enabled": QUESTS_ENABLED,
+            "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         }
         log_event(rid, "get_config.ok")
         out = jsonify(resp)

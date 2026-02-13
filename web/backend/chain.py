@@ -15,6 +15,7 @@ Functions:
 
 import json
 import re
+import time
 from typing import Any, Dict, Optional
 
 import grpc as _grpc
@@ -24,9 +25,11 @@ from node import require_runtime
 from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
 
-# Cache for difficulty info (refreshed on each call but avoids repeated gRPC setup)
+# Cache for difficulty info — short TTL so get_config doesn't pay gRPC cost every request
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
 _DIFFICULTY_CACHE_HEIGHT: int = 0
+_DIFFICULTY_CACHE_TIME: float = 0.0
+_DIFFICULTY_CACHE_TTL: float = 5.0  # seconds
 
 
 def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
@@ -48,7 +51,7 @@ def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
-def get_difficulty_info(timeout: float = 3.0) -> Dict[str, Any]:
+def get_difficulty_info(timeout: float = 3.0, *, force: bool = False) -> Dict[str, Any]:
     """Get full difficulty state from chain via gRPC.
 
     Returns dict with:
@@ -59,15 +62,21 @@ def get_difficulty_info(timeout: float = 3.0) -> Dict[str, Any]:
     - consecutive_low_usage: int
     - latest_block_hash: str (hex, lowercase)
     - current_height: int
+
+    Results are cached for _DIFFICULTY_CACHE_TTL seconds. Pass force=True to bypass.
     """
-    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_HEIGHT
+    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_HEIGHT, _DIFFICULTY_CACHE_TIME
+
+    now = time.monotonic()
+    if not force and _DIFFICULTY_CACHE is not None and (now - _DIFFICULTY_CACHE_TIME) < _DIFFICULTY_CACHE_TTL:
+        return _DIFFICULTY_CACHE
 
     info = _query_difficulty(timeout)
     height = int(info.get("current_height", 0))
 
-    # Update cache
     _DIFFICULTY_CACHE = info
     _DIFFICULTY_CACHE_HEIGHT = height
+    _DIFFICULTY_CACHE_TIME = now
 
     return info
 
@@ -157,7 +166,14 @@ def is_valid_recent_block_hash(block_hash: str, timeout_s: int = 5) -> bool:
     return block_hash.upper() in [h.upper() for h in recent]
 
 
+_BLOCK_TIME_CACHE: Optional[int] = None
+
+
 def get_block_time_seconds() -> int:
+    global _BLOCK_TIME_CACHE
+    if _BLOCK_TIME_CACHE is not None:
+        return _BLOCK_TIME_CACHE
+
     from shared.config import get_config
 
     cfg = get_config()
@@ -169,17 +185,29 @@ def get_block_time_seconds() -> int:
         num = float(val[:-2])
         if num <= 0:
             raise RuntimeError("timeout_commit must be > 0")
-        return max(1, int(round(num / 1000.0)))
+        _BLOCK_TIME_CACHE = max(1, int(round(num / 1000.0)))
+        return _BLOCK_TIME_CACHE
     if val.endswith("s"):
         num = float(val[:-1])
         if num <= 0:
             raise RuntimeError("timeout_commit must be > 0")
-        return max(1, int(round(num)))
+        _BLOCK_TIME_CACHE = max(1, int(round(num)))
+        return _BLOCK_TIME_CACHE
     raise RuntimeError("timeout_commit must include units (e.g., '5s' or '500ms')")
 
 
+_CATCHING_UP_CACHE: Optional[bool] = None
+_CATCHING_UP_CACHE_TIME: float = 0.0
+_CATCHING_UP_CACHE_TTL: float = 5.0  # seconds
+
+
 def is_node_catching_up(timeout_s: int = 2) -> bool:
+    global _CATCHING_UP_CACHE, _CATCHING_UP_CACHE_TIME
     import urllib.request as _url
+
+    now = time.monotonic()
+    if _CATCHING_UP_CACHE is not None and (now - _CATCHING_UP_CACHE_TIME) < _CATCHING_UP_CACHE_TTL:
+        return _CATCHING_UP_CACHE
 
     url = f"{require_runtime().rpc_url}/status"
     try:
@@ -187,11 +215,16 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
             data = json.loads(resp.read().decode("utf-8"))
         val = data.get("result", {}).get("sync_info", {}).get("catching_up", True)
         if isinstance(val, str):
-            return val.strip().lower() == "true"
-        return bool(val)
+            result = val.strip().lower() == "true"
+        else:
+            result = bool(val)
     except Exception:
         # Treat unknown as catching up to be safe
-        return True
+        result = True
+
+    _CATCHING_UP_CACHE = result
+    _CATCHING_UP_CACHE_TIME = now
+    return result
 
 
 def classify_reject(raw_log: str) -> Dict[str, Any]:
