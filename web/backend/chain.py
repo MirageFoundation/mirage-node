@@ -254,8 +254,6 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
 def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
     import urllib.request as _url
     import ipaddress as _ipa
-    import subprocess
-    import os
     import time
 
     # Cache validator monikers (60 second TTL)
@@ -275,32 +273,15 @@ def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
     if validator_cache is None or (current_time - cache_time) >= cache_ttl:
         validator_cache = {}
         try:
-            rt = require_runtime()
-            possible_paths = [
-                "/opt/mirage/blockchain/bin/miraged",
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")),
-                "miraged",
-            ]
-            bin_path = None
-            for path in possible_paths:
-                if path == "miraged" or os.path.exists(path):
-                    bin_path = path
-                    break
+            from bank import get_all_validators
 
-            if bin_path:
-                cmd = [bin_path, "q", "staking", "validators", "--node", rt.rpc_url, "-o", "json"]
-                out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8")
-                data = json.loads(out)
-                for val in data.get("validators") or []:
-                    pubkey = val.get("consensus_pubkey", {}).get("key", "") or val.get("consensus_pubkey", {}).get(
-                        "value", ""
-                    )
-                    moniker = val.get("description", {}).get("moniker", "")
-                    if pubkey and moniker:
-                        validator_cache[pubkey] = moniker
-
-                setattr(get_connected_peers, cache_key, validator_cache)
-                setattr(get_connected_peers, cache_time_key, current_time)
+            for v in get_all_validators():
+                pubkey = v.get("consensus_pubkey", "")
+                moniker = v.get("moniker", "")
+                if pubkey and moniker:
+                    validator_cache[pubkey] = moniker
+            setattr(get_connected_peers, cache_key, validator_cache)
+            setattr(get_connected_peers, cache_time_key, current_time)
         except Exception:
             pass
 

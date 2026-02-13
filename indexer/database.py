@@ -1757,28 +1757,29 @@ class DatabaseManager:
                 rows = cur.fetchall()
                 return [{"height": r[0], "difficulty": r[1], "msg_count": r[2], "timestamp": r[3]} for r in rows]
 
-    def upsert_supply(self, height: int, total_supply: int, created_at: int) -> None:
-        """Record total supply at a given block height (sampled hourly)."""
+    def upsert_supply(self, height: int, total_supply: int, created_at: int, node_balance: int | None = None) -> None:
+        """Record total supply (and optionally node balance) at a given block height."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO supply_history(height, total_supply, created_at)
-                    VALUES(%s, %s, %s)
+                    INSERT INTO supply_history(height, total_supply, created_at, node_balance)
+                    VALUES(%s, %s, %s, %s)
                     ON CONFLICT (height) DO UPDATE SET
                         total_supply = EXCLUDED.total_supply,
-                        created_at = EXCLUDED.created_at
+                        created_at = EXCLUDED.created_at,
+                        node_balance = COALESCE(EXCLUDED.node_balance, supply_history.node_balance)
                     """,
-                    (int(height), int(total_supply), int(created_at)),
+                    (int(height), int(total_supply), int(created_at), node_balance),
                 )
 
     def get_supply_history(self, since_ts: int) -> list[dict]:
-        """Get supply history since a timestamp. Returns list of {height, total_supply, timestamp}."""
+        """Get supply history since a timestamp. Returns list of {height, total_supply, timestamp, node_balance}."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT height, total_supply, created_at
+                    SELECT height, total_supply, created_at, node_balance
                     FROM supply_history
                     WHERE created_at >= %s
                     ORDER BY height ASC
@@ -1786,7 +1787,7 @@ class DatabaseManager:
                     (int(since_ts),),
                 )
                 rows = cur.fetchall()
-                return [{"height": r[0], "total_supply": r[1], "timestamp": r[2]} for r in rows]
+                return [{"height": r[0], "total_supply": r[1], "timestamp": r[2], "node_balance": r[3]} for r in rows]
 
     def _compute_all_user_similarities(self, cur) -> None:
         """
