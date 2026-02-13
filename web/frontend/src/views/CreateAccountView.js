@@ -107,13 +107,23 @@ const UsernameLabel = styled.div`
     color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
 `;
 
-// Check if we're on the main site (mirage.talk or localhost)
-const hostname = window.location.hostname;
-const isMainSite = hostname === 'mirage.talk' || hostname === 'localhost';
-
 function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
+
+    // Read node config from localStorage (set by get_config API)
+    const nodeConfig = React.useMemo(() => {
+        try {
+            const raw = localStorage.getItem('configData');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                return parsed.node || {};
+            }
+        } catch (_) { }
+        return {};
+    }, []);
+    const registrationEnabled = nodeConfig.registration_enabled !== false;
+    const inviteCodeRequired = nodeConfig.registration_invite_code_required === true;
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
@@ -402,8 +412,8 @@ function CreateAccountView({ state, setCredentials }) {
 
     const usernameFinal = (usernameInput || "").trim();
 
-    // If not on main site, show redirect message
-    if (!isMainSite) {
+    // If registration is disabled on this node, show unavailable message
+    if (!registrationEnabled) {
         return (
             <ContentGrid>
                 <Helmet>
@@ -419,21 +429,8 @@ function CreateAccountView({ state, setCredentials }) {
                                 <StyledInfo>
                                     <WelcomeTitle>Account Creation Unavailable</WelcomeTitle>
                                     <IntroP>
-                                        Account creation is only available on the main Mirage site.
+                                        Account creation is not available on this node.
                                     </IntroP>
-                                    <IntroP>
-                                        Please visit <a href="https://mirage.talk/create_account" style={{ color: '#667eea', textDecoration: 'underline' }}>mirage.talk</a> to create your account.
-                                    </IntroP>
-                                    <ButtonWrapper>
-                                        <Button
-                                            as="a"
-                                            href="https://mirage.talk/create_account"
-                                            fullWidth
-                                            size="sm"
-                                        >
-                                            Go to mirage.talk
-                                        </Button>
-                                    </ButtonWrapper>
                                 </StyledInfo>
                             </Centered>
                         </AuthPageShell>
@@ -480,35 +477,39 @@ function CreateAccountView({ state, setCredentials }) {
                                         </>
                                     )}
                                 </div>
-                                <UsernameLabel>Enter your invite code:</UsernameLabel>
-                                <StyledInputBox
-                                    placeholder="XXXX-XXXX"
-                                    value={inviteCode}
-                                    onChange={(e) => {
-                                        const raw = e.target.value.toUpperCase();
-                                        // Only allow uppercase alphanumeric
-                                        const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-                                        // Limit to 8 alphanumeric chars
-                                        const limited = alphanumOnly.slice(0, 8);
-                                        // Auto-insert dash after 4 chars
-                                        const formatted = limited.length > 4
-                                            ? limited.slice(0, 4) + '-' + limited.slice(4)
-                                            : limited;
-                                        setInviteCode(formatted);
-                                        setSubmitError("");
-                                    }}
-                                    maxLength={9}
-                                    name="invite-code-entry"
-                                    id="invite-code-entry"
-                                    autoComplete="one-time-code"
-                                    autoCorrect="off"
-                                    autoCapitalize="characters"
-                                    spellCheck="false"
-                                    data-lpignore="true"
-                                    data-1p-ignore="true"
-                                    data-bwignore="true"
-                                    data-form-type="other"
-                                />
+                                {inviteCodeRequired && (
+                                    <>
+                                        <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                        <StyledInputBox
+                                            placeholder="XXXX-XXXX"
+                                            value={inviteCode}
+                                            onChange={(e) => {
+                                                const raw = e.target.value.toUpperCase();
+                                                // Only allow uppercase alphanumeric
+                                                const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+                                                // Limit to 8 alphanumeric chars
+                                                const limited = alphanumOnly.slice(0, 8);
+                                                // Auto-insert dash after 4 chars
+                                                const formatted = limited.length > 4
+                                                    ? limited.slice(0, 4) + '-' + limited.slice(4)
+                                                    : limited;
+                                                setInviteCode(formatted);
+                                                setSubmitError("");
+                                            }}
+                                            maxLength={9}
+                                            name="invite-code-entry"
+                                            id="invite-code-entry"
+                                            autoComplete="one-time-code"
+                                            autoCorrect="off"
+                                            autoCapitalize="characters"
+                                            spellCheck="false"
+                                            data-lpignore="true"
+                                            data-1p-ignore="true"
+                                            data-bwignore="true"
+                                            data-form-type="other"
+                                        />
+                                    </>
+                                )}
                                 <UsernameLabel>Choose your username:</UsernameLabel>
                                 <StyledInputBox
                                     placeholder=""

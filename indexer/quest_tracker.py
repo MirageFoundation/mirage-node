@@ -254,14 +254,14 @@ class QuestTracker:
         """
         completed_count = self._get_completed_quest_count(owner)
         invite_earner_completed = self._get_invite_earner_completed_count(owner)
-        next_milestone = (invite_earner_completed + 1) * settings.INVITE_EARNER_QUEST_INTERVAL
+        next_milestone = (invite_earner_completed + 1) * settings.QUEST_INVITE_EARNER_INTERVAL
 
         if completed_count < next_milestone:
             return False
 
         # 30% daily roll
         roll = self._deterministic_roll(owner, day_utc, "invite_earner")
-        return roll < settings.INVITE_EARNER_CHANCE
+        return roll < settings.QUEST_INVITE_EARNER_CHANCE
 
     def _deterministic_roll(self, owner: str, day_utc: int, roll_type: str) -> float:
         """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
@@ -283,8 +283,10 @@ class QuestTracker:
         # Check for invite_recruit eligibility (30% roll if user has unused codes)
         if not special_quest_assigned and self._has_unused_invite_codes(owner):
             roll = self._deterministic_roll(owner, day_utc, "invite_recruit")
-            logger.debug(f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.INVITE_RECRUIT_CHANCE})")
-            if roll < settings.INVITE_RECRUIT_CHANCE:
+            logger.debug(
+                f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.QUEST_INVITE_RECRUIT_CHANCE})"
+            )
+            if roll < settings.QUEST_INVITE_RECRUIT_CHANCE:
                 # Find invite_recruit in special quests
                 invite_recruit = next((q for q in self.special_quests if q.id == "invite_recruit"), None)
                 if invite_recruit:

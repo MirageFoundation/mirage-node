@@ -1239,7 +1239,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             const result = await tx.sendTokens(post.user_id, amount);
             if (result.success) {
-                setDonateMessage({ type: 'success', message: `Successfully sent ${amount} MIRAGE!` });
+                setDonateMessage({ type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` });
                 setConfirmDonate(false);
                 setTimeout(() => setDonateMessage(null), 5000);
             } else {

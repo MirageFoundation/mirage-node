@@ -12,6 +12,8 @@ import base64
 import hashlib
 import json
 import os
+import re
+import subprocess
 import sys
 import os
 import fcntl
@@ -45,6 +47,26 @@ from cosmpy.protos.cosmos.gov.v1beta1.tx_pb2 import MsgSubmitProposal
 logger = logging.getLogger(__name__)
 
 
+def _resolve_validator_address() -> str:
+    """Resolve the local validator's account address from the keyring."""
+    try:
+        config = get_config()
+        node_cfg = config.get_node_config()
+        home = node_cfg["home"]
+        keyring_backend = config.get_keyring_backend()
+        bin_path = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "blockchain", "bin", "miraged"))
+        cmd = [bin_path, "keys", "list", "--output", "json", "--home", home, "--keyring-backend", keyring_backend]
+        out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        for entry in json.loads(out) or []:
+            if str(entry.get("name", "")) == "validator":
+                addr = str(entry.get("address", "")).strip()
+                if addr and re.fullmatch(r"mirage1[0-9a-z]{38}", addr):
+                    return addr
+    except Exception as e:
+        logger.warning("Could not resolve validator address: %s", e)
+    return ""
+
+
 class Indexer:
     """Mirage Blockchain Indexer."""
 
@@ -62,6 +84,13 @@ class Indexer:
 
         self.db = DatabaseManager(db_url)
         self.chain = ChainClient(jsonrpc_url)
+
+        # Resolve validator address for node balance tracking
+        self._validator_address = _resolve_validator_address()
+        if self._validator_address:
+            logger.info("Tracking node balance for %s", self._validator_address)
+        else:
+            logger.warning("Validator address not resolved; node balance tracking disabled")
 
         # Run pending migrations before processing begins
         migration_count = run_migrations(self.db, self.chain)
@@ -509,12 +538,18 @@ class Indexer:
                             self.db.upsert_difficulty(height, info["difficulty"], info["msg_count"], int(time.time()))
                         except Exception as diff_err:
                             logger.warning("Failed to record difficulty at height %s: %s", height, diff_err)
-                        # Record supply every 200 blocks (aligns with mint interval)
+                        # Record supply (and node balance) every 200 blocks (aligns with mint interval)
                         if height % 200 == 0:
                             try:
                                 supply = self.chain.get_total_supply()
+                                node_bal = None
+                                if self._validator_address:
+                                    try:
+                                        node_bal = self.chain.get_balance(self._validator_address)
+                                    except Exception:
+                                        pass
                                 if supply > 0:
-                                    self.db.upsert_supply(height, supply, int(time.time()))
+                                    self.db.upsert_supply(height, supply, int(time.time()), node_balance=node_bal)
                             except Exception as supply_err:
                                 logger.warning("Failed to record supply at height %s: %s", height, supply_err)
         except Exception as e:

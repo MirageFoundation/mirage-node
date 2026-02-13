@@ -67,9 +67,9 @@ FLASH_QUEST_MIN_INTERVAL_HOURS = 5  # Minimum hours between flash quests
 FLASH_QUEST_MAX_INTERVAL_HOURS = 7  # Maximum hours between flash quests
 
 # Special quest gating
-INVITE_RECRUIT_CHANCE = 0.30  # 30% daily chance for invite_recruit quest (if user has unused codes)
-INVITE_EARNER_QUEST_INTERVAL = 10  # invite_earner quest appears every N completed quests
-INVITE_EARNER_CHANCE = 0.30  # 30% daily chance for invite_earner quest (if eligible)
+QUEST_INVITE_RECRUIT_CHANCE = 0.30  # 30% daily chance for invite_recruit quest (if user has unused codes)
+QUEST_INVITE_EARNER_INTERVAL = 10  # invite_earner quest appears every N completed quests
+QUEST_INVITE_EARNER_CHANCE = 0.30  # 30% daily chance for invite_earner quest (if eligible)
 
 # Reward multiplier (account age-based)
 REWARD_MULTIPLIER_DAYS = 30  # Days to reach max multiplier

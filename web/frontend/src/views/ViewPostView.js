@@ -1746,7 +1746,7 @@ function ViewPostView({ state, updatePost }) {
                 if (postId) {
                     setDonateMessages(prev => ({
                         ...prev,
-                        [postId]: { type: 'success', message: `Successfully sent ${amount} MIRAGE!` }
+                        [postId]: { type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` }
                     }));
                     setTimeout(() => {
                         setDonateMessages(prev => {

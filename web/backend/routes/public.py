@@ -17,7 +17,7 @@ import json
 import os
 import re
 from db import connect_db
-import subprocess
+
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -49,6 +49,8 @@ from bank import (
     get_balance as _get_balance,
     get_total_supply as _get_total_supply,
     get_balances_batch as _get_balances_batch,
+    get_staked_balance as _get_staked_balance,
+    get_validator as _get_validator,
 )
 import base64
 import urllib.request as _ur
@@ -2036,6 +2038,27 @@ def get_similar_users():
         return safe_error(e)
 
 
+# Cache for staked balance (60 second TTL)
+_staked_balance_cache: Dict[str, Any] = {"value": 0, "expires": 0}
+
+
+def _get_cached_staked_balance() -> int:
+    """Get total staked (delegated) balance for the validator via gRPC, cached 60s."""
+    now = int(time.time())
+    if _staked_balance_cache["expires"] > now:
+        return _staked_balance_cache["value"]
+    total = 0
+    try:
+        rt = require_runtime()
+        if rt.validator_payer_addr:
+            total = _get_staked_balance(rt.validator_payer_addr)
+    except Exception:
+        pass
+    _staked_balance_cache["value"] = total
+    _staked_balance_cache["expires"] = now + 60
+    return total
+
+
 @public_bp.route("/api/get_network_stats")
 def get_network_stats():
     """Get network/node stats for NetworkView."""
@@ -2062,8 +2085,16 @@ def get_network_stats():
         except Exception:
             pass
 
+        # Get staked balance (cached 60s)
+        staked_balance = 0
+        try:
+            staked_balance = _get_cached_staked_balance()
+        except Exception:
+            pass
+
         resp = {
             "server_balance": server_balance,
+            "staked_balance": staked_balance,
             "block_time": block_time,
             "pow_difficulty": int(diff_info.get("current_difficulty", 10)),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
@@ -2096,7 +2127,7 @@ def _get_cached_supply_history() -> list:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT height, total_supply, created_at
+            SELECT height, total_supply, created_at, node_balance
             FROM supply_history
             WHERE created_at >= %s
             ORDER BY height ASC
@@ -2107,7 +2138,10 @@ def _get_cached_supply_history() -> list:
     finally:
         conn.close()
 
-    history = [{"height": r[0], "total_supply": r[1], "timestamp": r[2]} for r in rows]
+    history = [
+        {"height": r[0], "total_supply": r[1], "timestamp": r[2], "node_balance": r[3] if len(r) > 3 else None}
+        for r in rows
+    ]
 
     _supply_history_cache["data"] = history
     _supply_history_cache["expires"] = now + 30  # 30 second cache
@@ -2322,23 +2356,8 @@ def get_config():
         try:
             valoper = find_local_operator_address()
             if valoper:
-                possible_paths = [
-                    "/opt/mirage/blockchain/bin/miraged",
-                    os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")
-                    ),
-                    "miraged",
-                ]
-                bin_path = None
-                for path in possible_paths:
-                    if path == "miraged" or os.path.exists(path):
-                        bin_path = path
-                        break
-                if bin_path:
-                    cmd = [bin_path, "q", "staking", "validator", valoper, "--node", rt.rpc_url, "-o", "json"]
-                    out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8")
-                    data = json.loads(out)
-                    validator_moniker = data.get("validator", {}).get("description", {}).get("moniker", "") or ""
+                val_info = _get_validator(valoper)
+                validator_moniker = val_info.get("moniker", "")
         except Exception:
             pass
 
@@ -2364,6 +2383,14 @@ def get_config():
             "validator_moniker": validator_moniker,
             # Public API keys (for client-side features)
             "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
+            # Node-specific feature flags (from env vars)
+            "node": {
+                "registration_enabled": os.environ.get("REGISTRATION_ENABLED", "").lower() == "true",
+                "registration_invite_code_required": os.environ.get("REGISTRATION_INVITE_CODE_REQUIRED", "").lower()
+                == "true",
+                "quests_enabled": os.environ.get("QUESTS_ENABLED", "").lower() == "true",
+                "quest_payouts_enabled": os.environ.get("QUEST_PAYOUTS_ENABLED", "").lower() == "true",
+            },
         }
         log_event(rid, "get_config.ok")
         out = jsonify(resp)
@@ -5295,7 +5322,7 @@ def _get_stats_rewards(rid: int):
                 "first_reward_at": summary_row[6],
                 "last_reward_at": summary_row[7],
                 "pool_balance": pool_balance,
-                "payouts_enabled": distributor.is_configured(),
+                "quest_payouts_enabled": distributor.is_configured(),
             }
 
             # Calculate daily rate (last 7 days)

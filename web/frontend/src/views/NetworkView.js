@@ -486,6 +486,152 @@ function SupplyChart({ history }) {
     );
 }
 
+function NodeBalanceChart({ history }) {
+    // Filter to entries that have node_balance recorded
+    const data = (history || []).filter((h) => h.node_balance != null);
+    if (data.length < 2) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (collecting node balance data...)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
+
+    const { width, height, padding, innerW, innerH } = CHART;
+
+    const balances = data.map((d) => d.node_balance / 1e6);
+    const minB = Math.min(...balances);
+    const maxB = Math.max(...balances);
+    const range = maxB - minB || 1;
+    const delta = balances[balances.length - 1] - balances[0];
+
+    const minTs = data[0].timestamp;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
+
+    const pts = data.map((d, i) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - ((balances[i] - minB) / range) * innerH;
+        return `${x},${y}`;
+    }).join(' ');
+
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const color = delta >= 0 ? '#48bb78' : '#f56565';
+    const fill = delta >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)';
+
+    const fmtAxis = (v) => {
+        if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (Math.abs(v) >= 1e6) {
+            const topM = Math.round(maxB / 1e6);
+            const botM = Math.round(minB / 1e6);
+            if (topM !== botM) return Math.round(v / 1e6).toLocaleString() + 'M';
+            return (v / 1e6).toFixed(1) + 'M';
+        }
+        return fmtMirage(v);
+    };
+    const fmtDelta = (v) => (v >= 0 ? '+' : '') + fmtMirage(v);
+
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color={color} /> Balance ({fmtDelta(delta)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(maxB)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(minB)}</text>
+                    <polygon fill={fill} points={`${base} ${pts} ${end}`} />
+                    <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
+    );
+}
+
+function NodeMintBurnChart({ history, mintInterval, mintQuantity }) {
+    // Filter to entries that have node_balance recorded
+    const raw = (history || []).filter((h) => h.node_balance != null);
+    if (raw.length < 2) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (collecting node balance data...)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
+
+    const { width, height, padding, innerW, innerH } = CHART;
+
+    // Derive cumulative earned/spent from balance + supply changes
+    // Node "earned" = balance increases, "spent" = balance decreases
+    const data = [];
+    let cumEarned = 0;
+    let cumSpent = 0;
+    for (let i = 1; i < raw.length; i++) {
+        const diff = raw[i].node_balance - raw[i - 1].node_balance;
+        if (diff > 0) cumEarned += diff;
+        else if (diff < 0) cumSpent += -diff;
+        data.push({ timestamp: raw[i].timestamp, earned: cumEarned, spent: cumSpent });
+    }
+    if (data.length < 1) return null;
+
+    const totalEarned = cumEarned / 1e6;
+    const totalSpent = cumSpent / 1e6;
+    const maxY = Math.max(cumEarned, cumSpent, 1);
+
+    const minTs = data[0].timestamp;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
+
+    const toXY = (d, val) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - (val / maxY) * innerH;
+        return `${x},${y}`;
+    };
+    const earnedPts = data.map((d) => toXY(d, d.earned)).join(' ');
+    const spentPts = data.map((d) => toXY(d, d.spent)).join(' ');
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color="#48bb78" /> Earned ({fmtMirage(totalEarned)})</LegendItem>
+                <LegendItem><LegendDot color="#f56565" /> Spent ({fmtMirage(totalSpent)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">0</text>
+                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${base} ${earnedPts} ${end}`} />
+                    <polygon fill="rgba(245, 101, 101, 0.15)" points={`${base} ${spentPts} ${end}`} />
+                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={earnedPts} />
+                    <polyline fill="none" stroke="#f56565" strokeWidth="1.5" points={spentPts} />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
+    );
+}
+
 export default function NetworkView({ state }) {
     const location = useLocation();
     const navigate = useNavigate();
@@ -512,6 +658,7 @@ export default function NetworkView({ state }) {
     });
     const [peers, setPeers] = useState(null);
     const [serverBalance, setServerBalance] = useState(null);
+    const [stakedBalance, setStakedBalance] = useState(null);
     const [copiedAddress, setCopiedAddress] = useState(null);
     const [circulationStats, setCirculationStats] = useState({ total_supply: null, top_accounts: [] });
     const [supplyHistory, setSupplyHistory] = useState({ history: [], mint_interval: 200, mint_quantity: 100000 });
@@ -551,6 +698,8 @@ export default function NetworkView({ state }) {
                 if (!cancelled && data) {
                     const sb = Number(data.server_balance);
                     if (isFinite(sb)) setServerBalance(sb);
+                    const stk = Number(data.staked_balance);
+                    if (isFinite(stk)) setStakedBalance(stk);
                     setCfg(prev => ({
                         ...prev,
                         block_time: (typeof data.block_time !== 'undefined') ? Number(data.block_time) : undefined,
@@ -822,6 +971,12 @@ export default function NetworkView({ state }) {
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
+                                        <Label>Staked:</Label>
+                                        <ValueBox>
+                                            <Mono>{stakedBalance === null ? '(loading...)' : `${formatMirage(stakedBalance)} MIRAGE`}</Mono>
+                                        </ValueBox>
+                                    </RowCentered>
+                                    <RowCentered>
                                         <Label>Address:</Label>
                                         <ValueBoxWithButton>
                                             <InlineMono title={cfg.validator_account_address || ''}>{cfg.validator_account_address || '(loading...)'}</InlineMono>
@@ -881,6 +1036,22 @@ export default function NetworkView({ state }) {
                                             )}
                                         </ValueBoxWithButton>
                                     </RowCentered>
+                                    <SectionRow>
+                                        <SectionLabel>Node Balance:</SectionLabel>
+                                        <ValueBox>
+                                            <NodeBalanceChart history={supplyHistory.history} />
+                                        </ValueBox>
+                                    </SectionRow>
+                                    <SectionRow>
+                                        <SectionLabel>Earned vs Spent:</SectionLabel>
+                                        <ValueBox>
+                                            <NodeMintBurnChart
+                                                history={supplyHistory.history}
+                                                mintInterval={supplyHistory.mint_interval}
+                                                mintQuantity={supplyHistory.mint_quantity}
+                                            />
+                                        </ValueBox>
+                                    </SectionRow>
                                 </>
                             )}
                         </ContainerBody>
