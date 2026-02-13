@@ -24,13 +24,28 @@ curl "${API_BASE}/get_parameters"
 curl "${API_BASE}/get_parameters?address=mirage1abc123..."
 ```
 
-### Get config
+### Get chain config
 
-Configuration snapshot including chain params and optional user context.
+Chain governance params (tiers, limits, subscription_period, etc.).
 
 ```bash
-curl "${API_BASE}/get_config"
-curl "${API_BASE}/get_config?address=mirage1abc123..."
+curl "${API_BASE}/get_chain_config"
+```
+
+### Get node config
+
+Per-node static settings (validator info, feature flags).
+
+```bash
+curl "${API_BASE}/get_node_config"
+```
+
+### Get user status
+
+User-specific status (level, reserve funds, balance, subscription expiry).
+
+```bash
+curl "${API_BASE}/get_user_status?address=mirage1abc123..."
 ```
 
 ### Get topics

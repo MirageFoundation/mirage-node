@@ -360,7 +360,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
 
     useEffect(() => {
         const handleStorageChange = (e) => {
-            if (e.key === 'configData' || e.key === 'user_balance') {
+            if (e.key === 'chainConfig' || e.key === 'user_balance' || e.key === 'user_level') {
                 setConfigUpdateTrigger(prev => prev + 1);
             }
         };
@@ -370,18 +370,19 @@ function CreatePostView({ state, setPosts, updatePost }) {
         };
 
         window.addEventListener('storage', handleStorageChange);
-        window.addEventListener('configUpdated', handleConfigUpdate);
+        window.addEventListener('chainConfigUpdated', handleConfigUpdate);
+        window.addEventListener('userStatusUpdated', handleConfigUpdate);
 
         return () => {
             window.removeEventListener('storage', handleStorageChange);
-            window.removeEventListener('configUpdated', handleConfigUpdate);
+            window.removeEventListener('chainConfigUpdated', handleConfigUpdate);
+            window.removeEventListener('userStatusUpdated', handleConfigUpdate);
         };
     }, []);
 
     // Rely on global config/user-status cache (App.js) and listen for updates
     useEffect(() => {
-        // No direct API call here to avoid extra get_config requests;
-        // limits will update when 'configData' or 'user_balance' changes via events above.
+        // No direct API call here; limits update when chainConfig or user_level changes via events above.
         void state.publicKey;
     }, [state.publicKey]);
 
@@ -389,11 +390,10 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const limits = React.useMemo(() => {
         void configUpdateTrigger;
         try {
-            const configDataRaw = localStorage.getItem('configData');
-            const config = JSON.parse(configDataRaw || '{}');
-
-            const userLevel = parseInt(config.user_level || '0');
-            const tiers = config.tiers || [];
+            const chainRaw = localStorage.getItem('chainConfig');
+            const chain = JSON.parse(chainRaw || '{}');
+            const userLevel = parseInt(Storage.load('user_level', '0'));
+            const tiers = chain.tiers || [];
             const tierIndex = Math.min(userLevel, tiers.length - 1);
             const tier = tiers[tierIndex] || {};
 
@@ -404,8 +404,8 @@ function CreatePostView({ state, setPosts, updatePost }) {
             return {
                 maxTitle,
                 maxContent,
-                maxTopic: parseInt(config.max_topic_size) || 50,
-                minTopic: parseInt(config.min_topic_size) || 2,
+                maxTopic: parseInt(chain.max_topic_size) || 50,
+                minTopic: parseInt(chain.min_topic_size) || 2,
                 willPayFee: userLevel >= 1
             };
         } catch (e) {

@@ -313,10 +313,26 @@ def get_status(backend: str, address: str | None = None) -> dict:
         raise ValueError(f"Invalid JSON response from {r.url}: status={r.status_code}, text={r.text[:200]}") from e
 
 
-def get_config(backend: str, address: str) -> dict:
-    r = _session.get(f"{backend}/api/get_config", params={"address": address}, timeout=5)
+def get_chain_config(backend: str) -> dict:
+    r = _session.get(f"{backend}/api/get_chain_config", timeout=5)
     r.raise_for_status()
     return r.json()
+
+
+def get_node_config(backend: str) -> dict:
+    r = _session.get(f"{backend}/api/get_node_config", timeout=5)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_user_status(backend: str, address: str) -> dict:
+    r = _session.get(f"{backend}/api/get_user_status", params={"address": address}, timeout=5)
+    r.raise_for_status()
+    return r.json()
+
+
+def get_config(*_args, **_kwargs) -> dict:
+    raise RuntimeError("get_config endpoint removed; use get_chain_config/get_node_config")
 
 
 def get_username_from_address(backend: str, address: str) -> str | None:
@@ -339,14 +355,7 @@ def get_address_from_username(backend: str, username: str) -> str | None:
             return data.get("address")
         return None
     except Exception:
-        try:
-            r = _session.get(f"{backend}/api/get_config", params={"username": username}, timeout=5)
-            r.raise_for_status()
-            cfg = r.json()
-            address = cfg.get("address")
-            return address if address else None
-        except Exception:
-            return None
+        return None
 
 
 def is_username_available(backend: str, username: str) -> bool:

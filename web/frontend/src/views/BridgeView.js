@@ -1869,7 +1869,13 @@ export default function BridgeView({ state }) {
     const theme = useTheme();
     const [searchParams, setSearchParams] = useSearchParams();
     const address = Storage.load('publicKey', '') || '';
-    const valoperAddress = Storage.load('validator_operator_address', '') || '';
+    const valoperAddress = (() => {
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            if (raw) { const cfg = JSON.parse(raw); if (cfg.validator_operator_address) return cfg.validator_operator_address; }
+        } catch (_) { }
+        return '';
+    })();
 
     // Get initial tab from URL, default to 'out'
     const tabFromUrl = searchParams.get('tab');
@@ -2006,8 +2012,8 @@ export default function BridgeView({ state }) {
                 throw new Error('Invalid balance from get_user_status');
             }
             setBalance(balanceVal);
-            // Also sync to TopBar/MobileHeader via cacheConfigData → _persistUserBalance → balanceUpdated event
-            try { transactionHandler.cacheConfigData(data); } catch (_) { }
+            // Also sync to TopBar/MobileHeader via cacheUserStatus → _persistUserBalance → balanceUpdated event
+            try { transactionHandler.cacheUserStatus(data); } catch (_) { }
             setBalanceError(null);
             console.debug('[Bridge] Balance updated', { balance: balanceVal });
         } catch (e) {

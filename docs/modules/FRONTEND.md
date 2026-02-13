@@ -459,7 +459,9 @@ async function post(path, body, options) {
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/get_parameters` | GET | Block hash, difficulty, balance |
-| `/api/get_config` | GET | Chain params, tier configs |
+| `/api/get_chain_config` | GET | Chain params, tier configs |
+| `/api/get_node_config` | GET | Node static config, feature flags |
+| `/api/get_user_status` | GET | User status (level, balance, subscription) |
 | `/api/get_posts` | GET | Feed data |
 | `/api/get_comments` | GET | Thread comments |
 | `/api/get_profile` | GET | User profile data |
@@ -551,7 +553,7 @@ export async function getChainParams() {
     if (cachedParams && Date.now() - cacheTime < CACHE_TTL) {
         return cachedParams;
     }
-    const data = await Api.get('get_config');
+    const data = await Api.get('get_chain_config');
     cachedParams = data;
     cacheTime = Date.now();
     return data;

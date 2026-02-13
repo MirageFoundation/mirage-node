@@ -472,9 +472,9 @@ export default function SubscriptionView({ state }) {
 
     const loadTierConfigFromStorage = () => {
         try {
-            const configData = localStorage.getItem('configData');
-            if (!configData) return;
-            const cached = JSON.parse(configData);
+            const raw = localStorage.getItem('chainConfig');
+            if (!raw) return;
+            const cached = JSON.parse(raw);
             if (Array.isArray(cached.tiers) && cached.tiers.length > 0) {
                 setTierConfig(buildTierConfig(cached.tiers));
             }
@@ -484,34 +484,24 @@ export default function SubscriptionView({ state }) {
         } catch (_) { }
     };
 
-    // Load tiers from cached config (and keep in sync with configUpdated events)
+    // Load tiers from cached chain config (and keep in sync with chainConfigUpdated events)
     useEffect(() => {
         loadTierConfigFromStorage();
 
         const onConfigUpdated = () => {
             loadTierConfigFromStorage();
         };
-        window.addEventListener('configUpdated', onConfigUpdated);
-        return () => window.removeEventListener('configUpdated', onConfigUpdated);
+        window.addEventListener('chainConfigUpdated', onConfigUpdated);
+        return () => window.removeEventListener('chainConfigUpdated', onConfigUpdated);
     }, []);
 
     // Force-refresh chain config when visiting SubscriptionView to avoid stale tier pricing
     useEffect(() => {
         (async () => {
             try {
-                const cfg = await Api.get(
-                    'get_config',
-                    { _cb: Date.now() },
-                    {
-                        timeoutMs: 10000,
-                        headers: {
-                            'Cache-Control': 'no-cache',
-                            'Pragma': 'no-cache',
-                        }
-                    }
-                );
+                const cfg = await Api.get('get_chain_config', undefined, { timeoutMs: 10000 });
                 if (!cfg || typeof cfg !== 'object') return;
-                try { transactionHandler.cacheConfigData(cfg); } catch (_) { }
+                try { transactionHandler.cacheChainConfig(cfg); } catch (_) { }
             } catch (_) { }
         })();
     }, []);
@@ -528,7 +518,7 @@ export default function SubscriptionView({ state }) {
                 const data = await Api.get('get_user_status', { address, _cb: Date.now() }, { timeoutMs: 10000 });
                 if (cancelled) return;
                 // Persist to Storage so TransactionHandler picks up the latest user_level
-                try { transactionHandler.cacheConfigData(data); } catch (_) { }
+                try { transactionHandler.cacheUserStatus(data); } catch (_) { }
 
                 if (typeof data.user_level === 'number') {
                     setUserLevel(data.user_level);
@@ -540,7 +530,7 @@ export default function SubscriptionView({ state }) {
                     setAutoRenew(data.auto_renew);
                     autoRenewDisplayRef.current = data.auto_renew;
                 }
-                // Balance from API response (cacheConfigData above also syncs to TopBar via useBalance hook)
+                // Balance from API response (cacheUserStatus above also syncs to TopBar via useBalance hook)
                 const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
                 if (typeof balanceVal !== 'undefined') {
                     setBalance(Number(balanceVal) || 0);
@@ -674,7 +664,7 @@ export default function SubscriptionView({ state }) {
                 const data = await Api.get('get_user_status', { address: address || undefined, _cb: Date.now() }, { timeoutMs: 10000 });
                 // Persist to Storage so TransactionHandler picks up the new user_level
                 // (also syncs balance to TopBar via _persistUserBalance → balanceUpdated event)
-                try { transactionHandler.cacheConfigData(data); } catch (_) { }
+                try { transactionHandler.cacheUserStatus(data); } catch (_) { }
                 const balanceVal = data?.balance !== undefined ? data.balance : data?.user_balance;
                 if (balanceVal !== undefined) {
                     setBalance(Number(balanceVal) || 0);

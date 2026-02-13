@@ -4,7 +4,8 @@ from __future__ import annotations
 
 Endpoints:
 - GET /api/get_parameters: Latest block hash, difficulty, optional balance.
-- GET /api/get_config: Snapshot of params, block_time, difficulty, optional recent votes.
+- GET /api/get_chain_config: Chain governance params (tiers, limits, subscription_period).
+- GET /api/get_node_config: Per-node static settings (validator info, feature flags).
 - GET /api/get_tx_status: Unified tx status with type-specific enrichment.
 - GET /api/get_address_from_username: Get address for a username if it exists.
 - GET /api/get_topics: List most active topics, excluding deleted messages.
@@ -1730,6 +1731,11 @@ def get_tx_status():
         return safe_error(e)
 
 
+# ---- get_parameters: short cache for pow params ----
+_PARAMS_CACHE: Dict[str, Any] = {"data": None, "expires": 0.0}
+_PARAMS_CACHE_TTL: float = 3.0  # seconds
+
+
 @public_bp.route("/api/get_parameters")
 def get_parameters():
     rid = next_request_id()
@@ -1738,12 +1744,31 @@ def get_parameters():
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
         addr = request.args.get("address", default=None, type=str)
-        last = _latest_block_hash()
-        diff = _get_current_pow_difficulty()
+        now = time.monotonic()
+        cached = _PARAMS_CACHE["data"]
+        if cached is not None and _PARAMS_CACHE["expires"] > now:
+            base = cached
+            cache_hit = True
+        else:
+            last = _latest_block_hash()
+            diff = _get_current_pow_difficulty()
+            base = {"last_block_hash": last, "pow_difficulty": diff}
+            _PARAMS_CACHE["data"] = base
+            _PARAMS_CACHE["expires"] = now + _PARAMS_CACHE_TTL
+            cache_hit = False
+
         op_addr = find_local_operator_address()
         bal = _get_balance(addr) if addr else None
-        log_event(rid, "get_parameters.ok", last=last[:8], diff=diff, operator=op_addr, addr=addr, bal=bal)
-        payload: Dict[str, Any] = {"last_block_hash": last, "pow_difficulty": diff}
+        log_event(
+            rid,
+            "get_parameters.cached" if cache_hit else "get_parameters.ok",
+            last=base["last_block_hash"][:8],
+            diff=base["pow_difficulty"],
+            operator=op_addr,
+            addr=addr,
+            bal=bal,
+        )
+        payload: Dict[str, Any] = dict(base)
         if bal is not None:
             try:
                 payload["balance"] = int(bal)
@@ -2329,60 +2354,88 @@ def get_circulation_stats():
         return safe_error(e)
 
 
-_GET_CONFIG_CACHE: Optional[Dict[str, Any]] = None
-_GET_CONFIG_CACHE_TIME: float = 0.0
-_GET_CONFIG_CACHE_TTL: float = 60.0  # seconds — frontend caches 24h, so 60s server-side is fine
+# ---- get_chain_config: chain governance params only ----
+_CHAIN_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_CHAIN_CONFIG_CACHE_TIME: float = 0.0
+_CHAIN_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — governance changes are rare
 
 
-@public_bp.route("/api/get_config")
-def get_config():
-    """Get static blockchain/server config. Cached 24h on frontend.
+@public_bp.route("/api/get_chain_config")
+def get_chain_config():
+    """Chain governance params (tiers, limits, subscription_period, etc.).
 
-    Response is cached server-side for 60s to avoid repeated gRPC/HTTP calls.
-    For dynamic user data, use get_user_status instead.
-    For follow/block lists, use get_user_followed/get_user_blocked.
-    For network stats, use get_network_stats.
+    These change only via governance proposals. Cached 24h server-side.
+    No difficulty/height — use get_network_stats or get_parameters for those.
     """
-    global _GET_CONFIG_CACHE, _GET_CONFIG_CACHE_TIME
+    global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
 
     rid = next_request_id()
-    log_event(rid, "get_config.begin")
+    log_event(rid, "get_chain_config.begin")
     try:
         now = time.monotonic()
-        if _GET_CONFIG_CACHE is not None and (now - _GET_CONFIG_CACHE_TIME) < _GET_CONFIG_CACHE_TTL:
-            log_event(rid, "get_config.cached")
-            out = jsonify(_GET_CONFIG_CACHE)
-            out.headers["Cache-Control"] = "no-store, max-age=0"
-            out.headers["Pragma"] = "no-cache"
-            out.headers["Expires"] = "0"
-            return out
+        if _CHAIN_CONFIG_CACHE is not None and (now - _CHAIN_CONFIG_CACHE_TIME) < _CHAIN_CONFIG_CACHE_TTL:
+            log_event(rid, "get_chain_config.cached")
+            return jsonify(_CHAIN_CONFIG_CACHE)
 
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
-        # Load cached chain params
         try:
             p = load_params(force=False)
-            max_username_size = p["max_username_size"]
-            min_username_size = p["min_username_size"]
-            max_topic_size = p["max_topic_size"]
-            min_topic_size = p["min_topic_size"]
-            subscription_period = p["subscription_period"]
-            mint_interval = p["mint_interval"]
-            tiers = p["tiers"]
         except Exception as e:
-            log_event(rid, "get_config.params_err", error=str(e))
-            return safe_error(e, context="get_config.params")
+            log_event(rid, "get_chain_config.params_err", error=str(e))
+            return safe_error(e, context="get_chain_config.params")
+
+        resp: Dict[str, Any] = {
+            "max_username_size": p["max_username_size"],
+            "min_username_size": p["min_username_size"],
+            "max_topic_size": p["max_topic_size"],
+            "min_topic_size": p["min_topic_size"],
+            "subscription_period": p["subscription_period"],
+            "mint_interval": p["mint_interval"],
+            "block_time": _get_block_time_seconds(),
+            "tiers": p["tiers"],
+        }
+
+        _CHAIN_CONFIG_CACHE = resp
+        _CHAIN_CONFIG_CACHE_TIME = now
+
+        log_event(rid, "get_chain_config.ok")
+        return jsonify(resp)
+    except Exception as e:
+        log_event(rid, "get_chain_config.err", error=str(e))
+        return safe_error(e)
+
+
+# ---- get_node_config: per-node static settings ----
+_NODE_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_NODE_CONFIG_CACHE_TIME: float = 0.0
+_NODE_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — these almost never change
+
+
+@public_bp.route("/api/get_node_config")
+def get_node_config():
+    """Per-node static settings (validator info, feature flags, API keys).
+
+    These are deployment-specific and don't change at runtime. Cached 24h server-side.
+    """
+    global _NODE_CONFIG_CACHE, _NODE_CONFIG_CACHE_TIME
+
+    rid = next_request_id()
+    log_event(rid, "get_node_config.begin")
+    try:
+        now = time.monotonic()
+        if _NODE_CONFIG_CACHE is not None and (now - _NODE_CONFIG_CACHE_TIME) < _NODE_CONFIG_CACHE_TTL:
+            log_event(rid, "get_node_config.cached")
+            return jsonify(_NODE_CONFIG_CACHE)
+
+        if _is_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
 
         rt = require_runtime()
-        diff_info = _get_difficulty_info()
-        block_time = _get_block_time_seconds()
-
-        # Validator addresses (cached after first call — static per node)
         valoper = find_local_operator_address()
         valcons = find_local_consensus_address()
 
-        # Get current site's validator moniker
         validator_moniker = ""
         try:
             if valoper:
@@ -2392,47 +2445,24 @@ def get_config():
             pass
 
         resp: Dict[str, Any] = {
-            # Chain params (static)
-            "max_username_size": max_username_size,
-            "min_username_size": min_username_size,
-            "max_topic_size": max_topic_size,
-            "min_topic_size": min_topic_size,
-            "subscription_period": subscription_period,
-            "mint_interval": mint_interval,
-            "block_time": block_time,
-            "pow_difficulty": int(diff_info.get("current_difficulty", 0)),
-            "pow_message_count": int(diff_info.get("pow_message_count", 0)),
-            "pow_calm_sequence": int(diff_info.get("consecutive_low_usage", 0)),
-            "pow_last_change_height": int(diff_info.get("last_change_height", 0)),
-            "current_height": int(diff_info.get("current_height", 0)),
-            "tiers": tiers,
-            # Validator info (static per node)
             "validator_account_address": rt.validator_payer_addr,
             "validator_operator_address": valoper,
             "validator_consensus_address": valcons,
             "validator_moniker": validator_moniker,
-            # Public API keys (for client-side features)
             "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
-            # Node-specific feature flags (validated at startup in settings.py)
             "registration_enabled": REGISTRATION_ENABLED,
             "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
             "quests_enabled": QUESTS_ENABLED,
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         }
 
-        _GET_CONFIG_CACHE = resp
-        _GET_CONFIG_CACHE_TIME = now
+        _NODE_CONFIG_CACHE = resp
+        _NODE_CONFIG_CACHE_TIME = now
 
-        log_event(rid, "get_config.ok")
-        out = jsonify(resp)
-        # Prevent browser/CDN caching: frontend already does its own localStorage caching and should
-        # be able to force-refresh tier pricing immediately after on-chain updates.
-        out.headers["Cache-Control"] = "no-store, max-age=0"
-        out.headers["Pragma"] = "no-cache"
-        out.headers["Expires"] = "0"
-        return out
+        log_event(rid, "get_node_config.ok")
+        return jsonify(resp)
     except Exception as e:
-        log_event(rid, "get_config.err", error=str(e))
+        log_event(rid, "get_node_config.err", error=str(e))
         return safe_error(e)
 
 

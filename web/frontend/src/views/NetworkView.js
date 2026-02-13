@@ -672,12 +672,12 @@ export default function NetworkView({ state }) {
         }
     }, [location.pathname]);
 
-    // Load static validator info from cached config (once)
+    // Load static validator info from cached node config (once)
     useEffect(() => {
         try {
-            const configData = localStorage.getItem('configData');
-            if (configData) {
-                const cached = JSON.parse(configData);
+            const raw = localStorage.getItem('nodeConfig');
+            if (raw) {
+                const cached = JSON.parse(raw);
                 setCfg(prev => ({
                     ...prev,
                     validator_moniker: cached.validator_moniker || undefined,
