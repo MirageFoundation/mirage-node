@@ -1,5 +1,5 @@
 """
-Migration: v1.11.0 - Rename backend.env vars for clarity
+Migration: v1.10.8 - Rename backend.env vars for clarity
 
 Renames environment variables in backend.env to use proper domain prefixes:
 
@@ -26,7 +26,7 @@ All operations are idempotent - safe to run multiple times.
 import re
 from pathlib import Path
 
-MIGRATION_KEY = "v1_11_0_backend_env_renames"
+MIGRATION_KEY = "v1_10_8_backend_env_renames"
 DESCRIPTION = "Rename backend.env vars to use REGISTRATION_*/BACKEND_*/QUESTS_* prefixes"
 
 # Map of old key -> new key
