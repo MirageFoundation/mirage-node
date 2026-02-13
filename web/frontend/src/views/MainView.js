@@ -1373,6 +1373,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
+    // Node is "gated" when registration is disabled or requires invite codes — logged-out users should see zero fetches
+    const isNodeGated = !nodeConfig?.registration_enabled || Boolean(nodeConfig?.registration_invite_code_required);
 
     // Invite code state
     const [inviteCodes, setInviteCodes] = useState([]);
@@ -1440,8 +1442,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
     // Uses lightweight endpoint that only returns essential counts (fast, cached)
     // Implements stale-while-revalidate: show cached value immediately, update when fresh
+    // On gated nodes (invite-only / registration disabled), skip all fetches for logged-out users
     useEffect(() => {
         if (isLoggedIn) return; // Only fetch for logged-out visitors
+        if (isNodeGated) return; // No fetches on gated nodes for guests
 
         let cancelled = false;
         const loadWelcomeStats = async () => {
@@ -1468,7 +1472,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         };
         loadWelcomeStats();
         return () => { cancelled = true; };
-    }, [isLoggedIn]);
+    }, [isLoggedIn, isNodeGated]);
 
     // Get next available invite code
     const nextAvailableCode = inviteCodes.find(c => !c.is_used);
@@ -1740,6 +1744,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     const getPosts = useCallback((topic, overrideChrono = null, pageOverride = null, silent = false) => {
         if (!isMountedRef.current) return;
+
+        // Never fetch posts for logged-out users
+        const viewer = Storage.load("publicKey", "");
+        if (!viewer || viewer === 'guest') return;
 
         if (topic === "")
             topic = "all";
