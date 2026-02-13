@@ -198,22 +198,18 @@ maybe_proto_gen_and_go_build() {
 
   # Step 2: Compute Go hash AFTER proto-gen (so it includes fresh .pb.go files)
   # This is critical: if proto-gen updated any .pb.go files, the hash will change
-  # Also include the closest tag so that creating a new tag forces a rebuild
-  # (the version is baked into the binary via ldflags at compile time).
-  # Use --abbrev=0 to get just the tag name (e.g. "v1.10.8"), NOT the full
-  # git-describe suffix (e.g. "v1.10.8-8-gd51fe94") — otherwise every
-  # non-Go commit would change the hash and trigger a needless rebuild.
-  local git_version
-  git_version="$(git -C "$REPO_ROOT/blockchain" describe --tags --abbrev=0 2>/dev/null || echo "unknown")"
+  # The hash is STRICTLY based on source file contents — tags, commit hashes,
+  # and other git metadata are NOT included. The version string baked into the
+  # binary via ldflags is cosmetic and not worth triggering a full rebuild for.
   local new_go_hash
-  new_go_hash="$(echo "$git_version" | cat - <(hash_tree \
+  new_go_hash="$(hash_tree \
     "$REPO_ROOT/blockchain/go.mod" \
     "$REPO_ROOT/blockchain/go.sum" \
     "$REPO_ROOT/blockchain/app" \
     "$REPO_ROOT/blockchain/cmd" \
     "$REPO_ROOT/blockchain/orchestrator" \
     "$REPO_ROOT/blockchain/x" \
-  ) | sha256sum | awk '{print $1}')"
+  )"
 
   local miraged_bin="$REPO_ROOT/blockchain/bin/miraged"
   local orchestrator_bin="$REPO_ROOT/blockchain/bin/orchestrator"
