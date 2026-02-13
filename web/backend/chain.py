@@ -25,7 +25,7 @@ from node import require_runtime, get_grpc_channel
 from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
 
-# Cache for difficulty info — short TTL so get_config doesn't pay gRPC cost every request
+# Cache for difficulty info — short TTL so callers don't pay gRPC cost every request
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
 _DIFFICULTY_CACHE_HEIGHT: int = 0
 _DIFFICULTY_CACHE_TIME: float = 0.0

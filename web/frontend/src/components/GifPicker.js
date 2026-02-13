@@ -10,14 +10,14 @@ const GIPHY_TRENDING_URL = 'https://api.giphy.com/v1/gifs/trending';
 // Get Giphy API key: runtime config (from backend) takes precedence over build-time env
 function getGiphyApiKey() {
     try {
-        const configData = localStorage.getItem('configData');
-        if (configData) {
-            const config = JSON.parse(configData);
+        const raw = localStorage.getItem('nodeConfig');
+        if (raw) {
+            const config = JSON.parse(raw);
             if (config.giphy_api_key) {
                 return config.giphy_api_key.trim();
             }
         }
-    } catch (_) {}
+    } catch (_) { }
     return BUILD_TIME_GIPHY_KEY;
 }
 
@@ -192,7 +192,7 @@ const PoweredBy = styled.div`
 
 const GifIcon = () => (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-        <rect x="2" y="4" width="20" height="16" rx="3" ry="3" fill="none" stroke="currentColor" strokeWidth="2"/>
+        <rect x="2" y="4" width="20" height="16" rx="3" ry="3" fill="none" stroke="currentColor" strokeWidth="2" />
         <text x="12" y="15" textAnchor="middle" fontSize="8" fontWeight="bold" fill="currentColor">GIF</text>
     </svg>
 );
@@ -209,17 +209,15 @@ export default function GifPicker({ onSelect, disabled = false }) {
     const searchInputRef = useRef(null);
     const searchTimeoutRef = useRef(null);
 
-    // Re-check API key when configData changes (e.g., after login)
+    // Re-check API key when nodeConfig changes (e.g., after login)
     useEffect(() => {
-        const handleStorageChange = (e) => {
-            if (e.key === 'configData') {
-                setApiKey(getGiphyApiKey());
-            }
+        const handleNodeConfigUpdate = () => {
+            setApiKey(getGiphyApiKey());
         };
-        window.addEventListener('storage', handleStorageChange);
+        window.addEventListener('nodeConfigUpdated', handleNodeConfigUpdate);
         // Also check on mount in case config was already loaded
         setApiKey(getGiphyApiKey());
-        return () => window.removeEventListener('storage', handleStorageChange);
+        return () => window.removeEventListener('nodeConfigUpdated', handleNodeConfigUpdate);
     }, []);
 
     const updatePosition = useCallback(() => {
@@ -227,21 +225,21 @@ export default function GifPicker({ onSelect, disabled = false }) {
         const rect = buttonRef.current.getBoundingClientRect();
         const popoverHeight = 420;
         const popoverWidth = 340;
-        
+
         let top = rect.top - popoverHeight - 8;
         let left = rect.left;
-        
+
         if (top < 10) {
             top = rect.bottom + 8;
         }
-        
+
         if (left + popoverWidth > window.innerWidth - 10) {
             left = window.innerWidth - popoverWidth - 10;
         }
         if (left < 10) {
             left = 10;
         }
-        
+
         setPosition({ top, left });
     }, []);
 
@@ -255,7 +253,7 @@ export default function GifPicker({ onSelect, disabled = false }) {
             const url = query
                 ? `${GIPHY_SEARCH_URL}?api_key=${apiKey}&q=${encodeURIComponent(query)}&limit=20&rating=pg-13`
                 : `${GIPHY_TRENDING_URL}?api_key=${apiKey}&limit=20&rating=pg-13`;
-            
+
             const response = await fetch(url);
             const data = await response.json();
             setGifs(data.data || []);

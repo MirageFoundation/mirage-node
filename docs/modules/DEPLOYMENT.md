@@ -741,7 +741,7 @@ ssh root@mirage.vote 'docker exec mirage psql -U mirage -d mirage -c "SELECT COU
 
 1. Check backend is running:
    ```bash
-   docker exec mirage curl -s http://127.0.0.1:5000/api/get_config
+   docker exec mirage curl -s http://127.0.0.1:5000/api/get_chain_config
    ```
 
 2. Check Caddy proxy config:

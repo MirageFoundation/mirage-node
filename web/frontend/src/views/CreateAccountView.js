@@ -115,16 +115,16 @@ function CreateAccountView({ state, setCredentials }) {
     // Re-read config when App.js fetches fresh data
     React.useEffect(() => {
         const handler = () => setConfigUpdateTrigger(prev => prev + 1);
-        window.addEventListener('configUpdated', handler);
-        return () => window.removeEventListener('configUpdated', handler);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
     }, []);
 
-    // Read node config from localStorage (set by get_config API)
+    // Read node config from localStorage (set by get_node_config API)
     // Both fields must be explicitly present (boolean) — no silent defaults.
     const nodeConfig = React.useMemo(() => {
         void configUpdateTrigger;
         try {
-            const raw = localStorage.getItem('configData');
+            const raw = localStorage.getItem('nodeConfig');
             if (raw) {
                 const parsed = JSON.parse(raw);
                 if (typeof parsed.registration_enabled === 'boolean' &&
@@ -139,14 +139,13 @@ function CreateAccountView({ state, setCredentials }) {
     const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
     // If nodeConfig is missing (stale cache or empty localStorage), fetch it ourselves.
-    // App.js may skip the fetch if it thinks params are valid and not stale (24h TTL).
     React.useEffect(() => {
         if (nodeConfig) return;
         (async () => {
             try {
-                const cfg = await Api.get('get_config', undefined, { timeoutMs: 10000 });
+                const cfg = await Api.get('get_node_config', undefined, { timeoutMs: 10000 });
                 if (!cfg || typeof cfg !== 'object') return;
-                try { await tx.cacheConfigData(cfg); } catch (_) { }
+                try { tx.cacheNodeConfig(cfg); } catch (_) { }
             } catch (_) { }
         })();
     }, [nodeConfig]);
@@ -441,7 +440,7 @@ function CreateAccountView({ state, setCredentials }) {
     const usernameFinal = (usernameInput || "").trim();
 
     // Node config must be loaded before we can show anything.
-    // configUpdateTrigger > 0 means the configUpdated event fired at least once (fetch finished).
+    // configUpdateTrigger > 0 means the nodeConfigUpdated event fired at least once (fetch finished).
     const configFetchDone = configUpdateTrigger > 0;
     if (!nodeConfig) {
         return (
