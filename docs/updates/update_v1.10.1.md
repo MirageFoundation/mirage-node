@@ -53,4 +53,4 @@ This is just the beginning. The Quest System lays the foundation for a richer en
 - **API:** `POST /api/quests/claim` - Claim completed quest rewards
 - **API:** `GET /api/rewards/stats` - Public rewards statistics
 - **New script:** `deploy/setup_rewards_pool.py`
-- **Env vars:** `QUESTS_ENABLED`, `QUEST_PAYOUTS_ENABLED`, `QUEST_REWARDS_POOL_ADDRESS`
+- **Env vars:** `QUESTS_ENABLED`, `QUESTS_PAYOUTS_ENABLED`, `QUESTS_REWARDS_POOL_ADDRESS`

@@ -24,8 +24,12 @@ v1.10.8 additions (source-level checks):
 - Node balance tracking (migration v2_0_4, indexer records balance every 200 blocks)
 - Network charts: unified layout constants, Total Supply chart, chart label fixes
 - Server page: node balance chart, earned vs spent chart, staked balance display
-- Deploy migration v1_11_0_backend_env_renames
-- Quest settings renamed (INVITE_* → QUEST_INVITE_*)
+- Deploy migration v1_11_0_backend_env_renames (with full content validation)
+- Quest settings renamed to QUESTS_* prefix (env vars + Python constants)
+- Reward env vars renamed to QUESTS_ prefix (reward_distributor.py, setup_rewards_pool.py)
+- GUNICORN_WORKERS renamed to BACKEND_GUNICORN_WORKERS (gunicorn_config.py)
+- Frontend env template cleaned (REACT_APP_API_BASE removed, bake-time note added)
+- Donation amount formatting (toLocaleString)
 
 NOTE: This does NOT submit transactions or mutate chain state.
 """
@@ -1352,50 +1356,80 @@ def check_network_charts(failures: list[str], warnings: list[str]) -> None:
 
 
 def check_deploy_migration_v1_11(failures: list[str], warnings: list[str]) -> None:
-    """Verify deploy migration for backend env renames exists."""
+    """Verify deploy migration for backend env renames exists and covers all renames."""
     print("\n-> Checking deploy migration v1.11.0...")
 
     migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
-    if migration.exists():
-        print("   [OK] v1_11_0_backend_env_renames.py exists")
-    else:
+    if not migration.exists():
         print("   [FAIL] v1_11_0_backend_env_renames.py not found")
         failures.append("deploy: migrations/v1_11_0_backend_env_renames.py not found")
+        return
+
+    print("   [OK] v1_11_0_backend_env_renames.py exists")
+    mig_text = migration.read_text()
+
+    # Verify the migration covers all required renames
+    required_renames = {
+        "INVITE_CODES_REQUIRED": "REGISTRATION_INVITE_CODE_REQUIRED",
+        "GUNICORN_WORKERS": "BACKEND_GUNICORN_WORKERS",
+        "DAILY_QUESTS_COUNT": "QUESTS_DAILY_COUNT",
+        "FLASH_QUESTS_COUNT": "QUESTS_FLASH_COUNT",
+        "FLASH_QUEST_MIN_INTERVAL_HOURS": "QUESTS_FLASH_MIN_INTERVAL_HOURS",
+        "FLASH_QUEST_MAX_INTERVAL_HOURS": "QUESTS_FLASH_MAX_INTERVAL_HOURS",
+        "PAYOUTS_ENABLED": "QUESTS_PAYOUTS_ENABLED",
+        "REWARDS_POOL_ADDRESS": "QUESTS_REWARDS_POOL_ADDRESS",
+        "INVITE_RECRUIT_CHANCE": "QUESTS_INVITE_RECRUIT_CHANCE",
+        "INVITE_EARNER_QUEST_INTERVAL": "QUESTS_INVITE_EARNER_INTERVAL",
+        "INVITE_EARNER_CHANCE": "QUESTS_INVITE_EARNER_CHANCE",
+    }
+    for old, new in required_renames.items():
+        if f'"{old}"' in mig_text and f'"{new}"' in mig_text:
+            print(f"   [OK] migration: {old} -> {new}")
+        else:
+            print(f"   [FAIL] migration: {old} -> {new} mapping not found")
+            failures.append(f"deploy migration: missing rename {old} -> {new}")
 
 
 def check_quest_settings_rename(failures: list[str], warnings: list[str]) -> None:
-    """Verify quest settings constants were renamed from INVITE_* to QUEST_INVITE_*."""
+    """Verify all quest env vars use the QUESTS_ prefix."""
     print("\n-> Checking quest settings rename...")
 
+    # All quest env vars/constants must use QUESTS_ prefix
+    quests_names = [
+        "QUESTS_DAILY_COUNT",
+        "QUESTS_FLASH_MIN_INTERVAL_HOURS",
+        "QUESTS_FLASH_MAX_INTERVAL_HOURS",
+        "QUESTS_INVITE_RECRUIT_CHANCE",
+        "QUESTS_INVITE_EARNER_INTERVAL",
+        "QUESTS_INVITE_EARNER_CHANCE",
+    ]
+    # Old names that must NOT appear as bare definitions
+    old_names = [
+        "INVITE_RECRUIT_CHANCE",
+        "INVITE_EARNER_QUEST_INTERVAL",
+        "INVITE_EARNER_CHANCE",
+        "DAILY_QUESTS_COUNT",
+        "FLASH_QUESTS_COUNT",
+        "FLASH_QUEST_MIN_INTERVAL_HOURS",
+        "FLASH_QUEST_MAX_INTERVAL_HOURS",
+    ]
+
     settings_py = REPO_ROOT / "indexer" / "settings.py"
-    if not settings_py.exists():
-        print("   [WARN] indexer/settings.py not found")
-        warnings.append("quest settings: indexer/settings.py not found")
-        return
+    if settings_py.exists():
+        text = settings_py.read_text()
+        for name in quests_names:
+            if name in text:
+                print(f"   [OK] settings.py: {name} defined")
+            else:
+                print(f"   [FAIL] settings.py: {name} not found")
+                failures.append(f"quest settings: {name} not defined in settings.py")
 
-    text = settings_py.read_text()
+        for name in old_names:
+            if re.search(rf"^{name}\s*=", text, re.MULTILINE):
+                print(f"   [FAIL] settings.py: old name {name} still defined")
+                failures.append(f"quest settings: old name {name} still present in settings.py")
 
-    new_names = ["QUEST_INVITE_RECRUIT_CHANCE", "QUEST_INVITE_EARNER_INTERVAL", "QUEST_INVITE_EARNER_CHANCE"]
-    old_names = ["INVITE_RECRUIT_CHANCE", "INVITE_EARNER_QUEST_INTERVAL", "INVITE_EARNER_CHANCE"]
-
-    for name in new_names:
-        if name in text:
-            print(f"   [OK] {name} defined")
-        else:
-            print(f"   [FAIL] {name} not found")
-            failures.append(f"quest settings: {name} not defined in settings.py")
-
-    for name in old_names:
-        # Check for bare definition (not as part of QUEST_INVITE_*)
-        if re.search(rf"^{name}\s*=", text, re.MULTILINE):
-            print(f"   [FAIL] old name {name} still defined")
-            failures.append(f"quest settings: old name {name} still present in settings.py")
-        else:
-            print(f"   [OK] old name {name} removed")
-
-    # Check quest_tracker.py uses new names (word-boundary match to avoid
-    # false positives where e.g. INVITE_RECRUIT_CHANCE is a substring of
-    # QUEST_INVITE_RECRUIT_CHANCE)
+    # Check quest_tracker.py uses new names
     tracker_py = REPO_ROOT / "indexer" / "quest_tracker.py"
     if tracker_py.exists():
         tracker_text = tracker_py.read_text()
@@ -1403,20 +1437,13 @@ def check_quest_settings_rename(failures: list[str], warnings: list[str]) -> Non
             if re.search(rf"(?<![A-Z_]){old}(?![A-Z_])", tracker_text):
                 print(f"   [FAIL] quest_tracker.py still references {old}")
                 failures.append(f"quest settings: quest_tracker.py still uses {old}")
-            else:
-                print(f"   [OK] quest_tracker.py: no bare {old}")
+        print("   [OK] quest_tracker.py: uses QUESTS_ prefix")
 
-    # Check quests.py uses consistent names (no double-prefix like QUEST_QUEST_*)
+    # Check quests.py uses consistent names
     quests_py = REPO_ROOT / "web" / "backend" / "routes" / "quests.py"
     if quests_py.exists():
         quests_text = quests_py.read_text()
-        if "QUEST_QUEST_" in quests_text:
-            print("   [FAIL] quests.py: double-prefix QUEST_QUEST_ found (NameError risk)")
-            failures.append("quest settings: quests.py has QUEST_QUEST_ double prefix")
-        else:
-            print("   [OK] quests.py: no double-prefix issues")
-
-        for name in new_names:
+        for name in quests_names:
             if name in quests_text:
                 print(f"   [OK] quests.py: {name} used")
             else:
@@ -1494,7 +1521,7 @@ def check_registration_gating(failures: list[str], warnings: list[str]) -> None:
 
 
 def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
-    """Verify reward env vars renamed from REWARDS_POOL_ADDRESS/PAYOUTS_ENABLED to QUEST_* prefix."""
+    """Verify reward env vars use the QUESTS_ prefix."""
     print("\n-> Checking reward env renames...")
 
     rd = REPO_ROOT / "web" / "backend" / "reward_distributor.py"
@@ -1506,7 +1533,7 @@ def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
     text = rd.read_text()
 
     # New names should be present
-    for new_name in ("QUEST_REWARDS_POOL_ADDRESS", "QUEST_PAYOUTS_ENABLED"):
+    for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
         if new_name in text:
             print(f"   [OK] reward_distributor.py: {new_name} used")
         else:
@@ -1530,12 +1557,32 @@ def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
     env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
     if env_template.exists():
         env_text = env_template.read_text()
-        for key in ("QUEST_REWARDS_POOL_ADDRESS", "QUEST_PAYOUTS_ENABLED"):
+        for key in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
             if key in env_text:
                 print(f"   [OK] backend.env template: {key} present")
             else:
                 print(f"   [FAIL] backend.env template: {key} missing")
                 failures.append(f"reward renames: backend.env template missing {key}")
+
+    # setup_rewards_pool.py should also use QUESTS_ prefix
+    srp = REPO_ROOT / "deploy" / "setup_rewards_pool.py"
+    if srp.exists():
+        srp_text = srp.read_text()
+        for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
+            if new_name in srp_text:
+                print(f"   [OK] setup_rewards_pool.py: {new_name} used")
+            else:
+                print(f"   [FAIL] setup_rewards_pool.py: {new_name} not found")
+                failures.append(f"reward renames: setup_rewards_pool.py missing {new_name}")
+
+        # Old bare names should not be present
+        for old_name in ("REWARDS_POOL_ADDRESS", "PAYOUTS_ENABLED"):
+            if re.search(rf"(?<![A-Z_]){old_name}(?![A-Z_])", srp_text):
+                print(f"   [FAIL] setup_rewards_pool.py: old {old_name} still referenced")
+                failures.append(f"reward renames: setup_rewards_pool.py still uses {old_name}")
+    else:
+        print("   [WARN] setup_rewards_pool.py not found")
+        warnings.append("reward renames: setup_rewards_pool.py not found")
 
 
 def check_donation_formatting(failures: list[str], warnings: list[str]) -> None:
@@ -1552,6 +1599,85 @@ def check_donation_formatting(failures: list[str], warnings: list[str]) -> None:
         else:
             print(f"   [WARN] {fname}: toLocaleString() not found")
             warnings.append(f"donation formatting: {fname} missing toLocaleString()")
+
+
+def check_gunicorn_workers_rename(failures: list[str], warnings: list[str]) -> None:
+    """Verify GUNICORN_WORKERS was renamed to BACKEND_GUNICORN_WORKERS."""
+    print("\n-> Checking BACKEND_GUNICORN_WORKERS rename...")
+
+    # 1. gunicorn_config.py should use BACKEND_GUNICORN_WORKERS
+    gc = REPO_ROOT / "web" / "backend" / "gunicorn_config.py"
+    if gc.exists():
+        text = gc.read_text()
+        if "BACKEND_GUNICORN_WORKERS" in text:
+            print("   [OK] gunicorn_config.py: uses BACKEND_GUNICORN_WORKERS")
+        else:
+            print("   [FAIL] gunicorn_config.py: BACKEND_GUNICORN_WORKERS not found")
+            failures.append("gunicorn rename: gunicorn_config.py missing BACKEND_GUNICORN_WORKERS")
+
+        # Old name should not be present (as a bare reference)
+        if re.search(r'(?<![A-Z_])GUNICORN_WORKERS(?![A-Z_])', text):
+            print("   [FAIL] gunicorn_config.py: old GUNICORN_WORKERS still referenced")
+            failures.append("gunicorn rename: gunicorn_config.py still uses old GUNICORN_WORKERS")
+        else:
+            print("   [OK] gunicorn_config.py: old GUNICORN_WORKERS removed")
+    else:
+        print("   [WARN] gunicorn_config.py not found")
+        warnings.append("gunicorn rename: gunicorn_config.py not found")
+
+    # 2. backend.env template should use BACKEND_GUNICORN_WORKERS
+    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
+    if env_template.exists():
+        env_text = env_template.read_text()
+        if "BACKEND_GUNICORN_WORKERS" in env_text:
+            print("   [OK] backend.env template: BACKEND_GUNICORN_WORKERS present")
+        else:
+            print("   [FAIL] backend.env template: BACKEND_GUNICORN_WORKERS missing")
+            failures.append("gunicorn rename: backend.env template missing BACKEND_GUNICORN_WORKERS")
+
+        if re.search(r'^GUNICORN_WORKERS=', env_text, re.MULTILINE):
+            print("   [FAIL] backend.env template: old GUNICORN_WORKERS= still present")
+            failures.append("gunicorn rename: backend.env template still has old GUNICORN_WORKERS")
+        else:
+            print("   [OK] backend.env template: old GUNICORN_WORKERS= removed")
+
+    # 3. Migration should include this rename
+    migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
+    if migration.exists():
+        mig_text = migration.read_text()
+        if '"GUNICORN_WORKERS"' in mig_text and '"BACKEND_GUNICORN_WORKERS"' in mig_text:
+            print("   [OK] migration: GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS mapping present")
+        else:
+            print("   [FAIL] migration: GUNICORN_WORKERS rename mapping not found")
+            failures.append("gunicorn rename: migration missing GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS")
+
+
+def check_frontend_env_template(failures: list[str], warnings: list[str]) -> None:
+    """Verify frontend.env template is cleaned up (no REACT_APP_API_BASE)."""
+    print("\n-> Checking frontend.env template...")
+
+    fe = REPO_ROOT / "deploy" / "templates" / "env" / "frontend.env"
+    if not fe.exists():
+        print("   [WARN] frontend.env template not found")
+        warnings.append("frontend env: template not found")
+        return
+
+    text = fe.read_text()
+
+    # REACT_APP_API_BASE should NOT be in the template (it's baked at build time
+    # and is not user-configurable)
+    if re.search(r'^REACT_APP_API_BASE=', text, re.MULTILINE):
+        print("   [FAIL] frontend.env: REACT_APP_API_BASE should not be user-configurable")
+        failures.append("frontend env: REACT_APP_API_BASE still in template (baked at build time)")
+    else:
+        print("   [OK] frontend.env: REACT_APP_API_BASE not exposed as configurable")
+
+    # Should have the bake-time note
+    if "baked" in text.lower() or "build time" in text.lower():
+        print("   [OK] frontend.env: contains build-time note for REACT_APP_* vars")
+    else:
+        print("   [WARN] frontend.env: missing note about REACT_APP_* being baked at build time")
+        warnings.append("frontend env: missing bake-time note for REACT_APP_* vars")
 
 
 # ---------------------------------------------------------------------------
@@ -2233,6 +2359,8 @@ def main() -> int:
     check_quest_settings_rename(failures, warnings)
     check_registration_gating(failures, warnings)
     check_reward_env_renames(failures, warnings)
+    check_gunicorn_workers_rename(failures, warnings)
+    check_frontend_env_template(failures, warnings)
     check_donation_formatting(failures, warnings)
 
     print("\n" + "=" * 72)
