@@ -1514,13 +1514,13 @@ def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
             failures.append(f"reward renames: reward_distributor.py missing {new_name}")
 
     # Old bare names should NOT be defined (but may appear in comments)
-    if re.search(r'^REWARDS_POOL_ADDRESS\s*=', text, re.MULTILINE):
+    if re.search(r"^REWARDS_POOL_ADDRESS\s*=", text, re.MULTILINE):
         print("   [FAIL] reward_distributor.py: old REWARDS_POOL_ADDRESS still defined")
         failures.append("reward renames: old REWARDS_POOL_ADDRESS still defined")
     else:
         print("   [OK] old REWARDS_POOL_ADDRESS definition removed")
 
-    if re.search(r'^PAYOUTS_ENABLED\s*=', text, re.MULTILINE):
+    if re.search(r"^PAYOUTS_ENABLED\s*=", text, re.MULTILINE):
         print("   [FAIL] reward_distributor.py: old PAYOUTS_ENABLED still defined")
         failures.append("reward renames: old PAYOUTS_ENABLED still defined")
     else:
