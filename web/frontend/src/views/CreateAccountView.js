@@ -138,17 +138,8 @@ function CreateAccountView({ state, setCredentials }) {
     const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
     const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
-    // If nodeConfig is missing (stale cache or empty localStorage), fetch it ourselves.
-    React.useEffect(() => {
-        if (nodeConfig) return;
-        (async () => {
-            try {
-                const cfg = await Api.get('get_node_config', undefined, { timeoutMs: 10000 });
-                if (!cfg || typeof cfg !== 'object') return;
-                try { tx.cacheNodeConfig(cfg); } catch (_) { }
-            } catch (_) { }
-        })();
-    }, [nodeConfig]);
+    // App.js fetches get_node_config on mount when stale and fires nodeConfigUpdated.
+    // No duplicate fetch here — just wait for the event (listened above).
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
