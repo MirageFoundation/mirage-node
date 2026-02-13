@@ -358,7 +358,11 @@ def _fmt_value(v: Any) -> str:
 
 
 def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
-    """Check that miraged binary version matches the exact expected version."""
+    """Check that miraged binary version starts with the expected version prefix.
+
+    Accepts both exact tags (v1.10.8) and git-describe suffixes (v1.10.8-3-g67679d3)
+    since post-tag commits that don't touch Go source produce identical binaries.
+    """
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
@@ -366,8 +370,11 @@ def check_binary_version(miraged: str, failures: list[str], warnings: list[str])
         if version == EXPECTED_VERSION:
             print(f"   [OK] Binary version: {version}")
             return version
+        elif version.startswith(EXPECTED_VERSION + "-"):
+            print(f"   [OK] Binary version: {version} (matches {EXPECTED_VERSION} prefix)")
+            return version
         else:
-            print(f"   [FAIL] Binary version: {version} (expected exactly {EXPECTED_VERSION})")
+            print(f"   [FAIL] Binary version: {version} (expected {EXPECTED_VERSION} or {EXPECTED_VERSION}-*)")
             failures.append(f"Binary version {version!r} does not match expected {EXPECTED_VERSION!r}")
             return version
     except Exception as e:
