@@ -32,7 +32,7 @@ if REPO_ROOT not in sys.path:
 from shared.client import (  # noqa: E402
     create_wallet_from_seed,
     get_status,
-    get_config,
+    get_user_status,
     sign_canonical,
     get_username_from_address,
 )
@@ -3711,17 +3711,17 @@ def sub_stress_reserve_downgrade(
         addr = str(wallet.address())
 
         # Ensure user is a subscriber
-        cfg = get_config(backend, addr)
-        level = int(cfg.get("user_level") or 0)
+        status = get_user_status(backend, addr)
+        level = int(status.get("user_level") or 0)
         if level < 1:
             up = pos_upgrade_to_level(backend, seed, level=1)
             # do not require success here; we will poll actual level
             _print_result(up)
             time.sleep(2)
 
-        cfg = get_config(backend, addr)
-        level = int(cfg.get("user_level") or 0)
-        reserve = int(cfg.get("reserve_funds") or 0)
+        status = get_user_status(backend, addr)
+        level = int(status.get("user_level") or 0)
+        reserve = int(status.get("reserve_funds") or 0)
 
         print(f"  Subscriber start: level={level} reserve_funds={reserve}")
 
@@ -3760,9 +3760,9 @@ def sub_stress_reserve_downgrade(
                 return TestResult(name=name, passed=False, status_code=code, response=res or resp, details=details)
 
             # After each tx, fetch reserve and level
-            cfg = get_config(backend, addr)
-            level = int(cfg.get("user_level") or 0)
-            reserve = int(cfg.get("reserve_funds") or 0)
+            status = get_user_status(backend, addr)
+            level = int(status.get("user_level") or 0)
+            reserve = int(status.get("reserve_funds") or 0)
             details["iterations"] = i
             details["last_tx"] = txh
             details["reserve"] = reserve
@@ -3773,9 +3773,9 @@ def sub_stress_reserve_downgrade(
                 # Give the chain a moment to process downgrade if asynchronous
                 t_end = time.time() + wait_after_zero_s
                 while time.time() < t_end:
-                    cfg2 = get_config(backend, addr)
-                    lvl2 = int(cfg2.get("user_level") or 0)
-                    res2 = int(cfg2.get("reserve_funds") or 0)
+                    status2 = get_user_status(backend, addr)
+                    lvl2 = int(status2.get("user_level") or 0)
+                    res2 = int(status2.get("reserve_funds") or 0)
                     print(f"    check: reserve_funds={res2} level={lvl2}")
                     if lvl2 == 0:
                         downgraded = True

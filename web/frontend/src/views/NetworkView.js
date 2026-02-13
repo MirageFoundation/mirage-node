@@ -168,7 +168,7 @@ const ChartWrapper = styled.div`
 
 const ChartContainer = styled.div`
     width: 100%;
-    height: 120px;
+    aspect-ratio: 400 / 120;
 `;
 
 const ChartSvg = styled.svg`
@@ -203,6 +203,39 @@ const LegendDot = styled.span`
     background: ${props => props.color};
 `;
 
+// Shared chart layout constants — ALL charts MUST use the same values so axes align.
+// labelH reserves space above/below the plot area for Y-axis text labels.
+const CHART_LABEL_H = 10;
+const CHART = {
+    width: 400, height: 120,
+    padding: { top: CHART_LABEL_H + 4, right: 10, bottom: CHART_LABEL_H + 4, left: 50 },
+};
+CHART.innerW = CHART.width - CHART.padding.left - CHART.padding.right;
+CHART.innerH = CHART.height - CHART.padding.top - CHART.padding.bottom;
+
+// Shared compact MIRAGE formatter
+function fmtMirage(v) {
+    const a = Math.abs(v);
+    if (a >= 1e9) return (v / 1e9).toFixed(a >= 1e11 ? 1 : 2) + 'B';
+    if (a >= 1e6) return (v / 1e6).toFixed(a >= 1e8 ? 1 : 2) + 'M';
+    if (a >= 1e3) return (v / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'K';
+    if (a >= 1) return v.toFixed(1);
+    if (a >= 0.01) return v.toFixed(2);
+    return v.toFixed(4);
+}
+
+// Shared SVG grid (left axis, bottom axis, right axis)
+function ChartGrid() {
+    const { width, height, padding } = CHART;
+    return (
+        <>
+            <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+            <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+            <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+        </>
+    );
+}
+
 function DifficultyChart({ history }) {
     if (!history || history.length < 2) {
         return (
@@ -216,11 +249,7 @@ function DifficultyChart({ history }) {
         );
     }
 
-    const width = 400;
-    const height = 100;
-    const padding = { top: 10, right: 35, bottom: 5, left: 30 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
+    const { width, height, padding, innerW, innerH } = CHART;
 
     // Difficulty data (left axis, blue)
     const difficulties = history.map(h => h.difficulty);
@@ -238,15 +267,15 @@ function DifficultyChart({ history }) {
 
     // Difficulty line (blue)
     const diffPoints = history.map((h) => {
-        const x = padding.left + ((h.timestamp - minTs) / tsRange) * chartWidth;
-        const y = padding.top + chartHeight - ((h.difficulty - minDiff) / diffRange) * chartHeight;
+        const x = padding.left + ((h.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - ((h.difficulty - minDiff) / diffRange) * innerH;
         return `${x},${y}`;
     }).join(' ');
 
     // Message count line (green)
     const msgPoints = history.map((h) => {
-        const x = padding.left + ((h.timestamp - minTs) / tsRange) * chartWidth;
-        const y = padding.top + chartHeight - ((h.msg_count || 0) / maxMsg) * chartHeight;
+        const x = padding.left + ((h.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - ((h.msg_count || 0) / maxMsg) * innerH;
         return `${x},${y}`;
     }).join(' ');
 
@@ -260,18 +289,15 @@ function DifficultyChart({ history }) {
             </ChartLegend>
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-                    {/* Grid lines */}
-                    <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                    <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                    <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+                    <ChartGrid />
 
                     {/* Left Y-axis labels (Difficulty - blue) */}
-                    <text x={padding.left - 5} y={padding.top + 4} fill="#667eea" fontSize="9" textAnchor="end">{maxDiff}</text>
-                    <text x={padding.left - 5} y={height - padding.bottom} fill="#667eea" fontSize="9" textAnchor="end">{minDiff}</text>
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#667eea" fontSize="8" textAnchor="end">{maxDiff}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#667eea" fontSize="8" textAnchor="end">{minDiff}</text>
 
-                    {/* Right Y-axis labels (Msgs - green) */}
-                    <text x={width - padding.right + 5} y={padding.top + 4} fill="#48bb78" fontSize="9" textAnchor="start">{maxMsg}</text>
-                    <text x={width - padding.right + 5} y={height - padding.bottom} fill="#48bb78" fontSize="9" textAnchor="start">0</text>
+                    {/* Right Y-axis labels (Msgs - green, just inside right axis) */}
+                    <text x={width - padding.right - 2} y={padding.top - 4} fill="#48bb78" fontSize="8" textAnchor="end">{maxMsg}</text>
+                    <text x={width - padding.right - 2} y={height - padding.bottom + 8} fill="#48bb78" fontSize="8" textAnchor="end">0</text>
 
                     {/* Message count area fill (green, behind) */}
                     <polygon
@@ -317,133 +343,285 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
         );
     }
 
-    const width = 400;
-    const height = 100;
-    const padding = { top: 10, right: 35, bottom: 5, left: 30 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
+    const { width, height, padding, innerW, innerH } = CHART;
 
-    // Calculate cumulative minted and burned over time (in umirage)
+    // Cumulative minted/burned (burned derived from cumulative totals, not per-interval)
     const data = [];
-    let cumulativeMinted = 0;
-    let cumulativeBurned = 0;
-
+    let cumMinted = 0;
+    let cumSupplyChange = 0;
     for (let i = 1; i < history.length; i++) {
         const prev = history[i - 1];
         const curr = history[i];
-        const heightDiff = curr.height - prev.height;
-        const supplyDiff = curr.total_supply - prev.total_supply;
-
-        // Minted = number of mint intervals * mint_quantity
-        const mintEvents = Math.floor(heightDiff / mintInterval);
-        const minted = Math.max(0, mintEvents * mintQuantity);
-
-        // Burned = minted - supply_increase (if supply decreased, burned > minted)
-        const burned = Math.max(0, minted - supplyDiff);
-
-        cumulativeMinted += minted;
-        cumulativeBurned += burned;
-
-        data.push({
-            timestamp: curr.timestamp,
-            minted: cumulativeMinted,
-            burned: cumulativeBurned,
-        });
+        const mintEvents = Math.floor((curr.height - prev.height) / mintInterval);
+        cumMinted += Math.max(0, mintEvents * mintQuantity);
+        cumSupplyChange += curr.total_supply - prev.total_supply;
+        data.push({ timestamp: curr.timestamp, minted: cumMinted, burned: Math.max(0, cumMinted - cumSupplyChange) });
     }
+    if (data.length < 1) return null;
 
-    if (data.length < 1) {
+    const lastPt = data[data.length - 1];
+    const totalMinted = cumMinted / 1e6;
+    const totalBurned = lastPt.burned / 1e6;
+    const maxY = Math.max(cumMinted, lastPt.burned, 1);
+
+    const minTs = data[0].timestamp;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
+
+    const toXY = (d, val) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - (val / maxY) * innerH;
+        return `${x},${y}`;
+    };
+    const mintedPts = data.map((d) => toXY(d, d.minted)).join(' ');
+    const burnedPts = data.map((d) => toXY(d, d.burned)).join(' ');
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color="#48bb78" /> Minted ({fmtMirage(totalMinted)})</LegendItem>
+                <LegendItem><LegendDot color="#f56565" /> Burned ({fmtMirage(totalBurned)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">0</text>
+                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${base} ${mintedPts} ${end}`} />
+                    <polygon fill="rgba(245, 101, 101, 0.15)" points={`${base} ${burnedPts} ${end}`} />
+                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={mintedPts} />
+                    <polyline fill="none" stroke="#f56565" strokeWidth="1.5" points={burnedPts} />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
+    );
+}
+
+function SupplyChart({ history }) {
+    if (!history || history.length < 2) {
         return (
             <ChartWrapper>
                 <ChartContainer>
                     <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
-                        (not enough data yet)
+                        (chart available after more data is collected)
                     </Mono>
                 </ChartContainer>
             </ChartWrapper>
         );
     }
 
-    // Final totals (in MIRAGE for display)
-    const totalMinted = cumulativeMinted / 1_000_000;
-    const totalBurned = cumulativeBurned / 1_000_000;
+    const { width, height, padding, innerW, innerH } = CHART;
 
-    // Find max for scaling - use the final cumulative values
-    const maxY = Math.max(cumulativeMinted, cumulativeBurned, 1);
-    const maxYMirage = maxY / 1_000_000;
+    const data = history.map((h) => ({ timestamp: h.timestamp, supply: h.total_supply / 1e6 }));
+    const minS = Math.min(...data.map((d) => d.supply));
+    const maxS = Math.max(...data.map((d) => d.supply));
+    const range = maxS - minS || 1;
+    const delta = data[data.length - 1].supply - data[0].supply;
 
     const minTs = data[0].timestamp;
-    const maxTs = data[data.length - 1].timestamp;
-    const tsRange = maxTs - minTs || 1;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
 
-    // Minted line (green) - cumulative, should steadily increase
-    const mintedPoints = data.map((d) => {
-        const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
-        const y = padding.top + chartHeight - (d.minted / maxY) * chartHeight;
-        return `${x},${y}`;
-    }).join(' ');
-
-    // Burned line (red) - cumulative, steps up when burns happen
-    const burnedPoints = data.map((d) => {
-        const x = padding.left + ((d.timestamp - minTs) / tsRange) * chartWidth;
-        const y = padding.top + chartHeight - (d.burned / maxY) * chartHeight;
+    const pts = data.map((d) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - ((d.supply - minS) / range) * innerH;
         return `${x},${y}`;
     }).join(' ');
 
     const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const color = delta >= 0 ? '#48bb78' : '#f56565';
+    const fill = delta >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)';
 
-    // Format MIRAGE amounts for display
-    const formatMirageAmount = (mirage) => {
-        if (mirage >= 1000000) return (mirage / 1000000).toFixed(1) + 'M';
-        if (mirage >= 1000) return (mirage / 1000).toFixed(1) + 'K';
-        if (mirage >= 1) return mirage.toFixed(1);
-        if (mirage >= 0.01) return mirage.toFixed(2);
-        return mirage.toFixed(4);
+    // Y-axis labels: pick a unit where top != bottom label
+    const fmtAxis = (v) => {
+        // Use the smallest unit that makes the labels distinct
+        if (maxS >= 1e9) {
+            // Check if B-level labels would be identical
+            const topB = (maxS / 1e9).toFixed(2);
+            const botB = (minS / 1e9).toFixed(2);
+            if (topB !== botB) return (v / 1e9).toFixed(2) + 'B';
+            // Fall through to M
+        }
+        if (maxS >= 1e6) {
+            const topM = Math.round(maxS / 1e6);
+            const botM = Math.round(minS / 1e6);
+            if (topM !== botM) return Math.round(v / 1e6).toLocaleString() + 'M';
+            return (v / 1e6).toFixed(1) + 'M';
+        }
+        return fmtMirage(v);
     };
+
+    const fmtDelta = (v) => {
+        const sign = v >= 0 ? '+' : '';
+        return sign + fmtMirage(v);
+    };
+
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
 
     return (
         <ChartWrapper>
             <ChartLegend>
-                <LegendItem><LegendDot color="#48bb78" /> Minted ({formatMirageAmount(totalMinted)})</LegendItem>
-                <LegendItem><LegendDot color="#f56565" /> Burned ({formatMirageAmount(totalBurned)})</LegendItem>
+                <LegendItem><LegendDot color={color} /> Supply ({fmtDelta(delta)})</LegendItem>
             </ChartLegend>
             <ChartContainer>
                 <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-                    {/* Grid lines */}
-                    <line x1={padding.left} y1={padding.top} x2={padding.left} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                    <line x1={padding.left} y1={height - padding.bottom} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
-                    <line x1={width - padding.right} y1={padding.top} x2={width - padding.right} y2={height - padding.bottom} stroke="#444" strokeWidth="1" />
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(maxS)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(minS)}</text>
+                    <polygon fill={fill} points={`${base} ${pts} ${end}`} />
+                    <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
+    );
+}
 
-                    {/* Y-axis labels (in MIRAGE) */}
-                    <text x={padding.left - 5} y={padding.top + 4} fill="#888" fontSize="8" textAnchor="end">{formatMirageAmount(maxYMirage)}</text>
-                    <text x={padding.left - 5} y={height - padding.bottom} fill="#888" fontSize="8" textAnchor="end">0</text>
+function NodeBalanceChart({ history }) {
+    // Filter to entries that have node_balance recorded
+    const data = (history || []).filter((h) => h.node_balance != null);
+    if (data.length < 2) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (collecting node balance data...)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
 
-                    {/* Minted area fill (green, behind) */}
-                    <polygon
-                        fill="rgba(72, 187, 120, 0.15)"
-                        points={`${padding.left},${height - padding.bottom} ${mintedPoints} ${width - padding.right},${height - padding.bottom}`}
-                    />
+    const { width, height, padding, innerW, innerH } = CHART;
 
-                    {/* Burned area fill (red, behind) */}
-                    <polygon
-                        fill="rgba(245, 101, 101, 0.15)"
-                        points={`${padding.left},${height - padding.bottom} ${burnedPoints} ${width - padding.right},${height - padding.bottom}`}
-                    />
+    const balances = data.map((d) => d.node_balance / 1e6);
+    const minB = Math.min(...balances);
+    const maxB = Math.max(...balances);
+    const range = maxB - minB || 1;
+    const delta = balances[balances.length - 1] - balances[0];
 
-                    {/* Minted line (green) */}
-                    <polyline
-                        fill="none"
-                        stroke="#48bb78"
-                        strokeWidth="1.5"
-                        points={mintedPoints}
-                    />
+    const minTs = data[0].timestamp;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
 
-                    {/* Burned line (red) */}
-                    <polyline
-                        fill="none"
-                        stroke="#f56565"
-                        strokeWidth="1.5"
-                        points={burnedPoints}
-                    />
+    const pts = data.map((d, i) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - ((balances[i] - minB) / range) * innerH;
+        return `${x},${y}`;
+    }).join(' ');
+
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const color = delta >= 0 ? '#48bb78' : '#f56565';
+    const fill = delta >= 0 ? 'rgba(72, 187, 120, 0.15)' : 'rgba(245, 101, 101, 0.15)';
+
+    const fmtAxis = (v) => {
+        if (Math.abs(v) >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+        if (Math.abs(v) >= 1e6) {
+            const topM = Math.round(maxB / 1e6);
+            const botM = Math.round(minB / 1e6);
+            if (topM !== botM) return Math.round(v / 1e6).toLocaleString() + 'M';
+            return (v / 1e6).toFixed(1) + 'M';
+        }
+        return fmtMirage(v);
+    };
+    const fmtDelta = (v) => (v >= 0 ? '+' : '') + fmtMirage(v);
+
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color={color} /> Balance ({fmtDelta(delta)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(maxB)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">{fmtAxis(minB)}</text>
+                    <polygon fill={fill} points={`${base} ${pts} ${end}`} />
+                    <polyline fill="none" stroke={color} strokeWidth="1.5" points={pts} />
+                </ChartSvg>
+            </ChartContainer>
+            <ChartLabel>
+                <span>{daysAgo}d ago</span>
+                <span>now</span>
+            </ChartLabel>
+        </ChartWrapper>
+    );
+}
+
+function NodeMintBurnChart({ history, mintInterval, mintQuantity }) {
+    // Filter to entries that have node_balance recorded
+    const raw = (history || []).filter((h) => h.node_balance != null);
+    if (raw.length < 2) {
+        return (
+            <ChartWrapper>
+                <ChartContainer>
+                    <Mono style={{ fontSize: '0.75rem', color: '#888' }}>
+                        (collecting node balance data...)
+                    </Mono>
+                </ChartContainer>
+            </ChartWrapper>
+        );
+    }
+
+    const { width, height, padding, innerW, innerH } = CHART;
+
+    // Derive cumulative earned/spent from balance + supply changes
+    // Node "earned" = balance increases, "spent" = balance decreases
+    const data = [];
+    let cumEarned = 0;
+    let cumSpent = 0;
+    for (let i = 1; i < raw.length; i++) {
+        const diff = raw[i].node_balance - raw[i - 1].node_balance;
+        if (diff > 0) cumEarned += diff;
+        else if (diff < 0) cumSpent += -diff;
+        data.push({ timestamp: raw[i].timestamp, earned: cumEarned, spent: cumSpent });
+    }
+    if (data.length < 1) return null;
+
+    const totalEarned = cumEarned / 1e6;
+    const totalSpent = cumSpent / 1e6;
+    const maxY = Math.max(cumEarned, cumSpent, 1);
+
+    const minTs = data[0].timestamp;
+    const tsRange = data[data.length - 1].timestamp - minTs || 1;
+
+    const toXY = (d, val) => {
+        const x = padding.left + ((d.timestamp - minTs) / tsRange) * innerW;
+        const y = padding.top + innerH - (val / maxY) * innerH;
+        return `${x},${y}`;
+    };
+    const earnedPts = data.map((d) => toXY(d, d.earned)).join(' ');
+    const spentPts = data.map((d) => toXY(d, d.spent)).join(' ');
+    const daysAgo = Math.round((Date.now() / 1000 - minTs) / 86400);
+    const base = `${padding.left},${height - padding.bottom}`;
+    const end = `${width - padding.right},${height - padding.bottom}`;
+
+    return (
+        <ChartWrapper>
+            <ChartLegend>
+                <LegendItem><LegendDot color="#48bb78" /> Earned ({fmtMirage(totalEarned)})</LegendItem>
+                <LegendItem><LegendDot color="#f56565" /> Spent ({fmtMirage(totalSpent)})</LegendItem>
+            </ChartLegend>
+            <ChartContainer>
+                <ChartSvg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+                    <ChartGrid />
+                    <text x={padding.left - 4} y={padding.top - 4} fill="#888" fontSize="8" textAnchor="end">{fmtMirage(maxY / 1e6)}</text>
+                    <text x={padding.left - 4} y={height - padding.bottom + 8} fill="#888" fontSize="8" textAnchor="end">0</text>
+                    <polygon fill="rgba(72, 187, 120, 0.15)" points={`${base} ${earnedPts} ${end}`} />
+                    <polygon fill="rgba(245, 101, 101, 0.15)" points={`${base} ${spentPts} ${end}`} />
+                    <polyline fill="none" stroke="#48bb78" strokeWidth="1.5" points={earnedPts} />
+                    <polyline fill="none" stroke="#f56565" strokeWidth="1.5" points={spentPts} />
                 </ChartSvg>
             </ChartContainer>
             <ChartLabel>
@@ -480,6 +658,7 @@ export default function NetworkView({ state }) {
     });
     const [peers, setPeers] = useState(null);
     const [serverBalance, setServerBalance] = useState(null);
+    const [stakedBalance, setStakedBalance] = useState(null);
     const [copiedAddress, setCopiedAddress] = useState(null);
     const [circulationStats, setCirculationStats] = useState({ total_supply: null, top_accounts: [] });
     const [supplyHistory, setSupplyHistory] = useState({ history: [], mint_interval: 200, mint_quantity: 100000 });
@@ -493,12 +672,12 @@ export default function NetworkView({ state }) {
         }
     }, [location.pathname]);
 
-    // Load static validator info from cached config (once)
+    // Load static validator info from cached node config (once)
     useEffect(() => {
         try {
-            const configData = localStorage.getItem('configData');
-            if (configData) {
-                const cached = JSON.parse(configData);
+            const raw = localStorage.getItem('nodeConfig');
+            if (raw) {
+                const cached = JSON.parse(raw);
                 setCfg(prev => ({
                     ...prev,
                     validator_moniker: cached.validator_moniker || undefined,
@@ -519,6 +698,8 @@ export default function NetworkView({ state }) {
                 if (!cancelled && data) {
                     const sb = Number(data.server_balance);
                     if (isFinite(sb)) setServerBalance(sb);
+                    const stk = Number(data.staked_balance);
+                    if (isFinite(stk)) setStakedBalance(stk);
                     setCfg(prev => ({
                         ...prev,
                         block_time: (typeof data.block_time !== 'undefined') ? Number(data.block_time) : undefined,
@@ -704,13 +885,19 @@ export default function NetworkView({ state }) {
                                         </ValueBox>
                                     </SectionRow>
                                     <SectionRow>
-                                        <SectionLabel>Tokenomics:</SectionLabel>
+                                        <SectionLabel>Minted vs Burned:</SectionLabel>
                                         <ValueBox>
                                             <BurnMintChart
                                                 history={supplyHistory.history}
                                                 mintInterval={supplyHistory.mint_interval}
                                                 mintQuantity={supplyHistory.mint_quantity}
                                             />
+                                        </ValueBox>
+                                    </SectionRow>
+                                    <SectionRow>
+                                        <SectionLabel>Total Supply:</SectionLabel>
+                                        <ValueBox>
+                                            <SupplyChart history={supplyHistory.history} />
                                         </ValueBox>
                                     </SectionRow>
                                     <SectionRow>
@@ -784,6 +971,12 @@ export default function NetworkView({ state }) {
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
+                                        <Label>Staked:</Label>
+                                        <ValueBox>
+                                            <Mono>{stakedBalance === null ? '(loading...)' : `${formatMirage(stakedBalance)} MIRAGE`}</Mono>
+                                        </ValueBox>
+                                    </RowCentered>
+                                    <RowCentered>
                                         <Label>Address:</Label>
                                         <ValueBoxWithButton>
                                             <InlineMono title={cfg.validator_account_address || ''}>{cfg.validator_account_address || '(loading...)'}</InlineMono>
@@ -843,6 +1036,22 @@ export default function NetworkView({ state }) {
                                             )}
                                         </ValueBoxWithButton>
                                     </RowCentered>
+                                    <SectionRow>
+                                        <SectionLabel>Node Balance:</SectionLabel>
+                                        <ValueBox>
+                                            <NodeBalanceChart history={supplyHistory.history} />
+                                        </ValueBox>
+                                    </SectionRow>
+                                    <SectionRow>
+                                        <SectionLabel>Earned vs Spent:</SectionLabel>
+                                        <ValueBox>
+                                            <NodeMintBurnChart
+                                                history={supplyHistory.history}
+                                                mintInterval={supplyHistory.mint_interval}
+                                                mintQuantity={supplyHistory.mint_quantity}
+                                            />
+                                        </ValueBox>
+                                    </SectionRow>
                                 </>
                             )}
                         </ContainerBody>

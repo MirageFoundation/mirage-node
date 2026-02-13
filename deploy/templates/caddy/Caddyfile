@@ -39,4 +39,14 @@ ${DOMAIN:-:80} {
 		try_files {path} /index.html
 		file_server
 	}
+
+	# Show maintenance page when backends are down (502/503)
+	handle_errors {
+		@maintenance expression {err.status_code} in [502, 503]
+		handle @maintenance {
+			root * /etc/caddy
+			rewrite * /maintenance.html
+			file_server
+		}
+	}
 }

@@ -494,7 +494,9 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /api/get_parameters` | Block hash, difficulty, optional balance |
-| `GET /api/get_config` | Chain params, difficulty, block time |
+| `GET /api/get_chain_config` | Chain governance params (tiers, limits, periods) |
+| `GET /api/get_node_config` | Per-node static settings (validator info, flags) |
+| `GET /api/get_user_status` | User status (level, balance, subscription) |
 | `GET /api/get_tx_status` | Transaction status with enrichment |
 | `GET /api/get_topics` | Most active topics |
 | `GET /api/get_posts` | Recent posts with aggregates |

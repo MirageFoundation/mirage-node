@@ -1213,16 +1213,25 @@ function ViewPostView({ state, updatePost }) {
     const replyErrorClearTimeoutRef = useRef({}); // { postId: timeoutId }
     const mobileReplyOverlayRef = useRef(null);
 
-    // Listen for config updates from ProfileView or other sources
+    // Listen for chain config updates and fetch lazily if not cached
     useEffect(() => {
         const handleConfigUpdate = () => {
             setConfigUpdateTrigger(prev => prev + 1);
         };
 
-        window.addEventListener('configUpdated', handleConfigUpdate);
+        window.addEventListener('chainConfigUpdated', handleConfigUpdate);
+        window.addEventListener('userStatusUpdated', handleConfigUpdate);
+
+        // Fetch chain config if not cached (e.g. first visit after login)
+        if (!localStorage.getItem('chainConfig')) {
+            Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+                .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+                .catch(() => { });
+        }
 
         return () => {
-            window.removeEventListener('configUpdated', handleConfigUpdate);
+            window.removeEventListener('chainConfigUpdated', handleConfigUpdate);
+            window.removeEventListener('userStatusUpdated', handleConfigUpdate);
         };
     }, []);
 
@@ -1259,14 +1268,12 @@ function ViewPostView({ state, updatePost }) {
         }
     }, [state.posts, isMobile]);
 
-    // Get content size limits from cached config - based on user tier level
+    // Get content size limits from chain config + user level
     const limits = React.useMemo(() => {
         try {
-            const config = JSON.parse(localStorage.getItem('configData') || '{}');
-
-            // Use tier-based limits from chain params
-            const userLevel = parseInt(config.user_level || '0');
-            const tiers = config.tiers || [];
+            const chain = JSON.parse(localStorage.getItem('chainConfig') || '{}');
+            const userLevel = parseInt(Storage.load('user_level', '0'));
+            const tiers = chain.tiers || [];
             const tierIndex = Math.min(userLevel, tiers.length - 1);
             const tier = tiers[tierIndex] || {};
 
@@ -1746,7 +1753,7 @@ function ViewPostView({ state, updatePost }) {
                 if (postId) {
                     setDonateMessages(prev => ({
                         ...prev,
-                        [postId]: { type: 'success', message: `Successfully sent ${amount} MIRAGE!` }
+                        [postId]: { type: 'success', message: `Successfully sent ${Number(amount).toLocaleString()} MIRAGE!` }
                     }));
                     setTimeout(() => {
                         setDonateMessages(prev => {
@@ -2994,17 +3001,7 @@ function ViewPostView({ state, updatePost }) {
         const publicKeyStr = String(state.publicKey || '').trim();
         const hasValidAccount = publicKeyStr && publicKeyStr !== 'guest';
         const isOwnPost = post && state && (post.user_id === state.publicKey);
-        const userLevel = (() => {
-            try {
-                const cfg = localStorage.getItem('configData');
-                if (cfg) {
-                    const parsed = JSON.parse(cfg);
-                    const lvl = Number(parsed && parsed.user_level);
-                    if (Number.isFinite(lvl)) return lvl;
-                }
-            } catch (_) { }
-            return Number(Storage.load('user_level', '0'));
-        })();
+        const userLevel = Number(Storage.load('user_level', '0')) || 0;
         const isAdmin = hasValidAccount && userLevel >= 100;
         const isOpen = openMenuId === post.post_id;
         const authorAddr = String(post.user_id || '').trim().toLowerCase();

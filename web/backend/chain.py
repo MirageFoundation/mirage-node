@@ -15,18 +15,21 @@ Functions:
 
 import json
 import re
+import time
 from typing import Any, Dict, Optional
 
-import grpc as _grpc
+
 from google.protobuf.json_format import MessageToDict
 
-from node import require_runtime
+from node import require_runtime, get_grpc_channel
 from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
 
-# Cache for difficulty info (refreshed on each call but avoids repeated gRPC setup)
+# Cache for difficulty info — short TTL so callers don't pay gRPC cost every request
 _DIFFICULTY_CACHE: Optional[Dict[str, Any]] = None
 _DIFFICULTY_CACHE_HEIGHT: int = 0
+_DIFFICULTY_CACHE_TIME: float = 0.0
+_DIFFICULTY_CACHE_TTL: float = 5.0  # seconds
 
 
 def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
@@ -37,18 +40,17 @@ def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
         msg.ParseFromString(data)
         return msg
 
-    target = require_runtime().grpc_target
-    with _grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetDifficulty",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        resp = method(QueryDifficultyRequest(), timeout=timeout)
+    ch = get_grpc_channel()
+    method = ch.unary_unary(
+        "/mirage.core.v1.Query/GetDifficulty",
+        request_serializer=lambda msg: msg.SerializeToString(),
+        response_deserializer=_deserialize,
+    )
+    resp = method(QueryDifficultyRequest(), timeout=timeout)
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 
-def get_difficulty_info(timeout: float = 3.0) -> Dict[str, Any]:
+def get_difficulty_info(timeout: float = 3.0, *, force: bool = False) -> Dict[str, Any]:
     """Get full difficulty state from chain via gRPC.
 
     Returns dict with:
@@ -59,15 +61,21 @@ def get_difficulty_info(timeout: float = 3.0) -> Dict[str, Any]:
     - consecutive_low_usage: int
     - latest_block_hash: str (hex, lowercase)
     - current_height: int
+
+    Results are cached for _DIFFICULTY_CACHE_TTL seconds. Pass force=True to bypass.
     """
-    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_HEIGHT
+    global _DIFFICULTY_CACHE, _DIFFICULTY_CACHE_HEIGHT, _DIFFICULTY_CACHE_TIME
+
+    now = time.monotonic()
+    if not force and _DIFFICULTY_CACHE is not None and (now - _DIFFICULTY_CACHE_TIME) < _DIFFICULTY_CACHE_TTL:
+        return _DIFFICULTY_CACHE
 
     info = _query_difficulty(timeout)
     height = int(info.get("current_height", 0))
 
-    # Update cache
     _DIFFICULTY_CACHE = info
     _DIFFICULTY_CACHE_HEIGHT = height
+    _DIFFICULTY_CACHE_TIME = now
 
     return info
 
@@ -157,7 +165,14 @@ def is_valid_recent_block_hash(block_hash: str, timeout_s: int = 5) -> bool:
     return block_hash.upper() in [h.upper() for h in recent]
 
 
+_BLOCK_TIME_CACHE: Optional[int] = None
+
+
 def get_block_time_seconds() -> int:
+    global _BLOCK_TIME_CACHE
+    if _BLOCK_TIME_CACHE is not None:
+        return _BLOCK_TIME_CACHE
+
     from shared.config import get_config
 
     cfg = get_config()
@@ -169,17 +184,29 @@ def get_block_time_seconds() -> int:
         num = float(val[:-2])
         if num <= 0:
             raise RuntimeError("timeout_commit must be > 0")
-        return max(1, int(round(num / 1000.0)))
+        _BLOCK_TIME_CACHE = max(1, int(round(num / 1000.0)))
+        return _BLOCK_TIME_CACHE
     if val.endswith("s"):
         num = float(val[:-1])
         if num <= 0:
             raise RuntimeError("timeout_commit must be > 0")
-        return max(1, int(round(num)))
+        _BLOCK_TIME_CACHE = max(1, int(round(num)))
+        return _BLOCK_TIME_CACHE
     raise RuntimeError("timeout_commit must include units (e.g., '5s' or '500ms')")
 
 
+_CATCHING_UP_CACHE: Optional[bool] = None
+_CATCHING_UP_CACHE_TIME: float = 0.0
+_CATCHING_UP_CACHE_TTL: float = 5.0  # seconds
+
+
 def is_node_catching_up(timeout_s: int = 2) -> bool:
+    global _CATCHING_UP_CACHE, _CATCHING_UP_CACHE_TIME
     import urllib.request as _url
+
+    now = time.monotonic()
+    if _CATCHING_UP_CACHE is not None and (now - _CATCHING_UP_CACHE_TIME) < _CATCHING_UP_CACHE_TTL:
+        return _CATCHING_UP_CACHE
 
     url = f"{require_runtime().rpc_url}/status"
     try:
@@ -187,11 +214,16 @@ def is_node_catching_up(timeout_s: int = 2) -> bool:
             data = json.loads(resp.read().decode("utf-8"))
         val = data.get("result", {}).get("sync_info", {}).get("catching_up", True)
         if isinstance(val, str):
-            return val.strip().lower() == "true"
-        return bool(val)
+            result = val.strip().lower() == "true"
+        else:
+            result = bool(val)
     except Exception:
         # Treat unknown as catching up to be safe
-        return True
+        result = True
+
+    _CATCHING_UP_CACHE = result
+    _CATCHING_UP_CACHE_TIME = now
+    return result
 
 
 def classify_reject(raw_log: str) -> Dict[str, Any]:
@@ -254,8 +286,6 @@ def classify_reject(raw_log: str) -> Dict[str, Any]:
 def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
     import urllib.request as _url
     import ipaddress as _ipa
-    import subprocess
-    import os
     import time
 
     # Cache validator monikers (60 second TTL)
@@ -275,32 +305,15 @@ def get_connected_peers(timeout_s: int = 2) -> list[Dict[str, str]]:
     if validator_cache is None or (current_time - cache_time) >= cache_ttl:
         validator_cache = {}
         try:
-            rt = require_runtime()
-            possible_paths = [
-                "/opt/mirage/blockchain/bin/miraged",
-                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")),
-                "miraged",
-            ]
-            bin_path = None
-            for path in possible_paths:
-                if path == "miraged" or os.path.exists(path):
-                    bin_path = path
-                    break
+            from bank import get_all_validators
 
-            if bin_path:
-                cmd = [bin_path, "q", "staking", "validators", "--node", rt.rpc_url, "-o", "json"]
-                out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8")
-                data = json.loads(out)
-                for val in data.get("validators") or []:
-                    pubkey = val.get("consensus_pubkey", {}).get("key", "") or val.get("consensus_pubkey", {}).get(
-                        "value", ""
-                    )
-                    moniker = val.get("description", {}).get("moniker", "")
-                    if pubkey and moniker:
-                        validator_cache[pubkey] = moniker
-
-                setattr(get_connected_peers, cache_key, validator_cache)
-                setattr(get_connected_peers, cache_time_key, current_time)
+            for v in get_all_validators():
+                pubkey = v.get("consensus_pubkey", "")
+                moniker = v.get("moniker", "")
+                if pubkey and moniker:
+                    validator_cache[pubkey] = moniker
+            setattr(get_connected_peers, cache_key, validator_cache)
+            setattr(get_connected_peers, cache_time_key, current_time)
         except Exception:
             pass
 

@@ -107,13 +107,39 @@ const UsernameLabel = styled.div`
     color: ${({ theme }) => theme?.colors?.text || '#e5e7eb'};
 `;
 
-// Check if we're on the main site (mirage.talk or localhost)
-const hostname = window.location.hostname;
-const isMainSite = hostname === 'mirage.talk' || hostname === 'localhost';
-
 function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
+    const [configUpdateTrigger, setConfigUpdateTrigger] = React.useState(0);
+
+    // Re-read config when App.js fetches fresh data
+    React.useEffect(() => {
+        const handler = () => setConfigUpdateTrigger(prev => prev + 1);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
+    }, []);
+
+    // Read node config from localStorage (set by get_node_config API)
+    // Both fields must be explicitly present (boolean) — no silent defaults.
+    const nodeConfig = React.useMemo(() => {
+        void configUpdateTrigger;
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (typeof parsed.registration_enabled === 'boolean' &&
+                    typeof parsed.registration_invite_code_required === 'boolean') {
+                    return parsed;
+                }
+            }
+        } catch (_) { }
+        return null;  // null = config not loaded
+    }, [configUpdateTrigger]);
+    const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
+    const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
+
+    // App.js fetches get_node_config on mount when stale and fires nodeConfigUpdated.
+    // No duplicate fetch here — just wait for the event (listened above).
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
@@ -257,16 +283,6 @@ function CreateAccountView({ state, setCredentials }) {
         const base = (usernameInput || "").trim();
         if (!base) return;
 
-        // Validate invite code format (must be XXXX-XXXX)
-        const codeClean = (inviteCode || "").trim().toUpperCase();
-        if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
-            setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
-            const until = Date.now() + 1000;
-            setCooldownUntil(until);
-            setTimeout(() => setCooldownUntil(0), 1000);
-            return;
-        }
-
         const usernameFinal = `Anon-${base}`;
 
         // Validate username length (use defaults if params not cached yet)
@@ -287,15 +303,27 @@ function CreateAccountView({ state, setCredentials }) {
             return;
         }
 
-        // Validate invite code with backend
-        setSubmitError("");
-        const inviteRes = await validateInviteCode(codeClean);
-        if (!inviteRes || !inviteRes.valid) {
-            setSubmitError(inviteRes?.error || "Invalid invite code");
-            const until = Date.now() + 1000;
-            setCooldownUntil(until);
-            setTimeout(() => setCooldownUntil(0), 1000);
-            return;
+        // Validate invite code only when required by node config
+        let codeClean = null;
+        if (inviteCodeRequired) {
+            codeClean = (inviteCode || "").trim().toUpperCase();
+            if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
+                setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
+
+            setSubmitError("");
+            const inviteRes = await validateInviteCode(codeClean);
+            if (!inviteRes || !inviteRes.valid) {
+                setSubmitError(inviteRes?.error || "Invalid invite code");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
         }
 
         // Preflight: ensure username is still available
@@ -402,8 +430,44 @@ function CreateAccountView({ state, setCredentials }) {
 
     const usernameFinal = (usernameInput || "").trim();
 
-    // If not on main site, show redirect message
-    if (!isMainSite) {
+    // Node config must be loaded before we can show anything.
+    // configUpdateTrigger > 0 means the nodeConfigUpdated event fired at least once (fetch finished).
+    const configFetchDone = configUpdateTrigger > 0;
+    if (!nodeConfig) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>Create Account | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    <TopBar state={state} />
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <AuthPageShell activeTab="create">
+                            <Centered>
+                                <StyledInfo>
+                                    {configFetchDone ? (
+                                        <>
+                                            <WelcomeTitle>Unavailable</WelcomeTitle>
+                                            <IntroP>
+                                                Unable to load node configuration. Please refresh the page.
+                                            </IntroP>
+                                        </>
+                                    ) : (
+                                        <WelcomeTitle>Loading...</WelcomeTitle>
+                                    )}
+                                </StyledInfo>
+                            </Centered>
+                        </AuthPageShell>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    }
+
+    // If registration is disabled on this node, show unavailable message
+    if (!registrationEnabled) {
         return (
             <ContentGrid>
                 <Helmet>
@@ -419,21 +483,8 @@ function CreateAccountView({ state, setCredentials }) {
                                 <StyledInfo>
                                     <WelcomeTitle>Account Creation Unavailable</WelcomeTitle>
                                     <IntroP>
-                                        Account creation is only available on the main Mirage site.
+                                        Account creation is not available on this node.
                                     </IntroP>
-                                    <IntroP>
-                                        Please visit <a href="https://mirage.talk/create_account" style={{ color: '#667eea', textDecoration: 'underline' }}>mirage.talk</a> to create your account.
-                                    </IntroP>
-                                    <ButtonWrapper>
-                                        <Button
-                                            as="a"
-                                            href="https://mirage.talk/create_account"
-                                            fullWidth
-                                            size="sm"
-                                        >
-                                            Go to mirage.talk
-                                        </Button>
-                                    </ButtonWrapper>
                                 </StyledInfo>
                             </Centered>
                         </AuthPageShell>
@@ -480,35 +531,39 @@ function CreateAccountView({ state, setCredentials }) {
                                         </>
                                     )}
                                 </div>
-                                <UsernameLabel>Enter your invite code:</UsernameLabel>
-                                <StyledInputBox
-                                    placeholder="XXXX-XXXX"
-                                    value={inviteCode}
-                                    onChange={(e) => {
-                                        const raw = e.target.value.toUpperCase();
-                                        // Only allow uppercase alphanumeric
-                                        const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
-                                        // Limit to 8 alphanumeric chars
-                                        const limited = alphanumOnly.slice(0, 8);
-                                        // Auto-insert dash after 4 chars
-                                        const formatted = limited.length > 4
-                                            ? limited.slice(0, 4) + '-' + limited.slice(4)
-                                            : limited;
-                                        setInviteCode(formatted);
-                                        setSubmitError("");
-                                    }}
-                                    maxLength={9}
-                                    name="invite-code-entry"
-                                    id="invite-code-entry"
-                                    autoComplete="one-time-code"
-                                    autoCorrect="off"
-                                    autoCapitalize="characters"
-                                    spellCheck="false"
-                                    data-lpignore="true"
-                                    data-1p-ignore="true"
-                                    data-bwignore="true"
-                                    data-form-type="other"
-                                />
+                                {inviteCodeRequired && (
+                                    <>
+                                        <UsernameLabel>Enter your invite code:</UsernameLabel>
+                                        <StyledInputBox
+                                            placeholder="XXXX-XXXX"
+                                            value={inviteCode}
+                                            onChange={(e) => {
+                                                const raw = e.target.value.toUpperCase();
+                                                // Only allow uppercase alphanumeric
+                                                const alphanumOnly = raw.replace(/[^A-Z0-9]/g, "");
+                                                // Limit to 8 alphanumeric chars
+                                                const limited = alphanumOnly.slice(0, 8);
+                                                // Auto-insert dash after 4 chars
+                                                const formatted = limited.length > 4
+                                                    ? limited.slice(0, 4) + '-' + limited.slice(4)
+                                                    : limited;
+                                                setInviteCode(formatted);
+                                                setSubmitError("");
+                                            }}
+                                            maxLength={9}
+                                            name="invite-code-entry"
+                                            id="invite-code-entry"
+                                            autoComplete="one-time-code"
+                                            autoCorrect="off"
+                                            autoCapitalize="characters"
+                                            spellCheck="false"
+                                            data-lpignore="true"
+                                            data-1p-ignore="true"
+                                            data-bwignore="true"
+                                            data-form-type="other"
+                                        />
+                                    </>
+                                )}
                                 <UsernameLabel>Choose your username:</UsernameLabel>
                                 <StyledInputBox
                                     placeholder=""

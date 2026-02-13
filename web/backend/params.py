@@ -11,10 +11,9 @@ import threading
 import time
 from typing import Optional, Dict, Any
 
-import grpc
 from google.protobuf.json_format import MessageToDict
 
-from node import require_runtime
+from node import get_grpc_channel
 from shared.datatypes import QueryParamsRequest, QueryParamsResponse
 
 log = logging.getLogger(__name__)
@@ -114,12 +113,11 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
         if cache_valid and not force:
             return _PARAMS_CACHE
 
-        rt = require_runtime()
         last_error = None
 
         for attempt in range(max_retries):
             try:
-                params_dict = _query_core_params(rt.grpc_target)
+                params_dict = _query_core_params()
                 cache = _build_cache_from_params(params_dict)
                 _PARAMS_CACHE = cache
                 _PARAMS_CACHE_TIME = time.time()
@@ -134,7 +132,7 @@ def load_params(force: bool = False, max_retries: int = 360, retry_interval: flo
         raise RuntimeError(f"Failed to load chain params after {max_retries} attempts: {last_error}")
 
 
-def _query_core_params(target: str, timeout: float = 5.0) -> Dict:
+def _query_core_params(timeout: float = 5.0) -> Dict:
     """Query core module params over gRPC and return as dict."""
 
     def _deserialize(data: bytes) -> QueryParamsResponse:
@@ -142,13 +140,13 @@ def _query_core_params(target: str, timeout: float = 5.0) -> Dict:
         msg.ParseFromString(data)
         return msg
 
-    with grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetParams",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        resp = method(QueryParamsRequest(), timeout=timeout)
+    ch = get_grpc_channel()
+    method = ch.unary_unary(
+        "/mirage.core.v1.Query/GetParams",
+        request_serializer=lambda msg: msg.SerializeToString(),
+        response_deserializer=_deserialize,
+    )
+    resp = method(QueryParamsRequest(), timeout=timeout)
     return MessageToDict(
         resp.params,
         preserving_proto_field_name=True,

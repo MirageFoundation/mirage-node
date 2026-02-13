@@ -441,30 +441,6 @@ export default function ProfileView({ state }) {
     };
     const colorForWeight = (w) => (w > 0 ? '#22c55e' : w < 0 ? '#f87171' : '#888');
     // Server metrics are shown on ServerView; no local server balance state here
-    // const [cfg, setCfg] = useState(() => {
-    //     const loadNumber = (key) => {
-    //         const val = Storage.load(key, '');
-    //         return val === '' ? undefined : Number(val);
-    //     };
-    //     return {
-    //         validator_account_address: Storage.load('validator_account_address', ''),
-    //         validator_operator_address: Storage.load('validator_operator_address', ''),
-    //         validator_consensus_address: Storage.load('validator_consensus_address', ''),
-    //         user_level: loadNumber('user_level'),
-    //         min_fee_post: loadNumber('min_fee_post'),
-    //         min_fee_comment: loadNumber('min_fee_comment'),
-    //         min_fee_vote: loadNumber('min_fee_vote'),
-    //         min_fee_set_profile: loadNumber('min_fee_set_profile'),
-    //         min_fee_set_mods: loadNumber('min_fee_set_mods'),
-    //         min_fee_block_post: loadNumber('min_fee_block_post'),
-    //         min_fee_block_user: loadNumber('min_fee_block_user'),
-    //         min_fee_delete: loadNumber('min_fee_delete'),
-    //         min_fee_send_tokens: loadNumber('min_fee_send_tokens'),
-    //         block_time: loadNumber('block_time_seconds'),
-    //         pow_difficulty: loadNumber('pow_difficulty_cached'),
-    //         paid_vote_multiplier: loadNumber('paid_vote_multiplier'),
-    //     };
-    // });
 
     // Fetch follows data when follows tab is opened (always fresh)
     useEffect(() => {
@@ -680,7 +656,7 @@ export default function ProfileView({ state }) {
 
                 if (isOwnProfile) {
                     try {
-                        await tx.cacheConfigData(data);
+                        await tx.cacheUserStatus(data);
                     } catch (_) { }
                 }
 

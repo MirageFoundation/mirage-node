@@ -33,6 +33,7 @@ from logging_utils import log_event, next_request_id
 from node import derive_address_from_pubkey, require_runtime
 from reward_distributor import get_distributor
 from routes.core import get_user_level
+from settings import QUESTS_ENABLED, require_bool_env
 
 
 def _inject_balance(resp: dict, addr: str) -> dict:
@@ -47,20 +48,19 @@ def _inject_balance(resp: dict, addr: str) -> dict:
 
 quests_bp = Blueprint("quests", __name__)
 
-# Backend debug switch (default false; must be explicitly enabled)
-BACKEND_DEBUG = os.environ.get("BACKEND_DEBUG", "").lower() == "true"
+# Backend debug switch
+BACKEND_DEBUG = require_bool_env("BACKEND_DEBUG")
 
-# Quest system configuration (from environment)
-QUESTS_ENABLED = os.environ.get("QUESTS_ENABLED", "").lower() == "true"
-DAILY_QUESTS_COUNT = int(os.environ.get("DAILY_QUESTS_COUNT", "2"))
-FLASH_QUESTS_COUNT = int(os.environ.get("FLASH_QUESTS_COUNT", "1"))
-FLASH_QUEST_MIN_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MIN_INTERVAL_HOURS", "5"))
-FLASH_QUEST_MAX_INTERVAL_HOURS = int(os.environ.get("FLASH_QUEST_MAX_INTERVAL_HOURS", "7"))
+# Quest system configuration (from environment — crash if missing)
+QUESTS_DAILY_COUNT = int(os.environ["QUESTS_DAILY_COUNT"])
+QUESTS_FLASH_COUNT = int(os.environ["QUESTS_FLASH_COUNT"])
+QUESTS_FLASH_MIN_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MIN_INTERVAL_HOURS"])
+QUESTS_FLASH_MAX_INTERVAL_HOURS = int(os.environ["QUESTS_FLASH_MAX_INTERVAL_HOURS"])
 
 # Special quest gating
-INVITE_RECRUIT_CHANCE = float(os.environ.get("INVITE_RECRUIT_CHANCE", "0.30"))
-INVITE_EARNER_QUEST_INTERVAL = int(os.environ.get("INVITE_EARNER_QUEST_INTERVAL", "10"))
-INVITE_EARNER_CHANCE = float(os.environ.get("INVITE_EARNER_CHANCE", "0.30"))
+QUESTS_INVITE_RECRUIT_CHANCE = float(os.environ["QUESTS_INVITE_RECRUIT_CHANCE"])
+QUESTS_INVITE_EARNER_INTERVAL = int(os.environ["QUESTS_INVITE_EARNER_INTERVAL"])
+QUESTS_INVITE_EARNER_CHANCE = float(os.environ["QUESTS_INVITE_EARNER_CHANCE"])
 
 
 def _get_utc_julian_day(ts: int) -> int:
@@ -149,20 +149,23 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
     """Assign a flash quest if eligible. Returns the quest data or None."""
     if not flash_defs:
         return None
+    if QUESTS_FLASH_COUNT <= 0:
+        return None
 
-    # Check if user already has an active flash quest
+    # Check if user already has the max number of active flash quests
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT 1 FROM user_flash_quests
+                SELECT COUNT(1)
+                FROM user_flash_quests
                 WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
-                LIMIT 1
                 """,
                 (owner, ts),
             )
-            if cur.fetchone():
-                return None  # Already has an active quest
+            active_count = int((cur.fetchone() or [0])[0] or 0)
+            if active_count >= QUESTS_FLASH_COUNT:
+                return None  # Already has max active quests
 
     # Check if enough time has passed since last flash quest
     next_flash_at = _get_next_flash_time(owner)
@@ -170,7 +173,7 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
     # New user check: if no next_flash_at record exists (returns 0),
     # initialize it with minimum interval delay so new users don't get flash quests immediately
     if next_flash_at == 0:
-        initial_delay = FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
+        initial_delay = QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600
         _set_next_flash_time(owner, ts + initial_delay)
         return None
 
@@ -197,7 +200,9 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
             )
 
     # Schedule next flash quest (random interval between MIN and MAX hours)
-    next_interval_seconds = random.randint(FLASH_QUEST_MIN_INTERVAL_HOURS * 3600, FLASH_QUEST_MAX_INTERVAL_HOURS * 3600)
+    next_interval_seconds = random.randint(
+        QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600, QUESTS_FLASH_MAX_INTERVAL_HOURS * 3600
+    )
     _set_next_flash_time(owner, ts + next_interval_seconds)
 
     return {
@@ -291,14 +296,14 @@ def _is_invite_earner_eligible(owner: str, day_utc: int) -> bool:
     """
     completed_count = _get_completed_quest_count(owner)
     invite_earner_completed = _get_invite_earner_completed_count(owner)
-    next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+    next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
 
     if completed_count < next_milestone:
         return False
 
     # 30% daily roll
     roll = _deterministic_roll(owner, day_utc, "invite_earner")
-    return roll < INVITE_EARNER_CHANCE
+    return roll < QUESTS_INVITE_EARNER_CHANCE
 
 
 def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
@@ -366,9 +371,9 @@ def _assign_daily_quests_if_needed(
                         "quest.invite_recruit.roll",
                         owner=owner,
                         roll=round(roll, 3),
-                        threshold=INVITE_RECRUIT_CHANCE,
+                        threshold=QUESTS_INVITE_RECRUIT_CHANCE,
                     )
-                    if roll < INVITE_RECRUIT_CHANCE:
+                    if roll < QUESTS_INVITE_RECRUIT_CHANCE:
                         quest_ids.append("invite_recruit")
                         special_quest_assigned = True
                         log_event(None, "quest.invite_recruit.assigned", owner=owner)
@@ -378,7 +383,7 @@ def _assign_daily_quests_if_needed(
                 # Check milestone first
                 completed_count = _get_completed_quest_count(owner)
                 invite_earner_completed = _get_invite_earner_completed_count(owner)
-                next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
                 if completed_count >= next_milestone:
                     roll = get_roll("invite_earner")
                     log_event(
@@ -386,9 +391,9 @@ def _assign_daily_quests_if_needed(
                         "quest.invite_earner.roll",
                         owner=owner,
                         roll=round(roll, 3),
-                        threshold=INVITE_EARNER_CHANCE,
+                        threshold=QUESTS_INVITE_EARNER_CHANCE,
                     )
-                    if roll < INVITE_EARNER_CHANCE:
+                    if roll < QUESTS_INVITE_EARNER_CHANCE:
                         quest_ids.append("invite_earner")
                         special_quest_assigned = True
                         log_event(None, "quest.invite_earner.assigned", owner=owner, completed_count=completed_count)
@@ -397,7 +402,7 @@ def _assign_daily_quests_if_needed(
             if not daily_defs:
                 return quest_ids
 
-            remaining_slots = DAILY_QUESTS_COUNT - len(quest_ids)
+            remaining_slots = QUESTS_DAILY_COUNT - len(quest_ids)
             if remaining_slots > 0:
                 available_ids = list(daily_defs.keys())
                 count = min(remaining_slots, len(available_ids))
@@ -1176,7 +1181,7 @@ def debug_quests_info():
                     (owner,),
                 )
                 invite_earner_completed = cur.fetchone()[0] or 0
-                invite_earner_next_milestone = (invite_earner_completed + 1) * INVITE_EARNER_QUEST_INTERVAL
+                invite_earner_next_milestone = (invite_earner_completed + 1) * QUESTS_INVITE_EARNER_INTERVAL
                 invite_earner_milestone_reached = completed_count >= invite_earner_next_milestone
                 invite_earner_assigned = any(q["quest_id"] == "invite_earner" for q in today_quests)
 
@@ -1190,15 +1195,15 @@ def debug_quests_info():
                 "unused_invite_codes": unused_invite_codes,
                 "invite_recruit": {
                     "has_codes": invite_recruit_has_codes,
-                    "chance": f"{int(INVITE_RECRUIT_CHANCE * 100)}%",
+                    "chance": f"{int(QUESTS_INVITE_RECRUIT_CHANCE * 100)}%",
                     "assigned": invite_recruit_assigned,
                 },
                 "invite_earner": {
-                    "interval": INVITE_EARNER_QUEST_INTERVAL,
+                    "interval": QUESTS_INVITE_EARNER_INTERVAL,
                     "completed": invite_earner_completed,
                     "next_milestone": invite_earner_next_milestone,
                     "milestone_reached": invite_earner_milestone_reached,
-                    "chance": f"{int(INVITE_EARNER_CHANCE * 100)}%",
+                    "chance": f"{int(QUESTS_INVITE_EARNER_CHANCE * 100)}%",
                     "assigned": invite_earner_assigned,
                 },
             }

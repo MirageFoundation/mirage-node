@@ -1279,14 +1279,15 @@ def check_rewards() -> ServiceStatus:
     if both_on:
         status = Status.OK
         message = "Enabled"
-    else:
+    elif backend_quests and not indexer_quests:
         status = Status.ERROR
+        message = "Indexing OFF"
+    else:
+        status = Status.OK
         if not backend_quests and not indexer_quests:
-            message = "Both OFF"
-        elif not backend_quests:
-            message = "Backend OFF"
+            message = "Quests OFF"
         else:
-            message = "Indexer OFF"
+            message = "Indexing active"
 
     debug_log(
         "rewards: "
@@ -2301,15 +2302,20 @@ def format_card_content(status: ServiceStatus) -> list[str]:
         both_enabled = details.get("both_enabled")
 
         if backend_quests is not None:
-            b_color = Colors.BRIGHT_GREEN if backend_quests else Colors.BRIGHT_RED
+            b_color = Colors.BRIGHT_GREEN if backend_quests else Colors.BRIGHT_YELLOW
             b_text = "ON" if backend_quests else "OFF"
             lines.append(f"{bullet}{Colors.DIM}Backend quests:{Colors.RESET} {b_color}{b_text}{Colors.RESET}")
         if indexer_quests is not None:
             i_color = Colors.BRIGHT_GREEN if indexer_quests else Colors.BRIGHT_RED
             i_text = "ON" if indexer_quests else "OFF"
-            lines.append(f"{bullet}{Colors.DIM}Indexer quests:{Colors.RESET} {i_color}{i_text}{Colors.RESET}")
+            lines.append(f"{bullet}{Colors.DIM}Indexing quests:{Colors.RESET} {i_color}{i_text}{Colors.RESET}")
         if both_enabled is not None:
-            both_color = Colors.BRIGHT_GREEN if both_enabled else Colors.BRIGHT_RED
+            if both_enabled:
+                both_color = Colors.BRIGHT_GREEN
+            elif backend_quests and not indexer_quests:
+                both_color = Colors.BRIGHT_RED
+            else:
+                both_color = Colors.BRIGHT_YELLOW
             both_text = "YES" if both_enabled else "NO"
             lines.append(f"{bullet}{Colors.DIM}Both enabled:{Colors.RESET} {both_color}{both_text}{Colors.RESET}")
         if backend_debug is not None:

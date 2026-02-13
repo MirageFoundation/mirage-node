@@ -151,7 +151,15 @@ def _get_node_consensus_pubkey_bytes() -> bytes:
     return base64.b64decode(b64)
 
 
+_CACHED_OPERATOR_ADDRESS: Optional[str] = None
+_CACHED_CONSENSUS_ADDRESS: Optional[str] = None
+
+
 def find_local_operator_address() -> str:
+    global _CACHED_OPERATOR_ADDRESS
+    if _CACHED_OPERATOR_ADDRESS is not None:
+        return _CACHED_OPERATOR_ADDRESS
+
     local_cons_pub = _get_node_consensus_pubkey_bytes()
     import urllib.request as _url
     import json as _json
@@ -183,10 +191,15 @@ def find_local_operator_address() -> str:
     data5_new = convertbits(bytes(data8), 8, 5)
     if not data5_new:
         raise RuntimeError("bech32 convertbits 8->5 failed")
-    return bech32_encode("miragevaloper", data5_new)
+    _CACHED_OPERATOR_ADDRESS = bech32_encode("miragevaloper", data5_new)
+    return _CACHED_OPERATOR_ADDRESS
 
 
 def find_local_consensus_address() -> str:
+    global _CACHED_CONSENSUS_ADDRESS
+    if _CACHED_CONSENSUS_ADDRESS is not None:
+        return _CACHED_CONSENSUS_ADDRESS
+
     import hashlib as _hl
 
     cons_pub = _get_node_consensus_pubkey_bytes()
@@ -196,7 +209,8 @@ def find_local_consensus_address() -> str:
     data5 = convertbits(h20, 8, 5)
     if not data5:
         raise RuntimeError("bech32 convertbits 8->5 failed for valcons")
-    return bech32_encode("miragevalcons", data5)
+    _CACHED_CONSENSUS_ADDRESS = bech32_encode("miragevalcons", data5)
+    return _CACHED_CONSENSUS_ADDRESS
 
 
 def resolve_validator_payer_address() -> str:
@@ -299,6 +313,21 @@ def require_runtime() -> Runtime:
     return _RUNTIME
 
 
+_GRPC_CHANNEL = None
+
+
+def get_grpc_channel():
+    """Return a persistent gRPC channel to the local node.
+
+    gRPC channels are thread-safe and handle reconnection internally.
+    Reusing a single channel avoids TCP + HTTP/2 handshake on every call.
+    """
+    global _GRPC_CHANNEL
+    if _GRPC_CHANNEL is None:
+        _GRPC_CHANNEL = _grpc.insecure_channel(require_runtime().grpc_target)
+    return _GRPC_CHANNEL
+
+
 def assert_grpc_ready(timeout_s: float = 2.0, max_retries: int = 360, retry_interval: float = 10.0) -> None:
     """Wait for gRPC to be ready, retrying for up to 1 hour by default."""
     import logging
@@ -335,4 +364,5 @@ __all__ = [
     "find_local_operator_address",
     "find_local_consensus_address",
     "derive_address_from_pubkey",
+    "get_grpc_channel",
 ]

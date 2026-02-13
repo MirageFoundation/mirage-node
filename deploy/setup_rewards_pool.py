@@ -53,17 +53,19 @@ BOX_BOT = "└" + LINE + "┘"
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from text."""
     import re
-    return re.sub(r'\033\[[0-9;]*m', '', text)
+
+    return re.sub(r"\033\[[0-9;]*m", "", text)
 
 
 def visual_width(text: str) -> int:
     """Get visual width of text (accounting for emojis taking 2 chars)."""
     import unicodedata
+
     stripped = strip_ansi(text)
     width = 0
     for char in stripped:
         # Check if character is a wide character (like emojis)
-        if unicodedata.east_asian_width(char) in ('F', 'W'):
+        if unicodedata.east_asian_width(char) in ("F", "W"):
             width += 2
         else:
             width += 1
@@ -445,8 +447,8 @@ def get_backend_env(key: str) -> str | None:
 
 
 def update_backend_env(address: str) -> bool:
-    """Update REWARDS_POOL_ADDRESS in backend.env."""
-    set_backend_env("REWARDS_POOL_ADDRESS", address)
+    """Update QUESTS_REWARDS_POOL_ADDRESS in backend.env."""
+    set_backend_env("QUESTS_REWARDS_POOL_ADDRESS", address)
     return True
 
 
@@ -463,16 +465,16 @@ def configure_backend(address: str) -> None:
     changed = False
 
     # Ask about address
-    current_address = get_backend_env("REWARDS_POOL_ADDRESS")
+    current_address = get_backend_env("QUESTS_REWARDS_POOL_ADDRESS")
     if current_address == address:
-        print(f"  REWARDS_POOL_ADDRESS = {address}")
+        print(f"  QUESTS_REWARDS_POOL_ADDRESS = {address}")
     else:
-        print(f"  REWARDS_POOL_ADDRESS = {current_address or '(not set)'}")
+        print(f"  QUESTS_REWARDS_POOL_ADDRESS = {current_address or '(not set)'}")
         print(f"  New address: {address}")
     confirm = input("  Update address? [Y/n]: ").strip().lower()
     if confirm != "n":
-        set_backend_env("REWARDS_POOL_ADDRESS", address)
-        ok("REWARDS_POOL_ADDRESS updated")
+        set_backend_env("QUESTS_REWARDS_POOL_ADDRESS", address)
+        ok("QUESTS_REWARDS_POOL_ADDRESS updated")
         changed = True
     else:
         print("  Skipped.")
@@ -493,11 +495,11 @@ def configure_backend(address: str) -> None:
         ok(f"QUESTS_ENABLED={new_value}")
         changed = True
 
-    # Ask about payouts
+    # Ask about quest payouts
     print()
-    current_payouts = get_backend_env("PAYOUTS_ENABLED") or "false"
+    current_payouts = get_backend_env("QUESTS_PAYOUTS_ENABLED") or "false"
     default_payouts = "Y/n" if current_payouts == "true" else "y/N"
-    confirm = input(f"  Enable payouts? [{default_payouts}]: ").strip().lower()
+    confirm = input(f"  Enable quest payouts? [{default_payouts}]: ").strip().lower()
     if current_payouts == "true":
         # Currently enabled, default to keep enabled
         new_value = "false" if confirm == "n" else "true"
@@ -505,8 +507,8 @@ def configure_backend(address: str) -> None:
         # Currently disabled, default to keep disabled
         new_value = "true" if confirm == "y" else "false"
     if new_value != current_payouts:
-        set_backend_env("PAYOUTS_ENABLED", new_value)
-        ok(f"PAYOUTS_ENABLED={new_value}")
+        set_backend_env("QUESTS_PAYOUTS_ENABLED", new_value)
+        ok(f"QUESTS_PAYOUTS_ENABLED={new_value}")
         changed = True
 
     print()
@@ -605,13 +607,13 @@ def main():
             print()
             if BACKEND_ENV.exists():
                 content = BACKEND_ENV.read_text()
-                if f"REWARDS_POOL_ADDRESS={address}" in content:
+                if f"QUESTS_REWARDS_POOL_ADDRESS={address}" in content:
                     ok("backend.env already configured")
-                elif "REWARDS_POOL_ADDRESS=" in content:
-                    warn("backend.env has different REWARDS_POOL_ADDRESS")
+                elif "QUESTS_REWARDS_POOL_ADDRESS=" in content:
+                    warn("backend.env has different QUESTS_REWARDS_POOL_ADDRESS")
                     print(f"  Update {BACKEND_ENV} if needed")
                 else:
-                    warn("REWARDS_POOL_ADDRESS not in backend.env")
+                    warn("QUESTS_REWARDS_POOL_ADDRESS not in backend.env")
                     confirm = input("  Add to backend.env? [Y/n]: ").strip().lower()
                     if confirm != "n":
                         update_backend_env(address)
@@ -683,7 +685,7 @@ def main():
                     "The wallet needs to be funded before rewards can be distributed.",
                     "You can continue setup now and fund later, or fund first and run",
                     "this script again.",
-                ]
+                ],
             )
             print()
             confirm = input("  Continue with low balance? [y/N]: ").strip().lower()

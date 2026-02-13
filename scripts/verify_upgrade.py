@@ -19,6 +19,18 @@ v1.10.7 additions (source-level checks):
 - Admin gas fee non-blocking (level >= 100 skip deduction in chain module)
 - Balance overflow fix (uvarint64 encoding, useBalance hook)
 
+v1.10.8 additions (source-level checks):
+- gRPC staking queries replace CLI subprocess calls (bank.py, chain.py, public.py)
+- Node balance tracking (migration v2_0_4, indexer records balance every 200 blocks)
+- Network charts: unified layout constants, Total Supply chart, chart label fixes
+- Server page: node balance chart, earned vs spent chart, staked balance display
+- Deploy migration v1_11_0_backend_env_renames (with full content validation)
+- Quest settings renamed to QUESTS_* prefix (env vars + Python constants)
+- Reward env vars renamed to QUESTS_ prefix (reward_distributor.py, setup_rewards_pool.py)
+- GUNICORN_WORKERS renamed to BACKEND_GUNICORN_WORKERS (gunicorn_config.py)
+- Frontend env template cleaned (REACT_APP_API_BASE removed, bake-time note added)
+- Donation amount formatting (toLocaleString)
+
 NOTE: This does NOT submit transactions or mutate chain state.
 """
 
@@ -38,10 +50,12 @@ import urllib.error
 import urllib.request
 
 
-# Current upgrade being verified (set via --upgrade or defaults to latest)
+# Current release being verified (set via --upgrade or defaults to latest)
+# NOTE: UPGRADE_NAME is the last *chain* upgrade (on-chain governance proposal).
+# v1.10.8 is a services-only release (Python/JS) — no new chain upgrade.
 UPGRADE_NAME = "v1.10.7"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION = "v1.10.7"
+EXPECTED_VERSION = "v1.10.8"
 
 # All registered upgrade names in chronological order
 ALL_UPGRADES = [
@@ -77,7 +91,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _http_get_json(url: str, timeout: int = 5) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.10.7"})
+    req = urllib.request.Request(url, headers={"User-Agent": "mirage-verify/1.10.8"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = resp.read()
     return json.loads(data.decode("utf-8"))
@@ -349,7 +363,11 @@ def _fmt_value(v: Any) -> str:
 
 
 def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
-    """Check that miraged binary version matches the exact expected version."""
+    """Check that miraged binary version starts with the expected version prefix.
+
+    Accepts both exact tags (v1.10.8) and git-describe suffixes (v1.10.8-3-g67679d3)
+    since post-tag commits that don't touch Go source produce identical binaries.
+    """
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
@@ -357,8 +375,11 @@ def check_binary_version(miraged: str, failures: list[str], warnings: list[str])
         if version == EXPECTED_VERSION:
             print(f"   [OK] Binary version: {version}")
             return version
+        elif version.startswith(EXPECTED_VERSION + "-"):
+            print(f"   [OK] Binary version: {version} (matches {EXPECTED_VERSION} prefix)")
+            return version
         else:
-            print(f"   [FAIL] Binary version: {version} (expected exactly {EXPECTED_VERSION})")
+            print(f"   [FAIL] Binary version: {version} (expected {EXPECTED_VERSION} or {EXPECTED_VERSION}-*)")
             failures.append(f"Binary version {version!r} does not match expected {EXPECTED_VERSION!r}")
             return version
     except Exception as e:
@@ -1148,6 +1169,518 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
 
 
 # ---------------------------------------------------------------------------
+# v1.10.8 feature checks (source-level verification)
+# ---------------------------------------------------------------------------
+
+
+def check_grpc_staking_queries(failures: list[str], warnings: list[str]) -> None:
+    """Verify CLI subprocess staking calls replaced with gRPC in bank.py, chain.py, public.py."""
+    print("\n-> Checking gRPC staking migration...")
+
+    # 1. bank.py must have new gRPC functions
+    bank_py = REPO_ROOT / "web" / "backend" / "bank.py"
+    if not bank_py.exists():
+        failures.append("gRPC staking: web/backend/bank.py not found")
+        return
+    bank_text = bank_py.read_text()
+
+    for fn in ("get_staked_balance", "get_validator", "get_all_validators"):
+        if f"def {fn}(" in bank_text:
+            print(f"   [OK] bank.py: {fn}() defined")
+        else:
+            print(f"   [FAIL] bank.py: {fn}() not found")
+            failures.append(f"gRPC staking: bank.py missing {fn}()")
+
+    if "staking.v1beta1" in bank_text:
+        print("   [OK] bank.py: uses cosmos.staking.v1beta1 protos")
+    else:
+        print("   [FAIL] bank.py: missing staking proto imports")
+        failures.append("gRPC staking: bank.py does not import staking protos")
+
+    # 2. chain.py must NOT use subprocess for staking
+    chain_py = REPO_ROOT / "web" / "backend" / "chain.py"
+    if chain_py.exists():
+        chain_text = chain_py.read_text()
+        if "subprocess" not in chain_text:
+            print("   [OK] chain.py: no subprocess dependency")
+        else:
+            print("   [FAIL] chain.py: still uses subprocess")
+            failures.append("gRPC staking: chain.py still uses subprocess")
+
+        if "get_all_validators" in chain_text:
+            print("   [OK] chain.py: uses bank.get_all_validators()")
+        else:
+            print("   [FAIL] chain.py: not using gRPC validator query")
+            failures.append("gRPC staking: chain.py not using bank.get_all_validators()")
+
+    # 3. public.py must NOT use subprocess for staking
+    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
+    if public_py.exists():
+        public_text = public_py.read_text()
+        if "import subprocess" not in public_text:
+            print("   [OK] public.py: no subprocess import")
+        else:
+            print("   [FAIL] public.py: still imports subprocess")
+            failures.append("gRPC staking: public.py still imports subprocess")
+
+        if "_get_validator" in public_text or "_get_staked_balance" in public_text:
+            print("   [OK] public.py: uses gRPC staking functions")
+        else:
+            print("   [FAIL] public.py: not using gRPC staking functions")
+            failures.append("gRPC staking: public.py not using gRPC staking functions")
+
+        if "staked_balance" in public_text:
+            print("   [OK] public.py: staked_balance in network stats response")
+        else:
+            print("   [FAIL] public.py: staked_balance not in response")
+            failures.append("gRPC staking: public.py missing staked_balance in get_network_stats")
+
+
+def check_node_balance_tracking(failures: list[str], warnings: list[str]) -> None:
+    """Verify indexer records node balance alongside supply history."""
+    print("\n-> Checking node balance tracking...")
+
+    # 1. Migration file exists
+    migration = REPO_ROOT / "indexer" / "migrations" / "v2_0_4_node_balance.py"
+    if migration.exists():
+        print("   [OK] v2_0_4_node_balance.py migration exists")
+        if _file_contains(migration, r"node_balance"):
+            print("   [OK] migration adds node_balance column")
+        else:
+            print("   [FAIL] migration missing node_balance column")
+            failures.append("node balance: migration v2_0_4 does not add node_balance")
+    else:
+        print("   [FAIL] v2_0_4_node_balance.py migration not found")
+        failures.append("node balance: indexer/migrations/v2_0_4_node_balance.py not found")
+
+    # 2. chain_client.py has get_balance()
+    chain_client = REPO_ROOT / "indexer" / "chain_client.py"
+    if _file_contains(chain_client, r"def get_balance\("):
+        print("   [OK] chain_client.py: get_balance() defined")
+    else:
+        print("   [FAIL] chain_client.py: get_balance() not found")
+        failures.append("node balance: chain_client.py missing get_balance()")
+
+    # 3. main.py resolves validator address and records node balance
+    main_py = REPO_ROOT / "indexer" / "main.py"
+    if main_py.exists():
+        main_text = main_py.read_text()
+        if "_resolve_validator_address" in main_text:
+            print("   [OK] main.py: _resolve_validator_address() present")
+        else:
+            print("   [FAIL] main.py: validator address resolution not found")
+            failures.append("node balance: indexer main.py missing _resolve_validator_address()")
+
+        if "node_balance" in main_text:
+            print("   [OK] main.py: records node_balance in supply history")
+        else:
+            print("   [FAIL] main.py: node_balance recording not found")
+            failures.append("node balance: indexer main.py does not record node_balance")
+
+    # 4. database.py upsert_supply accepts node_balance
+    db_py = REPO_ROOT / "indexer" / "database.py"
+    if _file_contains(db_py, r"node_balance"):
+        print("   [OK] database.py: node_balance in supply queries")
+    else:
+        print("   [FAIL] database.py: node_balance not found")
+        failures.append("node balance: database.py missing node_balance support")
+
+    # 5. Backend supply history includes node_balance
+    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
+    if _file_contains(public_py, r"node_balance"):
+        print("   [OK] public.py: node_balance in supply history response")
+    else:
+        print("   [FAIL] public.py: node_balance not in supply history")
+        failures.append("node balance: public.py supply history missing node_balance")
+
+
+def check_network_charts(failures: list[str], warnings: list[str]) -> None:
+    """Verify unified chart layout and new chart components in NetworkView."""
+    print("\n-> Checking network charts...")
+
+    nv = REPO_ROOT / "web" / "frontend" / "src" / "views" / "NetworkView.js"
+    if not nv.exists():
+        print("   [WARN] NetworkView.js not found (frontend source not present)")
+        warnings.append("network charts: NetworkView.js not found (frontend source not on this host)")
+        return
+    text = nv.read_text()
+
+    # 1. Shared CHART constants
+    if "const CHART" in text:
+        print("   [OK] Shared CHART layout constants defined")
+    else:
+        print("   [FAIL] Shared CHART constants not found")
+        failures.append("network charts: missing shared CHART layout constants")
+
+    # 2. SupplyChart component
+    if "function SupplyChart(" in text:
+        print("   [OK] SupplyChart component defined")
+    else:
+        print("   [FAIL] SupplyChart component not found")
+        failures.append("network charts: SupplyChart component missing")
+
+    # 3. NodeBalanceChart component
+    if "function NodeBalanceChart(" in text:
+        print("   [OK] NodeBalanceChart component defined")
+    else:
+        print("   [FAIL] NodeBalanceChart component not found")
+        failures.append("network charts: NodeBalanceChart component missing")
+
+    # 4. NodeMintBurnChart component
+    if "function NodeMintBurnChart(" in text:
+        print("   [OK] NodeMintBurnChart component defined")
+    else:
+        print("   [FAIL] NodeMintBurnChart component not found")
+        failures.append("network charts: NodeMintBurnChart component missing")
+
+    # 5. Staked balance display
+    if "stakedBalance" in text:
+        print("   [OK] Staked balance state and display present")
+    else:
+        print("   [FAIL] Staked balance not found")
+        failures.append("network charts: stakedBalance display missing from server tab")
+
+    # 6. ChartGrid shared component
+    if "function ChartGrid(" in text:
+        print("   [OK] ChartGrid shared component defined")
+    else:
+        print("   [FAIL] ChartGrid component not found")
+        failures.append("network charts: ChartGrid shared component missing")
+
+    # 7. fmtMirage shared formatter
+    if "function fmtMirage(" in text:
+        print("   [OK] fmtMirage shared formatter defined")
+    else:
+        print("   [FAIL] fmtMirage formatter not found")
+        failures.append("network charts: fmtMirage shared formatter missing")
+
+
+def check_deploy_migration_v1_11(failures: list[str], warnings: list[str]) -> None:
+    """Verify deploy migration for backend env renames exists and covers all renames."""
+    print("\n-> Checking deploy migration v1.11.0...")
+
+    migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
+    if not migration.exists():
+        print("   [FAIL] v1_11_0_backend_env_renames.py not found")
+        failures.append("deploy: migrations/v1_11_0_backend_env_renames.py not found")
+        return
+
+    print("   [OK] v1_11_0_backend_env_renames.py exists")
+    mig_text = migration.read_text()
+
+    # Verify the migration covers all required renames
+    required_renames = {
+        "INVITE_CODES_REQUIRED": "REGISTRATION_INVITE_CODE_REQUIRED",
+        "GUNICORN_WORKERS": "BACKEND_GUNICORN_WORKERS",
+        "DAILY_QUESTS_COUNT": "QUESTS_DAILY_COUNT",
+        "FLASH_QUESTS_COUNT": "QUESTS_FLASH_COUNT",
+        "FLASH_QUEST_MIN_INTERVAL_HOURS": "QUESTS_FLASH_MIN_INTERVAL_HOURS",
+        "FLASH_QUEST_MAX_INTERVAL_HOURS": "QUESTS_FLASH_MAX_INTERVAL_HOURS",
+        "PAYOUTS_ENABLED": "QUESTS_PAYOUTS_ENABLED",
+        "REWARDS_POOL_ADDRESS": "QUESTS_REWARDS_POOL_ADDRESS",
+        "INVITE_RECRUIT_CHANCE": "QUESTS_INVITE_RECRUIT_CHANCE",
+        "INVITE_EARNER_QUEST_INTERVAL": "QUESTS_INVITE_EARNER_INTERVAL",
+        "INVITE_EARNER_CHANCE": "QUESTS_INVITE_EARNER_CHANCE",
+    }
+    for old, new in required_renames.items():
+        if f'"{old}"' in mig_text and f'"{new}"' in mig_text:
+            print(f"   [OK] migration: {old} -> {new}")
+        else:
+            print(f"   [FAIL] migration: {old} -> {new} mapping not found")
+            failures.append(f"deploy migration: missing rename {old} -> {new}")
+
+
+def check_quest_settings_rename(failures: list[str], warnings: list[str]) -> None:
+    """Verify all quest env vars use the QUESTS_ prefix."""
+    print("\n-> Checking quest settings rename...")
+
+    # All quest env vars/constants must use QUESTS_ prefix
+    quests_names = [
+        "QUESTS_DAILY_COUNT",
+        "QUESTS_FLASH_MIN_INTERVAL_HOURS",
+        "QUESTS_FLASH_MAX_INTERVAL_HOURS",
+        "QUESTS_INVITE_RECRUIT_CHANCE",
+        "QUESTS_INVITE_EARNER_INTERVAL",
+        "QUESTS_INVITE_EARNER_CHANCE",
+    ]
+    # Old names that must NOT appear as bare definitions
+    old_names = [
+        "INVITE_RECRUIT_CHANCE",
+        "INVITE_EARNER_QUEST_INTERVAL",
+        "INVITE_EARNER_CHANCE",
+        "DAILY_QUESTS_COUNT",
+        "FLASH_QUESTS_COUNT",
+        "FLASH_QUEST_MIN_INTERVAL_HOURS",
+        "FLASH_QUEST_MAX_INTERVAL_HOURS",
+    ]
+
+    settings_py = REPO_ROOT / "indexer" / "settings.py"
+    if settings_py.exists():
+        text = settings_py.read_text()
+        for name in quests_names:
+            if name in text:
+                print(f"   [OK] settings.py: {name} defined")
+            else:
+                print(f"   [FAIL] settings.py: {name} not found")
+                failures.append(f"quest settings: {name} not defined in settings.py")
+
+        for name in old_names:
+            if re.search(rf"^{name}\s*=", text, re.MULTILINE):
+                print(f"   [FAIL] settings.py: old name {name} still defined")
+                failures.append(f"quest settings: old name {name} still present in settings.py")
+
+    # Check quest_tracker.py uses new names
+    tracker_py = REPO_ROOT / "indexer" / "quest_tracker.py"
+    if tracker_py.exists():
+        tracker_text = tracker_py.read_text()
+        for old in old_names:
+            if re.search(rf"(?<![A-Z_]){old}(?![A-Z_])", tracker_text):
+                print(f"   [FAIL] quest_tracker.py still references {old}")
+                failures.append(f"quest settings: quest_tracker.py still uses {old}")
+        print("   [OK] quest_tracker.py: uses QUESTS_ prefix")
+
+    # Check quests.py uses consistent names
+    quests_py = REPO_ROOT / "web" / "backend" / "routes" / "quests.py"
+    if quests_py.exists():
+        quests_text = quests_py.read_text()
+        for name in quests_names:
+            if name in quests_text:
+                print(f"   [OK] quests.py: {name} used")
+            else:
+                print(f"   [WARN] quests.py: {name} not found")
+                warnings.append(f"quest settings: quests.py does not reference {name}")
+
+
+def check_registration_gating(failures: list[str], warnings: list[str]) -> None:
+    """Verify registration gating via REGISTRATION_ENABLED and REGISTRATION_INVITE_CODE_REQUIRED."""
+    print("\n-> Checking registration gating...")
+
+    # 1. Backend core.py: REGISTRATION_ENABLED + REGISTRATION_INVITE_CODE_REQUIRED
+    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
+    if core_py.exists():
+        text = core_py.read_text()
+        if "REGISTRATION_ENABLED" in text:
+            print("   [OK] core.py: REGISTRATION_ENABLED env var used")
+        else:
+            print("   [FAIL] core.py: REGISTRATION_ENABLED not found")
+            failures.append("registration: core.py missing REGISTRATION_ENABLED check")
+
+        if "REGISTRATION_INVITE_CODE_REQUIRED" in text:
+            print("   [OK] core.py: REGISTRATION_INVITE_CODE_REQUIRED env var used")
+        else:
+            print("   [FAIL] core.py: REGISTRATION_INVITE_CODE_REQUIRED not found")
+            failures.append("registration: core.py missing REGISTRATION_INVITE_CODE_REQUIRED check")
+
+        # Old name should be gone
+        if "INVITE_CODES_REQUIRED" in text:
+            print("   [FAIL] core.py: old INVITE_CODES_REQUIRED still present")
+            failures.append("registration: core.py still uses old INVITE_CODES_REQUIRED")
+        else:
+            print("   [OK] core.py: old INVITE_CODES_REQUIRED removed")
+
+        # Registration disabled gate
+        if "registration is disabled" in text or "registration_disabled" in text:
+            print("   [OK] core.py: registration disabled gate present")
+        else:
+            print("   [FAIL] core.py: registration disabled response not found")
+            failures.append("registration: core.py missing registration disabled response")
+
+    # 2. Frontend CreateAccountView reads config flags
+    cav = REPO_ROOT / "web" / "frontend" / "src" / "views" / "CreateAccountView.js"
+    if cav.exists():
+        cav_text = cav.read_text()
+        if "registrationEnabled" in cav_text:
+            print("   [OK] CreateAccountView.js: reads registrationEnabled from config")
+        else:
+            print("   [FAIL] CreateAccountView.js: registrationEnabled not found")
+            failures.append("registration: CreateAccountView.js missing registrationEnabled")
+
+        if "inviteCodeRequired" in cav_text:
+            print("   [OK] CreateAccountView.js: reads inviteCodeRequired from config")
+        else:
+            print("   [FAIL] CreateAccountView.js: inviteCodeRequired not found")
+            failures.append("registration: CreateAccountView.js missing inviteCodeRequired")
+
+        # Old hardcoded hostname check should be gone
+        if "isMainSite" in cav_text or "mirage.talk" in cav_text:
+            print("   [FAIL] CreateAccountView.js: still has hardcoded hostname check")
+            failures.append("registration: CreateAccountView.js still uses hardcoded hostname")
+        else:
+            print("   [OK] CreateAccountView.js: no hardcoded hostname checks")
+
+    # 3. Backend env template has new keys
+    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
+    if env_template.exists():
+        env_text = env_template.read_text()
+        for key in ("REGISTRATION_ENABLED", "REGISTRATION_INVITE_CODE_REQUIRED"):
+            if key in env_text:
+                print(f"   [OK] backend.env template: {key} present")
+            else:
+                print(f"   [FAIL] backend.env template: {key} missing")
+                failures.append(f"registration: backend.env template missing {key}")
+
+
+def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
+    """Verify reward env vars use the QUESTS_ prefix."""
+    print("\n-> Checking reward env renames...")
+
+    rd = REPO_ROOT / "web" / "backend" / "reward_distributor.py"
+    if not rd.exists():
+        print("   [WARN] reward_distributor.py not found")
+        warnings.append("reward renames: reward_distributor.py not found")
+        return
+
+    text = rd.read_text()
+
+    # New names should be present
+    for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
+        if new_name in text:
+            print(f"   [OK] reward_distributor.py: {new_name} used")
+        else:
+            print(f"   [FAIL] reward_distributor.py: {new_name} not found")
+            failures.append(f"reward renames: reward_distributor.py missing {new_name}")
+
+    # Old bare names should NOT be defined (but may appear in comments)
+    if re.search(r"^REWARDS_POOL_ADDRESS\s*=", text, re.MULTILINE):
+        print("   [FAIL] reward_distributor.py: old REWARDS_POOL_ADDRESS still defined")
+        failures.append("reward renames: old REWARDS_POOL_ADDRESS still defined")
+    else:
+        print("   [OK] old REWARDS_POOL_ADDRESS definition removed")
+
+    if re.search(r"^PAYOUTS_ENABLED\s*=", text, re.MULTILINE):
+        print("   [FAIL] reward_distributor.py: old PAYOUTS_ENABLED still defined")
+        failures.append("reward renames: old PAYOUTS_ENABLED still defined")
+    else:
+        print("   [OK] old PAYOUTS_ENABLED definition removed")
+
+    # Backend env template
+    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
+    if env_template.exists():
+        env_text = env_template.read_text()
+        for key in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
+            if key in env_text:
+                print(f"   [OK] backend.env template: {key} present")
+            else:
+                print(f"   [FAIL] backend.env template: {key} missing")
+                failures.append(f"reward renames: backend.env template missing {key}")
+
+    # setup_rewards_pool.py should also use QUESTS_ prefix
+    srp = REPO_ROOT / "deploy" / "setup_rewards_pool.py"
+    if srp.exists():
+        srp_text = srp.read_text()
+        for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
+            if new_name in srp_text:
+                print(f"   [OK] setup_rewards_pool.py: {new_name} used")
+            else:
+                print(f"   [FAIL] setup_rewards_pool.py: {new_name} not found")
+                failures.append(f"reward renames: setup_rewards_pool.py missing {new_name}")
+
+        # Old bare names should not be present
+        for old_name in ("REWARDS_POOL_ADDRESS", "PAYOUTS_ENABLED"):
+            if re.search(rf"(?<![A-Z_]){old_name}(?![A-Z_])", srp_text):
+                print(f"   [FAIL] setup_rewards_pool.py: old {old_name} still referenced")
+                failures.append(f"reward renames: setup_rewards_pool.py still uses {old_name}")
+    else:
+        print("   [WARN] setup_rewards_pool.py not found")
+        warnings.append("reward renames: setup_rewards_pool.py not found")
+
+
+def check_donation_formatting(failures: list[str], warnings: list[str]) -> None:
+    """Verify donation success messages use toLocaleString() for amount formatting."""
+    print("\n-> Checking donation amount formatting...")
+
+    for fname in ("components/CardView.js", "views/ViewPostView.js"):
+        path = REPO_ROOT / "web" / "frontend" / "src" / fname
+        if not path.exists():
+            continue
+        text = path.read_text()
+        if "toLocaleString()" in text:
+            print(f"   [OK] {fname}: uses toLocaleString() for donation amounts")
+        else:
+            print(f"   [WARN] {fname}: toLocaleString() not found")
+            warnings.append(f"donation formatting: {fname} missing toLocaleString()")
+
+
+def check_gunicorn_workers_rename(failures: list[str], warnings: list[str]) -> None:
+    """Verify GUNICORN_WORKERS was renamed to BACKEND_GUNICORN_WORKERS."""
+    print("\n-> Checking BACKEND_GUNICORN_WORKERS rename...")
+
+    # 1. gunicorn_config.py should use BACKEND_GUNICORN_WORKERS
+    gc = REPO_ROOT / "web" / "backend" / "gunicorn_config.py"
+    if gc.exists():
+        text = gc.read_text()
+        if "BACKEND_GUNICORN_WORKERS" in text:
+            print("   [OK] gunicorn_config.py: uses BACKEND_GUNICORN_WORKERS")
+        else:
+            print("   [FAIL] gunicorn_config.py: BACKEND_GUNICORN_WORKERS not found")
+            failures.append("gunicorn rename: gunicorn_config.py missing BACKEND_GUNICORN_WORKERS")
+
+        # Old name should not be present (as a bare reference)
+        if re.search(r'(?<![A-Z_])GUNICORN_WORKERS(?![A-Z_])', text):
+            print("   [FAIL] gunicorn_config.py: old GUNICORN_WORKERS still referenced")
+            failures.append("gunicorn rename: gunicorn_config.py still uses old GUNICORN_WORKERS")
+        else:
+            print("   [OK] gunicorn_config.py: old GUNICORN_WORKERS removed")
+    else:
+        print("   [WARN] gunicorn_config.py not found")
+        warnings.append("gunicorn rename: gunicorn_config.py not found")
+
+    # 2. backend.env template should use BACKEND_GUNICORN_WORKERS
+    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
+    if env_template.exists():
+        env_text = env_template.read_text()
+        if "BACKEND_GUNICORN_WORKERS" in env_text:
+            print("   [OK] backend.env template: BACKEND_GUNICORN_WORKERS present")
+        else:
+            print("   [FAIL] backend.env template: BACKEND_GUNICORN_WORKERS missing")
+            failures.append("gunicorn rename: backend.env template missing BACKEND_GUNICORN_WORKERS")
+
+        if re.search(r'^GUNICORN_WORKERS=', env_text, re.MULTILINE):
+            print("   [FAIL] backend.env template: old GUNICORN_WORKERS= still present")
+            failures.append("gunicorn rename: backend.env template still has old GUNICORN_WORKERS")
+        else:
+            print("   [OK] backend.env template: old GUNICORN_WORKERS= removed")
+
+    # 3. Migration should include this rename
+    migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
+    if migration.exists():
+        mig_text = migration.read_text()
+        if '"GUNICORN_WORKERS"' in mig_text and '"BACKEND_GUNICORN_WORKERS"' in mig_text:
+            print("   [OK] migration: GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS mapping present")
+        else:
+            print("   [FAIL] migration: GUNICORN_WORKERS rename mapping not found")
+            failures.append("gunicorn rename: migration missing GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS")
+
+
+def check_frontend_env_template(failures: list[str], warnings: list[str]) -> None:
+    """Verify frontend.env template is cleaned up (no REACT_APP_API_BASE)."""
+    print("\n-> Checking frontend.env template...")
+
+    fe = REPO_ROOT / "deploy" / "templates" / "env" / "frontend.env"
+    if not fe.exists():
+        print("   [WARN] frontend.env template not found")
+        warnings.append("frontend env: template not found")
+        return
+
+    text = fe.read_text()
+
+    # REACT_APP_API_BASE should NOT be in the template (it's baked at build time
+    # and is not user-configurable)
+    if re.search(r'^REACT_APP_API_BASE=', text, re.MULTILINE):
+        print("   [FAIL] frontend.env: REACT_APP_API_BASE should not be user-configurable")
+        failures.append("frontend env: REACT_APP_API_BASE still in template (baked at build time)")
+    else:
+        print("   [OK] frontend.env: REACT_APP_API_BASE not exposed as configurable")
+
+    # Should have the bake-time note
+    if "baked" in text.lower() or "build time" in text.lower():
+        print("   [OK] frontend.env: contains build-time note for REACT_APP_* vars")
+    else:
+        print("   [WARN] frontend.env: missing note about REACT_APP_* being baked at build time")
+        warnings.append("frontend env: missing bake-time note for REACT_APP_* vars")
+
+
+# ---------------------------------------------------------------------------
 # v1.10.7 feature checks (source-level verification)
 # ---------------------------------------------------------------------------
 
@@ -1817,6 +2350,18 @@ def main() -> int:
     check_seed_vault(failures, warnings)
     check_admin_gas_nonblocking(failures, warnings)
     check_balance_overflow_fix(failures, warnings)
+
+    # ---- v1.10.8 feature checks (source-level) ----
+    check_grpc_staking_queries(failures, warnings)
+    check_node_balance_tracking(failures, warnings)
+    check_network_charts(failures, warnings)
+    check_deploy_migration_v1_11(failures, warnings)
+    check_quest_settings_rename(failures, warnings)
+    check_registration_gating(failures, warnings)
+    check_reward_env_renames(failures, warnings)
+    check_gunicorn_workers_rename(failures, warnings)
+    check_frontend_env_template(failures, warnings)
+    check_donation_formatting(failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")

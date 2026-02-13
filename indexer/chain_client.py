@@ -436,3 +436,21 @@ class ChainClient:
         except Exception as e:
             logger.warning("Failed to query total supply: %s", e)
             return 0
+
+    def get_balance(self, address: str) -> int:
+        """Get umirage balance for a specific address via gRPC."""
+        if not address:
+            return 0
+        try:
+            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
+            from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
+
+            with grpc.insecure_channel(self.grpc_target) as channel:
+                stub = bank_query_pb2_grpc.QueryStub(channel)
+                req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
+                resp = stub.Balance(req, timeout=GRPC_TIMEOUT)
+                amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
+                return int(amt)
+        except Exception as e:
+            logger.warning("Failed to query balance for %s: %s", address, e)
+            return 0

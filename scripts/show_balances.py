@@ -308,6 +308,17 @@ def load_profiles_from_chain(rpc_url: str) -> Dict[str, str]:
     return out
 
 
+def query_profile_rest(address: str, rest_url: str = "http://127.0.0.1:1317") -> str:
+    """Query a single profile username via chain REST API."""
+    try:
+        r = requests.get(f"{rest_url}/mirage/core/v1/profile/{address}", timeout=5)
+        r.raise_for_status()
+        data = r.json()
+        return str(data.get("profile", {}).get("username", "") or "").strip()
+    except Exception:
+        return ""
+
+
 def _bech32_hrp_expand(hrp: str) -> List[int]:
     return [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp]
 
@@ -435,25 +446,17 @@ def build_well_known_usernames(hrp: str = "mirage") -> Dict[str, str]:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Display liquid and staked balances for all accounts on-chain"
+    parser = argparse.ArgumentParser(description="Display liquid and staked balances for all accounts on-chain")
+    parser.add_argument(
+        "--min", type=float, default=0, help="Minimum total balance in MIRAGE to display (default: 0, show all)"
     )
     parser.add_argument(
-        "--min", 
-        type=float, 
-        default=0,
-        help="Minimum total balance in MIRAGE to display (default: 0, show all)"
-    )
-    parser.add_argument(
-        "--rpc",
-        type=str,
-        default="tcp://127.0.0.1:26657",
-        help="RPC endpoint (default: tcp://127.0.0.1:26657)"
+        "--rpc", type=str, default="tcp://127.0.0.1:26657", help="RPC endpoint (default: tcp://127.0.0.1:26657)"
     )
     args = parser.parse_args()
-    
+
     min_balance_umirage = int(args.min * UMIRAGE_PER_MIRAGE)
-    
+
     if args.min > 0:
         print(f"Showing accounts with >= {args.min:,.1f} MIRAGE", file=sys.stderr)
 
@@ -485,20 +488,17 @@ def main():
         v["account"].lower(): normalize_moniker(v.get("moniker") or "") for v in validators if v.get("account")
     }
 
-    # Determine which addresses still need usernames (no moniker available)
-    need_username_lower: set[str] = set()
+    all_addresses_lower: set[str] = set()
     for o in owners:
         addr = (o.get("address") or "").lower()
-        if not addr:
-            continue
-        moniker = validator_moniker_by_account.get(addr, "")
-        if not moniker:
-            need_username_lower.add(addr)
+        if addr:
+            all_addresses_lower.add(addr)
 
-    usernames: Dict[str, str] = {}
+    # DB usernames (fallback only — on-chain is source of truth)
+    db_usernames: Dict[str, str] = {}
     try:
         db_url = os.environ.get("INDEXER_DB_URL", "").strip()
-        if db_url and need_username_lower:
+        if db_url and all_addresses_lower:
             conn = psycopg.connect(db_url, autocommit=True)
             cur = conn.cursor()
             chunk: List[str] = []
@@ -517,14 +517,14 @@ def main():
                         try:
                             uname_str = str(uname).strip() if uname else ""
                             if uname_str:
-                                usernames[addr.lower()] = uname_str
+                                db_usernames[addr.lower()] = uname_str
                         except Exception:
                             pass
                 chunk = []
 
             for o in owners:
                 a = o.get("address", "")
-                if a and a.lower() in need_username_lower:
+                if a and a.lower() in all_addresses_lower:
                     chunk.append(a)
                     if len(chunk) >= 500:
                         _flush_chunk()
@@ -533,11 +533,22 @@ def main():
     except Exception:
         pass
 
+    # On-chain profiles (source of truth — overrides DB and moniker)
     onchain = load_profiles_from_chain("http://127.0.0.1:26657")
-    if onchain and need_username_lower:
-        for a, u in onchain.items():
-            if a in need_username_lower and a not in usernames and u:
-                usernames[a] = str(u).strip()
+
+    # ABCI subspace query may truncate results; fill gaps with per-address REST queries
+    missing = all_addresses_lower - set(onchain.keys())
+    if missing:
+        with ThreadPoolExecutor(max_workers=min(16, len(missing))) as ex:
+            futs = {ex.submit(query_profile_rest, addr): addr for addr in missing}
+            for fut in as_completed(futs):
+                addr = futs[fut]
+                try:
+                    uname = fut.result() or ""
+                    if uname:
+                        onchain[addr] = uname
+                except Exception:
+                    pass
 
     official_names_by_addr = build_well_known_usernames()
     official_lower = {k.lower(): v for k, v in official_names_by_addr.items()}
@@ -562,14 +573,17 @@ def main():
         address = item.get("address", "")
         amount = item.get("amount", "0")
         addr_l = address.lower()
-        moniker = validator_moniker_by_account.get(addr_l, "")
-        if moniker:
-            display_name = moniker
+        # Priority: on-chain username > validator moniker > DB username > official name
+        onchain_uname = onchain.get(addr_l, "")
+        if onchain_uname:
+            display_name = normalize_username(onchain_uname)
         else:
-            uname_db = usernames.get(addr_l, "")
-            uname_official = official_lower.get(addr_l, "")
-            uname = uname_db or uname_official
-            display_name = normalize_username(uname)
+            moniker = validator_moniker_by_account.get(addr_l, "")
+            if moniker:
+                display_name = moniker
+            else:
+                uname = db_usernames.get(addr_l, "") or official_lower.get(addr_l, "")
+                display_name = normalize_username(uname)
         staked_amt = int(staked_map.get(addr_l, 0) or 0)
         account_data.append(
             {
@@ -582,11 +596,8 @@ def main():
 
     # Filter by minimum balance
     if min_balance_umirage > 0:
-        account_data = [
-            a for a in account_data 
-            if (int(a["liquid"]) + int(a["staked"])) >= min_balance_umirage
-        ]
-    
+        account_data = [a for a in account_data if (int(a["liquid"]) + int(a["staked"])) >= min_balance_umirage]
+
     # Sort by total balance descending
     account_data.sort(key=lambda x: int(x["liquid"]) + int(x["staked"]), reverse=True)
 
@@ -602,7 +613,7 @@ def main():
         total = liquid + staked
         total_liquid += liquid
         total_staked += staked
-        
+
         liquid_formatted = format_mirage(liquid)
         staked_formatted = format_mirage(staked)
         total_formatted = format_mirage(total)

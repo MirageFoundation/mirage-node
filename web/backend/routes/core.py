@@ -17,6 +17,7 @@ from typing import Any, Dict
 import time
 
 from flask import Blueprint, jsonify, request
+from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
@@ -566,10 +567,8 @@ def core_set_username():
         # Extract invite code (always extract, but only enforce if enabled)
         invite_code = str(data.get("invite_code", "")).strip().upper()
 
-        # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS (if enabled via env var)
-        INVITE_CODES_REQUIRED = os.environ.get("INVITE_CODES_REQUIRED", "").lower() == "true"
-        if INVITE_CODES_REQUIRED:
-            # Check if this is a new user (no existing profile/username)
+        # Check if this is a new user (no existing profile/username)
+        if not REGISTRATION_ENABLED or REGISTRATION_INVITE_CODE_REQUIRED:
             is_new_user = False
             try:
                 with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
@@ -583,7 +582,6 @@ def core_set_username():
                     is_new_user = not row or not row[0] or row[0].strip() == ""
             except Exception as db_err:
                 log_event(rid, "set_username.profile_check_error", error=str(db_err))
-                # If we can't check, also check on-chain as fallback
                 try:
                     chain_profile = _query_chain_profile_full(user_addr)
                     is_new_user = (
@@ -592,11 +590,15 @@ def core_set_username():
                         or chain_profile.get("username", "").strip() == ""
                     )
                 except Exception:
-                    # If both checks fail, err on the side of requiring invite code
                     is_new_user = True
 
-            # If this is a new user, REQUIRE a valid invite code
-            if is_new_user:
+            # ENFORCE REGISTRATION GATE
+            if not REGISTRATION_ENABLED and is_new_user:
+                log_event(rid, "set_username.registration_disabled", user=user_addr, username=username)
+                return jsonify({"error": "registration is disabled on this node"}), 403
+
+            # ENFORCE INVITE CODE REQUIREMENT FOR NEW USERS (if enabled via env var)
+            if REGISTRATION_INVITE_CODE_REQUIRED and is_new_user:
                 if not invite_code or len(invite_code) != 9 or invite_code[4] != "-":
                     log_event(rid, "set_username.invite_code_required", user=user_addr, username=username)
                     return jsonify({"error": "invite code required for new account registration"}), 400

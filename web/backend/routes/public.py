@@ -4,7 +4,8 @@ from __future__ import annotations
 
 Endpoints:
 - GET /api/get_parameters: Latest block hash, difficulty, optional balance.
-- GET /api/get_config: Snapshot of params, block_time, difficulty, optional recent votes.
+- GET /api/get_chain_config: Chain governance params (tiers, limits, subscription_period).
+- GET /api/get_node_config: Per-node static settings (validator info, feature flags).
 - GET /api/get_tx_status: Unified tx status with type-specific enrichment.
 - GET /api/get_address_from_username: Get address for a username if it exists.
 - GET /api/get_topics: List most active topics, excluding deleted messages.
@@ -17,7 +18,7 @@ import json
 import os
 import re
 from db import connect_db
-import subprocess
+
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -31,6 +32,10 @@ from settings import (
     IGNORE_DELETIONS,
     IGNORE_MOD_BLOCKED_POSTS,
     IGNORE_MOD_BLOCKED_USERS,
+    REGISTRATION_ENABLED,
+    REGISTRATION_INVITE_CODE_REQUIRED,
+    QUESTS_ENABLED,
+    QUESTS_PAYOUTS_ENABLED,
 )
 import time
 import hashlib
@@ -49,6 +54,8 @@ from bank import (
     get_balance as _get_balance,
     get_total_supply as _get_total_supply,
     get_balances_batch as _get_balances_batch,
+    get_staked_balance as _get_staked_balance,
+    get_validator as _get_validator,
 )
 import base64
 import urllib.request as _ur
@@ -391,8 +398,8 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
-# ---- Inbox count cache (60s TTL per address) ----
-_inbox_cache: dict[str, tuple[int, float]] = {}
+# ---- Inbox count cache (60s TTL per address; stores count + last_viewed_at) ----
+_inbox_cache: dict[str, tuple[int, float, int]] = {}
 _INBOX_CACHE_TTL = 60.0
 _INBOX_CACHE_MAX = 10000
 
@@ -410,23 +417,29 @@ def _get_new_inbox_count(cur, address: str) -> int:
     if cached and cached[1] > now:
         return cached[0]
 
+    last_seen = 0
     try:
         cur.execute(
             """
-            SELECT COUNT(*)
-            FROM posts r
-            JOIN posts p ON r.target = p.txhash
-            JOIN profiles pr ON LOWER(pr.owner) = %s
-            WHERE LOWER(p.owner) = %s
-              AND LOWER(r.owner) != %s
-              AND r.deleted = FALSE
-              AND r.created_at > pr.inbox_last_viewed_at
+            SELECT pr.inbox_last_viewed_at,
+                   COUNT(r.txhash)
+            FROM profiles pr
+            LEFT JOIN posts p ON LOWER(p.owner) = LOWER(pr.owner)
+            LEFT JOIN posts r
+              ON r.target = p.txhash
+             AND LOWER(r.owner) != LOWER(pr.owner)
+             AND r.deleted = FALSE
+             AND r.created_at > pr.inbox_last_viewed_at
+            WHERE LOWER(pr.owner) = %s
+            GROUP BY pr.inbox_last_viewed_at
             """,
-            (viewer, viewer, viewer),
+            (viewer,),
         )
         row = cur.fetchone()
-        count = int(row[0]) if row and row[0] else 0
+        last_seen = int(row[0]) if row and row[0] else 0
+        count = int(row[1]) if row and row[1] else 0
     except Exception:
+        last_seen = 0
         count = 0
 
     # Evict expired entries if cache is too large
@@ -438,7 +451,7 @@ def _get_new_inbox_count(cur, address: str) -> int:
         if len(_inbox_cache) >= _INBOX_CACHE_MAX:
             _inbox_cache.clear()
 
-    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL)
+    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL, last_seen)
     return count
 
 
@@ -1718,6 +1731,11 @@ def get_tx_status():
         return safe_error(e)
 
 
+# ---- get_parameters: short cache for pow params ----
+_PARAMS_CACHE: Dict[str, Any] = {"data": None, "expires": 0.0}
+_PARAMS_CACHE_TTL: float = 3.0  # seconds
+
+
 @public_bp.route("/api/get_parameters")
 def get_parameters():
     rid = next_request_id()
@@ -1726,12 +1744,31 @@ def get_parameters():
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
         addr = request.args.get("address", default=None, type=str)
-        last = _latest_block_hash()
-        diff = _get_current_pow_difficulty()
+        now = time.monotonic()
+        cached = _PARAMS_CACHE["data"]
+        if cached is not None and _PARAMS_CACHE["expires"] > now:
+            base = cached
+            cache_hit = True
+        else:
+            last = _latest_block_hash()
+            diff = _get_current_pow_difficulty()
+            base = {"last_block_hash": last, "pow_difficulty": diff}
+            _PARAMS_CACHE["data"] = base
+            _PARAMS_CACHE["expires"] = now + _PARAMS_CACHE_TTL
+            cache_hit = False
+
         op_addr = find_local_operator_address()
         bal = _get_balance(addr) if addr else None
-        log_event(rid, "get_parameters.ok", last=last[:8], diff=diff, operator=op_addr, addr=addr, bal=bal)
-        payload: Dict[str, Any] = {"last_block_hash": last, "pow_difficulty": diff}
+        log_event(
+            rid,
+            "get_parameters.cached" if cache_hit else "get_parameters.ok",
+            last=base["last_block_hash"][:8],
+            diff=base["pow_difficulty"],
+            operator=op_addr,
+            addr=addr,
+            bal=bal,
+        )
+        payload: Dict[str, Any] = dict(base)
         if bal is not None:
             try:
                 payload["balance"] = int(bal)
@@ -2036,6 +2073,27 @@ def get_similar_users():
         return safe_error(e)
 
 
+# Cache for staked balance (60 second TTL)
+_staked_balance_cache: Dict[str, Any] = {"value": 0, "expires": 0}
+
+
+def _get_cached_staked_balance() -> int:
+    """Get total staked (delegated) balance for the validator via gRPC, cached 60s."""
+    now = int(time.time())
+    if _staked_balance_cache["expires"] > now:
+        return _staked_balance_cache["value"]
+    total = 0
+    try:
+        rt = require_runtime()
+        if rt.validator_payer_addr:
+            total = _get_staked_balance(rt.validator_payer_addr)
+    except Exception:
+        pass
+    _staked_balance_cache["value"] = total
+    _staked_balance_cache["expires"] = now + 60
+    return total
+
+
 @public_bp.route("/api/get_network_stats")
 def get_network_stats():
     """Get network/node stats for NetworkView."""
@@ -2062,8 +2120,16 @@ def get_network_stats():
         except Exception:
             pass
 
+        # Get staked balance (cached 60s)
+        staked_balance = 0
+        try:
+            staked_balance = _get_cached_staked_balance()
+        except Exception:
+            pass
+
         resp = {
             "server_balance": server_balance,
+            "staked_balance": staked_balance,
             "block_time": block_time,
             "pow_difficulty": int(diff_info.get("current_difficulty", 10)),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
@@ -2096,7 +2162,7 @@ def _get_cached_supply_history() -> list:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT height, total_supply, created_at
+            SELECT height, total_supply, created_at, node_balance
             FROM supply_history
             WHERE created_at >= %s
             ORDER BY height ASC
@@ -2107,7 +2173,10 @@ def _get_cached_supply_history() -> list:
     finally:
         conn.close()
 
-    history = [{"height": r[0], "total_supply": r[1], "timestamp": r[2]} for r in rows]
+    history = [
+        {"height": r[0], "total_supply": r[1], "timestamp": r[2], "node_balance": r[3] if len(r) > 3 else None}
+        for r in rows
+    ]
 
     _supply_history_cache["data"] = history
     _supply_history_cache["expires"] = now + 30  # 30 second cache
@@ -2285,96 +2354,115 @@ def get_circulation_stats():
         return safe_error(e)
 
 
-@public_bp.route("/api/get_config")
-def get_config():
-    """Get static blockchain/server config. Cached 24h on frontend.
+# ---- get_chain_config: chain governance params only ----
+_CHAIN_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_CHAIN_CONFIG_CACHE_TIME: float = 0.0
+_CHAIN_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — governance changes are rare
 
-    For dynamic user data, use get_user_status instead.
-    For follow/block lists, use get_user_followed/get_user_blocked.
-    For network stats, use get_network_stats.
+
+@public_bp.route("/api/get_chain_config")
+def get_chain_config():
+    """Chain governance params (tiers, limits, subscription_period, etc.).
+
+    These change only via governance proposals. Cached 24h server-side.
+    No difficulty/height — use get_network_stats or get_parameters for those.
     """
+    global _CHAIN_CONFIG_CACHE, _CHAIN_CONFIG_CACHE_TIME
+
     rid = next_request_id()
-    log_event(rid, "get_config.begin")
+    log_event(rid, "get_chain_config.begin")
     try:
+        now = time.monotonic()
+        if _CHAIN_CONFIG_CACHE is not None and (now - _CHAIN_CONFIG_CACHE_TIME) < _CHAIN_CONFIG_CACHE_TTL:
+            log_event(rid, "get_chain_config.cached")
+            return jsonify(_CHAIN_CONFIG_CACHE)
+
         if _is_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
 
-        # Load cached chain params
         try:
             p = load_params(force=False)
-            max_username_size = p["max_username_size"]
-            min_username_size = p["min_username_size"]
-            max_topic_size = p["max_topic_size"]
-            min_topic_size = p["min_topic_size"]
-            subscription_period = p["subscription_period"]
-            mint_interval = p["mint_interval"]
-            tiers = p["tiers"]
         except Exception as e:
-            log_event(rid, "get_config.params_err", error=str(e))
-            return safe_error(e, context="get_config.params")
+            log_event(rid, "get_chain_config.params_err", error=str(e))
+            return safe_error(e, context="get_chain_config.params")
+
+        resp: Dict[str, Any] = {
+            "max_username_size": p["max_username_size"],
+            "min_username_size": p["min_username_size"],
+            "max_topic_size": p["max_topic_size"],
+            "min_topic_size": p["min_topic_size"],
+            "subscription_period": p["subscription_period"],
+            "mint_interval": p["mint_interval"],
+            "block_time": _get_block_time_seconds(),
+            "tiers": p["tiers"],
+        }
+
+        _CHAIN_CONFIG_CACHE = resp
+        _CHAIN_CONFIG_CACHE_TIME = now
+
+        log_event(rid, "get_chain_config.ok")
+        return jsonify(resp)
+    except Exception as e:
+        log_event(rid, "get_chain_config.err", error=str(e))
+        return safe_error(e)
+
+
+# ---- get_node_config: per-node static settings ----
+_NODE_CONFIG_CACHE: Optional[Dict[str, Any]] = None
+_NODE_CONFIG_CACHE_TIME: float = 0.0
+_NODE_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — these almost never change
+
+
+@public_bp.route("/api/get_node_config")
+def get_node_config():
+    """Per-node static settings (validator info, feature flags, API keys).
+
+    These are deployment-specific and don't change at runtime. Cached 24h server-side.
+    """
+    global _NODE_CONFIG_CACHE, _NODE_CONFIG_CACHE_TIME
+
+    rid = next_request_id()
+    log_event(rid, "get_node_config.begin")
+    try:
+        now = time.monotonic()
+        if _NODE_CONFIG_CACHE is not None and (now - _NODE_CONFIG_CACHE_TIME) < _NODE_CONFIG_CACHE_TTL:
+            log_event(rid, "get_node_config.cached")
+            return jsonify(_NODE_CONFIG_CACHE)
+
+        if _is_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
 
         rt = require_runtime()
-        diff_info = _get_difficulty_info()
-        block_time = _get_block_time_seconds()
+        valoper = find_local_operator_address()
+        valcons = find_local_consensus_address()
 
-        # Get current site's validator moniker
         validator_moniker = ""
         try:
-            valoper = find_local_operator_address()
             if valoper:
-                possible_paths = [
-                    "/opt/mirage/blockchain/bin/miraged",
-                    os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), "..", "..", "blockchain", "bin", "miraged")
-                    ),
-                    "miraged",
-                ]
-                bin_path = None
-                for path in possible_paths:
-                    if path == "miraged" or os.path.exists(path):
-                        bin_path = path
-                        break
-                if bin_path:
-                    cmd = [bin_path, "q", "staking", "validator", valoper, "--node", rt.rpc_url, "-o", "json"]
-                    out = subprocess.check_output(cmd, timeout=5, stderr=subprocess.DEVNULL).decode("utf-8")
-                    data = json.loads(out)
-                    validator_moniker = data.get("validator", {}).get("description", {}).get("moniker", "") or ""
+                val_info = _get_validator(valoper)
+                validator_moniker = val_info.get("moniker", "")
         except Exception:
             pass
 
         resp: Dict[str, Any] = {
-            # Chain params (static)
-            "max_username_size": max_username_size,
-            "min_username_size": min_username_size,
-            "max_topic_size": max_topic_size,
-            "min_topic_size": min_topic_size,
-            "subscription_period": subscription_period,
-            "mint_interval": mint_interval,
-            "block_time": block_time,
-            "pow_difficulty": int(diff_info.get("current_difficulty", 0)),
-            "pow_message_count": int(diff_info.get("pow_message_count", 0)),
-            "pow_calm_sequence": int(diff_info.get("consecutive_low_usage", 0)),
-            "pow_last_change_height": int(diff_info.get("last_change_height", 0)),
-            "current_height": int(diff_info.get("current_height", 0)),
-            "tiers": tiers,
-            # Validator info (static per node)
             "validator_account_address": rt.validator_payer_addr,
-            "validator_operator_address": find_local_operator_address(),
-            "validator_consensus_address": find_local_consensus_address(),
+            "validator_operator_address": valoper,
+            "validator_consensus_address": valcons,
             "validator_moniker": validator_moniker,
-            # Public API keys (for client-side features)
             "giphy_api_key": os.environ.get("REACT_APP_GIPHY_API_KEY", ""),
+            "registration_enabled": REGISTRATION_ENABLED,
+            "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
+            "quests_enabled": QUESTS_ENABLED,
+            "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
         }
-        log_event(rid, "get_config.ok")
-        out = jsonify(resp)
-        # Prevent browser/CDN caching: frontend already does its own localStorage caching and should
-        # be able to force-refresh tier pricing immediately after on-chain updates.
-        out.headers["Cache-Control"] = "no-store, max-age=0"
-        out.headers["Pragma"] = "no-cache"
-        out.headers["Expires"] = "0"
-        return out
+
+        _NODE_CONFIG_CACHE = resp
+        _NODE_CONFIG_CACHE_TIME = now
+
+        log_event(rid, "get_node_config.ok")
+        return jsonify(resp)
     except Exception as e:
-        log_event(rid, "get_config.err", error=str(e))
+        log_event(rid, "get_node_config.err", error=str(e))
         return safe_error(e)
 
 
@@ -5295,7 +5383,7 @@ def _get_stats_rewards(rid: int):
                 "first_reward_at": summary_row[6],
                 "last_reward_at": summary_row[7],
                 "pool_balance": pool_balance,
-                "payouts_enabled": distributor.is_configured(),
+                "quest_payouts_enabled": distributor.is_configured(),
             }
 
             # Calculate daily rate (last 7 days)

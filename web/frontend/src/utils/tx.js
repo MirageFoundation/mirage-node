@@ -86,9 +86,19 @@ export async function getPendingFollowInfo(type, target) {
     return h.getPendingFollowInfo(type, target);
 }
 
-export async function cacheConfigData(data) {
+export async function cacheChainConfig(data) {
     const h = await getHandler();
-    return h.cacheConfigData(data);
+    return h.cacheChainConfig(data);
+}
+
+export async function cacheNodeConfig(data) {
+    const h = await getHandler();
+    return h.cacheNodeConfig(data);
+}
+
+export async function cacheUserStatus(data) {
+    const h = await getHandler();
+    return h.cacheUserStatus(data);
 }
 
 // Transactional actions

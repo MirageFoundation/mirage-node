@@ -119,6 +119,15 @@ def run_one_time_migrations(config_dir: Path) -> int:
         logger.debug("No migrations found")
         return 0
 
+    # Fresh deployment: no .migrations file means templates already have correct
+    # defaults — mark all existing migrations as completed so they don't run.
+    migrations_file = get_migrations_file(config_dir)
+    if not migrations_file.exists():
+        logger.info("Fresh deployment detected (no .migrations file) — skipping all existing migrations")
+        for _, key, module in migrations:
+            mark_migration_complete(config_dir, key, "skipped (fresh deploy)")
+        return 0
+
     completed = get_completed_migrations(config_dir)
     pending = [(name, key, mod) for name, key, mod in migrations if key not in completed]
 

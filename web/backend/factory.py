@@ -76,12 +76,24 @@ def create_app(init_runtime: bool = True) -> Flask:
             import time as _time
             from routes.public import _inbox_cache, _get_new_inbox_count
 
+            client_seen = 0
+            try:
+                client_seen = int(request.args.get("inbox_last_viewed_at") or 0)
+            except Exception:
+                client_seen = 0
+
             # Check cache first to avoid opening a DB connection on every request
             viewer = addr.lower()
+            count = None
             cached = _inbox_cache.get(viewer)
             if cached and cached[1] > _time.time():
-                count = cached[0]
-            else:
+                cached_seen = cached[2] if len(cached) > 2 else 0
+                if not client_seen or cached_seen >= client_seen:
+                    count = cached[0]
+                else:
+                    _inbox_cache.pop(viewer, None)
+
+            if count is None:
                 from db import connect_db
 
                 conn = connect_db(timeout=3.0, busy_timeout_ms=5000)

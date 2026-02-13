@@ -254,14 +254,14 @@ class QuestTracker:
         """
         completed_count = self._get_completed_quest_count(owner)
         invite_earner_completed = self._get_invite_earner_completed_count(owner)
-        next_milestone = (invite_earner_completed + 1) * settings.INVITE_EARNER_QUEST_INTERVAL
+        next_milestone = (invite_earner_completed + 1) * settings.QUESTS_INVITE_EARNER_INTERVAL
 
         if completed_count < next_milestone:
             return False
 
         # 30% daily roll
         roll = self._deterministic_roll(owner, day_utc, "invite_earner")
-        return roll < settings.INVITE_EARNER_CHANCE
+        return roll < settings.QUESTS_INVITE_EARNER_CHANCE
 
     def _deterministic_roll(self, owner: str, day_utc: int, roll_type: str) -> float:
         """Generate a deterministic random value (0-1) based on owner, day, and roll type."""
@@ -283,8 +283,10 @@ class QuestTracker:
         # Check for invite_recruit eligibility (30% roll if user has unused codes)
         if not special_quest_assigned and self._has_unused_invite_codes(owner):
             roll = self._deterministic_roll(owner, day_utc, "invite_recruit")
-            logger.debug(f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.INVITE_RECRUIT_CHANCE})")
-            if roll < settings.INVITE_RECRUIT_CHANCE:
+            logger.debug(
+                f"invite_recruit roll for {owner}: {roll:.3f} (threshold: {settings.QUESTS_INVITE_RECRUIT_CHANCE})"
+            )
+            if roll < settings.QUESTS_INVITE_RECRUIT_CHANCE:
                 # Find invite_recruit in special quests
                 invite_recruit = next((q for q in self.special_quests if q.id == "invite_recruit"), None)
                 if invite_recruit:
@@ -303,7 +305,7 @@ class QuestTracker:
                     logger.info(f"Assigned special quest invite_earner to {owner} (completed {completed_count} quests)")
 
         # Fill remaining slots with random daily quests
-        remaining_slots = settings.DAILY_QUESTS_COUNT - len(quest_ids)
+        remaining_slots = settings.QUESTS_DAILY_COUNT - len(quest_ids)
         if remaining_slots > 0 and self.daily_quests:
             count = min(remaining_slots, len(self.daily_quests))
             selected = random.sample(self.daily_quests, count)
@@ -412,7 +414,7 @@ class QuestTracker:
         # New user check: if no next_flash_at record exists (returns 0),
         # initialize it with minimum interval delay so new users don't get flash quests immediately
         if next_flash_at == 0:
-            initial_delay = settings.FLASH_QUEST_MIN_INTERVAL_HOURS * 3600
+            initial_delay = settings.QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600
             self._set_next_flash_time(owner, ts + initial_delay)
             logger.info(f"New user {owner}: initialized flash quest delay to {initial_delay}s")
             return None
@@ -439,8 +441,8 @@ class QuestTracker:
                 )
 
         # Schedule next flash quest (random interval between MIN and MAX hours)
-        min_hours = settings.FLASH_QUEST_MIN_INTERVAL_HOURS
-        max_hours = settings.FLASH_QUEST_MAX_INTERVAL_HOURS
+        min_hours = settings.QUESTS_FLASH_MIN_INTERVAL_HOURS
+        max_hours = settings.QUESTS_FLASH_MAX_INTERVAL_HOURS
         next_interval_seconds = random.randint(min_hours * 3600, max_hours * 3600)
         self._set_next_flash_time(owner, ts + next_interval_seconds)
 

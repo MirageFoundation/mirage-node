@@ -1107,45 +1107,53 @@ class TransactionHandler {
         return 1;
     }
 
-    cacheConfigData(data) {
+    /**
+     * Cache chain governance params (from get_chain_config).
+     * Stored in localStorage as 'chainConfig'.
+     */
+    cacheChainConfig(data) {
         if (!data || typeof data !== 'object') return;
+        try {
+            localStorage.setItem('chainConfig', JSON.stringify(data));
+            Storage.save('chain_config_cached_at', String(Date.now()));
+        } catch (_) { }
+        console.debug('[TransactionHandler] cacheChainConfig', { keys: Object.keys(data) });
+        window.dispatchEvent(new Event('chainConfigUpdated'));
+    }
 
+    /**
+     * Cache per-node static settings (from get_node_config).
+     * Stored in localStorage as 'nodeConfig'.
+     */
+    cacheNodeConfig(data) {
+        if (!data || typeof data !== 'object') return;
+        try {
+            localStorage.setItem('nodeConfig', JSON.stringify(data));
+            Storage.save('node_config_cached_at', String(Date.now()));
+        } catch (_) { }
+        console.debug('[TransactionHandler] cacheNodeConfig', { keys: Object.keys(data) });
+        window.dispatchEvent(new Event('nodeConfigUpdated'));
+    }
+
+    /**
+     * Cache user-specific data (from get_user_status).
+     * Each field stored in its own key — no monolithic blob.
+     */
+    cacheUserStatus(data) {
+        if (!data || typeof data !== 'object') return;
         if (data.username !== undefined) Storage.save('username', data.username);
         if (data.user_level !== undefined && data.user_level !== null) Storage.save('user_level', String(data.user_level));
-        // Store numeric params directly without JSON.stringify (chainParams.js reads with localStorage.getItem)
-        if (data.max_username_size !== undefined) localStorage.setItem('max_username_size', String(data.max_username_size));
-        if (data.min_username_size !== undefined) localStorage.setItem('min_username_size', String(data.min_username_size));
-        if (data.max_topic_size !== undefined) localStorage.setItem('max_topic_size', String(data.max_topic_size));
-        if (data.validator_account_address !== undefined) Storage.save('validator_account_address', data.validator_account_address);
-        if (data.validator_operator_address !== undefined) Storage.save('validator_operator_address', data.validator_operator_address);
-        if (data.validator_consensus_address !== undefined) Storage.save('validator_consensus_address', data.validator_consensus_address);
         if (data.server_balance !== undefined) Storage.save('server_balance', String(data.server_balance));
-        // Handle both 'balance' (from get_user_status) and 'user_balance' (legacy)
         const balanceVal = data.balance !== undefined ? data.balance : data.user_balance;
         if (balanceVal !== undefined) {
             this._persistUserBalance(balanceVal);
         }
-        if (data.block_time !== undefined) Storage.save('block_time_seconds', String(data.block_time));
-        if (data.pow_difficulty !== undefined) Storage.save('pow_difficulty_cached', String(data.pow_difficulty));
-        Storage.save('config_cached_at', String(Date.now()));
-
-        // Merge into cached config JSON (static config + user status)
-        let merged = data;
-        try {
-            const existingRaw = localStorage.getItem('configData');
-            if (existingRaw) {
-                const existing = JSON.parse(existingRaw);
-                if (existing && typeof existing === 'object') {
-                    merged = { ...existing, ...data };
-                }
-            }
-        } catch (_) {
-            merged = data;
-        }
-        localStorage.setItem('configData', JSON.stringify(merged));
-
-        // Dispatch event to notify other components
-        window.dispatchEvent(new Event('configUpdated'));
+        console.debug('[TransactionHandler] cacheUserStatus', {
+            hasUsername: data.username !== undefined,
+            userLevel: data.user_level ?? null,
+            hasBalance: balanceVal !== undefined,
+        });
+        window.dispatchEvent(new Event('userStatusUpdated'));
     }
 
     createVote(parentId, direction) {

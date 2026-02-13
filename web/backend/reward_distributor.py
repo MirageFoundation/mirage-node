@@ -4,10 +4,10 @@ Reward Distributor
 Handles distribution of MIRAGE token rewards from the rewards pool to users.
 
 Configuration (via environment variables):
-- REWARDS_POOL_ADDRESS: The address holding reward tokens
-- PAYOUTS_ENABLED: Set to "true" to enable actual token transfers (default: false)
+- QUESTS_REWARDS_POOL_ADDRESS: The address holding reward tokens
+- QUESTS_PAYOUTS_ENABLED: Set to "true" to enable actual token transfers (default: false)
 
-When PAYOUTS_ENABLED != "true", rewards are logged but not sent.
+When QUESTS_PAYOUTS_ENABLED != "true", rewards are logged but not sent.
 This allows testing the full flow without requiring a funded rewards pool.
 
 To set up the rewards pool:
@@ -16,7 +16,7 @@ To set up the rewards pool:
 2. Get the address:
    miraged keys show rewards_pool --keyring-backend test -a
 3. Fund the address (governance proposal or direct transfer)
-4. Set REWARDS_POOL_ADDRESS and PAYOUTS_ENABLED=true in environment
+4. Set QUESTS_REWARDS_POOL_ADDRESS and QUESTS_PAYOUTS_ENABLED=true in environment
 """
 
 from __future__ import annotations
@@ -84,8 +84,8 @@ def _generate_unique_invite_codes(owner: str, count: int) -> List[str]:
 
 
 # Configuration from environment
-REWARDS_POOL_ADDRESS = os.environ.get("REWARDS_POOL_ADDRESS", "")
-PAYOUTS_ENABLED = os.environ.get("PAYOUTS_ENABLED", "").lower() == "true"
+QUESTS_REWARDS_POOL_ADDRESS = os.environ.get("QUESTS_REWARDS_POOL_ADDRESS", "")
+QUESTS_PAYOUTS_ENABLED = os.environ.get("QUESTS_PAYOUTS_ENABLED", "").lower() == "true"
 
 # Node configuration
 NODE_HOME = os.environ.get("NODE_HOME", os.path.expanduser("~/.mirage/node"))
@@ -225,11 +225,11 @@ class RewardDistributor:
             pool_address: Override rewards pool address (uses env var if not provided)
             enabled: Override enabled flag (uses env var if not provided)
         """
-        self.pool_address = pool_address or REWARDS_POOL_ADDRESS
-        self.enabled = enabled if enabled is not None else PAYOUTS_ENABLED
+        self.pool_address = pool_address or QUESTS_REWARDS_POOL_ADDRESS
+        self.enabled = enabled if enabled is not None else QUESTS_PAYOUTS_ENABLED
 
         if self.enabled and not self.pool_address:
-            logger.warning("PAYOUTS_ENABLED is true but REWARDS_POOL_ADDRESS is not set")
+            logger.warning("QUESTS_PAYOUTS_ENABLED is true but QUESTS_REWARDS_POOL_ADDRESS is not set")
             self.enabled = False
 
     def is_configured(self) -> bool:

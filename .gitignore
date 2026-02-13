@@ -83,6 +83,7 @@ scripts/*
 !scripts/verify_upgrade.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
+!scripts/assign_all_quests.py
 
 cursor.md.cursor/
 .cursor/

@@ -547,22 +547,15 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch chain params if not cached, corrupted, or stale (> 24h)
+        // Fetch node config if not cached or stale (> 24h)
+        // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
         try {
-            const lastCfgAt = Number(Storage.load('config_cached_at', '0') || 0);
             const nowMs = Date.now();
-            const isStale = !lastCfgAt || (nowMs - lastCfgAt) > 86400_000;
-
-            // Check if params are valid (not just present but parseable)
-            const hasValidParams = getMaxUsernameSize() !== null;
-
-            if (!hasValidParams || isStale) {
-                Api.get('get_config', undefined, { timeoutMs: 10000 })
-                    .then((cfg) => {
-                        if (!cfg) return;
-                        try { tx.cacheConfigData(cfg); } catch (_) { }
-                        Storage.save('config_cached_at', String(nowMs));
-                    })
+            const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
+            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 86400_000;
+            if (nodeStale) {
+                Api.get('get_node_config', undefined, { timeoutMs: 10000 })
+                    .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })
                     .catch(() => { });
             }
         } catch (_) { }
@@ -634,8 +627,10 @@ class App extends Component {
         }
 
         // Clear old cached data (from previous wallet)
-        Storage.remove('configData');
-        Storage.remove('config_cached_at');
+        Storage.remove('chainConfig');
+        Storage.remove('nodeConfig');
+        Storage.remove('chain_config_cached_at');
+        Storage.remove('node_config_cached_at');
         Storage.remove('user_balance');
         Storage.remove('profile_followed_cache');
         Storage.remove('profile_no_cache_until');
@@ -643,16 +638,8 @@ class App extends Component {
         // Fetch latest status on login
         try {
             if (publicKey) {
-                // Fetch static config (cached 24h)
-                Api.get('get_config', undefined, { timeoutMs: 10000 })
-                    .then((cfg) => {
-                        if (!cfg) return;
-                        try { tx.cacheConfigData(cfg); } catch (_) { }
-                        Storage.save('config_cached_at', String(Date.now()));
-                    })
-                    .catch((err) => {
-                        console.error('[App] Config fetch failed:', err);
-                    });
+                // Node config already fetched by componentDidMount; no need to re-fetch on login.
+                // Chain config fetched lazily by views that need it.
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
                 Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 })
@@ -662,8 +649,8 @@ class App extends Component {
                             return;
                         }
 
-                        // Cache user data via facade
-                        try { tx.cacheConfigData(userStatus); } catch (_) { }
+                        // Cache user data
+                        try { tx.cacheUserStatus(userStatus); } catch (_) { }
 
                         // Update username in state if returned from backend
                         if (typeof userStatus.username === 'string' && userStatus.username) {
