@@ -745,7 +745,6 @@ npm run build
 ```bash
 REACT_APP_VERSION       # App version string
 REACT_APP_BUILD_ID      # Build identifier
-REACT_APP_API_BASE      # API base URL (optional, defaults to /api)
 ```
 
 ### Deployment

@@ -149,20 +149,23 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
     """Assign a flash quest if eligible. Returns the quest data or None."""
     if not flash_defs:
         return None
+    if QUESTS_FLASH_COUNT <= 0:
+        return None
 
-    # Check if user already has an active flash quest
+    # Check if user already has the max number of active flash quests
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT 1 FROM user_flash_quests
+                SELECT COUNT(1)
+                FROM user_flash_quests
                 WHERE LOWER(owner) = LOWER(%s) AND ends_at > %s
-                LIMIT 1
                 """,
                 (owner, ts),
             )
-            if cur.fetchone():
-                return None  # Already has an active quest
+            active_count = int((cur.fetchone() or [0])[0] or 0)
+            if active_count >= QUESTS_FLASH_COUNT:
+                return None  # Already has max active quests
 
     # Check if enough time has passed since last flash quest
     next_flash_at = _get_next_flash_time(owner)
@@ -197,7 +200,9 @@ def _maybe_assign_flash_quest(owner: str, ts: int, flash_defs: Dict[str, Any]) -
             )
 
     # Schedule next flash quest (random interval between MIN and MAX hours)
-    next_interval_seconds = random.randint(QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600, QUESTS_FLASH_MAX_INTERVAL_HOURS * 3600)
+    next_interval_seconds = random.randint(
+        QUESTS_FLASH_MIN_INTERVAL_HOURS * 3600, QUESTS_FLASH_MAX_INTERVAL_HOURS * 3600
+    )
     _set_next_flash_time(owner, ts + next_interval_seconds)
 
     return {
