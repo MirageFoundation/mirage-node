@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Optional, List, Tuple
 
-import grpc as _grpc
 from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2 as bank_query_pb2
 from cosmpy.protos.cosmos.bank.v1beta1 import query_pb2_grpc as bank_query_pb2_grpc
 
-from node import require_runtime
+from node import get_grpc_channel
 
 
 # Validator info cache (moniker, tokens, status) — keyed by valoper address.
@@ -18,16 +17,14 @@ def get_balance(address: Optional[str]) -> int:
     if not address:
         return 0
     try:
-        target = require_runtime().grpc_target
-        with _grpc.insecure_channel(target) as ch:
-            stub = bank_query_pb2_grpc.QueryStub(ch)
-            req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
-            resp = stub.Balance(req)
-            amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
-            try:
-                return int(amt)
-            except Exception:
-                return 0
+        stub = bank_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = bank_query_pb2.QueryBalanceRequest(address=str(address), denom="umirage")
+        resp = stub.Balance(req)
+        amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
+        try:
+            return int(amt)
+        except Exception:
+            return 0
     except Exception:
         return 0
 
@@ -35,16 +32,14 @@ def get_balance(address: Optional[str]) -> int:
 def get_total_supply() -> int:
     """Get total supply of umirage tokens from the chain."""
     try:
-        target = require_runtime().grpc_target
-        with _grpc.insecure_channel(target) as ch:
-            stub = bank_query_pb2_grpc.QueryStub(ch)
-            req = bank_query_pb2.QuerySupplyOfRequest(denom="umirage")
-            resp = stub.SupplyOf(req)
-            amt = (resp.amount.amount if resp and resp.amount else "0") or "0"
-            try:
-                return int(amt)
-            except Exception:
-                return 0
+        stub = bank_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = bank_query_pb2.QuerySupplyOfRequest(denom="umirage")
+        resp = stub.SupplyOf(req)
+        amt = (resp.amount.amount if resp and resp.amount else "0") or "0"
+        try:
+            return int(amt)
+        except Exception:
+            return 0
     except Exception:
         return 0
 
@@ -52,18 +47,16 @@ def get_total_supply() -> int:
 def get_balances_batch(addresses: List[str]) -> List[Tuple[str, int]]:
     """Get balances for multiple addresses. Returns list of (address, balance) tuples."""
     results = []
-    target = require_runtime().grpc_target
     try:
-        with _grpc.insecure_channel(target) as ch:
-            stub = bank_query_pb2_grpc.QueryStub(ch)
-            for addr in addresses:
-                try:
-                    req = bank_query_pb2.QueryBalanceRequest(address=str(addr), denom="umirage")
-                    resp = stub.Balance(req)
-                    amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
-                    results.append((addr, int(amt)))
-                except Exception:
-                    results.append((addr, 0))
+        stub = bank_query_pb2_grpc.QueryStub(get_grpc_channel())
+        for addr in addresses:
+            try:
+                req = bank_query_pb2.QueryBalanceRequest(address=str(addr), denom="umirage")
+                resp = stub.Balance(req)
+                amt = (resp.balance.amount if resp and resp.balance else "0") or "0"
+                results.append((addr, int(amt)))
+            except Exception:
+                results.append((addr, 0))
     except Exception:
         for addr in addresses:
             results.append((addr, 0))
@@ -78,18 +71,16 @@ def get_staked_balance(address: Optional[str]) -> int:
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
 
-        target = require_runtime().grpc_target
         total = 0
-        with _grpc.insecure_channel(target) as ch:
-            stub = staking_query_pb2_grpc.QueryStub(ch)
-            req = staking_query_pb2.QueryDelegatorDelegationsRequest(delegator_addr=str(address))
-            resp = stub.DelegatorDelegations(req)
-            for dr in resp.delegation_responses or []:
-                amt = (dr.balance.amount if dr and dr.balance else "0") or "0"
-                try:
-                    total += int(amt)
-                except (ValueError, TypeError):
-                    pass
+        stub = staking_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = staking_query_pb2.QueryDelegatorDelegationsRequest(delegator_addr=str(address))
+        resp = stub.DelegatorDelegations(req)
+        for dr in resp.delegation_responses or []:
+            amt = (dr.balance.amount if dr and dr.balance else "0") or "0"
+            try:
+                total += int(amt)
+            except (ValueError, TypeError):
+                pass
         return total
     except Exception:
         return 0
@@ -112,21 +103,19 @@ def get_validator(valoper: str) -> dict:
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2 as staking_query_pb2
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
 
-        target = require_runtime().grpc_target
-        with _grpc.insecure_channel(target) as ch:
-            stub = staking_query_pb2_grpc.QueryStub(ch)
-            req = staking_query_pb2.QueryValidatorRequest(validator_addr=str(valoper))
-            resp = stub.Validator(req)
-            v = resp.validator
-            if not v:
-                return {}
-            result = {
-                "moniker": v.description.moniker if v.description else "",
-                "tokens": str(v.tokens) if v.tokens else "0",
-                "status": int(v.status),
-            }
-            _VALIDATOR_CACHE[valoper] = result
-            return result
+        stub = staking_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = staking_query_pb2.QueryValidatorRequest(validator_addr=str(valoper))
+        resp = stub.Validator(req)
+        v = resp.validator
+        if not v:
+            return {}
+        result = {
+            "moniker": v.description.moniker if v.description else "",
+            "tokens": str(v.tokens) if v.tokens else "0",
+            "status": int(v.status),
+        }
+        _VALIDATOR_CACHE[valoper] = result
+        return result
     except Exception:
         return {}
 
@@ -141,23 +130,21 @@ def get_all_validators() -> list[dict]:
         from cosmpy.protos.cosmos.staking.v1beta1 import query_pb2_grpc as staking_query_pb2_grpc
         import base64
 
-        target = require_runtime().grpc_target
         results = []
-        with _grpc.insecure_channel(target) as ch:
-            stub = staking_query_pb2_grpc.QueryStub(ch)
-            req = staking_query_pb2.QueryValidatorsRequest()
-            resp = stub.Validators(req)
-            for v in resp.validators or []:
-                pubkey_b64 = ""
-                if v.consensus_pubkey and v.consensus_pubkey.value:
-                    # The value is a protobuf-encoded ed25519 key; extract raw bytes
-                    raw = v.consensus_pubkey.value
-                    # Skip the protobuf prefix (first 2 bytes: field tag + length)
-                    if len(raw) > 2:
-                        pubkey_b64 = base64.b64encode(raw[2:]).decode("ascii")
-                moniker = v.description.moniker if v.description else ""
-                if pubkey_b64 and moniker:
-                    results.append({"consensus_pubkey": pubkey_b64, "moniker": moniker})
+        stub = staking_query_pb2_grpc.QueryStub(get_grpc_channel())
+        req = staking_query_pb2.QueryValidatorsRequest()
+        resp = stub.Validators(req)
+        for v in resp.validators or []:
+            pubkey_b64 = ""
+            if v.consensus_pubkey and v.consensus_pubkey.value:
+                # The value is a protobuf-encoded ed25519 key; extract raw bytes
+                raw = v.consensus_pubkey.value
+                # Skip the protobuf prefix (first 2 bytes: field tag + length)
+                if len(raw) > 2:
+                    pubkey_b64 = base64.b64encode(raw[2:]).decode("ascii")
+            moniker = v.description.moniker if v.description else ""
+            if pubkey_b64 and moniker:
+                results.append({"consensus_pubkey": pubkey_b64, "moniker": moniker})
         return results
     except Exception:
         return []

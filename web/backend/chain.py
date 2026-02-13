@@ -18,10 +18,10 @@ import re
 import time
 from typing import Any, Dict, Optional
 
-import grpc as _grpc
+
 from google.protobuf.json_format import MessageToDict
 
-from node import require_runtime
+from node import require_runtime, get_grpc_channel
 from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
 
@@ -40,14 +40,13 @@ def _query_difficulty(timeout: float = 3.0) -> Dict[str, Any]:
         msg.ParseFromString(data)
         return msg
 
-    target = require_runtime().grpc_target
-    with _grpc.insecure_channel(target) as channel:
-        method = channel.unary_unary(
-            "/mirage.core.v1.Query/GetDifficulty",
-            request_serializer=lambda msg: msg.SerializeToString(),
-            response_deserializer=_deserialize,
-        )
-        resp = method(QueryDifficultyRequest(), timeout=timeout)
+    ch = get_grpc_channel()
+    method = ch.unary_unary(
+        "/mirage.core.v1.Query/GetDifficulty",
+        request_serializer=lambda msg: msg.SerializeToString(),
+        response_deserializer=_deserialize,
+    )
+    resp = method(QueryDifficultyRequest(), timeout=timeout)
     return MessageToDict(resp, preserving_proto_field_name=True, always_print_fields_with_no_presence=True)
 
 

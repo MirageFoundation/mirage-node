@@ -144,7 +144,7 @@ function CreateAccountView({ state, setCredentials }) {
         if (nodeConfig) return;
         (async () => {
             try {
-                const cfg = await Api.get('get_config', { _cb: Date.now() }, { timeoutMs: 10000 });
+                const cfg = await Api.get('get_config', undefined, { timeoutMs: 10000 });
                 if (!cfg || typeof cfg !== 'object') return;
                 try { await tx.cacheConfigData(cfg); } catch (_) { }
             } catch (_) { }
