@@ -46,8 +46,10 @@ import urllib.error
 import urllib.request
 
 
-# Current upgrade being verified (set via --upgrade or defaults to latest)
-UPGRADE_NAME = "v1.10.8"
+# Current release being verified (set via --upgrade or defaults to latest)
+# NOTE: UPGRADE_NAME is the last *chain* upgrade (on-chain governance proposal).
+# v1.10.8 is a services-only release (Python/JS) — no new chain upgrade.
+UPGRADE_NAME = "v1.10.7"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
 EXPECTED_VERSION = "v1.10.8"
 
@@ -78,7 +80,6 @@ ALL_UPGRADES = [
     "v1.10.4-restore-sdk",
     "v1.10.5",
     "v1.10.7",
-    "v1.10.8",
 ]
 
 # Repo root (scripts/ is one level below)
