@@ -397,8 +397,8 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
-# ---- Inbox count cache (60s TTL per address) ----
-_inbox_cache: dict[str, tuple[int, float]] = {}
+# ---- Inbox count cache (60s TTL per address; stores count + last_viewed_at) ----
+_inbox_cache: dict[str, tuple[int, float, int]] = {}
 _INBOX_CACHE_TTL = 60.0
 _INBOX_CACHE_MAX = 10000
 
@@ -416,23 +416,29 @@ def _get_new_inbox_count(cur, address: str) -> int:
     if cached and cached[1] > now:
         return cached[0]
 
+    last_seen = 0
     try:
         cur.execute(
             """
-            SELECT COUNT(*)
-            FROM posts r
-            JOIN posts p ON r.target = p.txhash
-            JOIN profiles pr ON LOWER(pr.owner) = %s
-            WHERE LOWER(p.owner) = %s
-              AND LOWER(r.owner) != %s
-              AND r.deleted = FALSE
-              AND r.created_at > pr.inbox_last_viewed_at
+            SELECT pr.inbox_last_viewed_at,
+                   COUNT(r.txhash)
+            FROM profiles pr
+            LEFT JOIN posts p ON LOWER(p.owner) = LOWER(pr.owner)
+            LEFT JOIN posts r
+              ON r.target = p.txhash
+             AND LOWER(r.owner) != LOWER(pr.owner)
+             AND r.deleted = FALSE
+             AND r.created_at > pr.inbox_last_viewed_at
+            WHERE LOWER(pr.owner) = %s
+            GROUP BY pr.inbox_last_viewed_at
             """,
-            (viewer, viewer, viewer),
+            (viewer,),
         )
         row = cur.fetchone()
-        count = int(row[0]) if row and row[0] else 0
+        last_seen = int(row[0]) if row and row[0] else 0
+        count = int(row[1]) if row and row[1] else 0
     except Exception:
+        last_seen = 0
         count = 0
 
     # Evict expired entries if cache is too large
@@ -444,7 +450,7 @@ def _get_new_inbox_count(cur, address: str) -> int:
         if len(_inbox_cache) >= _INBOX_CACHE_MAX:
             _inbox_cache.clear()
 
-    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL)
+    _inbox_cache[viewer] = (count, now + _INBOX_CACHE_TTL, last_seen)
     return count
 
 
