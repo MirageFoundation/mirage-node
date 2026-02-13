@@ -112,18 +112,24 @@ function CreateAccountView({ state, setCredentials }) {
     const location = useLocation();
 
     // Read node config from localStorage (set by get_config API)
+    // Both fields must be explicitly present (boolean) — no silent defaults.
     const nodeConfig = React.useMemo(() => {
         try {
             const raw = localStorage.getItem('configData');
             if (raw) {
                 const parsed = JSON.parse(raw);
-                return parsed.node || {};
+                const node = parsed.node;
+                if (node &&
+                    typeof node.registration_enabled === 'boolean' &&
+                    typeof node.registration_invite_code_required === 'boolean') {
+                    return node;
+                }
             }
         } catch (_) { }
-        return {};
+        return null;  // null = config not loaded
     }, []);
-    const registrationEnabled = nodeConfig.registration_enabled !== false;
-    const inviteCodeRequired = nodeConfig.registration_invite_code_required === true;
+    const registrationEnabled = nodeConfig ? nodeConfig.registration_enabled : false;
+    const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
@@ -267,16 +273,6 @@ function CreateAccountView({ state, setCredentials }) {
         const base = (usernameInput || "").trim();
         if (!base) return;
 
-        // Validate invite code format (must be XXXX-XXXX)
-        const codeClean = (inviteCode || "").trim().toUpperCase();
-        if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
-            setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
-            const until = Date.now() + 1000;
-            setCooldownUntil(until);
-            setTimeout(() => setCooldownUntil(0), 1000);
-            return;
-        }
-
         const usernameFinal = `Anon-${base}`;
 
         // Validate username length (use defaults if params not cached yet)
@@ -297,15 +293,27 @@ function CreateAccountView({ state, setCredentials }) {
             return;
         }
 
-        // Validate invite code with backend
-        setSubmitError("");
-        const inviteRes = await validateInviteCode(codeClean);
-        if (!inviteRes || !inviteRes.valid) {
-            setSubmitError(inviteRes?.error || "Invalid invite code");
-            const until = Date.now() + 1000;
-            setCooldownUntil(until);
-            setTimeout(() => setCooldownUntil(0), 1000);
-            return;
+        // Validate invite code only when required by node config
+        let codeClean = null;
+        if (inviteCodeRequired) {
+            codeClean = (inviteCode || "").trim().toUpperCase();
+            if (!codeClean || codeClean.length !== 9 || codeClean[4] !== '-') {
+                setSubmitError("Please enter a valid invite code (format: XXXX-XXXX)");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
+
+            setSubmitError("");
+            const inviteRes = await validateInviteCode(codeClean);
+            if (!inviteRes || !inviteRes.valid) {
+                setSubmitError(inviteRes?.error || "Invalid invite code");
+                const until = Date.now() + 1000;
+                setCooldownUntil(until);
+                setTimeout(() => setCooldownUntil(0), 1000);
+                return;
+            }
         }
 
         // Preflight: ensure username is still available
@@ -411,6 +419,34 @@ function CreateAccountView({ state, setCredentials }) {
     };
 
     const usernameFinal = (usernameInput || "").trim();
+
+    // Node config must be loaded before we can show anything
+    if (!nodeConfig) {
+        return (
+            <ContentGrid>
+                <Helmet>
+                    <title>Create Account | Mirage</title>
+                </Helmet>
+                <Sidebar currentPath={location.pathname} state={state} />
+                <div>
+                    <TopBar state={state} />
+                    <ModernPostFeed>
+                        <MobileHeader />
+                        <AuthPageShell activeTab="create">
+                            <Centered>
+                                <StyledInfo>
+                                    <WelcomeTitle>Loading...</WelcomeTitle>
+                                    <IntroP>
+                                        Unable to load node configuration. Please refresh the page.
+                                    </IntroP>
+                                </StyledInfo>
+                            </Centered>
+                        </AuthPageShell>
+                    </ModernPostFeed>
+                </div>
+            </ContentGrid>
+        );
+    }
 
     // If registration is disabled on this node, show unavailable message
     if (!registrationEnabled) {

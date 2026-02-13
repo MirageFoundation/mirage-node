@@ -17,6 +17,7 @@ from typing import Any, Dict
 import time
 
 from flask import Blueprint, jsonify, request
+from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED
 from google.protobuf.any_pb2 import Any as AnyPB
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, Fee, TxRaw, SignerInfo, ModeInfo
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
@@ -567,9 +568,6 @@ def core_set_username():
         invite_code = str(data.get("invite_code", "")).strip().upper()
 
         # Check if this is a new user (no existing profile/username)
-        REGISTRATION_ENABLED = os.environ.get("REGISTRATION_ENABLED", "").lower() == "true"
-        REGISTRATION_INVITE_CODE_REQUIRED = os.environ.get("REGISTRATION_INVITE_CODE_REQUIRED", "").lower() == "true"
-
         if not REGISTRATION_ENABLED or REGISTRATION_INVITE_CODE_REQUIRED:
             is_new_user = False
             try:
