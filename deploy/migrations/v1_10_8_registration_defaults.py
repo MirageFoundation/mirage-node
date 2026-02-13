@@ -1,5 +1,5 @@
 """
-Migration: v1.11.1 - Set registration defaults per node
+Migration: v1.10.8 - Set registration defaults per node
 
 Sets registration env vars based on the node's domain:
 - mirage.talk: registration ON, invite codes REQUIRED
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from deploy.migrations._helpers import parse_env_file, update_env_value
 
-MIGRATION_KEY = "v1_11_1_registration_defaults"
+MIGRATION_KEY = "v1_10_8_registration_defaults"
 DESCRIPTION = "Set registration enabled/invite codes per node domain"
 
 # Only this domain gets registration enabled
