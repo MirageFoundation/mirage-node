@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, memo } from "react";
+import React, { useEffect, useState, useRef, memo, useMemo } from "react";
 import ReactDOM from "react-dom";
 import styled, { useTheme } from "styled-components"
 import { Link, useNavigate } from 'react-router-dom';
@@ -905,6 +905,7 @@ const markViewPostOpenedFromFeed = () => {
 function CardView({ state, post, updatePost, showContent = false, footer = null }) {
     const navigate = useNavigate();
     const theme = useTheme();
+    const [nodeConfigTick, setNodeConfigTick] = useState(0);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [confirmSuspendQuests, setConfirmSuspendQuests] = useState(false);
@@ -935,6 +936,24 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [tierTooltipPosition, setTierTooltipPosition] = useState({ top: 0, left: 0 });
     const [tierTooltipText, setTierTooltipText] = useState('');
     const authorRef = useRef(null);
+
+    useEffect(() => {
+        const handler = () => setNodeConfigTick(prev => prev + 1);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
+    }, []);
+
+    const nodeConfig = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }, [nodeConfigTick]);
+
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);
@@ -1115,7 +1134,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     };
 
     const fetchUserSuspensionStatus = async (userId) => {
-        if (!userId) return;
+        if (!userId || !questsEnabled) {
+            setUserSuspendedStatus(null);
+            return;
+        }
         try {
             const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
             setUserSuspendedStatus(response.suspended === true);
@@ -1973,7 +1995,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             left: rect.right - 180 // 180 is min-width of dropdown
                                         });
                                         // Fetch suspension status for admins
-                                        if (isAdmin && post?.user_id) {
+                                        if (isAdmin && post?.user_id && questsEnabled) {
                                             setUserSuspendedStatus(null); // Reset while loading
                                             fetchUserSuspensionStatus(post.user_id);
                                         }
@@ -2020,10 +2042,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     {!isOwnPost && isAdmin && (
                                         <>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDeletePost(); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                                            {userSuspendedStatus !== true && (
+                                            {questsEnabled && userSuspendedStatus !== true && (
                                                 <MenuItem onClick={(e) => { e.stopPropagation(); handleSuspendFromQuests(); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
                                             )}
-                                            {userSuspendedStatus === true && (
+                                            {questsEnabled && userSuspendedStatus === true && (
                                                 <MenuItem onClick={(e) => { e.stopPropagation(); handleUnsuspendFromQuests(); }}>🛡️ Unsuspend from quests</MenuItem>
                                             )}
                                         </>
