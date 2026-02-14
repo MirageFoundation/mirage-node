@@ -998,6 +998,22 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	return &types.MsgUpdateParamsResponse{}, nil
 }
 
+// validateMsgPostMedia validates the media field constraints
+func validateMsgPostMedia(media []string) error {
+	if len(media) > 10 {
+		return fmt.Errorf("media exceeds limit: %d > 10", len(media))
+	}
+	for i, mediaItem := range media {
+		if len(mediaItem) > 2048 {
+			return fmt.Errorf("media[%d] exceeds length limit: %d > 2048", i, len(mediaItem))
+		}
+		if !strings.HasPrefix(mediaItem, "https://") {
+			return fmt.Errorf("media[%d] must use https://", i)
+		}
+	}
+	return nil
+}
+
 // Post handler accepts MsgPost and returns empty response.
 func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -1056,16 +1072,8 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	// Validate media field (v1.12.0)
-	if len(req.GetMedia()) > 10 {
-		return nil, fmt.Errorf("media exceeds limit: %d > 10", len(req.GetMedia()))
-	}
-	for i, mediaItem := range req.GetMedia() {
-		if len(mediaItem) > 2048 {
-			return nil, fmt.Errorf("media[%d] exceeds length limit: %d > 2048", i, len(mediaItem))
-		}
-		if !strings.HasPrefix(mediaItem, "https://") {
-			return nil, fmt.Errorf("media[%d] must use https://", i)
-		}
+	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
+		return nil, err
 	}
 
 	// Get user level for tier-based limits (only need Level from profile)

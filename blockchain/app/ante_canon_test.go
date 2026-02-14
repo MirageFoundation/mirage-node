@@ -39,6 +39,9 @@ func populateFields(t *testing.T, obj interface{}) {
 		case reflect.Slice:
 			if field.Type().Elem().Kind() == reflect.Uint8 { // []byte
 				field.SetBytes([]byte(fmt.Sprintf("%s_bytes", fieldName)))
+			} else if field.Type().Elem().Kind() == reflect.String { // []string
+				s := []string{fmt.Sprintf("%s_1", fieldName), fmt.Sprintf("%s_2", fieldName)}
+				field.Set(reflect.ValueOf(s))
 			}
 		}
 	}
@@ -83,6 +86,14 @@ func verifyCanon(t *testing.T, obj interface{}, canon []byte, ignoredFields ...s
 				b := field.Bytes()
 				search = b
 				valStr = string(b)
+			} else if field.Type().Elem().Kind() == reflect.String {
+				s := field.Interface().([]string)
+				for _, item := range s {
+					if !bytes.Contains(canon, []byte(item)) {
+						t.Errorf("Field %s item (%s) missing from canonical bytes", fieldName, item)
+					}
+				}
+				continue
 			}
 		case reflect.Uint64:
 			u := field.Uint()
