@@ -877,15 +877,19 @@ def test_account(backend: str):
         _fail("account.set_username succeeds", str(e))
         return
 
+    # The chain prefixes free-tier (level 0) usernames with "Anon-"
+    user_level = int((us or {}).get("user_level", 0))
+    expected_uname = f"Anon-{test_uname}" if user_level == 0 else test_uname
+
     # 2.4 get_address_from_username resolves (poll up to 10s)
     resolved = None
     for _ in range(10):
         time.sleep(1)
-        resolved = get_address_from_username(backend, test_uname)
+        resolved = get_address_from_username(backend, expected_uname)
         if resolved and resolved.lower() == addr.lower():
             break
     if resolved and resolved.lower() == addr.lower():
-        _pass("account.get_address_from_username resolves")
+        _pass("account.get_address_from_username resolves", username=expected_uname)
     else:
         _fail("account.get_address_from_username resolves", f"got {resolved}")
 
@@ -894,19 +898,19 @@ def test_account(backend: str):
     for _ in range(10):
         time.sleep(1)
         resolved_name = get_username_from_address(backend, addr)
-        if resolved_name and resolved_name.lower() == test_uname.lower():
+        if resolved_name and resolved_name.lower() == expected_uname.lower():
             break
-    if resolved_name and resolved_name.lower() == test_uname.lower():
-        _pass("account.get_username_from_address resolves")
+    if resolved_name and resolved_name.lower() == expected_uname.lower():
+        _pass("account.get_username_from_address resolves", username=resolved_name)
     else:
         _fail("account.get_username_from_address resolves", f"got {resolved_name}")
 
     # 2.6 search_username finds user
-    code, sr = _get(f"{backend}/api/search_username", {"q": test_uname[:5]})
+    code, sr = _get(f"{backend}/api/search_username", {"q": expected_uname[:8]})
     if code == 200:
         results = sr.get("results") or sr.get("users") or sr.get("data") or []
         # Flatten — some backends return different shapes
-        found = any(test_uname.lower() in json.dumps(r).lower() for r in results) if results else False
+        found = any(expected_uname.lower() in json.dumps(r).lower() for r in results) if results else False
         if found:
             _pass("account.search_username finds user")
         else:
