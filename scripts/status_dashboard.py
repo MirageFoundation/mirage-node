@@ -1378,8 +1378,8 @@ def _query_difficulty_rest() -> Optional[dict]:
     return None
 
 
-def check_server() -> ServiceStatus:
-    """Check server internals: validator balance and PoW difficulty."""
+def check_node_internals() -> ServiceStatus:
+    """Check node internals: validator balance and PoW difficulty."""
     details: dict = {}
 
     # Get validator payer address and balance
@@ -1430,7 +1430,7 @@ def check_server() -> ServiceStatus:
         f"pow_diff={details.get('pow_difficulty')} status={status.value} message={message}"
     )
 
-    return ServiceStatus(name="Server", status=status, message=message, details=details)
+    return ServiceStatus(name="Node", status=status, message=message, details=details)
 
 
 def check_caddy() -> ServiceStatus:
@@ -2465,10 +2465,10 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             else:
                 pool_color = Colors.BRIGHT_RED
             lines.append(
-                f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MRG{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MIRAGE{Colors.RESET}"
             )
 
-    elif status.name == "Server":
+    elif status.name == "Node":
         # Validator payer balance
         balance_mirage = details.get("balance_mirage")
         if balance_mirage is not None:
@@ -2479,7 +2479,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             else:
                 bal_color = Colors.BRIGHT_GREEN
             lines.append(
-                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MRG{Colors.RESET}"
+                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MIRAGE{Colors.RESET}"
             )
         elif details.get("payer_address"):
             lines.append(f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {Colors.BRIGHT_YELLOW}unknown{Colors.RESET}")
@@ -2671,7 +2671,7 @@ def render_dashboard(refresh_secs: int):
         check_postgres(),
         check_backend(),
         check_rewards(),
-        check_server(),
+        check_node_internals(),
         check_indexer(),
         check_caddy(),
         check_endpoints(),
@@ -2685,7 +2685,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Server", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Node", "System")
     ]
 
     # Render header
