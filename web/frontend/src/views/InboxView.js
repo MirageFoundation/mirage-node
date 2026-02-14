@@ -250,7 +250,7 @@ export default function InboxView({ state }) {
             setLoading(false);
             setIsLoadingMore(false);
         }
-    }, [viewerAddress, persistInboxLastViewed]);
+    }, [viewerAddress, persistInboxLastViewed, setBadgeCount]);
 
     useEffect(() => {
         fetchInbox(1, false);

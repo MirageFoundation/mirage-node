@@ -433,7 +433,7 @@ const MentionItem = styled.div`
 
 const MentionUsername = styled.span`
 	font-weight: 600;
-	color: ${({ theme }) => theme?.colors?.accent || theme?.colors?.link || "#948979"};
+	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
 `;
 
 const MentionAddress = styled.span`
