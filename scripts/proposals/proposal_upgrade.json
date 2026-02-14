@@ -5,7 +5,7 @@
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
                 "name": "v1.11.0",
-                "height": "T+50",
+                "height": "T+60",
                 "info": "Target-based PoW difficulty (gradual scaling) and parameter type migration"
             }
         }
