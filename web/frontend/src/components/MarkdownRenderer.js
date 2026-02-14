@@ -67,7 +67,7 @@ const SpoilerSpan = styled.span`
 `;
 
 const MentionLink = styled.a`
-	color: ${({ theme }) => theme?.colors?.accent || '#667eea'};
+	color: ${({ theme }) => theme?.colors?.link || theme?.colors?.text || '#DFD0B8'};
 	font-weight: 600;
 	text-decoration: none;
 	cursor: pointer;
