@@ -10,26 +10,13 @@ This script is intentionally "no hand-waving":
 - It can optionally verify genesis export with --export-check (stops node, runs export, restarts).
 - It shows status of ALL registered upgrades.
 
-v1.10.7 additions (source-level checks):
-- Fingerprinting system fully removed (tables, columns, code references)
-- safe_error() helper used across all route files + global Flask handler
-- Spoiler tag support (||text|| syntax, remarkSpoiler plugin, Spoiler component)
-- Server-side inbox unread count (cache, middleware, migration, API sync)
-- Seed phrase security (SeedVault with 4 modes: insecure, password, memory, passkey)
-- Admin gas fee non-blocking (level >= 100 skip deduction in chain module)
-- Balance overflow fix (uvarint64 encoding, useBalance hook)
-
-v1.10.8 additions (source-level checks):
-- gRPC staking queries replace CLI subprocess calls (bank.py, chain.py, public.py)
-- Node balance tracking (migration v2_0_4, indexer records balance every 200 blocks)
-- Network charts: unified layout constants, Total Supply chart, chart label fixes
-- Server page: node balance chart, earned vs spent chart, staked balance display
-- Deploy migration v1_11_0_backend_env_renames (with full content validation)
-- Quest settings renamed to QUESTS_* prefix (env vars + Python constants)
-- Reward env vars renamed to QUESTS_ prefix (reward_distributor.py, setup_rewards_pool.py)
-- GUNICORN_WORKERS renamed to BACKEND_GUNICORN_WORKERS (gunicorn_config.py)
-- Frontend env template cleaned (REACT_APP_API_BASE removed, bake-time note added)
-- Donation amount formatting (toLocaleString)
+v1.11.0 checks (chain upgrade):
+- PoW difficulty changed from bit-count/factor to step-based system (0 = base)
+- Effective factor: 1000 * (1 + pow_difficulty_step)^difficulty
+- pow_difficulty_step: new governable double param (default 0.25)
+- subscription_reserve_percent: converted from integer percent to double fraction [0,1]
+- bridge_attestation_threshold: converted from basis points to double fraction [0,1]
+- Upgrade handler migrates old difficulty values to step counts
 
 NOTE: This does NOT submit transactions or mutate chain state.
 """
@@ -52,10 +39,9 @@ import urllib.request
 
 # Current release being verified (set via --upgrade or defaults to latest)
 # NOTE: UPGRADE_NAME is the last *chain* upgrade (on-chain governance proposal).
-# v1.10.8 is a services-only release (Python/JS) — no new chain upgrade.
-UPGRADE_NAME = "v1.10.7"
+UPGRADE_NAME = "v1.11.0"
 REQUIRED_MIN_GAS_PRICE = "5000umirage"
-EXPECTED_VERSION = "v1.10.8"
+EXPECTED_VERSION = "v1.11.0"
 
 # All registered upgrade names in chronological order
 ALL_UPGRADES = [
@@ -84,6 +70,7 @@ ALL_UPGRADES = [
     "v1.10.4-restore-sdk",
     "v1.10.5",
     "v1.10.7",
+    "v1.11.0",
 ]
 
 # Repo root (scripts/ is one level below)
@@ -366,7 +353,7 @@ def _fmt_value(v: Any) -> str:
 def check_binary_version(miraged: str, failures: list[str], warnings: list[str]) -> str | None:
     """Check that miraged binary version starts with the expected version prefix.
 
-    Accepts both exact tags (v1.10.8) and git-describe suffixes (v1.10.8-3-g67679d3)
+    Accepts both exact tags (v1.11.0) and git-describe suffixes (v1.11.0-3-g67679d3)
     since post-tag commits that don't touch Go source produce identical binaries.
     """
     print("-> Checking binary version...")
@@ -533,110 +520,6 @@ def check_upgrade_state(miraged: str, rpc: str, phase: str, upgrade_name: str, f
             failures.append(f"upgrade plan name expected {upgrade_name!r}, got {name!r}")
         else:
             print(f"   [OK] upgrade plan: {name}")
-
-
-def check_sdk_modules_restored(miraged: str, rpc: str, failures: list[str], warnings: list[str]) -> None:
-    """Verify that SDK modules removed in v1.10.3-sdk-bloat are present and functional."""
-    print("\n-> Checking SDK modules restored...")
-
-    query_modules = ["authz", "feegrant", "group", "epochs", "circuit", "evidence", "mint"]
-    tx_modules = ["authz", "feegrant", "group"]
-
-    try:
-        q_help = subprocess.run([miraged, "q", "--help"], capture_output=True, text=True, check=False)
-        q_output = (q_help.stdout + q_help.stderr).lower()
-    except Exception as e:
-        failures.append(f"cannot run '{miraged} q --help': {e}")
-        return
-
-    for mod in query_modules:
-        if f"\n  {mod}" in q_output or f"\n\t{mod}" in q_output or f"  {mod} " in q_output:
-            print(f"   [OK] q {mod}: command present")
-        else:
-            print(f"   [FAIL] q {mod}: command missing")
-            failures.append(f"SDK module '{mod}' not present in query commands")
-
-    try:
-        tx_help = subprocess.run([miraged, "tx", "--help"], capture_output=True, text=True, check=False)
-        tx_output = (tx_help.stdout + tx_help.stderr).lower()
-    except Exception as e:
-        warnings.append(f"cannot run '{miraged} tx --help': {e}")
-        return
-
-    for mod in tx_modules:
-        if f"\n  {mod}" in tx_output or f"\n\t{mod}" in tx_output or f"  {mod} " in tx_output:
-            print(f"   [OK] tx {mod}: command present")
-        else:
-            print(f"   [WARN] tx {mod}: command missing")
-            warnings.append(f"tx {mod} command missing after restore (verify module wiring)")
-
-    # Verify modules have actual state (not just CLI commands)
-    print("\n   Module state verification:")
-
-    # Check mint params
-    try:
-        mint_params = _run_json([miraged, "q", "mint", "params", "--node", rpc, "-o", "json"])
-        params = mint_params.get("params", mint_params)
-        mint_denom = params.get("mint_denom", "")
-        if mint_denom:
-            print(f"   [OK] mint: params loaded (denom={mint_denom})")
-        else:
-            print(f"   [FAIL] mint: params missing mint_denom")
-            failures.append("mint module params missing mint_denom")
-    except Exception as e:
-        print(f"   [FAIL] mint: cannot query params: {e}")
-        failures.append(f"mint module query failed: {e}")
-
-    # Check epochs info
-    try:
-        epochs_info = _run_json([miraged, "q", "epochs", "epoch-infos", "--node", rpc, "-o", "json"])
-        epochs = epochs_info.get("epochs", [])
-        if isinstance(epochs, list) and len(epochs) > 0:
-            epoch_ids = [e.get("identifier", "?") for e in epochs[:3]]
-            print(f"   [OK] epochs: {len(epochs)} epoch(s) configured ({', '.join(epoch_ids)})")
-        else:
-            print(f"   [WARN] epochs: no epochs configured (may be expected)")
-            warnings.append("epochs module has no epochs configured")
-    except Exception as e:
-        print(f"   [FAIL] epochs: cannot query epoch-infos: {e}")
-        failures.append(f"epochs module query failed: {e}")
-
-    # Check authz (verify query works - use help to avoid needing valid address)
-    try:
-        p = subprocess.run([miraged, "q", "authz", "grants", "--help"], capture_output=True, text=True, check=False)
-        if p.returncode == 0 or "usage" in (p.stdout + p.stderr).lower():
-            print(f"   [OK] authz: query functional")
-        else:
-            print(f"   [FAIL] authz: query command broken")
-            failures.append("authz module query command broken")
-    except Exception as e:
-        print(f"   [FAIL] authz: cannot query: {e}")
-        failures.append(f"authz module query failed: {e}")
-
-    # Check circuit (empty accounts is OK)
-    try:
-        circuit_result = _run_json([miraged, "q", "circuit", "accounts", "--node", rpc, "-o", "json"])
-        print(f"   [OK] circuit: query functional")
-    except Exception as e:
-        err_str = str(e).lower()
-        if "pagination" in err_str or "empty" in err_str:
-            print(f"   [OK] circuit: query functional (no accounts)")
-        else:
-            print(f"   [FAIL] circuit: cannot query: {e}")
-            failures.append(f"circuit module query failed: {e}")
-
-    # Check evidence list (empty is OK)
-    try:
-        evidence_result = _run_json([miraged, "q", "evidence", "list", "--node", rpc, "-o", "json"])
-        evidence_list = evidence_result.get("evidence", [])
-        print(f"   [OK] evidence: query functional ({len(evidence_list)} item(s))")
-    except Exception as e:
-        err_str = str(e).lower()
-        if "no evidence" in err_str or "empty" in err_str or "pagination" in err_str or "null" in err_str:
-            print(f"   [OK] evidence: query functional (no evidence)")
-        else:
-            print(f"   [FAIL] evidence: cannot query: {e}")
-            failures.append(f"evidence module query failed: {e}")
 
 
 def check_export_command(miraged: str, home_dir: Path, failures: list[str]) -> None:
@@ -1061,11 +944,13 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
             "min_difficulty",
             "pow_message_window",
             "pow_message_limit",
+            "pow_difficulty_step",
             "mint_interval",
             "mint_quantity",
             "subscription_period",
             "max_envelope_age",
             "bridge_attestation_threshold",
+            "subscription_reserve_percent",
             # bridge_fee removed - now per-chain in BridgeChainConfig.fee
         ]
 
@@ -1170,934 +1055,216 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
 
 
 # ---------------------------------------------------------------------------
-# v1.10.8 feature checks (source-level verification)
+# v1.11.0 feature checks (source-level verification)
 # ---------------------------------------------------------------------------
 
 
-def check_grpc_staking_queries(failures: list[str], warnings: list[str]) -> None:
-    """Verify CLI subprocess staking calls replaced with gRPC in bank.py, chain.py, public.py."""
-    print("\n-> Checking gRPC staking migration...")
-
-    # 1. bank.py must have new gRPC functions
-    bank_py = REPO_ROOT / "web" / "backend" / "bank.py"
-    if not bank_py.exists():
-        failures.append("gRPC staking: web/backend/bank.py not found")
-        return
-    bank_text = bank_py.read_text()
-
-    for fn in ("get_staked_balance", "get_validator", "get_all_validators"):
-        if f"def {fn}(" in bank_text:
-            print(f"   [OK] bank.py: {fn}() defined")
-        else:
-            print(f"   [FAIL] bank.py: {fn}() not found")
-            failures.append(f"gRPC staking: bank.py missing {fn}()")
-
-    if "staking.v1beta1" in bank_text:
-        print("   [OK] bank.py: uses cosmos.staking.v1beta1 protos")
-    else:
-        print("   [FAIL] bank.py: missing staking proto imports")
-        failures.append("gRPC staking: bank.py does not import staking protos")
-
-    # 2. chain.py must NOT use subprocess for staking
-    chain_py = REPO_ROOT / "web" / "backend" / "chain.py"
-    if chain_py.exists():
-        chain_text = chain_py.read_text()
-        if "subprocess" not in chain_text:
-            print("   [OK] chain.py: no subprocess dependency")
-        else:
-            print("   [FAIL] chain.py: still uses subprocess")
-            failures.append("gRPC staking: chain.py still uses subprocess")
-
-        if "get_all_validators" in chain_text:
-            print("   [OK] chain.py: uses bank.get_all_validators()")
-        else:
-            print("   [FAIL] chain.py: not using gRPC validator query")
-            failures.append("gRPC staking: chain.py not using bank.get_all_validators()")
-
-    # 3. public.py must NOT use subprocess for staking
-    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
-    if public_py.exists():
-        public_text = public_py.read_text()
-        if "import subprocess" not in public_text:
-            print("   [OK] public.py: no subprocess import")
-        else:
-            print("   [FAIL] public.py: still imports subprocess")
-            failures.append("gRPC staking: public.py still imports subprocess")
-
-        if "_get_validator" in public_text or "_get_staked_balance" in public_text:
-            print("   [OK] public.py: uses gRPC staking functions")
-        else:
-            print("   [FAIL] public.py: not using gRPC staking functions")
-            failures.append("gRPC staking: public.py not using gRPC staking functions")
-
-        if "staked_balance" in public_text:
-            print("   [OK] public.py: staked_balance in network stats response")
-        else:
-            print("   [FAIL] public.py: staked_balance not in response")
-            failures.append("gRPC staking: public.py missing staked_balance in get_network_stats")
-
-
-def check_node_balance_tracking(failures: list[str], warnings: list[str]) -> None:
-    """Verify indexer records node balance alongside supply history."""
-    print("\n-> Checking node balance tracking...")
-
-    # 1. Migration file exists
-    migration = REPO_ROOT / "indexer" / "migrations" / "v2_0_4_node_balance.py"
-    if migration.exists():
-        print("   [OK] v2_0_4_node_balance.py migration exists")
-        if _file_contains(migration, r"node_balance"):
-            print("   [OK] migration adds node_balance column")
-        else:
-            print("   [FAIL] migration missing node_balance column")
-            failures.append("node balance: migration v2_0_4 does not add node_balance")
-    else:
-        print("   [FAIL] v2_0_4_node_balance.py migration not found")
-        failures.append("node balance: indexer/migrations/v2_0_4_node_balance.py not found")
-
-    # 2. chain_client.py has get_balance()
-    chain_client = REPO_ROOT / "indexer" / "chain_client.py"
-    if _file_contains(chain_client, r"def get_balance\("):
-        print("   [OK] chain_client.py: get_balance() defined")
-    else:
-        print("   [FAIL] chain_client.py: get_balance() not found")
-        failures.append("node balance: chain_client.py missing get_balance()")
-
-    # 3. main.py resolves validator address and records node balance
-    main_py = REPO_ROOT / "indexer" / "main.py"
-    if main_py.exists():
-        main_text = main_py.read_text()
-        if "_resolve_validator_address" in main_text:
-            print("   [OK] main.py: _resolve_validator_address() present")
-        else:
-            print("   [FAIL] main.py: validator address resolution not found")
-            failures.append("node balance: indexer main.py missing _resolve_validator_address()")
-
-        if "node_balance" in main_text:
-            print("   [OK] main.py: records node_balance in supply history")
-        else:
-            print("   [FAIL] main.py: node_balance recording not found")
-            failures.append("node balance: indexer main.py does not record node_balance")
-
-    # 4. database.py upsert_supply accepts node_balance
-    db_py = REPO_ROOT / "indexer" / "database.py"
-    if _file_contains(db_py, r"node_balance"):
-        print("   [OK] database.py: node_balance in supply queries")
-    else:
-        print("   [FAIL] database.py: node_balance not found")
-        failures.append("node balance: database.py missing node_balance support")
-
-    # 5. Backend supply history includes node_balance
-    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
-    if _file_contains(public_py, r"node_balance"):
-        print("   [OK] public.py: node_balance in supply history response")
-    else:
-        print("   [FAIL] public.py: node_balance not in supply history")
-        failures.append("node balance: public.py supply history missing node_balance")
-
-
-def check_network_charts(failures: list[str], warnings: list[str]) -> None:
-    """Verify unified chart layout and new chart components in NetworkView."""
-    print("\n-> Checking network charts...")
-
-    nv = REPO_ROOT / "web" / "frontend" / "src" / "views" / "NetworkView.js"
-    if not nv.exists():
-        print("   [WARN] NetworkView.js not found (frontend source not present)")
-        warnings.append("network charts: NetworkView.js not found (frontend source not on this host)")
-        return
-    text = nv.read_text()
-
-    # 1. Shared CHART constants
-    if "const CHART" in text:
-        print("   [OK] Shared CHART layout constants defined")
-    else:
-        print("   [FAIL] Shared CHART constants not found")
-        failures.append("network charts: missing shared CHART layout constants")
-
-    # 2. SupplyChart component
-    if "function SupplyChart(" in text:
-        print("   [OK] SupplyChart component defined")
-    else:
-        print("   [FAIL] SupplyChart component not found")
-        failures.append("network charts: SupplyChart component missing")
-
-    # 3. NodeBalanceChart component
-    if "function NodeBalanceChart(" in text:
-        print("   [OK] NodeBalanceChart component defined")
-    else:
-        print("   [FAIL] NodeBalanceChart component not found")
-        failures.append("network charts: NodeBalanceChart component missing")
-
-    # 4. NodeMintBurnChart component
-    if "function NodeMintBurnChart(" in text:
-        print("   [OK] NodeMintBurnChart component defined")
-    else:
-        print("   [FAIL] NodeMintBurnChart component not found")
-        failures.append("network charts: NodeMintBurnChart component missing")
-
-    # 5. Staked balance display
-    if "stakedBalance" in text:
-        print("   [OK] Staked balance state and display present")
-    else:
-        print("   [FAIL] Staked balance not found")
-        failures.append("network charts: stakedBalance display missing from server tab")
-
-    # 6. ChartGrid shared component
-    if "function ChartGrid(" in text:
-        print("   [OK] ChartGrid shared component defined")
-    else:
-        print("   [FAIL] ChartGrid component not found")
-        failures.append("network charts: ChartGrid shared component missing")
-
-    # 7. fmtMirage shared formatter
-    if "function fmtMirage(" in text:
-        print("   [OK] fmtMirage shared formatter defined")
-    else:
-        print("   [FAIL] fmtMirage formatter not found")
-        failures.append("network charts: fmtMirage shared formatter missing")
-
-
-def check_deploy_migration_v1_11(failures: list[str], warnings: list[str]) -> None:
-    """Verify deploy migration for backend env renames exists and covers all renames."""
-    print("\n-> Checking deploy migration v1.11.0...")
-
-    migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
-    if not migration.exists():
-        print("   [FAIL] v1_11_0_backend_env_renames.py not found")
-        failures.append("deploy: migrations/v1_11_0_backend_env_renames.py not found")
-        return
-
-    print("   [OK] v1_11_0_backend_env_renames.py exists")
-    mig_text = migration.read_text()
-
-    # Verify the migration covers all required renames
-    required_renames = {
-        "INVITE_CODES_REQUIRED": "REGISTRATION_INVITE_CODE_REQUIRED",
-        "GUNICORN_WORKERS": "BACKEND_GUNICORN_WORKERS",
-        "DAILY_QUESTS_COUNT": "QUESTS_DAILY_COUNT",
-        "FLASH_QUESTS_COUNT": "QUESTS_FLASH_COUNT",
-        "FLASH_QUEST_MIN_INTERVAL_HOURS": "QUESTS_FLASH_MIN_INTERVAL_HOURS",
-        "FLASH_QUEST_MAX_INTERVAL_HOURS": "QUESTS_FLASH_MAX_INTERVAL_HOURS",
-        "PAYOUTS_ENABLED": "QUESTS_PAYOUTS_ENABLED",
-        "REWARDS_POOL_ADDRESS": "QUESTS_REWARDS_POOL_ADDRESS",
-        "INVITE_RECRUIT_CHANCE": "QUESTS_INVITE_RECRUIT_CHANCE",
-        "INVITE_EARNER_QUEST_INTERVAL": "QUESTS_INVITE_EARNER_INTERVAL",
-        "INVITE_EARNER_CHANCE": "QUESTS_INVITE_EARNER_CHANCE",
-    }
-    for old, new in required_renames.items():
-        if f'"{old}"' in mig_text and f'"{new}"' in mig_text:
-            print(f"   [OK] migration: {old} -> {new}")
-        else:
-            print(f"   [FAIL] migration: {old} -> {new} mapping not found")
-            failures.append(f"deploy migration: missing rename {old} -> {new}")
-
-
-def check_quest_settings_rename(failures: list[str], warnings: list[str]) -> None:
-    """Verify all quest env vars use the QUESTS_ prefix."""
-    print("\n-> Checking quest settings rename...")
-
-    # All quest env vars/constants must use QUESTS_ prefix
-    quests_names = [
-        "QUESTS_DAILY_COUNT",
-        "QUESTS_FLASH_MIN_INTERVAL_HOURS",
-        "QUESTS_FLASH_MAX_INTERVAL_HOURS",
-        "QUESTS_INVITE_RECRUIT_CHANCE",
-        "QUESTS_INVITE_EARNER_INTERVAL",
-        "QUESTS_INVITE_EARNER_CHANCE",
-    ]
-    # Old names that must NOT appear as bare definitions
-    old_names = [
-        "INVITE_RECRUIT_CHANCE",
-        "INVITE_EARNER_QUEST_INTERVAL",
-        "INVITE_EARNER_CHANCE",
-        "DAILY_QUESTS_COUNT",
-        "FLASH_QUESTS_COUNT",
-        "FLASH_QUEST_MIN_INTERVAL_HOURS",
-        "FLASH_QUEST_MAX_INTERVAL_HOURS",
-    ]
-
-    settings_py = REPO_ROOT / "indexer" / "settings.py"
-    if settings_py.exists():
-        text = settings_py.read_text()
-        for name in quests_names:
-            if name in text:
-                print(f"   [OK] settings.py: {name} defined")
-            else:
-                print(f"   [FAIL] settings.py: {name} not found")
-                failures.append(f"quest settings: {name} not defined in settings.py")
-
-        for name in old_names:
-            if re.search(rf"^{name}\s*=", text, re.MULTILINE):
-                print(f"   [FAIL] settings.py: old name {name} still defined")
-                failures.append(f"quest settings: old name {name} still present in settings.py")
-
-    # Check quest_tracker.py uses new names
-    tracker_py = REPO_ROOT / "indexer" / "quest_tracker.py"
-    if tracker_py.exists():
-        tracker_text = tracker_py.read_text()
-        for old in old_names:
-            if re.search(rf"(?<![A-Z_]){old}(?![A-Z_])", tracker_text):
-                print(f"   [FAIL] quest_tracker.py still references {old}")
-                failures.append(f"quest settings: quest_tracker.py still uses {old}")
-        print("   [OK] quest_tracker.py: uses QUESTS_ prefix")
-
-    # Check quests.py uses consistent names
-    quests_py = REPO_ROOT / "web" / "backend" / "routes" / "quests.py"
-    if quests_py.exists():
-        quests_text = quests_py.read_text()
-        for name in quests_names:
-            if name in quests_text:
-                print(f"   [OK] quests.py: {name} used")
-            else:
-                print(f"   [WARN] quests.py: {name} not found")
-                warnings.append(f"quest settings: quests.py does not reference {name}")
-
-
-def check_registration_gating(failures: list[str], warnings: list[str]) -> None:
-    """Verify registration gating via REGISTRATION_ENABLED and REGISTRATION_INVITE_CODE_REQUIRED."""
-    print("\n-> Checking registration gating...")
-
-    # 1. Backend core.py: REGISTRATION_ENABLED + REGISTRATION_INVITE_CODE_REQUIRED
-    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
-    if core_py.exists():
-        text = core_py.read_text()
-        if "REGISTRATION_ENABLED" in text:
-            print("   [OK] core.py: REGISTRATION_ENABLED env var used")
-        else:
-            print("   [FAIL] core.py: REGISTRATION_ENABLED not found")
-            failures.append("registration: core.py missing REGISTRATION_ENABLED check")
-
-        if "REGISTRATION_INVITE_CODE_REQUIRED" in text:
-            print("   [OK] core.py: REGISTRATION_INVITE_CODE_REQUIRED env var used")
-        else:
-            print("   [FAIL] core.py: REGISTRATION_INVITE_CODE_REQUIRED not found")
-            failures.append("registration: core.py missing REGISTRATION_INVITE_CODE_REQUIRED check")
-
-        # Old name should be gone
-        if "INVITE_CODES_REQUIRED" in text:
-            print("   [FAIL] core.py: old INVITE_CODES_REQUIRED still present")
-            failures.append("registration: core.py still uses old INVITE_CODES_REQUIRED")
-        else:
-            print("   [OK] core.py: old INVITE_CODES_REQUIRED removed")
-
-        # Registration disabled gate
-        if "registration is disabled" in text or "registration_disabled" in text:
-            print("   [OK] core.py: registration disabled gate present")
-        else:
-            print("   [FAIL] core.py: registration disabled response not found")
-            failures.append("registration: core.py missing registration disabled response")
-
-    # 2. Frontend CreateAccountView reads config flags
-    cav = REPO_ROOT / "web" / "frontend" / "src" / "views" / "CreateAccountView.js"
-    if cav.exists():
-        cav_text = cav.read_text()
-        if "registrationEnabled" in cav_text:
-            print("   [OK] CreateAccountView.js: reads registrationEnabled from config")
-        else:
-            print("   [FAIL] CreateAccountView.js: registrationEnabled not found")
-            failures.append("registration: CreateAccountView.js missing registrationEnabled")
-
-        if "inviteCodeRequired" in cav_text:
-            print("   [OK] CreateAccountView.js: reads inviteCodeRequired from config")
-        else:
-            print("   [FAIL] CreateAccountView.js: inviteCodeRequired not found")
-            failures.append("registration: CreateAccountView.js missing inviteCodeRequired")
-
-        # Old hardcoded hostname check should be gone
-        if "isMainSite" in cav_text or "mirage.talk" in cav_text:
-            print("   [FAIL] CreateAccountView.js: still has hardcoded hostname check")
-            failures.append("registration: CreateAccountView.js still uses hardcoded hostname")
-        else:
-            print("   [OK] CreateAccountView.js: no hardcoded hostname checks")
-
-    # 3. Backend env template has new keys
-    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
-    if env_template.exists():
-        env_text = env_template.read_text()
-        for key in ("REGISTRATION_ENABLED", "REGISTRATION_INVITE_CODE_REQUIRED"):
-            if key in env_text:
-                print(f"   [OK] backend.env template: {key} present")
-            else:
-                print(f"   [FAIL] backend.env template: {key} missing")
-                failures.append(f"registration: backend.env template missing {key}")
-
-
-def check_reward_env_renames(failures: list[str], warnings: list[str]) -> None:
-    """Verify reward env vars use the QUESTS_ prefix."""
-    print("\n-> Checking reward env renames...")
-
-    rd = REPO_ROOT / "web" / "backend" / "reward_distributor.py"
-    if not rd.exists():
-        print("   [WARN] reward_distributor.py not found")
-        warnings.append("reward renames: reward_distributor.py not found")
-        return
-
-    text = rd.read_text()
-
-    # New names should be present
-    for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
-        if new_name in text:
-            print(f"   [OK] reward_distributor.py: {new_name} used")
-        else:
-            print(f"   [FAIL] reward_distributor.py: {new_name} not found")
-            failures.append(f"reward renames: reward_distributor.py missing {new_name}")
-
-    # Old bare names should NOT be defined (but may appear in comments)
-    if re.search(r"^REWARDS_POOL_ADDRESS\s*=", text, re.MULTILINE):
-        print("   [FAIL] reward_distributor.py: old REWARDS_POOL_ADDRESS still defined")
-        failures.append("reward renames: old REWARDS_POOL_ADDRESS still defined")
-    else:
-        print("   [OK] old REWARDS_POOL_ADDRESS definition removed")
-
-    if re.search(r"^PAYOUTS_ENABLED\s*=", text, re.MULTILINE):
-        print("   [FAIL] reward_distributor.py: old PAYOUTS_ENABLED still defined")
-        failures.append("reward renames: old PAYOUTS_ENABLED still defined")
-    else:
-        print("   [OK] old PAYOUTS_ENABLED definition removed")
-
-    # Backend env template
-    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
-    if env_template.exists():
-        env_text = env_template.read_text()
-        for key in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
-            if key in env_text:
-                print(f"   [OK] backend.env template: {key} present")
-            else:
-                print(f"   [FAIL] backend.env template: {key} missing")
-                failures.append(f"reward renames: backend.env template missing {key}")
-
-    # setup_rewards_pool.py should also use QUESTS_ prefix
-    srp = REPO_ROOT / "deploy" / "setup_rewards_pool.py"
-    if srp.exists():
-        srp_text = srp.read_text()
-        for new_name in ("QUESTS_REWARDS_POOL_ADDRESS", "QUESTS_PAYOUTS_ENABLED"):
-            if new_name in srp_text:
-                print(f"   [OK] setup_rewards_pool.py: {new_name} used")
-            else:
-                print(f"   [FAIL] setup_rewards_pool.py: {new_name} not found")
-                failures.append(f"reward renames: setup_rewards_pool.py missing {new_name}")
-
-        # Old bare names should not be present
-        for old_name in ("REWARDS_POOL_ADDRESS", "PAYOUTS_ENABLED"):
-            if re.search(rf"(?<![A-Z_]){old_name}(?![A-Z_])", srp_text):
-                print(f"   [FAIL] setup_rewards_pool.py: old {old_name} still referenced")
-                failures.append(f"reward renames: setup_rewards_pool.py still uses {old_name}")
-    else:
-        print("   [WARN] setup_rewards_pool.py not found")
-        warnings.append("reward renames: setup_rewards_pool.py not found")
-
-
-def check_donation_formatting(failures: list[str], warnings: list[str]) -> None:
-    """Verify donation success messages use toLocaleString() for amount formatting."""
-    print("\n-> Checking donation amount formatting...")
-
-    for fname in ("components/CardView.js", "views/ViewPostView.js"):
-        path = REPO_ROOT / "web" / "frontend" / "src" / fname
-        if not path.exists():
-            continue
-        text = path.read_text()
-        if "toLocaleString()" in text:
-            print(f"   [OK] {fname}: uses toLocaleString() for donation amounts")
-        else:
-            print(f"   [WARN] {fname}: toLocaleString() not found")
-            warnings.append(f"donation formatting: {fname} missing toLocaleString()")
-
-
-def check_gunicorn_workers_rename(failures: list[str], warnings: list[str]) -> None:
-    """Verify GUNICORN_WORKERS was renamed to BACKEND_GUNICORN_WORKERS."""
-    print("\n-> Checking BACKEND_GUNICORN_WORKERS rename...")
-
-    # 1. gunicorn_config.py should use BACKEND_GUNICORN_WORKERS
-    gc = REPO_ROOT / "web" / "backend" / "gunicorn_config.py"
-    if gc.exists():
-        text = gc.read_text()
-        if "BACKEND_GUNICORN_WORKERS" in text:
-            print("   [OK] gunicorn_config.py: uses BACKEND_GUNICORN_WORKERS")
-        else:
-            print("   [FAIL] gunicorn_config.py: BACKEND_GUNICORN_WORKERS not found")
-            failures.append("gunicorn rename: gunicorn_config.py missing BACKEND_GUNICORN_WORKERS")
-
-        # Old name should not be present (as a bare reference)
-        if re.search(r'(?<![A-Z_])GUNICORN_WORKERS(?![A-Z_])', text):
-            print("   [FAIL] gunicorn_config.py: old GUNICORN_WORKERS still referenced")
-            failures.append("gunicorn rename: gunicorn_config.py still uses old GUNICORN_WORKERS")
-        else:
-            print("   [OK] gunicorn_config.py: old GUNICORN_WORKERS removed")
-    else:
-        print("   [WARN] gunicorn_config.py not found")
-        warnings.append("gunicorn rename: gunicorn_config.py not found")
-
-    # 2. backend.env template should use BACKEND_GUNICORN_WORKERS
-    env_template = REPO_ROOT / "deploy" / "templates" / "env" / "backend.env"
-    if env_template.exists():
-        env_text = env_template.read_text()
-        if "BACKEND_GUNICORN_WORKERS" in env_text:
-            print("   [OK] backend.env template: BACKEND_GUNICORN_WORKERS present")
-        else:
-            print("   [FAIL] backend.env template: BACKEND_GUNICORN_WORKERS missing")
-            failures.append("gunicorn rename: backend.env template missing BACKEND_GUNICORN_WORKERS")
-
-        if re.search(r'^GUNICORN_WORKERS=', env_text, re.MULTILINE):
-            print("   [FAIL] backend.env template: old GUNICORN_WORKERS= still present")
-            failures.append("gunicorn rename: backend.env template still has old GUNICORN_WORKERS")
-        else:
-            print("   [OK] backend.env template: old GUNICORN_WORKERS= removed")
-
-    # 3. Migration should include this rename
-    migration = REPO_ROOT / "deploy" / "migrations" / "v1_11_0_backend_env_renames.py"
-    if migration.exists():
-        mig_text = migration.read_text()
-        if '"GUNICORN_WORKERS"' in mig_text and '"BACKEND_GUNICORN_WORKERS"' in mig_text:
-            print("   [OK] migration: GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS mapping present")
-        else:
-            print("   [FAIL] migration: GUNICORN_WORKERS rename mapping not found")
-            failures.append("gunicorn rename: migration missing GUNICORN_WORKERS -> BACKEND_GUNICORN_WORKERS")
-
-
-def check_frontend_env_template(failures: list[str], warnings: list[str]) -> None:
-    """Verify frontend.env template is cleaned up (no REACT_APP_API_BASE)."""
-    print("\n-> Checking frontend.env template...")
-
-    fe = REPO_ROOT / "deploy" / "templates" / "env" / "frontend.env"
-    if not fe.exists():
-        print("   [WARN] frontend.env template not found")
-        warnings.append("frontend env: template not found")
-        return
-
-    text = fe.read_text()
-
-    # REACT_APP_API_BASE should NOT be in the template (it's baked at build time
-    # and is not user-configurable)
-    if re.search(r'^REACT_APP_API_BASE=', text, re.MULTILINE):
-        print("   [FAIL] frontend.env: REACT_APP_API_BASE should not be user-configurable")
-        failures.append("frontend env: REACT_APP_API_BASE still in template (baked at build time)")
-    else:
-        print("   [OK] frontend.env: REACT_APP_API_BASE not exposed as configurable")
-
-    # Should have the bake-time note
-    if "baked" in text.lower() or "build time" in text.lower():
-        print("   [OK] frontend.env: contains build-time note for REACT_APP_* vars")
-    else:
-        print("   [WARN] frontend.env: missing note about REACT_APP_* being baked at build time")
-        warnings.append("frontend env: missing bake-time note for REACT_APP_* vars")
-
-
-# ---------------------------------------------------------------------------
-# v1.10.7 feature checks (source-level verification)
-# ---------------------------------------------------------------------------
-
-
-def _file_contains(path: Path, pattern: str) -> bool:
-    """Return True if *path* exists and its text matches *pattern* (regex)."""
-    try:
-        if not path.exists():
-            return False
-        return bool(re.search(pattern, path.read_text()))
-    except Exception:
-        return False
-
-
-def _file_missing_pattern(path: Path, pattern: str) -> bool:
-    """Return True if *path* exists and does NOT match *pattern* (regex)."""
-    try:
-        if not path.exists():
-            return False
-        return not bool(re.search(pattern, path.read_text()))
-    except Exception:
-        return False
-
-
-def check_fingerprinting_removed(failures: list[str], warnings: list[str]) -> None:
-    """Verify that the device fingerprinting system has been fully removed."""
-    print("\n-> Checking fingerprinting removal...")
-
-    # 1. user_fingerprints table should be dropped in database.py
-    db_path = REPO_ROOT / "indexer" / "database.py"
-    if _file_contains(db_path, r"DROP TABLE IF EXISTS user_fingerprints"):
-        print("   [OK] database.py: DROP TABLE user_fingerprints present")
-    else:
-        print("   [FAIL] database.py: missing DROP TABLE user_fingerprints")
-        failures.append("fingerprinting: database.py does not drop user_fingerprints table")
-
-    # 2. PII columns (user_agent, ip_hash, referrer) should be dropped from stats_events.
-    #    The source uses an f-string loop: for col in ("user_agent", "ip_hash", "referrer")
-    #    so we check for the column names in the iteration tuple AND the DROP COLUMN statement.
-    if _file_contains(db_path, r"DROP COLUMN"):
-        print("   [OK] database.py: DROP COLUMN statement present")
-    else:
-        print("   [FAIL] database.py: no DROP COLUMN statement found")
-        failures.append("fingerprinting: database.py has no DROP COLUMN for PII columns")
-    for col in ("user_agent", "ip_hash", "referrer"):
-        if _file_contains(db_path, rf'"{col}"'):
-            print(f"   [OK] database.py: column {col} referenced in drop loop")
-        else:
-            print(f"   [FAIL] database.py: column {col} not referenced")
-            failures.append(f"fingerprinting: stats_events.{col} not referenced in database.py drop loop")
-
-    # 3. Coarse device columns should be added instead.
-    #    Same f-string loop pattern: for col in ("browser_family", "os_family", "device_type")
-    if _file_contains(db_path, r"ADD COLUMN"):
-        print("   [OK] database.py: ADD COLUMN statement present for coarse categories")
-    else:
-        print("   [WARN] database.py: no ADD COLUMN for coarse categories")
-        warnings.append("fingerprinting: database.py has no ADD COLUMN for coarse device columns")
-    for col in ("browser_family", "os_family", "device_type"):
-        if _file_contains(db_path, rf'"{col}"'):
-            print(f"   [OK] database.py: coarse column {col} referenced")
-        else:
-            print(f"   [WARN] database.py: coarse column {col} not found")
-            warnings.append(f"fingerprinting: expected coarse column {col} in database.py")
-
-    # 4. No fingerprinting code in backend routes
-    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
-    public_py = routes_dir / "public.py"
-    if public_py.exists():
-        text = public_py.read_text()
-        for banned in ("fingerprint", "sock_puppet", "sock puppet", "user_profiling"):
-            if re.search(banned, text, re.IGNORECASE):
-                print(f"   [FAIL] public.py: still contains '{banned}'")
-                failures.append(f"fingerprinting: public.py still references '{banned}'")
-                break
-        else:
-            print("   [OK] public.py: no fingerprinting references")
-    else:
-        print("   [WARN] public.py not found")
-        warnings.append("fingerprinting: web/backend/routes/public.py not found")
-
-    # 5. Stats endpoint should use bot filtering, not fingerprinting
-    if _file_contains(public_py, r"_STATS_BOT_NAMES|bot.*filter"):
-        print("   [OK] public.py: server-side bot filtering present")
-    else:
-        print("   [WARN] public.py: bot filtering pattern not found")
-        warnings.append("fingerprinting: expected server-side bot filtering in public.py")
-
-
-def check_safe_error_coverage(failures: list[str], warnings: list[str]) -> None:
-    """Verify that safe_error() exists and is wired into all route files and the global handler."""
-    print("\n-> Checking sanitized error responses...")
-
-    # 1. error_utils.py must exist with safe_error()
-    error_utils = REPO_ROOT / "web" / "backend" / "error_utils.py"
-    if not error_utils.exists():
-        print("   [FAIL] error_utils.py: not found")
-        failures.append("safe_error: web/backend/error_utils.py not found")
-        return
-
-    text = error_utils.read_text()
-    if "def safe_error(" in text:
-        print("   [OK] error_utils.py: safe_error() defined")
-    else:
-        print("   [FAIL] error_utils.py: safe_error() not defined")
-        failures.append("safe_error: function not defined in error_utils.py")
-
-    if "request_id" in text:
-        print("   [OK] error_utils.py: returns request_id to client")
-    else:
-        print("   [FAIL] error_utils.py: missing request_id in response")
-        failures.append("safe_error: does not include request_id in error response")
-
-    # 2. Global error handler in factory.py
-    factory = REPO_ROOT / "web" / "backend" / "factory.py"
-    if _file_contains(factory, r"@app\.errorhandler\(Exception\)"):
-        print("   [OK] factory.py: global Exception handler registered")
-    else:
-        print("   [FAIL] factory.py: missing global Exception handler")
-        failures.append("safe_error: factory.py missing @app.errorhandler(Exception)")
-
-    if _file_contains(factory, r"safe_error"):
-        print("   [OK] factory.py: global handler uses safe_error()")
-    else:
-        print("   [FAIL] factory.py: global handler does not use safe_error()")
-        failures.append("safe_error: factory.py global handler does not call safe_error()")
-
-    # 3. Route files should sanitize errors — either via safe_error() directly or
-    #    via a local _classify_exception() helper that also strips raw exception text.
-    routes_dir = REPO_ROOT / "web" / "backend" / "routes"
-    route_files = ["public.py", "core.py", "bridge.py", "quests.py"]
-    for fname in route_files:
-        rpath = routes_dir / fname
-        if not rpath.exists():
-            print(f"   [WARN] routes/{fname}: not found")
-            warnings.append(f"safe_error: routes/{fname} not found")
-            continue
-        has_safe_error = _file_contains(rpath, r"safe_error")
-        has_classify = _file_contains(rpath, r"_classify_exception")
-        if has_safe_error:
-            print(f"   [OK] routes/{fname}: uses safe_error()")
-        elif has_classify:
-            print(f"   [OK] routes/{fname}: uses _classify_exception() (sanitized)")
-        else:
-            print(f"   [FAIL] routes/{fname}: no error sanitization found")
-            failures.append(f"safe_error: routes/{fname} has no safe_error() or _classify_exception()")
-
-
-def check_spoiler_tags(failures: list[str], warnings: list[str]) -> None:
-    """Verify spoiler tag support in the markdown renderer."""
-    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
-    renderer = frontend_src / "components" / "MarkdownRenderer.js"
-    if not frontend_src.exists() or not renderer.exists():
-        return
-
-    print("\n-> Checking spoiler tag support...")
-
-    text = renderer.read_text()
-
-    # Spoiler component
-    if re.search(r"function\s+Spoiler", text):
-        print("   [OK] Spoiler component defined")
-    else:
-        print("   [FAIL] Spoiler component not found")
-        failures.append("spoiler tags: Spoiler component not defined in MarkdownRenderer.js")
-
-    # remarkSpoiler plugin
-    if re.search(r"function\s+remarkSpoiler", text):
-        print("   [OK] remarkSpoiler plugin defined")
-    else:
-        print("   [FAIL] remarkSpoiler plugin not found")
-        failures.append("spoiler tags: remarkSpoiler plugin not defined in MarkdownRenderer.js")
-
-    # Plugin registered in remarkPlugins
-    if "remarkSpoiler" in text and "remarkPlugins" in text:
-        print("   [OK] remarkSpoiler registered in remarkPlugins")
-    else:
-        print("   [FAIL] remarkSpoiler not registered in remarkPlugins")
-        failures.append("spoiler tags: remarkSpoiler not wired into remarkPlugins")
-
-    # Component mapping for spoiler-tag
-    if "'spoiler-tag'" in text or '"spoiler-tag"' in text:
-        print("   [OK] spoiler-tag component mapping present")
-    else:
-        print("   [FAIL] spoiler-tag component mapping missing")
-        failures.append("spoiler tags: spoiler-tag not mapped in components prop")
-
-    # ||text|| syntax (the regex pattern in the plugin)
-    if re.search(r"\|\|.*\|\|", text):
-        print("   [OK] ||double pipes|| syntax pattern present")
-    else:
-        print("   [WARN] ||double pipes|| syntax pattern not found")
-        warnings.append("spoiler tags: expected ||text|| pattern in remarkSpoiler")
-
-
-def check_inbox_server_side(failures: list[str], warnings: list[str]) -> None:
-    """Verify server-side inbox unread count tracking."""
-    print("\n-> Checking server-side inbox notifications...")
-
-    # 1. Backend: _get_new_inbox_count in public.py
-    public_py = REPO_ROOT / "web" / "backend" / "routes" / "public.py"
-    if not public_py.exists():
-        print("   [FAIL] routes/public.py: not found")
-        failures.append("inbox: web/backend/routes/public.py not found")
-        return
-
-    text = public_py.read_text()
-
-    if "def _get_new_inbox_count(" in text:
-        print("   [OK] _get_new_inbox_count() defined")
-    else:
-        print("   [FAIL] _get_new_inbox_count() not found")
-        failures.append("inbox: _get_new_inbox_count() not defined in public.py")
-
-    if "_inbox_cache" in text:
-        print("   [OK] _inbox_cache present (60s server-side cache)")
-    else:
-        print("   [FAIL] _inbox_cache not found")
-        failures.append("inbox: _inbox_cache not found in public.py")
-
-    if "def _invalidate_inbox_cache(" in text:
-        print("   [OK] _invalidate_inbox_cache() defined")
-    else:
-        print("   [FAIL] _invalidate_inbox_cache() not found")
-        failures.append("inbox: _invalidate_inbox_cache() not defined in public.py")
-
-    if "mark_inbox_viewed" in text:
-        print("   [OK] mark_inbox_viewed endpoint present")
-    else:
-        print("   [FAIL] mark_inbox_viewed endpoint not found")
-        failures.append("inbox: /api/mark_inbox_viewed endpoint missing from public.py")
-
-    # 2. Middleware: factory.py injects new_inbox_items
-    factory = REPO_ROOT / "web" / "backend" / "factory.py"
-    if _file_contains(factory, r"new_inbox_items"):
-        print("   [OK] factory.py: new_inbox_items injected into responses")
-    else:
-        print("   [FAIL] factory.py: new_inbox_items injection missing")
-        failures.append("inbox: factory.py does not inject new_inbox_items into API responses")
-
-    if _file_contains(factory, r"@app\.after_request"):
-        print("   [OK] factory.py: after_request middleware registered")
-    else:
-        print("   [FAIL] factory.py: after_request middleware missing")
-        failures.append("inbox: factory.py missing @app.after_request middleware for inbox count")
-
-    # 3. Database migration for inbox_last_viewed_at
-    migration = REPO_ROOT / "indexer" / "migrations" / "v2_0_3_inbox_last_viewed.py"
-    if migration.exists():
-        print("   [OK] v2_0_3_inbox_last_viewed.py migration exists")
-        if _file_contains(migration, r"inbox_last_viewed_at"):
-            print("   [OK] migration adds inbox_last_viewed_at column")
-        else:
-            print("   [FAIL] migration missing inbox_last_viewed_at column")
-            failures.append("inbox: migration v2_0_3 does not add inbox_last_viewed_at")
-    else:
-        print("   [FAIL] v2_0_3_inbox_last_viewed.py migration not found")
-        failures.append("inbox: indexer/migrations/v2_0_3_inbox_last_viewed.py not found")
-
-    # 4. Frontend: api.js syncs inbox count from responses (only when source is present)
-    api_js = REPO_ROOT / "web" / "frontend" / "src" / "lib" / "api.js"
-    if api_js.exists():
-        if _file_contains(api_js, r"new_inbox_items|inboxCount"):
-            print("   [OK] api.js: inbox count sync from API responses")
-        else:
-            print("   [WARN] api.js: inbox count sync not found")
-            warnings.append("inbox: frontend api.js does not sync new_inbox_items")
-
-
-def check_seed_vault(failures: list[str], warnings: list[str]) -> None:
-    """Verify seed phrase security with four storage modes."""
-    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
-    vault = frontend_src / "utils" / "SeedVault.js"
-    if not frontend_src.exists() or not vault.exists():
-        return
-
-    print("\n-> Checking seed phrase security (SeedVault)...")
-
-    text = vault.read_text()
-
-    # Class / core structure
-    if "class SeedVault" in text:
-        print("   [OK] SeedVault class defined")
-    else:
-        print("   [FAIL] SeedVault class not found")
-        failures.append("seed vault: SeedVault class not defined")
-
-    # Four modes present
-    modes = ["insecure", "memory", "password", "passkey"]
-    found_modes = [m for m in modes if m in text]
-    missing_modes = [m for m in modes if m not in text]
-    if not missing_modes:
-        print(f"   [OK] All 4 storage modes present ({', '.join(modes)})")
-    else:
-        print(f"   [FAIL] Missing storage modes: {', '.join(missing_modes)}")
-        failures.append(f"seed vault: missing storage modes: {', '.join(missing_modes)}")
-
-    # getMode()
-    if "getMode()" in text or "getMode (" in text:
-        print("   [OK] getMode() defined")
-    else:
-        print("   [FAIL] getMode() not found")
-        failures.append("seed vault: getMode() not defined")
-
-    # AES-GCM / PBKDF2 for password mode
-    if "AES-GCM" in text or "aes-gcm" in text.lower():
-        print("   [OK] AES-GCM encryption present (password mode)")
-    else:
-        print("   [FAIL] AES-GCM encryption not found")
-        failures.append("seed vault: AES-GCM encryption not found for password mode")
-
-    if "PBKDF2" in text or "pbkdf2" in text.lower():
-        print("   [OK] PBKDF2 key derivation present")
-    else:
-        print("   [FAIL] PBKDF2 key derivation not found")
-        failures.append("seed vault: PBKDF2 key derivation not found")
-
-    # WebAuthn / PRF for passkey mode
-    if "PRF" in text or "prf" in text:
-        print("   [OK] PRF extension present (passkey mode)")
-    else:
-        print("   [FAIL] PRF extension not found")
-        failures.append("seed vault: PRF extension not found for passkey mode")
-
-    # Unlock prompt component
-    unlock = frontend_src / "components" / "UnlockPrompt.js"
-    if unlock.exists():
-        print("   [OK] UnlockPrompt.js component exists")
-    else:
-        print("   [WARN] UnlockPrompt.js not found")
-        warnings.append("seed vault: UnlockPrompt.js component not found")
-
-
-def check_admin_gas_nonblocking(failures: list[str], warnings: list[str]) -> None:
-    """Verify admin gas fee deduction is non-blocking in the chain module."""
-    print("\n-> Checking admin gas fee (non-blocking)...")
-
-    # 1. Chain module: admin level check + skip deduction (only when Go source is present)
-    module_go = REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go"
-    if module_go.exists():
-        text = module_go.read_text()
-        if re.search(r"userLevel\s*>=\s*100", text):
-            print("   [OK] module.go: admin level >= 100 check present")
-        else:
-            print("   [FAIL] module.go: admin level check not found")
-            failures.append("admin gas: module.go missing admin level >= 100 check")
-
-        if re.search(r"insufficient balance.*skipping deduction", text, re.IGNORECASE):
-            print("   [OK] module.go: skip deduction on insufficient balance")
-        else:
-            print("   [FAIL] module.go: skip-deduction logic not found")
-            failures.append("admin gas: module.go missing skip deduction for admin insufficient balance")
-
-    # 2. Upgrade handler registered for v1.10.7 (only when Go source is present)
+def check_v1_11_pow_difficulty(failures: list[str], warnings: list[str]) -> None:
+    """Verify v1.11.0 PoW difficulty overhaul: step-based system, param types, worker."""
+    print("\n-> Checking v1.11.0 PoW difficulty overhaul...")
+
+    # 1. upgrades.go: v1.11.0 handler registered
     upgrades_go = REPO_ROOT / "blockchain" / "app" / "upgrades.go"
     if upgrades_go.exists():
-        if _file_contains(upgrades_go, r"v1\.10\.7"):
-            print("   [OK] upgrades.go: v1.10.7 upgrade handler registered")
+        ug_text = upgrades_go.read_text()
+        if re.search(r"v1\.11\.0", ug_text):
+            print("   [OK] upgrades.go: v1.11.0 upgrade handler registered")
         else:
-            print("   [FAIL] upgrades.go: v1.10.7 upgrade handler not found")
-            failures.append("admin gas: upgrades.go missing v1.10.7 handler")
-
-    # 3. Backend: classify admin balance error as 400
-    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
-    if _file_contains(core_py, r"admin insufficient balance"):
-        print("   [OK] routes/core.py: admin insufficient balance -> 400")
+            print("   [FAIL] upgrades.go: v1.11.0 upgrade handler not found")
+            failures.append("v1.11.0: upgrades.go missing v1.11.0 handler")
     else:
-        print("   [WARN] routes/core.py: admin balance error classification not found")
-        warnings.append("admin gas: routes/core.py does not classify admin balance error as 400")
+        print("   [WARN] upgrades.go not found (no Go source)")
 
-    # 4. Frontend: handles admin balance error (only when source is present)
+    # 2. ante_pow.go: computeDifficultyFactor using exponential formula
+    ante_pow = REPO_ROOT / "blockchain" / "app" / "ante_pow.go"
+    if ante_pow.exists():
+        ap_text = ante_pow.read_text()
+        if "computeDifficultyFactor" in ap_text:
+            print("   [OK] ante_pow.go: computeDifficultyFactor present")
+        else:
+            print("   [FAIL] ante_pow.go: computeDifficultyFactor not found")
+            failures.append("v1.11.0: ante_pow.go missing computeDifficultyFactor")
+
+        if "math.Pow" in ap_text or "math.Round" in ap_text:
+            print("   [OK] ante_pow.go: uses math.Pow/math.Round for exponential factor")
+        else:
+            print("   [FAIL] ante_pow.go: missing math.Pow/math.Round for exponential calc")
+            failures.append("v1.11.0: ante_pow.go missing exponential math")
+
+        if "MaxSafeDifficultyFactor" in ap_text:
+            print("   [OK] ante_pow.go: MaxSafeDifficultyFactor cap present")
+        else:
+            print("   [FAIL] ante_pow.go: MaxSafeDifficultyFactor cap missing")
+            failures.append("v1.11.0: ante_pow.go missing MaxSafeDifficultyFactor")
+    else:
+        print("   [WARN] ante_pow.go not found")
+
+    # 3. keeper.go: BaseDifficultySteps and BaseDifficultyFactor constants
+    keeper_go = REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go"
+    if keeper_go.exists():
+        kp_text = keeper_go.read_text()
+        for const in ("BaseDifficultySteps", "BaseDifficultyFactor", "MaxSafeDifficultySteps"):
+            if const in kp_text:
+                print(f"   [OK] keeper.go: {const} defined")
+            else:
+                print(f"   [FAIL] keeper.go: {const} missing")
+                failures.append(f"v1.11.0: keeper.go missing {const}")
+    else:
+        print("   [WARN] keeper.go not found")
+
+    # 4. module.go: EndBlock adjusts by +/-1 step
+    module_go = REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go"
+    if module_go.exists():
+        mg_text = module_go.read_text()
+        if "BaseDifficultySteps" in mg_text:
+            print("   [OK] module.go: references BaseDifficultySteps")
+        else:
+            print("   [FAIL] module.go: missing BaseDifficultySteps reference")
+            failures.append("v1.11.0: module.go missing BaseDifficultySteps")
+    else:
+        print("   [WARN] module.go not found")
+
+    # 5. params.go: pow_difficulty_step default
+    params_go = REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.go"
+    if params_go.exists():
+        pg_text = params_go.read_text()
+        if "PowDifficultyStep" in pg_text:
+            print("   [OK] params.go: PowDifficultyStep default defined")
+        else:
+            print("   [FAIL] params.go: PowDifficultyStep default missing")
+            failures.append("v1.11.0: params.go missing PowDifficultyStep")
+    else:
+        print("   [WARN] params.go not found")
+
+    # 6. Python backend: pow.py uses step-based factor
+    pow_py = REPO_ROOT / "web" / "backend" / "pow.py"
+    if pow_py.exists():
+        pp_text = pow_py.read_text()
+        if "_difficulty_factor" in pp_text or "_BASE_DIFFICULTY_FACTOR" in pp_text:
+            print("   [OK] pow.py: step-based _difficulty_factor / _BASE_DIFFICULTY_FACTOR present")
+        else:
+            print("   [FAIL] pow.py: missing step-based difficulty factor logic")
+            failures.append("v1.11.0: pow.py missing step-based difficulty factor")
+
+        if "pow_difficulty_step" in pp_text:
+            print("   [OK] pow.py: accepts pow_difficulty_step parameter")
+        else:
+            print("   [FAIL] pow.py: missing pow_difficulty_step parameter")
+            failures.append("v1.11.0: pow.py missing pow_difficulty_step parameter")
+    else:
+        print("   [WARN] pow.py not found")
+
+    # 7. Python backend: chain.py exports get_pow_difficulty_step
+    chain_py = REPO_ROOT / "web" / "backend" / "chain.py"
+    if chain_py.exists():
+        cp_text = chain_py.read_text()
+        if "get_pow_difficulty_step" in cp_text:
+            print("   [OK] chain.py: get_pow_difficulty_step present")
+        else:
+            print("   [FAIL] chain.py: get_pow_difficulty_step missing")
+            failures.append("v1.11.0: chain.py missing get_pow_difficulty_step")
+    else:
+        print("   [WARN] chain.py not found")
+
+    # 8. Python backend: params.py has pow_difficulty_step as float param
+    params_py = REPO_ROOT / "web" / "backend" / "params.py"
+    if params_py.exists():
+        pp_text = params_py.read_text()
+        if "pow_difficulty_step" in pp_text:
+            print("   [OK] params.py: pow_difficulty_step registered")
+        else:
+            print("   [FAIL] params.py: pow_difficulty_step not registered")
+            failures.append("v1.11.0: params.py missing pow_difficulty_step")
+
+        # subscription_reserve_percent and bridge_attestation_threshold should be floats
+        if re.search(r"_REQUIRED_FLOAT_PARAMS.*subscription_reserve_percent", pp_text, re.DOTALL):
+            print("   [OK] params.py: subscription_reserve_percent is a float param")
+        elif "subscription_reserve_percent" in pp_text:
+            print("   [WARN] params.py: subscription_reserve_percent present but may not be float")
+            warnings.append("v1.11.0: params.py subscription_reserve_percent may not be float")
+        else:
+            print("   [FAIL] params.py: subscription_reserve_percent missing")
+            failures.append("v1.11.0: params.py missing subscription_reserve_percent")
+
+        if re.search(r"_REQUIRED_FLOAT_PARAMS.*bridge_attestation_threshold", pp_text, re.DOTALL):
+            print("   [OK] params.py: bridge_attestation_threshold is a float param")
+        elif "bridge_attestation_threshold" in pp_text:
+            print("   [WARN] params.py: bridge_attestation_threshold present but may not be float")
+            warnings.append("v1.11.0: params.py bridge_attestation_threshold may not be float")
+        else:
+            print("   [FAIL] params.py: bridge_attestation_threshold missing")
+            failures.append("v1.11.0: params.py missing bridge_attestation_threshold")
+    else:
+        print("   [WARN] params.py not found")
+
+    # 9. Frontend worker: difficultyFactor and BASE_DIFFICULTY_FACTOR
+    worker_js = REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js"
+    if worker_js.exists():
+        wj_text = worker_js.read_text()
+        if "difficultyFactor" in wj_text and "BASE_DIFFICULTY_FACTOR" in wj_text:
+            print("   [OK] worker.js: difficultyFactor + BASE_DIFFICULTY_FACTOR present")
+        else:
+            print("   [FAIL] worker.js: missing difficultyFactor or BASE_DIFFICULTY_FACTOR")
+            failures.append("v1.11.0: worker.js missing step-based factor logic")
+
+        if "powDifficultyStep" in wj_text or "pow_difficulty_step" in wj_text:
+            print("   [OK] worker.js: accepts powDifficultyStep parameter")
+        else:
+            print("   [FAIL] worker.js: missing powDifficultyStep parameter")
+            failures.append("v1.11.0: worker.js missing powDifficultyStep")
+    else:
+        print("   [WARN] worker.js not found")
+
+    # 10. Frontend TransactionHandler: passes pow_difficulty_step
     tx_handler = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js"
     if tx_handler.exists():
-        if _file_contains(tx_handler, r"admin insufficient balance"):
-            print("   [OK] TransactionHandler.js: admin balance error handling present")
+        th_text = tx_handler.read_text()
+        if "pow_difficulty_step" in th_text or "powDifficultyStep" in th_text:
+            print("   [OK] TransactionHandler.js: passes pow_difficulty_step")
         else:
-            print("   [WARN] TransactionHandler.js: admin balance error handling not found")
-            warnings.append("admin gas: TransactionHandler.js does not handle admin balance error")
-
-
-def check_balance_overflow_fix(failures: list[str], warnings: list[str]) -> None:
-    """Verify balance uses 64-bit encoding and single source-of-truth hook."""
-    frontend_src = REPO_ROOT / "web" / "frontend" / "src"
-    tx_handler = frontend_src / "utils" / "TransactionHandler.js"
-    if not frontend_src.exists() or not tx_handler.exists():
-        return
-
-    print("\n-> Checking balance overflow fix...")
-
-    text = tx_handler.read_text()
-    uvarint64_count = len(re.findall(r"uvarint64", text))
-    if uvarint64_count > 0:
-        print(f"   [OK] TransactionHandler.js: uvarint64 used ({uvarint64_count} occurrences)")
+            print("   [FAIL] TransactionHandler.js: missing pow_difficulty_step")
+            failures.append("v1.11.0: TransactionHandler.js missing pow_difficulty_step")
     else:
-        print("   [FAIL] TransactionHandler.js: uvarint64 not found")
-        failures.append("balance fix: TransactionHandler.js does not use uvarint64 for amounts")
+        print("   [WARN] TransactionHandler.js not found")
 
-    # 2. useBalance.js hook as single source of truth
-    use_balance = frontend_src / "utils" / "useBalance.js"
-    if not use_balance.exists():
-        print("   [FAIL] useBalance.js: not found")
-        failures.append("balance fix: useBalance.js not found")
-        return
-
-    balance_text = use_balance.read_text()
-    if "function useBalance" in balance_text or "export default function useBalance" in balance_text:
-        print("   [OK] useBalance.js: hook defined")
+    # 11. Python backend routes: core.py handles difficulty=0 correctly
+    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
+    if core_py.exists():
+        cr_text = core_py.read_text()
+        # Old pattern: int(difficulty) > 0 should NOT be present
+        if "int(difficulty) > 0" in cr_text:
+            print("   [FAIL] core.py: still uses 'int(difficulty) > 0' (rejects difficulty=0)")
+            failures.append("v1.11.0: core.py still rejects difficulty=0 with old check")
+        else:
+            print("   [OK] core.py: no 'int(difficulty) > 0' check (allows difficulty=0)")
     else:
-        print("   [FAIL] useBalance.js: useBalance hook not found")
-        failures.append("balance fix: useBalance() hook not defined in useBalance.js")
+        print("   [WARN] core.py not found")
 
-    if "balanceUpdated" in balance_text:
-        print("   [OK] useBalance.js: balanceUpdated event listener")
+    # 12. Update doc exists
+    update_doc = REPO_ROOT / "docs" / "updates" / "update_v1.11.0.md"
+    if update_doc.exists():
+        print("   [OK] docs/updates/update_v1.11.0.md exists")
     else:
-        print("   [FAIL] useBalance.js: balanceUpdated event not found")
-        failures.append("balance fix: useBalance.js missing balanceUpdated CustomEvent listener")
+        print("   [FAIL] docs/updates/update_v1.11.0.md not found")
+        failures.append("v1.11.0: update documentation not found")
+
+    # 13. Proposal file updated
+    proposal = REPO_ROOT / "scripts" / "proposals" / "proposal_upgrade.json"
+    if proposal.exists():
+        try:
+            pj = json.loads(proposal.read_text())
+            plan = pj.get("messages", [{}])[0].get("plan", {}) if pj.get("messages") else pj.get("plan", {})
+            plan_name = plan.get("name", "")
+            if "v1.11.0" in plan_name:
+                print(f"   [OK] proposal_upgrade.json: plan name = {plan_name}")
+            else:
+                print(f"   [FAIL] proposal_upgrade.json: plan name '{plan_name}' does not contain v1.11.0")
+                failures.append("v1.11.0: proposal_upgrade.json plan name wrong")
+        except Exception as e:
+            print(f"   [FAIL] proposal_upgrade.json: cannot parse: {e}")
+            failures.append(f"v1.11.0: proposal_upgrade.json parse error: {e}")
+    else:
+        print("   [WARN] proposal_upgrade.json not found")
 
 
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
@@ -2305,9 +1472,6 @@ def main() -> int:
     if args.export_check:
         check_export_command(miraged, home_dir, failures)
 
-    if "restore-sdk" in upgrade_name and args.phase == "post":
-        check_sdk_modules_restored(miraged, rpc, failures, warnings)
-
     try:
         core = fetch_core_params(miraged, rpc)
         check_core_params_exhaustive(core, failures)
@@ -2343,26 +1507,8 @@ def main() -> int:
     # Check Python protobuf definitions (always run)
     check_python_protobuf_definitions(failures, warnings)
 
-    # ---- v1.10.7 feature checks (source-level) ----
-    check_fingerprinting_removed(failures, warnings)
-    check_safe_error_coverage(failures, warnings)
-    check_spoiler_tags(failures, warnings)
-    check_inbox_server_side(failures, warnings)
-    check_seed_vault(failures, warnings)
-    check_admin_gas_nonblocking(failures, warnings)
-    check_balance_overflow_fix(failures, warnings)
-
-    # ---- v1.10.8 feature checks (source-level) ----
-    check_grpc_staking_queries(failures, warnings)
-    check_node_balance_tracking(failures, warnings)
-    check_network_charts(failures, warnings)
-    check_deploy_migration_v1_11(failures, warnings)
-    check_quest_settings_rename(failures, warnings)
-    check_registration_gating(failures, warnings)
-    check_reward_env_renames(failures, warnings)
-    check_gunicorn_workers_rename(failures, warnings)
-    check_frontend_env_template(failures, warnings)
-    check_donation_formatting(failures, warnings)
+    # ---- v1.11.0 feature checks (source-level) ----
+    check_v1_11_pow_difficulty(failures, warnings)
 
     print("\n" + "=" * 72)
     print("SUMMARY")
