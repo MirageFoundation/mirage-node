@@ -29,75 +29,73 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def query_solana_last_sequence() -> int | None:
     """Query Solana's bridge_state account to get the last_sequence.
-    
+
     Returns the last_sequence value, or None if query fails.
     This is used to initialize Mirage's burn_sequence counter to match Solana.
     """
     solana_rpc = os.environ.get("ORCHESTRATOR_SOLANA_RPC", "https://api.devnet.solana.com")
     program_id = os.environ.get("ORCHESTRATOR_SOLANA_PROGRAM_ID", "9rMS8JEHCM5UTGjwKoXV7V32tzkgM9b16LZcbVdPAMdp")
-    
+
     if not program_id:
         status("WARNING: ORCHESTRATOR_SOLANA_PROGRAM_ID not set, cannot query Solana")
         return None
-    
+
     try:
         # Derive bridge_state PDA (seed = "bridge_state")
         # We use a simple approach: query via getProgramAccounts with memcmp filter
         # or compute the PDA directly. For simplicity, let's try to find it.
         from solders.pubkey import Pubkey  # type: ignore
-        
+
         program_pubkey = Pubkey.from_string(program_id)
         bridge_state_pda, _ = Pubkey.find_program_address([b"bridge_state"], program_pubkey)
-        
+
         # Query the account
-        req_data = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getAccountInfo",
-            "params": [
-                str(bridge_state_pda),
-                {"encoding": "base64"}
-            ]
-        }).encode()
-        
-        req = urllib.request.Request(
-            solana_rpc,
-            data=req_data,
-            headers={"Content-Type": "application/json"}
-        )
-        
+        req_data = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getAccountInfo",
+                "params": [str(bridge_state_pda), {"encoding": "base64"}],
+            }
+        ).encode()
+
+        req = urllib.request.Request(solana_rpc, data=req_data, headers={"Content-Type": "application/json"})
+
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.load(resp)
-        
+
         account_info = result.get("result", {}).get("value")
         if not account_info:
             status(f"WARNING: Solana bridge_state account not found at {bridge_state_pda}")
             return None
-        
+
         # Decode base64 data
         data_b64 = account_info.get("data", [None])[0]
         if not data_b64:
             status("WARNING: Solana bridge_state has no data")
             return None
-        
+
         data = base64.b64decode(data_b64)
         if len(data) < 49:
             status(f"WARNING: Solana bridge_state data too short: {len(data)} bytes")
             return None
-        
+
         # Extract last_sequence (little-endian uint64 at offset 41)
         last_sequence = struct.unpack("<Q", data[41:49])[0]
         status(f"Solana bridge_state last_sequence: {last_sequence}")
         return last_sequence
-        
+
     except ImportError:
         status("WARNING: solders not installed, cannot derive Solana PDA")
         return None
     except Exception as e:
         status(f"WARNING: Failed to query Solana bridge_state: {e}")
         return None
+
+
 MIRAGE_TMP = Path.home() / ".mirage" / "tmp"
 BACKUP_DIR = backup_restore.BACKUP_DIR
+
 
 def read_node_env_value(key: str) -> str:
     node_env = ROOT / "deploy" / "templates" / "env" / "node.env"
@@ -154,7 +152,7 @@ def ensure_mirage_tmp() -> Path:
                 "bash",
                 "-lc",
                 f"docker run --rm -v '{home}/.mirage:/data' alpine sh -c "
-                f"\"mkdir -p /data/tmp && chown -R {uid}:{gid} /data/tmp\"",
+                f'"mkdir -p /data/tmp && chown -R {uid}:{gid} /data/tmp"',
             ]
         )
         MIRAGE_TMP.mkdir(parents=True, exist_ok=True)
@@ -240,10 +238,7 @@ def apply_local_evidence_params(gen: dict):
             app_state["consensus"] = consensus_state
             gen["app_state"] = app_state
 
-    status(
-        "Updated genesis evidence params: "
-        f"old={{old}} new={{LOCAL_EVIDENCE_PARAMS}}"
-    )
+    status("Updated genesis evidence params: " f"old={{old}} new={{LOCAL_EVIDENCE_PARAMS}}")
 
 
 # Cached miraged path inside container
@@ -252,18 +247,18 @@ _container_miraged_path: str | None = None
 
 def get_container_miraged_path() -> str:
     """Get the miraged binary path inside the Docker container.
-    
+
     Handles both old (/opt/mirage/blockchain/bin/miraged) and
     new (/opt/mirage/blockchain/miraged) directory structures.
     """
     global _container_miraged_path
     if _container_miraged_path is not None:
         return _container_miraged_path
-    
+
     # Check new path first, then fall back to old path
     new_path = "/opt/mirage/blockchain/miraged"
     old_path = "/opt/mirage/blockchain/bin/miraged"
-    
+
     result = subprocess.run(
         ["docker", "exec", "mirage", "test", "-f", new_path],
         capture_output=True,
@@ -272,14 +267,12 @@ def get_container_miraged_path() -> str:
         _container_miraged_path = new_path
     else:
         _container_miraged_path = old_path
-    
+
     return _container_miraged_path
 
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
 
 
 def stop_local_container():
@@ -378,11 +371,16 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     )
     run(
         [
-            "docker", "run", "--rm",
-            "--entrypoint", "/bin/bash",
-            "-v", f"{backup_root}:/root/.mirage",
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "/bin/bash",
+            "-v",
+            f"{backup_root}:/root/.mirage",
             image_ref,
-            "-c", export_cmd,
+            "-c",
+            export_cmd,
         ]
     )
 
@@ -391,10 +389,15 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     gid = os.getgid()
     run(
         [
-            "docker", "run", "--rm",
-            "-v", f"{backup_root}:/root/.mirage",
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{backup_root}:/root/.mirage",
             "alpine",
-            "chown", f"{uid}:{gid}", "/root/.mirage/export.json",
+            "chown",
+            f"{uid}:{gid}",
+            "/root/.mirage/export.json",
         ]
     )
 
@@ -945,7 +948,7 @@ def write_working_genesis(genesis_json: str):
             "  cp -f /root/.mirage/node.clone/config/$f /root/.mirage/node/config/ 2>/dev/null || true; "
             "done; "
             "for d in /root/.mirage/node.clone/keyring-*; do "
-            "  if [ -d \"$d\" ]; then cp -nR \"$d\" /root/.mirage/node/; fi; "
+            '  if [ -d "$d" ]; then cp -nR "$d" /root/.mirage/node/; fi; '
             "done'",
         ]
     )
@@ -1093,13 +1096,19 @@ def write_working_genesis(genesis_json: str):
     if orchestrator_exists == "yes":
         try:
             status("Starting orchestrator ...")
-            run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator"])
+            run(
+                [
+                    "bash",
+                    "-lc",
+                    "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator",
+                ]
+            )
             ensure_tmux_window("orchestrator")
             run(
                 [
                     "bash",
                     "-lc",
-                    'docker exec mirage tmux send-keys -t mirage:orchestrator \'/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog "/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
+                    "docker exec mirage tmux send-keys -t mirage:orchestrator '/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog \"/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log\")' C-m",
                 ]
             )
         except Exception as e:
