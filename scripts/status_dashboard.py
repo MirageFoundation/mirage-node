@@ -1341,7 +1341,7 @@ def check_rewards() -> ServiceStatus:
 
 
 # Server balance thresholds (in MIRAGE, not umirage)
-SERVER_BALANCE_WARN = int(os.environ.get("MIRAGE_SERVER_BALANCE_WARN", "2000000"))   # 2MM
+SERVER_BALANCE_WARN = int(os.environ.get("MIRAGE_SERVER_BALANCE_WARN", "2000000"))  # 2MM
 SERVER_BALANCE_ERROR = int(os.environ.get("MIRAGE_SERVER_BALANCE_ERROR", "1000000"))  # 1MM
 
 
@@ -2464,9 +2464,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
                 pool_color = Colors.BRIGHT_YELLOW
             else:
                 pool_color = Colors.BRIGHT_RED
-            lines.append(
-                f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MIRAGE{Colors.RESET}"
-            )
+            lines.append(f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MIRAGE{Colors.RESET}")
 
     elif status.name == "Node":
         # Validator payer balance
@@ -2685,7 +2683,8 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Node", "System")
+        or s.name
+        in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Node", "System")
     ]
 
     # Render header
