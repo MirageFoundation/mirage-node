@@ -158,6 +158,42 @@ def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_fac
 
 ---
 
+### Test Suite & Tooling
+
+v1.11.0 ships with a comprehensive test suite for local development and CI:
+
+- **`tests/test_local.py`** — 98-test suite covering all major features: wallet setup, account/username registration, post lifecycle, comment threading, social graph, PoW verification, subscription tiers (free + T1/T2/T3), search/discovery, and edge case validation. Runs inside the Docker container or from the host.
+- **`tests/spam_attack.py`** — multi-worker stress test with per-difficulty PoW timing stats (avg/min/max/median), automatic retry on difficulty increases, and a summary table showing solve times by difficulty level.
+- **`tests/test_pow_scaling.py`** — standalone script to empirically verify that each difficulty step increases solve time by ~25% (matching the `pow_factor=0.25` design).
+- **`tests/test_difficulty_ramp.py`** — difficulty ramp simulation.
+
+Local test workflow:
+```bash
+# Reset local testnet and run full test suite
+scripts/reset_local_testnet.py --latest
+docker exec mirage bash -lc "cd /opt/mirage/tests && python test_local.py"
+
+# Stress test with 10 workers for 60 seconds
+conda activate mirage-node
+python tests/spam_attack.py --backend http://127.0.0.1:80 --workers 10 --duration 60
+
+# Verify PoW scaling (empirical proof of 25% per step)
+python tests/test_pow_scaling.py --samples 30 --max-difficulty 6
+```
+
+---
+
+### Naming Cleanup
+
+Standardized PoW-related variable names across the entire codebase:
+
+- `difficulty_steps` → `difficulty` everywhere (Python, docs, tests)
+- `min_difficulty` → `pow_base_bits` (chain parameter)
+- `pow_difficulty_step` → `pow_factor` (chain parameter)
+- `check_difficulty_steps()` → `check_difficulty()` in verify scripts
+
+---
+
 ### Roadmap
 
 - Galleries — multiple images and videos in a single post
