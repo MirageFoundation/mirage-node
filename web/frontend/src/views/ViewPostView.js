@@ -3892,7 +3892,7 @@ function ViewPostView({ state, updatePost }) {
                                             )}
 
                                             {/* Content */}
-                                            {!isCollapsed && post.content && !(state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') && (
+                                            {!isCollapsed && (post.content || (Array.isArray(post.media) && post.media.length > 0)) && !(state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') && (
                                                 <StyledContentArea>
                                                     {(() => {
                                                         const raw = String(post.content || '');
