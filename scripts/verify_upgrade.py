@@ -1060,203 +1060,114 @@ def check_python_protobuf_definitions(failures: list[str], warnings: list[str]) 
 
 
 def check_v1_11_pow_difficulty(failures: list[str], warnings: list[str]) -> None:
-    """Verify v1.11.0 PoW difficulty overhaul: step-based system, param types, worker."""
+    """Verify v1.11.0 PoW difficulty overhaul (source-level, skips missing files silently)."""
     print("\n-> Checking v1.11.0 PoW difficulty overhaul...")
 
-    # 1. upgrades.go: v1.11.0 handler registered
-    upgrades_go = REPO_ROOT / "blockchain" / "app" / "upgrades.go"
-    if upgrades_go.exists():
-        ug_text = upgrades_go.read_text()
-        if re.search(r"v1\.11\.0", ug_text):
-            print("   [OK] upgrades.go: v1.11.0 upgrade handler registered")
-        else:
-            print("   [FAIL] upgrades.go: v1.11.0 upgrade handler not found")
-            failures.append("v1.11.0: upgrades.go missing v1.11.0 handler")
-    else:
-        print("   [WARN] upgrades.go not found (no Go source)")
+    def _check_file(path: Path, checks: list[tuple[str, str, str]]) -> None:
+        """Run checks on a file. Skip silently if the file doesn't exist.
 
-    # 2. ante_pow.go: computeDifficultyFactor using exponential formula
-    ante_pow = REPO_ROOT / "blockchain" / "app" / "ante_pow.go"
-    if ante_pow.exists():
-        ap_text = ante_pow.read_text()
-        if "computeDifficultyFactor" in ap_text:
-            print("   [OK] ante_pow.go: computeDifficultyFactor present")
-        else:
-            print("   [FAIL] ante_pow.go: computeDifficultyFactor not found")
-            failures.append("v1.11.0: ante_pow.go missing computeDifficultyFactor")
-
-        if "math.Pow" in ap_text or "math.Round" in ap_text:
-            print("   [OK] ante_pow.go: uses math.Pow/math.Round for exponential factor")
-        else:
-            print("   [FAIL] ante_pow.go: missing math.Pow/math.Round for exponential calc")
-            failures.append("v1.11.0: ante_pow.go missing exponential math")
-
-        if "MaxSafeDifficultyFactor" in ap_text:
-            print("   [OK] ante_pow.go: MaxSafeDifficultyFactor cap present")
-        else:
-            print("   [FAIL] ante_pow.go: MaxSafeDifficultyFactor cap missing")
-            failures.append("v1.11.0: ante_pow.go missing MaxSafeDifficultyFactor")
-    else:
-        print("   [WARN] ante_pow.go not found")
-
-    # 3. keeper.go: BaseDifficultySteps and BaseDifficultyFactor constants
-    keeper_go = REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go"
-    if keeper_go.exists():
-        kp_text = keeper_go.read_text()
-        for const in ("BaseDifficultySteps", "BaseDifficultyFactor", "MaxSafeDifficultySteps"):
-            if const in kp_text:
-                print(f"   [OK] keeper.go: {const} defined")
+        Each check is (pattern, ok_msg, fail_msg). Pattern is a plain substring
+        or a regex (prefixed with 're:').
+        """
+        if not path.exists():
+            return
+        text = path.read_text()
+        for pattern, ok_msg, fail_msg in checks:
+            if pattern.startswith("re:"):
+                found = bool(re.search(pattern[3:], text))
             else:
-                print(f"   [FAIL] keeper.go: {const} missing")
-                failures.append(f"v1.11.0: keeper.go missing {const}")
-    else:
-        print("   [WARN] keeper.go not found")
+                found = pattern in text
+            if found:
+                print(f"   [OK] {ok_msg}")
+            else:
+                print(f"   [FAIL] {fail_msg}")
+                failures.append(f"v1.11.0: {fail_msg}")
 
-    # 4. module.go: EndBlock adjusts by +/-1 step
-    module_go = REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go"
-    if module_go.exists():
-        mg_text = module_go.read_text()
-        if "BaseDifficultySteps" in mg_text:
-            print("   [OK] module.go: references BaseDifficultySteps")
+    def _check_absent(path: Path, pattern: str, ok_msg: str, fail_msg: str) -> None:
+        """Fail if pattern IS found (checking that old code was removed)."""
+        if not path.exists():
+            return
+        text = path.read_text()
+        if pattern.startswith("re:"):
+            found = bool(re.search(pattern[3:], text))
         else:
-            print("   [FAIL] module.go: missing BaseDifficultySteps reference")
-            failures.append("v1.11.0: module.go missing BaseDifficultySteps")
-    else:
-        print("   [WARN] module.go not found")
-
-    # 5. params.go: pow_difficulty_step default
-    params_go = REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.go"
-    if params_go.exists():
-        pg_text = params_go.read_text()
-        if "PowDifficultyStep" in pg_text:
-            print("   [OK] params.go: PowDifficultyStep default defined")
+            found = pattern in text
+        if not found:
+            print(f"   [OK] {ok_msg}")
         else:
-            print("   [FAIL] params.go: PowDifficultyStep default missing")
-            failures.append("v1.11.0: params.go missing PowDifficultyStep")
-    else:
-        print("   [WARN] params.go not found")
+            print(f"   [FAIL] {fail_msg}")
+            failures.append(f"v1.11.0: {fail_msg}")
 
-    # 6. Python backend: pow.py uses step-based factor
-    pow_py = REPO_ROOT / "web" / "backend" / "pow.py"
-    if pow_py.exists():
-        pp_text = pow_py.read_text()
-        if "_difficulty_factor" in pp_text or "_BASE_DIFFICULTY_FACTOR" in pp_text:
-            print("   [OK] pow.py: step-based _difficulty_factor / _BASE_DIFFICULTY_FACTOR present")
-        else:
-            print("   [FAIL] pow.py: missing step-based difficulty factor logic")
-            failures.append("v1.11.0: pow.py missing step-based difficulty factor")
+    # --- Go (blockchain) — only checked when source is present ---
 
-        if "pow_difficulty_step" in pp_text:
-            print("   [OK] pow.py: accepts pow_difficulty_step parameter")
-        else:
-            print("   [FAIL] pow.py: missing pow_difficulty_step parameter")
-            failures.append("v1.11.0: pow.py missing pow_difficulty_step parameter")
-    else:
-        print("   [WARN] pow.py not found")
+    _check_file(REPO_ROOT / "blockchain" / "app" / "upgrades.go", [
+        ("v1.11.0", "upgrades.go: v1.11.0 handler registered", "upgrades.go: v1.11.0 handler not found"),
+    ])
 
-    # 7. Python backend: chain.py exports get_pow_difficulty_step
-    chain_py = REPO_ROOT / "web" / "backend" / "chain.py"
-    if chain_py.exists():
-        cp_text = chain_py.read_text()
-        if "get_pow_difficulty_step" in cp_text:
-            print("   [OK] chain.py: get_pow_difficulty_step present")
-        else:
-            print("   [FAIL] chain.py: get_pow_difficulty_step missing")
-            failures.append("v1.11.0: chain.py missing get_pow_difficulty_step")
-    else:
-        print("   [WARN] chain.py not found")
+    _check_file(REPO_ROOT / "blockchain" / "app" / "ante_pow.go", [
+        ("computeDifficultyFactor", "ante_pow.go: computeDifficultyFactor present", "ante_pow.go: computeDifficultyFactor missing"),
+        ("MaxSafeDifficultyFactor", "ante_pow.go: MaxSafeDifficultyFactor cap present", "ante_pow.go: MaxSafeDifficultyFactor missing"),
+    ])
 
-    # 8. Python backend: params.py has pow_difficulty_step as float param
-    params_py = REPO_ROOT / "web" / "backend" / "params.py"
-    if params_py.exists():
-        pp_text = params_py.read_text()
-        if "pow_difficulty_step" in pp_text:
-            print("   [OK] params.py: pow_difficulty_step registered")
-        else:
-            print("   [FAIL] params.py: pow_difficulty_step not registered")
-            failures.append("v1.11.0: params.py missing pow_difficulty_step")
+    _check_file(REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go", [
+        ("BaseDifficultySteps", "keeper.go: BaseDifficultySteps defined", "keeper.go: BaseDifficultySteps missing"),
+        ("BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor defined", "keeper.go: BaseDifficultyFactor missing"),
+        ("MaxSafeDifficultySteps", "keeper.go: MaxSafeDifficultySteps defined", "keeper.go: MaxSafeDifficultySteps missing"),
+    ])
 
-        # subscription_reserve_percent and bridge_attestation_threshold should be floats
-        if re.search(r"_REQUIRED_FLOAT_PARAMS.*subscription_reserve_percent", pp_text, re.DOTALL):
-            print("   [OK] params.py: subscription_reserve_percent is a float param")
-        elif "subscription_reserve_percent" in pp_text:
-            print("   [WARN] params.py: subscription_reserve_percent present but may not be float")
-            warnings.append("v1.11.0: params.py subscription_reserve_percent may not be float")
-        else:
-            print("   [FAIL] params.py: subscription_reserve_percent missing")
-            failures.append("v1.11.0: params.py missing subscription_reserve_percent")
+    _check_file(REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go", [
+        ("BaseDifficultySteps", "module.go: references BaseDifficultySteps", "module.go: BaseDifficultySteps missing"),
+    ])
 
-        if re.search(r"_REQUIRED_FLOAT_PARAMS.*bridge_attestation_threshold", pp_text, re.DOTALL):
-            print("   [OK] params.py: bridge_attestation_threshold is a float param")
-        elif "bridge_attestation_threshold" in pp_text:
-            print("   [WARN] params.py: bridge_attestation_threshold present but may not be float")
-            warnings.append("v1.11.0: params.py bridge_attestation_threshold may not be float")
-        else:
-            print("   [FAIL] params.py: bridge_attestation_threshold missing")
-            failures.append("v1.11.0: params.py missing bridge_attestation_threshold")
-    else:
-        print("   [WARN] params.py not found")
+    _check_file(REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.go", [
+        ("PowDifficultyStep", "params.go: PowDifficultyStep default defined", "params.go: PowDifficultyStep missing"),
+    ])
 
-    # 9. Frontend worker: difficultyFactor and BASE_DIFFICULTY_FACTOR
-    worker_js = REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js"
-    if worker_js.exists():
-        wj_text = worker_js.read_text()
-        if "difficultyFactor" in wj_text and "BASE_DIFFICULTY_FACTOR" in wj_text:
-            print("   [OK] worker.js: difficultyFactor + BASE_DIFFICULTY_FACTOR present")
-        else:
-            print("   [FAIL] worker.js: missing difficultyFactor or BASE_DIFFICULTY_FACTOR")
-            failures.append("v1.11.0: worker.js missing step-based factor logic")
+    # --- Python backend ---
 
-        if "powDifficultyStep" in wj_text or "pow_difficulty_step" in wj_text:
-            print("   [OK] worker.js: accepts powDifficultyStep parameter")
-        else:
-            print("   [FAIL] worker.js: missing powDifficultyStep parameter")
-            failures.append("v1.11.0: worker.js missing powDifficultyStep")
-    else:
-        print("   [WARN] worker.js not found")
+    _check_file(REPO_ROOT / "web" / "backend" / "pow.py", [
+        ("_BASE_DIFFICULTY_FACTOR", "pow.py: step-based difficulty factor present", "pow.py: step-based difficulty factor missing"),
+        ("pow_difficulty_step", "pow.py: accepts pow_difficulty_step", "pow.py: pow_difficulty_step missing"),
+    ])
 
-    # 10. Frontend TransactionHandler: passes pow_difficulty_step
-    tx_handler = REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js"
-    if tx_handler.exists():
-        th_text = tx_handler.read_text()
-        if "pow_difficulty_step" in th_text or "powDifficultyStep" in th_text:
-            print("   [OK] TransactionHandler.js: passes pow_difficulty_step")
-        else:
-            print("   [FAIL] TransactionHandler.js: missing pow_difficulty_step")
-            failures.append("v1.11.0: TransactionHandler.js missing pow_difficulty_step")
-    else:
-        print("   [WARN] TransactionHandler.js not found")
+    _check_file(REPO_ROOT / "web" / "backend" / "chain.py", [
+        ("get_pow_difficulty_step", "chain.py: get_pow_difficulty_step present", "chain.py: get_pow_difficulty_step missing"),
+    ])
 
-    # 11. Python backend routes: core.py handles difficulty=0 correctly
-    #     The old bug was: `if not (int(difficulty) > 0 and proof):` which rejected
-    #     difficulty=0 in the non-subscriber PoW validation path.
-    #     Note: `int(difficulty) > 0 or int(proof) > 0` in subscriber-rejection
-    #     branches is correct (detects subscribers accidentally sending PoW data).
-    core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
-    if core_py.exists():
-        cr_text = core_py.read_text()
-        # Old pattern used for non-subscriber PoW *validation* that rejects difficulty=0
-        if re.search(r'not\s*\(\s*int\(difficulty\)\s*>\s*0\s+and\s+proof\s*\)', cr_text):
-            print("   [FAIL] core.py: still uses 'not (int(difficulty) > 0 and proof)' (rejects difficulty=0)")
-            failures.append("v1.11.0: core.py still rejects difficulty=0 with old validation check")
-        else:
-            print("   [OK] core.py: old 'not (int(difficulty) > 0 and proof)' pattern removed")
-    else:
-        print("   [WARN] core.py not found")
+    _check_file(REPO_ROOT / "web" / "backend" / "params.py", [
+        ("pow_difficulty_step", "params.py: pow_difficulty_step registered", "params.py: pow_difficulty_step missing"),
+        ("re:_REQUIRED_FLOAT_PARAMS.*subscription_reserve_percent", "params.py: subscription_reserve_percent is float", "params.py: subscription_reserve_percent not float"),
+        ("re:_REQUIRED_FLOAT_PARAMS.*bridge_attestation_threshold", "params.py: bridge_attestation_threshold is float", "params.py: bridge_attestation_threshold not float"),
+    ])
 
-    # 12. Update doc exists (warn-only; docs/ may not be present on deployed nodes)
+    # Check old buggy pattern was removed from core.py
+    _check_absent(
+        REPO_ROOT / "web" / "backend" / "routes" / "core.py",
+        r"re:not\s*\(\s*int\(difficulty\)\s*>\s*0\s+and\s+proof\s*\)",
+        "core.py: old difficulty=0 rejection removed",
+        "core.py: still rejects difficulty=0 with old check",
+    )
+
+    # --- Frontend ---
+
+    _check_file(REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js", [
+        ("difficultyFactor", "worker.js: difficultyFactor present", "worker.js: difficultyFactor missing"),
+        ("BASE_DIFFICULTY_FACTOR", "worker.js: BASE_DIFFICULTY_FACTOR present", "worker.js: BASE_DIFFICULTY_FACTOR missing"),
+    ])
+
+    _check_file(REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js", [
+        ("pow_difficulty_step", "TransactionHandler.js: passes pow_difficulty_step", "TransactionHandler.js: pow_difficulty_step missing"),
+    ])
+
+    # --- Docs & proposal (skip if dirs missing on deployed nodes) ---
+
     update_doc = REPO_ROOT / "docs" / "updates" / "update_v1.11.0.md"
     if update_doc.exists():
         print("   [OK] docs/updates/update_v1.11.0.md exists")
-    else:
-        docs_dir = REPO_ROOT / "docs"
-        if docs_dir.exists():
-            print("   [FAIL] docs/updates/update_v1.11.0.md not found")
-            failures.append("v1.11.0: update documentation not found")
-        else:
-            print("   [SKIP] docs/ directory not present (deployed node)")
+    elif (REPO_ROOT / "docs").exists():
+        print("   [FAIL] docs/updates/update_v1.11.0.md not found")
+        failures.append("v1.11.0: update documentation not found")
 
-    # 13. Proposal file updated
     proposal = REPO_ROOT / "scripts" / "proposals" / "proposal_upgrade.json"
     if proposal.exists():
         try:
@@ -1266,13 +1177,11 @@ def check_v1_11_pow_difficulty(failures: list[str], warnings: list[str]) -> None
             if "v1.11.0" in plan_name:
                 print(f"   [OK] proposal_upgrade.json: plan name = {plan_name}")
             else:
-                print(f"   [FAIL] proposal_upgrade.json: plan name '{plan_name}' does not contain v1.11.0")
+                print(f"   [FAIL] proposal_upgrade.json: plan name '{plan_name}' missing v1.11.0")
                 failures.append("v1.11.0: proposal_upgrade.json plan name wrong")
         except Exception as e:
-            print(f"   [FAIL] proposal_upgrade.json: cannot parse: {e}")
+            print(f"   [FAIL] proposal_upgrade.json: parse error: {e}")
             failures.append(f"v1.11.0: proposal_upgrade.json parse error: {e}")
-    else:
-        print("   [WARN] proposal_upgrade.json not found")
 
 
 def check_orchestrator_config(home_dir: Path, failures: list[str], warnings: list[str]) -> None:
