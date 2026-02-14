@@ -1024,26 +1024,29 @@ func (k Keeper) ClearPoWWindow(ctx sdk.Context, params types.Params) error {
 	return nil
 }
 
-// BaseDifficulty is the default difficulty factor (1.0x the base target).
-const BaseDifficulty uint64 = 1000
+// BaseDifficultySteps is the default difficulty step (0 = base).
+const BaseDifficultySteps uint64 = 0
 
-// MaxSafeDifficulty caps the factor to 2^53-1 so JSON/JS Number is lossless.
-const MaxSafeDifficulty uint64 = (1 << 53) - 1
+// BaseDifficultyFactor is the base work factor (1.0x).
+const BaseDifficultyFactor uint64 = 1000
 
-// GetCurrentDifficulty returns the current dynamic difficulty factor.
-// 1000 = base difficulty (1.0x). Higher values = harder.
+// MaxSafeDifficultyFactor caps the factor to 2^53-1 so JSON/JS Number is lossless.
+const MaxSafeDifficultyFactor uint64 = (1 << 53) - 1
+
+// MaxSafeDifficultySteps caps the step count to 2^53-1 so JSON/JS Number is lossless.
+const MaxSafeDifficultySteps uint64 = (1 << 53) - 1
+
+// GetCurrentDifficulty returns the current dynamic difficulty step.
+// 0 = base difficulty. Higher values = harder via (1 + pow_difficulty_step)^difficulty.
 func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
 	if err != nil || len(bz) == 0 {
-		return BaseDifficulty
+		return BaseDifficultySteps
 	}
 	v := binary.BigEndian.Uint64(bz)
-	if v < BaseDifficulty {
-		return BaseDifficulty
-	}
-	if v > MaxSafeDifficulty {
-		return MaxSafeDifficulty
+	if v > MaxSafeDifficultySteps {
+		return MaxSafeDifficultySteps
 	}
 	return v
 }

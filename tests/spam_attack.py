@@ -18,6 +18,7 @@ import sys
 import time
 import random
 import string
+import math
 import threading
 from dataclasses import dataclass, field
 from typing import Optional, Tuple, List
@@ -203,14 +204,43 @@ def _uvarint(n: int) -> bytes:
     return bytes(out)
 
 
-def _check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
-    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
+_BASE_DIFFICULTY_FACTOR = 1000
+_MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
+_POW_DIFFICULTY_STEP: float | None = None
+
+
+def _round_half_up(value: float) -> int:
+    return int(math.floor(value + 0.5))
+
+
+def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+    if difficulty_steps < 0:
+        return None
+    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+        return None
+    if difficulty_steps == 0:
+        return _BASE_DIFFICULTY_FACTOR
+    try:
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+    except Exception:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if not math.isfinite(factor):
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if factor > _MAX_SAFE_DIFFICULTY_FACTOR:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    rounded = _round_half_up(factor)
+    return max(_BASE_DIFFICULTY_FACTOR, rounded)
+
+
+def _check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+    """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
     if min_difficulty <= 0 or min_difficulty > 256:
         return False
-    if difficulty < 1000:
+    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    if factor is None:
         return False
     base_target = 1 << (256 - min_difficulty)
-    eff_target = base_target * 1000 // difficulty
+    eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
 
@@ -246,7 +276,7 @@ def canon_base_vote(
 
 def _compute_pow(
     base: bytes,
-    difficulty: int,
+    difficulty_steps: int,
     min_difficulty: int,
     last_block_hash: str,
     max_seconds: float = 180.0,
@@ -257,10 +287,12 @@ def _compute_pow(
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW") from e
-    if difficulty < 1000:
-        raise ValueError("difficulty must be >= 1000")
+    if difficulty_steps < 0:
+        raise ValueError("difficulty must be >= 0")
     if min_difficulty <= 0 or min_difficulty > 256:
         raise ValueError("min_difficulty must be in [1, 256]")
+    if _POW_DIFFICULTY_STEP is None:
+        raise ValueError("pow_difficulty_step missing")
 
     try:
         salt = bytes.fromhex(last_block_hash.strip())
@@ -280,7 +312,7 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _check_pow_target(digest, difficulty, min_difficulty):
+        if _check_pow_target(digest, difficulty_steps, min_difficulty, _POW_DIFFICULTY_STEP):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW not found in {max_seconds}s")
@@ -296,6 +328,8 @@ def _fetch_params(backend: str, address: Optional[str] = None) -> Tuple[str, int
     last_block_hash = str(st.get("last_block_hash", "") or "")
     pow_difficulty = int(st.get("pow_difficulty", 0) or 0)
     min_difficulty = int(st.get("min_difficulty", 0) or 0)
+    global _POW_DIFFICULTY_STEP
+    _POW_DIFFICULTY_STEP = float(st["pow_difficulty_step"])
     return last_block_hash, pow_difficulty, min_difficulty
 
 

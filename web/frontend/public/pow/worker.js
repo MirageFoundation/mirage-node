@@ -47,18 +47,33 @@ function concatBytes(a, b, c) {
 /**
  * Target-based PoW check using BigInt.
  * base_target = 2^(256 - minDifficulty)
- * eff_target  = base_target * 1000 / difficulty
+ * eff_target  = base_target * 1000 / (1000 * (1 + step)^difficulty)
  * Pass if hash_int <= eff_target
  */
-function checkPowTarget(hashBytes, difficulty, minDifficulty) {
+const BASE_DIFFICULTY_FACTOR = 1000;
+const MAX_SAFE_DIFFICULTY_FACTOR = Number.MAX_SAFE_INTEGER;
+
+function difficultyFactor(difficultySteps, powDifficultyStep) {
+    if (!Number.isFinite(powDifficultyStep) || powDifficultyStep <= 0 || powDifficultyStep > 1) return null;
+    if (!Number.isFinite(difficultySteps) || !Number.isInteger(difficultySteps) || difficultySteps < 0) return null;
+    if (difficultySteps === 0) return BASE_DIFFICULTY_FACTOR;
+    const factorFloat = BASE_DIFFICULTY_FACTOR * Math.pow(1 + powDifficultyStep, difficultySteps);
+    if (!Number.isFinite(factorFloat) || factorFloat > MAX_SAFE_DIFFICULTY_FACTOR) return MAX_SAFE_DIFFICULTY_FACTOR;
+    const rounded = Math.round(factorFloat);
+    return Math.max(BASE_DIFFICULTY_FACTOR, rounded);
+}
+
+function checkPowTarget(hashBytes, difficultySteps, minDifficulty, powDifficultyStep) {
     const hashHex = bytesToHex(hashBytes);
     const hashInt = BigInt('0x' + hashHex);
     const baseTarget = 1n << BigInt(256 - minDifficulty);
-    const effTarget = baseTarget * 1000n / BigInt(difficulty);
+    const factor = difficultyFactor(difficultySteps, powDifficultyStep);
+    if (factor === null) return false;
+    const effTarget = baseTarget * 1000n / BigInt(factor);
     return hashInt <= effTarget;
 }
 
-async function isValidProofArgon2id(baseBytes, saltBytes, proof, difficulty, minDifficulty) {
+async function isValidProofArgon2id(baseBytes, saltBytes, proof, difficultySteps, minDifficulty, powDifficultyStep) {
     const proofBytes = uvarint(proof >>> 0);
     const colon = new Uint8Array([":".charCodeAt(0)]);
     const password = concatBytes(baseBytes, colon, proofBytes);
@@ -74,16 +89,16 @@ async function isValidProofArgon2id(baseBytes, saltBytes, proof, difficulty, min
     const digest = res && (res.hash || res.hashBytes || null);
     const bytes = digest instanceof Uint8Array ? digest : (res.hashHex ? hexToBytes(res.hashHex) : null);
     if (!bytes) return false;
-    return checkPowTarget(bytes, difficulty, minDifficulty);
+    return checkPowTarget(bytes, difficultySteps, minDifficulty, powDifficultyStep);
 }
 
-async function performPow(baseHex, saltHex, difficulty, minDifficulty, start) {
+async function performPow(baseHex, saltHex, difficultySteps, minDifficulty, powDifficultyStep, start) {
     const baseBytes = hexToBytes(baseHex);
     const saltBytes = hexToBytes((saltHex || '').trim());
     let proof = (start >>> 0) || 0;
     while (true) {
         // eslint-disable-next-line no-await-in-loop
-        const ok = await isValidProofArgon2id(baseBytes, saltBytes, proof, difficulty, minDifficulty);
+        const ok = await isValidProofArgon2id(baseBytes, saltBytes, proof, difficultySteps, minDifficulty, powDifficultyStep);
         if (ok) break;
         proof++;
     }
@@ -96,6 +111,7 @@ self.onmessage = function (e) {
     const saltHex = data && typeof data.saltHex === 'string' ? data.saltHex : undefined;
     const diff = (data && typeof data.difficulty === 'number') ? data.difficulty : NaN;
     const minDiff = (data && typeof data.minDifficulty === 'number') ? data.minDifficulty : NaN;
+    const powStep = (data && typeof data.powDifficultyStep === 'number') ? data.powDifficultyStep : NaN;
     const start = (data && typeof data.start === 'number') ? (data.start >>> 0) : 0;
 
     if (
@@ -103,15 +119,18 @@ self.onmessage = function (e) {
         !saltHex ||
         !Number.isFinite(diff) ||
         !Number.isInteger(diff) ||
-        diff < 1000 ||
+        diff < 0 ||
         !Number.isFinite(minDiff) ||
         !Number.isInteger(minDiff) ||
-        minDiff <= 0
+        minDiff <= 0 ||
+        !Number.isFinite(powStep) ||
+        powStep <= 0 ||
+        powStep > 1
     ) {
         self.postMessage({ error: 'invalid_params' });
         return;
     }
-    performPow(baseHex, saltHex, diff, minDiff, start)
+    performPow(baseHex, saltHex, diff, minDiff, powStep, start)
         .then((pow) => self.postMessage(pow))
         .catch(() => self.postMessage({ error: 'pow_failed' }));
 };

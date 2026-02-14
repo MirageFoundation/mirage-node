@@ -397,12 +397,12 @@ class ChainClient:
             return False
 
     def get_current_difficulty(self) -> int:
-        """Get current PoW difficulty factor via gRPC."""
+        """Get current PoW difficulty steps via gRPC."""
         info = self.get_difficulty_info()
         return info["difficulty"]
 
     def get_difficulty_info(self) -> dict:
-        """Get current PoW difficulty factor and message count via gRPC."""
+        """Get current PoW difficulty steps and message count via gRPC."""
         try:
             from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 

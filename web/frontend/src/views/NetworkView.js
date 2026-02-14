@@ -646,6 +646,7 @@ export default function NetworkView({ state }) {
     const [cfg, setCfg] = useState({
         block_time: undefined,
         pow_difficulty: undefined,
+        pow_difficulty_step: undefined,
         pow_message_count: undefined,
         pow_calm_sequence: undefined,
         pow_last_change_height: undefined,
@@ -704,6 +705,7 @@ export default function NetworkView({ state }) {
                         ...prev,
                         block_time: (typeof data.block_time !== 'undefined') ? Number(data.block_time) : undefined,
                         pow_difficulty: (typeof data.pow_difficulty !== 'undefined') ? Number(data.pow_difficulty) : undefined,
+                        pow_difficulty_step: (typeof data.pow_difficulty_step !== 'undefined') ? Number(data.pow_difficulty_step) : undefined,
                         pow_message_count: (typeof data.pow_message_count !== 'undefined') ? Number(data.pow_message_count) : undefined,
                         pow_calm_sequence: (typeof data.pow_calm_sequence !== 'undefined') ? Number(data.pow_calm_sequence) : undefined,
                         pow_last_change_height: (typeof data.pow_last_change_height !== 'undefined') ? Number(data.pow_last_change_height) : undefined,
@@ -857,7 +859,11 @@ export default function NetworkView({ state }) {
                                     <RowCentered>
                                         <Label>Difficulty:</Label>
                                         <ValueBox>
-                                            <Mono>{typeof cfg.pow_difficulty === 'number' ? `${(cfg.pow_difficulty / 1000).toFixed(2)}x` : '(loading...)'}</Mono>
+                                        <Mono>{
+                                            (typeof cfg.pow_difficulty === 'number' && typeof cfg.pow_difficulty_step === 'number')
+                                                ? `${Math.pow(1 + cfg.pow_difficulty_step, cfg.pow_difficulty).toFixed(2)}x`
+                                                : '(loading...)'
+                                        }</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>

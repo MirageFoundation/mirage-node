@@ -16,6 +16,7 @@ import sys
 import time
 import random
 import string
+import math
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -62,6 +63,7 @@ from shared.datatypes import (
 
 MIN_GAS_PRICE = 0.025
 RPC_URL = ""
+_POW_DIFFICULTY_STEP: float | None = None
 
 # Default RPC
 DEFAULT_RPC = "http://127.0.0.1:26657"
@@ -155,9 +157,28 @@ def _rpc_abci_uint64(key_name: str, timeout_s: float = 3.0) -> int:
 
 def _rpc_get_current_pow_difficulty(timeout_s: float = 3.0) -> tuple[int, int]:
     """Return (current_difficulty, min_difficulty) from on-chain state."""
+    global _POW_DIFFICULTY_STEP
     diff = _rpc_abci_uint64("current_difficulty", timeout_s)
     min_diff = _rpc_abci_uint64("min_difficulty", timeout_s)
+    _POW_DIFFICULTY_STEP = _rpc_get_pow_difficulty_step(timeout_s)
     return diff, min_diff
+
+
+def _rpc_get_pow_difficulty_step(timeout_s: float = 3.0) -> float:
+    if not RPC_URL:
+        raise RuntimeError("RPC_URL not set")
+    # Prefer LCD if available
+    lcd = RPC_URL
+    if ":26657" in lcd:
+        lcd = lcd.replace(":26657", ":1317")
+    url = f"{lcd}/mirage/core/v1/params"
+    with requests.get(url, timeout=timeout_s) as r:
+        r.raise_for_status()
+        data = r.json() or {}
+    params = data.get("params") or {}
+    if "pow_difficulty_step" not in params:
+        raise RuntimeError("pow_difficulty_step missing from params")
+    return float(params["pow_difficulty_step"])
 
 
 def _uvarint(n: int) -> bytes:
@@ -175,16 +196,18 @@ def _uvarint(n: int) -> bytes:
 
 
 def _compute_pow(
-    base: bytes, difficulty: int, min_difficulty: int, last_block_hash: str, max_seconds: float = 20.0
+    base: bytes, difficulty_steps: int, min_difficulty: int, last_block_hash: str, max_seconds: float = 20.0
 ) -> int:
     try:
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW tests") from e
-    if difficulty < 1000:
-        raise ValueError("difficulty must be >= 1000")
+    if difficulty_steps < 0:
+        raise ValueError("difficulty must be >= 0")
     if min_difficulty <= 0 or min_difficulty > 256:
         raise ValueError("min_difficulty must be in [1, 256]")
+    if _POW_DIFFICULTY_STEP is None:
+        raise ValueError("pow_difficulty_step missing")
     try:
         salt = bytes.fromhex(last_block_hash.strip())
     except Exception:
@@ -201,21 +224,49 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _check_pow_target(digest, difficulty, min_difficulty):
+        if _check_pow_target(digest, difficulty_steps, min_difficulty, _POW_DIFFICULTY_STEP):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW mining exceeded {max_seconds:.1f}s")
         proof += 1
 
 
-def _check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
-    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
+_BASE_DIFFICULTY_FACTOR = 1000
+_MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
+
+
+def _round_half_up(value: float) -> int:
+    return int(math.floor(value + 0.5))
+
+
+def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+    if difficulty_steps < 0:
+        return None
+    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+        return None
+    if difficulty_steps == 0:
+        return _BASE_DIFFICULTY_FACTOR
+    try:
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+    except Exception:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if not math.isfinite(factor):
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if factor > _MAX_SAFE_DIFFICULTY_FACTOR:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    rounded = _round_half_up(factor)
+    return max(_BASE_DIFFICULTY_FACTOR, rounded)
+
+
+def _check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+    """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
     if min_difficulty <= 0 or min_difficulty > 256:
         return False
-    if difficulty < 1000:
+    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    if factor is None:
         return False
     base_target = 1 << (256 - min_difficulty)
-    eff_target = base_target * 1000 // difficulty
+    eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
 

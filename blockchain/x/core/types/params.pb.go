@@ -214,7 +214,7 @@ func (m *TierConfig) GetCanHaveBanner() bool {
 // Params defines the parameters for the module.
 type Params struct {
 	// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty).
-	// The dynamic difficulty (a work multiplier) is stored on-chain and never goes below 1000 (1.0x base).
+	// The dynamic difficulty is stored on-chain as integer steps (0 = base).
 	MinDifficulty uint64 `protobuf:"varint,1,opt,name=min_difficulty,json=minDifficulty,proto3" json:"min_difficulty,omitempty"`
 	// pow_message_window is the sliding window size (in blocks) over which PoW message volume is measured
 	PowMessageWindow uint64 `protobuf:"varint,2,opt,name=pow_message_window,json=powMessageWindow,proto3" json:"pow_message_window,omitempty"`
@@ -267,8 +267,8 @@ type Params struct {
 	// bridge_attestation_threshold is the voting power fraction required for minting [0.0, 1.0]
 	// Default: 0.6667 (66.67% of total voting power required)
 	BridgeAttestationThreshold float64 `protobuf:"fixed64,51,opt,name=bridge_attestation_threshold,json=bridgeAttestationThreshold,proto3" json:"bridge_attestation_threshold,omitempty"`
-	// pow_difficulty_step is the fractional step for dynamic difficulty adjustment [0.0, 1.0]
-	// On busy: new_difficulty = difficulty * (1 + step). On calm: new_difficulty = difficulty / (1 + step).
+	// pow_difficulty_step is the fractional step for the exponential difficulty factor [0.0, 1.0]
+	// Effective factor: 1000 * (1 + step)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
 	// Default: 0.25 (25% per step)
 	PowDifficultyStep float64 `protobuf:"fixed64,52,opt,name=pow_difficulty_step,json=powDifficultyStep,proto3" json:"pow_difficulty_step,omitempty"`
 }

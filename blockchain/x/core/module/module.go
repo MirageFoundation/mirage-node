@@ -471,10 +471,10 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		return err
 	}
 
-	// Initialize difficulty if not set (base factor = 1000)
+	// Initialize difficulty if not set (base step = 0)
 	params := am.k.GetParams(sdkCtx)
 	if !am.k.HasCurrentDifficulty(sdkCtx) {
-		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficulty); err != nil {
+		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficultySteps); err != nil {
 			return err
 		}
 	}
@@ -528,15 +528,11 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		"calm_sequence", calmSeq,
 	)
 
-	// Busy window: increase difficulty by (1 + pow_difficulty_step) and reset calm sequence
+	// Busy window: increase difficulty by 1 step and reset calm sequence
 	if messageCount >= params.PowMessageLimit {
-		step := params.PowDifficultyStep
-		newDifficulty := uint64(math.Round(float64(currentDifficulty) * (1 + step)))
-		if newDifficulty <= currentDifficulty {
-			newDifficulty = currentDifficulty + 1
-		}
-		if newDifficulty > keeper.MaxSafeDifficulty {
-			newDifficulty = keeper.MaxSafeDifficulty
+		newDifficulty := currentDifficulty + 1
+		if newDifficulty > keeper.MaxSafeDifficultySteps {
+			newDifficulty = keeper.MaxSafeDifficultySteps
 		}
 		if newDifficulty != currentDifficulty {
 			if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
@@ -557,13 +553,9 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 			return err
 		}
 		if calmSeq >= params.PowCalmSequenceThreshold {
-			step := params.PowDifficultyStep
-			newDifficulty := uint64(math.Round(float64(currentDifficulty) / (1 + step)))
-			if newDifficulty >= currentDifficulty && currentDifficulty > keeper.BaseDifficulty {
+			newDifficulty := currentDifficulty
+			if currentDifficulty > keeper.BaseDifficultySteps {
 				newDifficulty = currentDifficulty - 1
-			}
-			if newDifficulty < keeper.BaseDifficulty {
-				newDifficulty = keeper.BaseDifficulty
 			}
 			if newDifficulty != currentDifficulty {
 				if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {

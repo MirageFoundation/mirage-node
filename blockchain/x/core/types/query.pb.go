@@ -154,9 +154,9 @@ var xxx_messageInfo_QueryDifficultyRequest proto.InternalMessageInfo
 
 // QueryDifficultyResponse is response type for the Query/Difficulty RPC method.
 type QueryDifficultyResponse struct {
-	// current_difficulty is the current PoW difficulty factor (1000 = base, 1250 = 1.25x harder)
+	// current_difficulty is the current PoW difficulty step (0 = base)
 	CurrentDifficulty uint64 `protobuf:"varint,1,opt,name=current_difficulty,json=currentDifficulty,proto3" json:"current_difficulty,omitempty"`
-	// previous_difficulty is the difficulty factor before the last change
+	// previous_difficulty is the difficulty step before the last change
 	PreviousDifficulty uint64 `protobuf:"varint,2,opt,name=previous_difficulty,json=previousDifficulty,proto3" json:"previous_difficulty,omitempty"`
 	// last_change_height is the block height when difficulty last changed
 	LastChangeHeight int64 `protobuf:"varint,3,opt,name=last_change_height,json=lastChangeHeight,proto3" json:"last_change_height,omitempty"`

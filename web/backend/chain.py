@@ -95,7 +95,7 @@ def get_latest_block_hash(timeout_s: int = 5) -> str:
 
 
 def get_current_pow_difficulty() -> int:
-    """Get current PoW difficulty factor via gRPC Query/Difficulty."""
+    """Get current PoW difficulty steps via gRPC Query/Difficulty."""
     info = get_difficulty_info()
     return int(info["current_difficulty"])
 
@@ -104,6 +104,12 @@ def get_min_difficulty() -> int:
     """Get min_difficulty (base target bits) from chain params."""
     from params import expect_params
     return int(expect_params()["min_difficulty"])
+
+
+def get_pow_difficulty_step() -> float:
+    """Get pow_difficulty_step (fractional step) from chain params."""
+    from params import expect_params
+    return float(expect_params()["pow_difficulty_step"])
 
 
 # Cache for recent block hashes
@@ -373,6 +379,7 @@ __all__ = [
     "get_recent_block_hashes",
     "is_valid_recent_block_hash",
     "get_current_pow_difficulty",
+    "get_pow_difficulty_step",
     "get_block_time_seconds",
     "is_node_catching_up",
     "classify_reject",

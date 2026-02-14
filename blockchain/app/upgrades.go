@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -1044,7 +1045,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	)
 
 	// v1.11.0: Target-based PoW difficulty (gradual scaling)
-	// - Difficulty changes from bit-count to work-multiplier factor (1000 = base, 1250 = 1.25x)
+	// - Difficulty changes from bit-count to step count (0 = base, factor = 1000 * (1+step)^difficulty)
 	// - Validation changes from leadingZeroBits to big.Int target comparison
 	// - subscription_reserve_percent changes from integer percent (0-100) to double fraction [0,1]
 	// - bridge_attestation_threshold changes from basis points (0-10000) to double fraction [0,1]
@@ -1129,31 +1130,52 @@ func (app *App) RegisterUpgradeHandlers() {
 			minDiff := params.MinDifficulty
 
 			// After GetCurrentDifficulty with new code, the old bit-count value was read as-is.
-			// If it's below BaseDifficulty, it was an old bit-count value that needs conversion.
-			// If it's already >= BaseDifficulty, it was somehow already converted or set by the new
-			// fallback. We read the raw bytes to get the original value.
+			// If it's below BaseDifficultyFactor, it was an old bit-count value that needs conversion.
+			// If it's already >= BaseDifficultyFactor, it was already in factor format.
 			rawDiffBz, _ := store.Get([]byte("current_difficulty"))
 			if len(rawDiffBz) == 8 {
 				oldDiff = binary.BigEndian.Uint64(rawDiffBz)
 			}
 
-			if oldDiff < corekeeper.BaseDifficulty {
-				// Old value is a bit-count; convert to factor: 1000 * 2^(old - minDiff)
+			baseFactor := corekeeper.BaseDifficultyFactor
+			step := params.PowDifficultyStep
+			factor := oldDiff
+			if oldDiff < baseFactor {
+				// Old value is a bit-count; convert to factor: base_factor * 2^(old - minDiff)
 				shift := uint64(0)
 				if oldDiff > minDiff {
 					shift = oldDiff - minDiff
 				}
-				newDiff := uint64(1000) << shift
-				if newDiff > corekeeper.MaxSafeDifficulty || shift > 53 {
-					newDiff = corekeeper.MaxSafeDifficulty
+				factor = baseFactor << shift
+				if factor > corekeeper.MaxSafeDifficultyFactor || shift > 53 {
+					factor = corekeeper.MaxSafeDifficultyFactor
 				}
-				sdkCtx.Logger().Info("v1.11.0: converting difficulty bit-count to factor",
-					"old_bits", oldDiff, "min_diff", minDiff, "shift", shift, "new_factor", newDiff)
-				if err := app.CoreKeeper.SetCurrentDifficulty(sdkCtx, newDiff); err != nil {
-					return nil, err
-				}
+				sdkCtx.Logger().Info("v1.11.0: converted difficulty bit-count to factor",
+					"old_bits", oldDiff, "min_diff", minDiff, "shift", shift, "factor", factor)
 			} else {
 				sdkCtx.Logger().Info("v1.11.0: difficulty already in factor format", "value", oldDiff)
+			}
+
+			// Convert factor to difficulty steps: steps = log(factor/base_factor) / log(1 + step)
+			if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 || step > 1 {
+				return nil, fmt.Errorf("v1.11.0: invalid pow_difficulty_step: %v", step)
+			}
+			steps := uint64(0)
+			if factor > baseFactor {
+				ratio := float64(factor) / float64(baseFactor)
+				exp := math.Log(ratio) / math.Log(1+step)
+				if math.IsNaN(exp) || math.IsInf(exp, 0) {
+					return nil, fmt.Errorf("v1.11.0: difficulty step conversion overflow")
+				}
+				steps = uint64(math.Round(exp))
+				if steps > corekeeper.MaxSafeDifficultySteps {
+					steps = corekeeper.MaxSafeDifficultySteps
+				}
+			}
+			sdkCtx.Logger().Info("v1.11.0: converted difficulty factor to steps",
+				"factor", factor, "step", step, "steps", steps)
+			if err := app.CoreKeeper.SetCurrentDifficulty(sdkCtx, steps); err != nil {
+				return nil, err
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.11.0 complete - target-based PoW difficulty enabled")

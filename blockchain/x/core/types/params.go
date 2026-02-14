@@ -109,7 +109,7 @@ func DefaultParams() Params {
 		// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty)
 		MinDifficulty: 10,
 
-		// PoW dynamic difficulty step (fraction [0,1]): on busy *= (1+step), on calm /= (1+step)
+		// PoW difficulty step size (fraction (0,1]): factor = 1000 * (1+step)^difficulty, steps +/-1
 		PowDifficultyStep: 0.25,
 
 		// PoW message window

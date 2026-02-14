@@ -72,9 +72,9 @@ message QueryDifficultyRequest {}
 
 // QueryDifficultyResponse is response type for the Query/Difficulty RPC method.
 message QueryDifficultyResponse {
-  // current_difficulty is the current PoW difficulty factor (1000 = base, 1250 = 1.25x harder)
+  // current_difficulty is the current PoW difficulty step (0 = base, 1 = +step, 2 = +step^2, ...)
   uint64 current_difficulty = 1;
-  // previous_difficulty is the difficulty factor before the last change
+  // previous_difficulty is the difficulty step before the last change
   uint64 previous_difficulty = 2;
   // last_change_height is the block height when difficulty last changed
   int64 last_change_height = 3;

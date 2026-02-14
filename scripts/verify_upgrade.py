@@ -976,11 +976,11 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
     _require_keys(d, ["current_difficulty"], "core difficulty", failures)
     try:
         cur = _as_int(d.get("current_difficulty", 0))
-        if cur < 1000:
-            print(f"   [FAIL] current_difficulty: {cur} (must be >= 1000)")
-            failures.append(f"current_difficulty must be >= 1000, got {cur}")
+        if cur < 0:
+            print(f"   [FAIL] current_difficulty: {cur} (must be >= 0)")
+            failures.append(f"current_difficulty must be >= 0, got {cur}")
         else:
-            print(f"   [OK] current_difficulty: {cur} ({cur / 1000:.2f}x)")
+            print(f"   [OK] current_difficulty: {cur} steps")
     except Exception as e:
         print(f"   [FAIL] current_difficulty: {e}")
         failures.append(f"core difficulty invalid: {e}")

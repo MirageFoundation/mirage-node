@@ -44,7 +44,7 @@ message Params {
   option (gogoproto.equal) = true;
 
   // min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty).
-  // The dynamic difficulty (a work multiplier) is stored on-chain and never goes below 1000 (1.0x base).
+  // The dynamic difficulty is stored on-chain as integer steps (0 = base).
   uint64 min_difficulty = 1;
 
   // pow_message_window is the sliding window size (in blocks) over which PoW message volume is measured
@@ -126,8 +126,8 @@ message Params {
   // Default: 0.6667 (66.67% of total voting power required)
   double bridge_attestation_threshold = 51;
 
-  // pow_difficulty_step is the fractional step for dynamic difficulty adjustment [0.0, 1.0]
-  // On busy: new_difficulty = difficulty * (1 + step). On calm: new_difficulty = difficulty / (1 + step).
+  // pow_difficulty_step is the fractional step for the exponential difficulty factor [0.0, 1.0]
+  // Effective factor: 1000 * (1 + step)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
   // Default: 0.25 (25% per step)
   double pow_difficulty_step = 52;
 }

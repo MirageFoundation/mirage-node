@@ -191,7 +191,7 @@ This allows the backend to identify the sender without requiring them to explici
 │       "signature": "R3S4...",     // Base64 64-byte (r||s)                    │
 │       "last_block_hash": "ABC...", // Recent block hash for replay protection │
 │       "timestamp": 1700000000,    // Unix seconds                             │
-│       "pow_difficulty": 12,       // Required bits (free users)               │
+│       "pow_difficulty": 3,        // Difficulty steps (free users)            │
 │       "pow": 98765,               // Nonce that produces valid hash           │
 │       "topic": "technology",                                                  │
 │       "title": "Hello World",                                                 │
@@ -250,28 +250,31 @@ def argon2_digest(base: bytes, last_block_hash: str, proof: int) -> bytes:
         type=Argon2Type.ID,
     )
 
-def check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
-    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
-    if difficulty < 1000:
+import math
+
+def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+    """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
+    if difficulty_steps < 0 or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
         return False
     base_target = 1 << (256 - min_difficulty)
-    eff_target = base_target * 1000 // difficulty
+    factor = int(math.floor(1000 * (1 + pow_difficulty_step) ** difficulty_steps + 0.5))
+    eff_target = base_target * 1000 // factor
     return int.from_bytes(digest, "big") <= eff_target
 ```
 
 **Validation Steps:**
 
-1. **Difficulty Check:** `declared_difficulty >= current_chain_difficulty` (difficulty is a work-multiplier factor, 1000 = base)
+1. **Difficulty Steps:** `declared_difficulty` is a step count (0 = base)
 2. **Block Hash Check:** `last_block_hash` is in recent window (configurable, typically 5 blocks)
-3. **Hash Verification:** `check_pow_target(argon2_digest(...), effective_difficulty, min_difficulty)`
+3. **Hash Verification:** `check_pow_target(argon2_digest(...), effective_difficulty, min_difficulty, pow_difficulty_step)`
 
 ### Difficulty Allowance
 
 The chain has a "difficulty allowance" period after difficulty changes:
 
 ```python
-def _effective_pow_bits(declared: int) -> int:
-    """Mirror chain's validatePoWBytesArgon2 threshold logic."""
+def _effective_difficulty(declared: int) -> int:
+    """Mirror chain's validatePoWBytesArgon2 threshold logic (step counts)."""
     info = get_difficulty_info()
     current = info["current_difficulty"]
     prev = info["previous_difficulty"]
@@ -487,7 +490,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/get_parameters` | Block hash, difficulty, optional balance |
+| `GET /api/get_parameters` | Block hash, difficulty, min_difficulty, pow_difficulty_step, optional balance |
 | `GET /api/get_chain_config` | Chain governance params (tiers, limits, periods) |
 | `GET /api/get_node_config` | Per-node static settings (validator info, flags) |
 | `GET /api/get_user_status` | User status (level, balance, subscription) |
@@ -688,7 +691,7 @@ user_is_sub = is_subscriber(user_addr)
 
 if not user_is_sub:
     # Free user: require valid PoW
-    if not (difficulty > 0 and proof):
+    if proof is None:
         return error("pow_required")
     if difficulty < get_current_pow_difficulty():
         return error("insufficient pow")

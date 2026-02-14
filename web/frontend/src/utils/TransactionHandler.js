@@ -29,9 +29,18 @@ function requireMinDifficulty(value) {
 
 function requirePowDifficulty(value) {
     const num = Number(value);
-    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 1000) {
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
         try { console.error('[PoW] invalid pow_difficulty', { value }); } catch (_) { }
         throw new Error('pow_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function requirePowDifficultyStep(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0 || num > 1) {
+        try { console.error('[PoW] invalid pow_difficulty_step', { value }); } catch (_) { }
+        throw new Error('pow_difficulty_step missing or invalid');
     }
     return num;
 }
@@ -353,12 +362,15 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 updateNotification("Fetching transaction parameters");
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash;
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
 
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
@@ -372,6 +384,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
                 timestamp: Math.max(0, Date.now() - 15000),
                 // Include invite code if provided (backend marks it as used)
@@ -397,17 +410,20 @@ class TransactionHandler {
             if (!username) return { success: false, error: "empty username" };
 
             // Subscribers do not need parameters; free users do
-            let last_block_hash2 = "";
-            let pow_difficulty2 = 0;
-            const userLevel2 = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel2 === 0) {
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            if (userLevel === 0) {
                 updateNotification("Preparing username change");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
-                last_block_hash2 = statusData.last_block_hash || "";
-                pow_difficulty2 = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty2 = requireMinDifficulty(statusData.min_difficulty);
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -417,15 +433,16 @@ class TransactionHandler {
             const tx = {
                 action: 'set_username',
                 username,
-                last_block_hash: userLevel2 >= 1 ? "" : last_block_hash2,
-                pow_difficulty: userLevel2 >= 1 ? 0 : pow_difficulty2,
-                min_difficulty: min_difficulty2,
+                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
+                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
+                min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${userLevel2 >= 1 ? "" : last_block_hash2}:0`; // Challenge format required
+            const challenge = `${derivedAddress}:${userLevel >= 1 ? "" : last_block_hash}:0`; // Challenge format required
 
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
@@ -459,6 +476,8 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 updateNotification("Blocking post");
                 const [statusData] = await Promise.all([
@@ -466,7 +485,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -479,6 +499,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -503,6 +524,8 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 updateNotification("Unblocking post");
                 const [statusData] = await Promise.all([
@@ -510,7 +533,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -519,6 +543,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -552,6 +577,8 @@ class TransactionHandler {
             const userLevelB = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash_b = "";
             let pow_difficulty_b = 0;
+            let min_difficulty_b = 0;
+            let pow_difficulty_step_b = 0;
             if (userLevelB === 0) {
                 updateNotification("Blocking user");
                 const [statusData] = await Promise.all([
@@ -559,7 +586,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash_b = statusData.last_block_hash || "";
                 pow_difficulty_b = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step_b = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -568,6 +596,7 @@ class TransactionHandler {
                 last_block_hash: last_block_hash_b,
                 pow_difficulty: pow_difficulty_b,
                 min_difficulty: min_difficulty_b,
+                pow_difficulty_step: pow_difficulty_step_b,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -592,6 +621,8 @@ class TransactionHandler {
             const userLevelB = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash_b = "";
             let pow_difficulty_b = 0;
+            let min_difficulty_b = 0;
+            let pow_difficulty_step_b = 0;
             if (userLevelB === 0) {
                 updateNotification("Unblocking user");
                 const [statusData] = await Promise.all([
@@ -599,7 +630,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash_b = statusData.last_block_hash || "";
                 pow_difficulty_b = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step_b = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -608,6 +640,7 @@ class TransactionHandler {
                 last_block_hash: last_block_hash_b,
                 pow_difficulty: pow_difficulty_b,
                 min_difficulty: min_difficulty_b,
+                pow_difficulty_step: pow_difficulty_step_b,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -808,6 +841,7 @@ class TransactionHandler {
             const last_block_hash = statusData.last_block_hash;
             let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
             const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+            const pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
             // Level >= 1 users don't need PoW
             const userLevel = Number(statusData.user_level !== undefined ? statusData.user_level : Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -821,6 +855,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -870,6 +905,7 @@ class TransactionHandler {
             let last_block_hash = statusData?.last_block_hash || "";
             let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
             const min_difficulty = requireMinDifficulty(statusData?.min_difficulty);
+            const pow_difficulty_step = requirePowDifficultyStep(statusData?.pow_difficulty_step);
             const balance = statusData?.balance || 0;
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -893,6 +929,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1033,6 +1070,8 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 updateNotification("Deleting post");
                 const [statusData] = await Promise.all([
@@ -1040,7 +1079,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -1053,6 +1093,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1089,6 +1130,8 @@ class TransactionHandler {
             const userLevelE = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash_e = "";
             let pow_difficulty_e = 0;
+            let min_difficulty_e = 0;
+            let pow_difficulty_step_e = 0;
             if (userLevelE === 0) {
                 updateNotification("Preparing edit");
                 const [statusData] = await Promise.all([
@@ -1096,7 +1139,8 @@ class TransactionHandler {
                 ]);
                 last_block_hash_e = statusData.last_block_hash || "";
                 pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty_e = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty_e = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step_e = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -1110,6 +1154,7 @@ class TransactionHandler {
                 last_block_hash: last_block_hash_e,
                 pow_difficulty: pow_difficulty_e,
                 min_difficulty: min_difficulty_e,
+                pow_difficulty_step: pow_difficulty_step_e,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
@@ -1305,11 +1350,14 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -1322,6 +1370,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1375,11 +1424,14 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty = 0;
+            let pow_difficulty_step = 0;
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                min_difficulty = requireMinDifficulty(statusData.min_difficulty);
+                pow_difficulty_step = requirePowDifficultyStep(statusData.pow_difficulty_step);
             }
 
             const tx = {
@@ -1391,6 +1443,7 @@ class TransactionHandler {
                 last_block_hash,
                 pow_difficulty,
                 min_difficulty,
+                pow_difficulty_step,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1434,6 +1487,8 @@ class TransactionHandler {
 
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let min_difficulty_relay = 0;
+            let pow_difficulty_step_relay = 0;
             const userLevelNow = Number(Storage.load('user_level', '0')) || 0;
             if (userLevelNow === 0) {
                 // Free tier: must fetch real block hash for PoW validation
@@ -1443,7 +1498,8 @@ class TransactionHandler {
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = requirePowDifficulty(status.pow_difficulty);
-                    const min_difficulty_relay = requireMinDifficulty(status.min_difficulty);
+                    min_difficulty_relay = requireMinDifficulty(status.min_difficulty);
+                    pow_difficulty_step_relay = requirePowDifficultyStep(status.pow_difficulty_step);
                     const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
                     const prevOnChain = this.lastOnchainBalanceUmirage;
                     this.lastOnchainBalanceUmirage = onChainBalance;
@@ -1485,6 +1541,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1497,6 +1554,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1511,6 +1569,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1524,6 +1583,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1535,6 +1595,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1546,6 +1607,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1557,6 +1619,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1568,6 +1631,7 @@ class TransactionHandler {
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     min_difficulty: min_difficulty_relay,
+                    pow_difficulty_step: pow_difficulty_step_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -3697,6 +3761,7 @@ class TransactionHandler {
                 typeof transaction.pow_difficulty !== 'undefined' ? transaction.pow_difficulty : transaction.difficulty
             );
             const minDifficulty = requireMinDifficulty(transaction.min_difficulty);
+            const powDifficultyStep = requirePowDifficultyStep(transaction.pow_difficulty_step);
 
             let baseBytes;
             const action = transaction.action;
@@ -4043,7 +4108,7 @@ class TransactionHandler {
             // Use a random starting nonce so repeated clicks in the same block
             // produce different valid PoW solutions (and thus different tx hashes).
             const start = Math.floor(Math.random() * 0xffffffff) >>> 0;
-            worker.postMessage({ baseHex, difficulty, minDifficulty, saltHex, start });
+            worker.postMessage({ baseHex, difficulty, minDifficulty, powDifficultyStep, saltHex, start });
 
             let taken = 0;
             let powTimedOut = false;
