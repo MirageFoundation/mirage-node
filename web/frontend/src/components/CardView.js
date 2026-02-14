@@ -953,7 +953,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     }, [nodeConfigTick]);
 
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);

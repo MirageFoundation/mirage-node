@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import ReactDOM from "react-dom";
 import styled, { useTheme } from "styled-components";
 import { Helmet } from 'react-helmet-async';
@@ -900,6 +900,9 @@ function ViewPostView({ state, updatePost }) {
     const [isSuspending, setIsSuspending] = useState(false);
     const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
     const [suspendSuccess, setSuspendSuccess] = useState({}); // { postId: message }
+    const [confirmUnsuspendQuests, setConfirmUnsuspendQuests] = useState(null); // { userId, postId }
+    const [isUnsuspending, setIsUnsuspending] = useState(false);
+    const [userSuspendedMap, setUserSuspendedMap] = useState({}); // { userId: true/false/null }
     const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
     const [donateAmount, setDonateAmount] = useState("1");
     const [isDonating, setIsDonating] = useState(false);
@@ -928,6 +931,22 @@ function ViewPostView({ state, updatePost }) {
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [subToggleTick, setSubToggleTick] = useState(0);
     useEffect(() => { }, [subToggleTick]);
+    const [nodeConfigTick, setNodeConfigTick] = useState(0);
+    useEffect(() => {
+        const handler = () => setNodeConfigTick(prev => prev + 1);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
+    }, []);
+    const nodeConfig = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }, [nodeConfigTick]);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
     // reliably return to the originating feed route (including /t/:topic).
@@ -1598,6 +1617,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
         setConfirmDonate(null);
+        setConfirmUnsuspendQuests(null);
         setConfirmSuspendQuests({ userId, postId });
     };
 
@@ -1619,6 +1639,7 @@ function ViewPostView({ state, updatePost }) {
             if (response.success) {
                 const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
                 setConfirmSuspendQuests(null);
+                setUserSuspendedMap(prev => ({ ...prev, [userId]: true }));
                 if (postId) {
                     setSuspendSuccess(prev => ({ ...prev, [postId]: `User suspended from quests ${durationText}` }));
                 }
@@ -1645,6 +1666,68 @@ function ViewPostView({ state, updatePost }) {
         setConfirmSuspendQuests(null);
     };
 
+    const fetchUserSuspensionStatus = async (userId) => {
+        if (!userId || !questsEnabled) return;
+        try {
+            const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
+            setUserSuspendedMap(prev => ({ ...prev, [userId]: response.suspended === true }));
+        } catch (err) {
+            console.error('Error fetching suspension status:', err);
+        }
+    };
+
+    const handleUnsuspendFromQuests = (userId, postId) => {
+        if (!userId) return;
+        clearBlockMessages();
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmDeletePost(null);
+        setConfirmReportPost(null);
+        setConfirmSuspendQuests(null);
+        setConfirmUnsuspendQuests({ userId, postId });
+    };
+
+    const confirmUnsuspendFromQuests = async () => {
+        const userId = confirmUnsuspendQuests?.userId;
+        const postId = confirmUnsuspendQuests?.postId;
+        if (!userId) return;
+        const adminAddress = state.publicKey;
+        if (!adminAddress) return;
+
+        setIsUnsuspending(true);
+        try {
+            const response = await Api.post('/admin/rewards/unsuspend', {
+                admin: adminAddress,
+                target: userId,
+            });
+            if (response.success) {
+                setConfirmUnsuspendQuests(null);
+                setUserSuspendedMap(prev => ({ ...prev, [userId]: false }));
+                if (postId) {
+                    setSuspendSuccess(prev => ({ ...prev, [postId]: 'User unsuspended from quests' }));
+                }
+                setTimeout(() => {
+                    setSuspendSuccess(prev => {
+                        const updated = { ...prev };
+                        if (postId) delete updated[postId];
+                        return updated;
+                    });
+                }, 4000);
+            } else {
+                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmUnsuspendQuests(null);
+            }
+        } catch (err) {
+            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
+            setConfirmUnsuspendQuests(null);
+        }
+        setIsUnsuspending(false);
+    };
+
+    const cancelUnsuspendFromQuests = () => {
+        setConfirmUnsuspendQuests(null);
+    };
+
     const handleDonate = (userAddress, postId) => {
         if (!userAddress) {
             return;
@@ -1654,6 +1737,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
         setConfirmSuspendQuests(null);
+        setConfirmUnsuspendQuests(null);
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
         setDonateAmount("1"); // Reset to default
@@ -2814,6 +2898,22 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        if (confirmUnsuspendQuests?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
+                                {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
         if (suspendSuccess[post.post_id]) {
             return (
                 <div style={{
@@ -3007,6 +3107,8 @@ function ViewPostView({ state, updatePost }) {
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
 
+        const userSuspendedStatus = post.user_id ? userSuspendedMap[post.user_id] : undefined;
+
         const handleMenuClick = (e) => {
             e.stopPropagation();
             if (!isOpen) {
@@ -3017,6 +3119,9 @@ function ViewPostView({ state, updatePost }) {
                         top: rect.bottom + 4,
                         left: Math.max(10, rect.right - 180)
                     });
+                }
+                if (isAdmin && post.user_id && questsEnabled) {
+                    fetchUserSuspensionStatus(post.user_id);
                 }
             }
             setOpenMenuId(isOpen ? null : post.post_id);
@@ -3074,7 +3179,12 @@ function ViewPostView({ state, updatePost }) {
                                 {isAdmin && (
                                     <>
                                         <MenuItem onClick={() => { setOpenMenuId(null); handleDeletePost(post.post_id); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                                        <MenuItem onClick={() => { setOpenMenuId(null); handleSuspendFromQuests(post.user_id, post.post_id); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                        {questsEnabled && userSuspendedStatus !== true && (
+                                            <MenuItem onClick={() => { setOpenMenuId(null); handleSuspendFromQuests(post.user_id, post.post_id); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                        )}
+                                        {questsEnabled && userSuspendedStatus === true && (
+                                            <MenuItem onClick={() => { setOpenMenuId(null); handleUnsuspendFromQuests(post.user_id, post.post_id); }}>🛡️ Unsuspend from quests</MenuItem>
+                                        )}
                                     </>
                                 )}
                             </>
