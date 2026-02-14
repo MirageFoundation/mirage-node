@@ -22,10 +22,22 @@ ${DOMAIN:-:80} {
 		try_files .maintenance
 	}
 	handle @maintenance {
-		root * /etc/caddy
-		rewrite * /maintenance.html
-		header Content-Type "text/html; charset=utf-8"
-		file_server
+		# API and chain endpoints get JSON 503 during maintenance
+		handle /api/* {
+			header Content-Type "application/json"
+			respond `{"error":"maintenance","message":"Upgrade in progress"}` 503
+		}
+		handle /chain/* {
+			header Content-Type "application/json"
+			respond `{"error":"maintenance","message":"Upgrade in progress"}` 503
+		}
+		# Everything else gets the HTML maintenance page
+		handle {
+			root * /etc/caddy
+			rewrite * /maintenance.html
+			header Content-Type "text/html; charset=utf-8"
+			file_server
+		}
 	}
 
 	@api {
@@ -57,10 +69,22 @@ ${DOMAIN:-:80} {
 	handle_errors {
 		@maintenance_err expression {err.status_code} in [502, 503]
 		handle @maintenance_err {
-			root * /etc/caddy
-			rewrite * /maintenance.html
-			header Content-Type "text/html; charset=utf-8"
-			file_server
+			# API and chain endpoints get JSON error
+			handle /api/* {
+				header Content-Type "application/json"
+				respond `{"error":"unavailable","message":"Service temporarily unavailable"}` 503
+			}
+			handle /chain/* {
+				header Content-Type "application/json"
+				respond `{"error":"unavailable","message":"Service temporarily unavailable"}` 503
+			}
+			# Everything else gets the HTML maintenance page
+			handle {
+				root * /etc/caddy
+				rewrite * /maintenance.html
+				header Content-Type "text/html; charset=utf-8"
+				file_server
+			}
 		}
 	}
 }
