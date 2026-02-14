@@ -398,10 +398,13 @@ const MentionDropdown = styled.div`
 	left: 0;
 	right: 0;
 	margin-bottom: 4px;
-	background: ${({ theme }) => theme?.colors?.panel || "#23272C"};
-	border: 1px solid ${({ theme }) => theme?.colors?.border || "#444"};
+	background: ${({ theme }) => theme?.colors?.surface3 || theme?.colors?.panel || "#303640"};
+	border: 1px solid ${({ theme }) => theme?.colors?.borderSubtle || theme?.colors?.border || "#3d444d"};
 	border-radius: 6px;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+	box-shadow: ${({ theme }) =>
+        theme?.name === "dark"
+            ? "0 4px 16px rgba(0, 0, 0, 0.5)"
+            : "0 4px 16px rgba(0, 0, 0, 0.15)"};
 	z-index: 100;
 	max-height: 220px;
 	overflow-y: auto;
@@ -414,11 +417,11 @@ const MentionItem = styled.div`
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	color: ${({ theme }) => theme?.colors?.text || "#ddd"};
+	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
 	background: ${({ $active, theme }) =>
-		$active ? (theme?.colors?.panelAlt || "rgba(102, 126, 234, 0.15)") : "transparent"};
+        $active ? (theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)") : "transparent"};
 	&:hover {
-		background: ${({ theme }) => theme?.colors?.panelAlt || "rgba(102, 126, 234, 0.15)"};
+		background: ${({ theme }) => theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)"};
 	}
 	&:first-child {
 		border-radius: 6px 6px 0 0;
@@ -430,12 +433,12 @@ const MentionItem = styled.div`
 
 const MentionUsername = styled.span`
 	font-weight: 600;
-	color: ${({ theme }) => theme?.colors?.accent || "#667eea"};
+	color: ${({ theme }) => theme?.colors?.accent || theme?.colors?.link || "#948979"};
 `;
 
 const MentionAddress = styled.span`
 	font-size: 0.65rem;
-	color: ${({ theme }) => theme?.colors?.subtleText || "#888"};
+	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -443,7 +446,7 @@ const MentionAddress = styled.span`
 
 const MentionHint = styled.div`
 	padding: 0.35rem 0.6rem;
-	color: ${({ theme }) => theme?.colors?.subtleText || "#888"};
+	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
 	font-size: 0.7rem;
 	font-style: italic;
 `;
@@ -661,7 +664,7 @@ export default function MarkdownEditor({
             const controller = new AbortController();
             mentionAbortRef.current = controller;
             try {
-                const res = await Api.get('username_search', { q: mentionQuery, limit: 8 }, { timeoutMs: 4000 });
+                const res = await Api.get('search_username', { q: mentionQuery, limit: 8 }, { timeoutMs: 4000 });
                 if (!controller.signal.aborted && res && Array.isArray(res.results)) {
                     setMentionResults(res.results);
                     setMentionIndex(0);

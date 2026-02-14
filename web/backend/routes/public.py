@@ -2784,7 +2784,7 @@ def get_address_from_username():
         return safe_error(e)
 
 
-@public_bp.route("/api/username_search")
+@public_bp.route("/api/search_username")
 def username_search():
     """Lightweight username prefix search for @mention autocomplete.
 
@@ -2809,7 +2809,7 @@ def username_search():
         conn.close()
         return jsonify({"results": results})
     except Exception as e:
-        return safe_error(e, context="username_search")
+        return safe_error(e, context="search_username")
 
 
 @public_bp.route("/api/get_username_from_address", methods=["GET", "POST"])
