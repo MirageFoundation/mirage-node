@@ -1001,6 +1001,11 @@ def write_working_genesis(genesis_json: str):
     # Note: We use the binary from the pulled image (same version as source chain)
     # No need to copy binary from backup
 
+    # Disable tmux automatic-rename so windows created with -n keep their names
+    # (otherwise tmux renames them to the running process, breaking send-keys by name)
+    run(["bash", "-lc", "docker exec mirage tmux set-option -g automatic-rename off 2>/dev/null || true"])
+    run(["bash", "-lc", "docker exec mirage tmux set-option -g allow-rename off 2>/dev/null || true"])
+
     # Helper to ensure tmux window exists (tmux session may not have all windows)
     def ensure_tmux_window(window_name: str):
         window_exists = run(
