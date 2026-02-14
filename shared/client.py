@@ -139,12 +139,12 @@ def _round_half_up(value: float) -> int:
 def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     if difficulty_steps < 0:
         return None
-	if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
     if difficulty_steps == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-		factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -157,12 +157,12 @@ def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
 
 def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-	if pow_base_bits <= 0 or pow_base_bits > 256:
+    if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-	factor = _difficulty_factor(difficulty_steps, pow_factor)
+    factor = _difficulty_factor(difficulty_steps, pow_factor)
     if factor is None:
         return False
-	base_target = 1 << (256 - pow_base_bits)
+    base_target = 1 << (256 - pow_base_bits)
     eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
@@ -244,8 +244,8 @@ def compute_pow(base: bytes, difficulty_steps: int, pow_base_bits: int, pow_fact
         raise RuntimeError("argon2-cffi is required for PoW")
     if difficulty_steps < 0:
         raise ValueError("difficulty must be >= 0")
-	if pow_base_bits <= 0 or pow_base_bits > 256:
-		raise ValueError("pow_base_bits must be in [1, 256]")
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        raise ValueError("pow_base_bits must be in [1, 256]")
     try:
         salt = bytes.fromhex(lb_hash.strip())
     except Exception:
@@ -256,7 +256,7 @@ def compute_pow(base: bytes, difficulty_steps: int, pow_base_bits: int, pow_fact
     parallelism = 1
 
     _log(
-		f"[pow] argon2id: difficulty_steps={difficulty_steps} pow_base_bits={pow_base_bits} pow_factor={pow_factor} mem_kib={mem_kib} t={time_cost} p={parallelism}"
+        f"[pow] argon2id: difficulty_steps={difficulty_steps} pow_base_bits={pow_base_bits} pow_factor={pow_factor} mem_kib={mem_kib} t={time_cost} p={parallelism}"
     )
 
     proof = 0
@@ -281,7 +281,7 @@ def compute_pow(base: bytes, difficulty_steps: int, pow_base_bits: int, pow_fact
             type=_Argon2Type.ID,
         )
         attempts += 1
-		if check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor):
+        if check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor):
             total = time.perf_counter() - start
             rate = attempts / max(1e-6, total)
             _log(
