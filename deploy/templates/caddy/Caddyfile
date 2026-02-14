@@ -15,6 +15,19 @@ ${DOMAIN:-:80} {
 		}
 	}
 
+	# Maintenance mode: when /etc/caddy/.maintenance exists, serve upgrade page for ALL routes.
+	# Created by entrypoint at startup, removed when backend is ready.
+	@maintenance file {
+		root /etc/caddy
+		try_files .maintenance
+	}
+	handle @maintenance {
+		root * /etc/caddy
+		rewrite * /maintenance.html
+		header Content-Type "text/html; charset=utf-8"
+		file_server
+	}
+
 	@api {
 		path /api/*
 	}
@@ -42,10 +55,11 @@ ${DOMAIN:-:80} {
 
 	# Show maintenance page when backends are down (502/503)
 	handle_errors {
-		@maintenance expression {err.status_code} in [502, 503]
-		handle @maintenance {
+		@maintenance_err expression {err.status_code} in [502, 503]
+		handle @maintenance_err {
 			root * /etc/caddy
 			rewrite * /maintenance.html
+			header Content-Type "text/html; charset=utf-8"
 			file_server
 		}
 	}

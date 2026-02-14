@@ -1186,6 +1186,29 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.12.0: Add dedicated media field to MsgPost, rename params for clarity
+	// - MsgPost gains repeated string 'media' field (proto field 105)
+	// - Params field renames (wire-compatible, same field numbers):
+	//     PowBaseBits → MinDifficulty, PowIncreaseThreshold → PowMessageLimit,
+	//     PowDifficultyGracePeriod → PowDifficultyAllowance, PowFactor → PowDifficultyStep,
+	//     MintDynamicFraction → MintDynamicSplit, SubscriptionReserveFraction → SubscriptionReservePercent
+	// - No state migration needed (field numbers unchanged, protobuf binary compatible)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.12.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.12.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.12.0 complete - media field on MsgPost, params renamed")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)
