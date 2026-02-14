@@ -222,9 +222,9 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	currentDifficulty := d.Keeper.GetCurrentDifficulty(ctx)
 	prevDifficulty := d.Keeper.GetPreviousDifficulty(ctx)
 	lastChange := d.Keeper.GetLastDifficultyChangeHeight(ctx)
-	gracePeriod := params.PowDifficultyGracePeriod
-	baseBits := params.PowBaseBits
-	powFactor := params.PowFactor
+	gracePeriod := params.PowDifficultyAllowance
+	baseBits := params.MinDifficulty
+	powFactor := params.PowDifficultyStep
 
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 

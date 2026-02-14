@@ -17,15 +17,15 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		"MintInterval":         true,
 		"MintQuantity":         true,
 		"MintDynamicCreditCap": true,
-		"MintDynamicFraction":  true,
+		"MintDynamicSplit":     true,
 		// PoW
-		"PowBaseBits":              true,
+		"MinDifficulty":            true,
 		"PowMessageWindow":         true,
-		"PowIncreaseThreshold":     true,
+		"PowMessageLimit":          true,
 		"PowCalmPeriodDefinition":  true,
 		"PowCalmSequenceThreshold": true,
-		"PowDifficultyGracePeriod": true,
-		"PowFactor":                true,
+		"PowDifficultyAllowance":   true,
+		"PowDifficultyStep":        true,
 		"BlockHashWindow":          true,
 		// Username/Topic limits
 		"MinUsernameSize": true,
@@ -34,7 +34,7 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		"MaxTopicSize":    true,
 		// Subscription
 		"SubscriptionPeriod":         true,
-		"SubscriptionReserveFraction": true,
+		"SubscriptionReservePercent": true,
 		"Tiers":                      true,
 		// Relay
 		"RelayMinGasPrice": true,

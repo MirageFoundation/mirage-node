@@ -319,7 +319,7 @@ func (am AppModule) ValidateGenesis(_ codec.JSONCodec, _ client.TxEncodingConfig
 	}
 	// Default params if missing in genesis
 	p := genState.Params
-	if p.PowBaseBits == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
+	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
 		genState.Params = types.DefaultParams()
 	}
 	return genState.Validate()
@@ -367,7 +367,7 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 	}
 	// Default params if missing in genesis
 	p := genState.Params
-	if p.PowBaseBits == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
+	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 {
 		p = types.DefaultParams()
 	}
 	_ = am.k.SetParams(sdkCtx, p)
@@ -529,7 +529,7 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	)
 
 	// Busy window: increase difficulty by 1 step and reset calm sequence
-	if messageCount >= params.PowIncreaseThreshold {
+	if messageCount >= params.PowMessageLimit {
 		newDifficulty := currentDifficulty + 1
 		if newDifficulty > keeper.MaxSafeDifficultySteps {
 			newDifficulty = keeper.MaxSafeDifficultySteps
@@ -658,8 +658,8 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
 			if balance.GTE(sdkmath.NewIntFromUint64(periodFee)) {
-				// Calculate reserve for new period (SubscriptionReserveFraction is fraction [0,1])
-				reserveFrac := params.SubscriptionReserveFraction
+				// Calculate reserve for new period (SubscriptionReservePercent is fraction [0,1])
+				reserveFrac := params.SubscriptionReservePercent
 				if reserveFrac > 1 {
 					reserveFrac = 1
 				}
@@ -785,7 +785,7 @@ func (am AppModule) GetDifficulty(ctx context.Context, _ *types.QueryDifficultyR
 		ConsecutiveLowUsage: calmSeq,
 		LatestBlockHash:     latestHash,
 		CurrentHeight:       currentHeight,
-		PowBaseBits:         params.PowBaseBits,
+		MinDifficulty:       params.MinDifficulty,
 	}, nil
 }
 
@@ -916,18 +916,18 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.MintDynamicCreditCap != 0 {
 		cur.MintDynamicCreditCap = p.MintDynamicCreditCap
 	}
-	if p.MintDynamicFraction != 0 {
-		cur.MintDynamicFraction = p.MintDynamicFraction
+	if p.MintDynamicSplit != 0 {
+		cur.MintDynamicSplit = p.MintDynamicSplit
 	}
 	// PoW
-	if p.PowBaseBits != 0 {
-		cur.PowBaseBits = p.PowBaseBits
+	if p.MinDifficulty != 0 {
+		cur.MinDifficulty = p.MinDifficulty
 	}
 	if p.PowMessageWindow != 0 {
 		cur.PowMessageWindow = p.PowMessageWindow
 	}
-	if p.PowIncreaseThreshold != 0 {
-		cur.PowIncreaseThreshold = p.PowIncreaseThreshold
+	if p.PowMessageLimit != 0 {
+		cur.PowMessageLimit = p.PowMessageLimit
 	}
 	if p.PowCalmPeriodDefinition != 0 {
 		cur.PowCalmPeriodDefinition = p.PowCalmPeriodDefinition
@@ -935,11 +935,11 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.PowCalmSequenceThreshold != 0 {
 		cur.PowCalmSequenceThreshold = p.PowCalmSequenceThreshold
 	}
-	if p.PowDifficultyGracePeriod != 0 {
-		cur.PowDifficultyGracePeriod = p.PowDifficultyGracePeriod
+	if p.PowDifficultyAllowance != 0 {
+		cur.PowDifficultyAllowance = p.PowDifficultyAllowance
 	}
-	if p.PowFactor != 0 {
-		cur.PowFactor = p.PowFactor
+	if p.PowDifficultyStep != 0 {
+		cur.PowDifficultyStep = p.PowDifficultyStep
 	}
 	if p.BlockHashWindow != 0 {
 		cur.BlockHashWindow = p.BlockHashWindow
@@ -958,9 +958,9 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.SubscriptionPeriod != 0 {
 		cur.SubscriptionPeriod = p.SubscriptionPeriod
 	}
-	// Subscription reserve fraction [0,1]
-	if p.SubscriptionReserveFraction != 0 {
-		cur.SubscriptionReserveFraction = p.SubscriptionReserveFraction
+	// Subscription reserve percent [0,1]
+	if p.SubscriptionReservePercent != 0 {
+		cur.SubscriptionReservePercent = p.SubscriptionReservePercent
 	}
 	// Tiers - replace entirely if provided
 	if len(p.Tiers) > 0 {
@@ -2458,8 +2458,8 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 			return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 		}
 
-		// Calculate reserve (subscription_reserve_fraction is fraction [0,1])
-		reserveFrac := params.SubscriptionReserveFraction
+		// Calculate reserve (subscription_reserve_percent is fraction [0,1])
+		reserveFrac := params.SubscriptionReservePercent
 		if reserveFrac > 1 {
 			reserveFrac = 1
 		}
