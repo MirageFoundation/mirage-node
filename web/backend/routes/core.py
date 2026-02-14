@@ -2478,6 +2478,9 @@ def core_vote():
                     ),
                     400,
                 )
+            required = get_current_pow_difficulty()
+            if int(difficulty) < int(required):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             if not is_valid_recent_block_hash(last_block_hash):

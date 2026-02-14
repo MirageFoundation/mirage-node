@@ -3220,9 +3220,17 @@ class TransactionHandler {
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
                 const sigFixed = sigCompact.toFixedLength();
                 const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                // Only send fields the backend actually reads — omit noise like
+                // min_difficulty, pow_difficulty_step, difficulty, action.
                 toRelay = {
-                    ...toRelay,
+                    pubkey: toRelay.pubkey,
                     signature: sigB64,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: resolveTxDifficulty(transaction),
+                    pow: Number(proof),
+                    target: transaction.target || "",
+                    direction: signDirUnsigned,
+                    timestamp: transaction.timestamp,
                 };
                 endpoint = 'core/vote';
             } else if (msgName === 'MsgUpgradeLevel') {
@@ -3692,11 +3700,13 @@ class TransactionHandler {
                 transaction.timestamp = Date.now();
             }
 
-            // Level >= 1 users skip PoW (chain trusts them)
-            // Also skip PoW entirely when difficulty is 0 (e.g., fee-only tx like set_auto_renewal).
+            // Subscribers (level >= 1) skip PoW — chain trusts them.
+            // Fee-only actions (upgrade_level, set_auto_renewal) never use PoW regardless of level.
+            // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
+            // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const powDifficulty = resolveTxDifficulty(transaction);
-            const canSkipPow = !forcePow && (userLevel >= 1 || powDifficulty <= 0);
+            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal']);
+            const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
             this._setStatus("preparing");
