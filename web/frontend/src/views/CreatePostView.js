@@ -557,9 +557,8 @@ function CreatePostView({ state, setPosts, updatePost }) {
         let content = String(contentValue).trim();
         const tag = tagEnabled ? String(tagValue || '').trim().toLowerCase() : '';
 
-        if (attachedMediaUrl) {
-            content = `${attachedMediaUrl}\n\n${content}`;
-        }
+        // v1.12.0: Build media array from attached media URL instead of prepending to content
+        const media = attachedMediaUrl ? [attachedMediaUrl] : [];
 
         if (tagEnabled) {
             const validTags = TAG_OPTIONS_ENABLED.map(t => t.value);
@@ -627,7 +626,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                 return;
             }
 
-            const res = await tx.createPostAsync(topic, title, content, tag);
+            const res = await tx.createPostAsync(topic, title, content, tag, media);
             if (res && res.success) {
                 try {
                     const txHash = (res && res.tx_hash) ? String(res.tx_hash).toLowerCase() : "";

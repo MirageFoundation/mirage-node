@@ -220,10 +220,21 @@ def canon_base_post(
     tag: str = "",
     pow_val: int = 0,
     timestamp: Optional[int] = None,
+    media: list[str] | None = None,
 ) -> bytes:
     ts = _now_ms() if timestamp is None else int(timestamp)
     return _canon_base_post_raw(
-        pubkey, _lb_bytes(last_block_hash_hex), int(difficulty), ts, target, topic, title, content, tag, pow_val
+        pubkey,
+        _lb_bytes(last_block_hash_hex),
+        int(difficulty),
+        ts,
+        target,
+        topic,
+        title,
+        content,
+        tag,
+        pow_val,
+        media=media,
     )
 
 

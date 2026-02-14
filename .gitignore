@@ -87,10 +87,5 @@ scripts/*
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
 
-cursor.md.cursor/
+cursor.md
 .cursor/
-
-
-
-# temporary
-tests/test_pow_scaling.py

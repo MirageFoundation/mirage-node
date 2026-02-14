@@ -103,10 +103,21 @@ def canon_base_post(
     tag: str = "",
     pow_val: int = 0,
     timestamp: Optional[int] = None,
+    media: list[str] | None = None,
 ) -> bytes:
     ts = _record_ts(_now_ms() if timestamp is None else int(timestamp))
     return _canon_base_post_raw(
-        pubkey, _lb_bytes(last_block_hash_hex), int(difficulty), ts, target, topic, title, content, tag, pow_val
+        pubkey,
+        _lb_bytes(last_block_hash_hex),
+        int(difficulty),
+        ts,
+        target,
+        topic,
+        title,
+        content,
+        tag,
+        pow_val,
+        media=media,
     )
 
 
@@ -229,10 +240,21 @@ def build_canon_post(
     tag: str = "",
     pow_val: int = 0,
     timestamp: Optional[int] = None,
+    media: list[str] | None = None,
 ) -> tuple[bytes, int]:
     ts = _now_ms() if timestamp is None else int(timestamp)
     base = canon_base_post(
-        pubkey, last_block_hash_hex, int(difficulty), target, topic, title, content, tag, pow_val, timestamp=ts
+        pubkey,
+        last_block_hash_hex,
+        int(difficulty),
+        target,
+        topic,
+        title,
+        content,
+        tag,
+        pow_val,
+        timestamp=ts,
+        media=media,
     )
     return base, ts
 
@@ -390,6 +412,23 @@ def _get_post_votes(backend: str, owner: str, post_tx: str) -> int:
         return 0
     except Exception:
         return 0
+
+
+def _get_post_media(backend: str, owner: str, post_tx: str) -> Optional[list]:
+    """Fetch media array for a specific post owned by owner."""
+    try:
+        code, resp = _get_json(
+            f"{backend}/api/get_user_posts", {"owner": owner, "address": owner, "limit": 50, "page": 1}
+        )
+        if code != 200:
+            return None
+        posts = (resp or {}).get("posts") or []
+        for p in posts:
+            if str(p.get("post_id", "")).lower() == str(post_tx).lower():
+                return p.get("media")
+        return None
+    except Exception:
+        return None
 
 
 def _neg_post_topic_invalid(backend: str, seed: str, topic: str, name: str) -> TestResult:
@@ -797,6 +836,73 @@ def pos_create_posts_all_valid_tags(backend: str, seed: str) -> List[TestResult]
         r, _ = pos_create_post_with_tag(backend, seed, tag)
         results.append(r)
     return results
+
+
+def pos_create_post_with_media(backend: str, seed: str) -> Tuple[TestResult, Optional[str]]:
+    """Create a post with media array (v1.12.0)."""
+    name = "Create post with media"
+    try:
+        wallet = create_wallet_from_seed(seed)
+        addr = str(wallet.address())
+        last, diff, min_diff, bal = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+
+        title = f"Media Post {_rand_str(6)}"
+        content = f"Media content created at {int(time.time())}"
+        topic = f"topic{_rand_str(5)}"
+        media = [
+            f"https://example.com/{_rand_str(6)}.jpg",
+            f"https://example.com/{_rand_str(6)}.png",
+        ]
+
+        base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, media=media)
+        proof = _compute_pow(base, diff, min_diff, last)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": last,
+            "timestamp": ts_ms,
+            "pow_difficulty": int(diff),
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": "",
+            "media": media,
+        }
+
+        code, resp = _post_json(f"{backend}/api/core/post", payload)
+
+        details = {
+            "address": addr,
+            "topic": topic,
+            "media_count": len(media),
+            "media_expected": media,
+            "balance": bal,
+        }
+        if code != 200 or "tx_hash" not in resp:
+            return TestResult(name=name, passed=False, status_code=code, response=resp, details=details), None
+
+        txh = str(resp.get("tx_hash"))
+        details["tx_hash"] = txh
+
+        res = wait_tx_result(backend, txh, timeout_s=15.0)
+        ok = bool(res) and bool(res.get("found")) and bool(res.get("success"))
+        if ok:
+            wait_post_indexed(backend, addr, txh, timeout_s=15.0)
+            media_val = _get_post_media(backend, addr, txh)
+            ok = media_val == media
+            details["media_received"] = media_val
+
+        return TestResult(name=name, passed=ok, status_code=code, response=res or resp, details=details), (
+            txh if ok else None
+        )
+    except Exception as e:
+        return TestResult(name=name, passed=False, error=str(e)), None
 
 
 def pos_create_comment(backend: str, seed: str, parent_tx: str) -> Tuple[TestResult, Optional[str]]:
@@ -2159,6 +2265,161 @@ def neg_post_oversize_content(backend: str, seed: str) -> TestResult:
             return TestResult(name=name, passed=passed, status_code=code, response=res or resp, details=details)
 
         return TestResult(name=name, passed=False, status_code=code, response=resp, details=details)
+    except Exception as e:
+        return TestResult(name=name, passed=False, error=str(e))
+
+
+def neg_post_media_not_list(backend: str, seed: str) -> TestResult:
+    """Media must be a list."""
+    name = "Post: media not list rejected"
+    try:
+        wallet = create_wallet_from_seed(seed)
+        addr = str(wallet.address())
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+
+        topic = "topicok"
+        title = "ok"
+        content = "content"
+
+        base = canon_base_post(pub, last, diff, "", topic, title, content)
+        proof = _compute_pow(base, diff, min_diff, last)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": last,
+            "timestamp": _now_ms(),
+            "pow_difficulty": int(diff),
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "media": "https://example.com/x.jpg",
+        }
+        code, resp = _post_json(f"{backend}/api/core/post", payload)
+        passed = _expect_fail(resp, code, ["media must be a list"])
+        return TestResult(name=name, passed=passed, status_code=code, response=resp)
+    except Exception as e:
+        return TestResult(name=name, passed=False, error=str(e))
+
+
+def neg_post_media_over_limit(backend: str, seed: str) -> TestResult:
+    """Reject media arrays over the max length."""
+    name = "Post: media count over limit rejected"
+    try:
+        wallet = create_wallet_from_seed(seed)
+        addr = str(wallet.address())
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+
+        topic = "topicok"
+        title = "ok"
+        content = "content"
+        media = [f"https://example.com/{i}.jpg" for i in range(11)]
+
+        base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, media=media)
+        proof = _compute_pow(base, diff, min_diff, last)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": last,
+            "timestamp": ts_ms,
+            "pow_difficulty": int(diff),
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "media": media,
+        }
+        code, resp = _post_json(f"{backend}/api/core/post", payload)
+        passed = _expect_fail(resp, code, ["media exceeds limit"])
+        return TestResult(name=name, passed=passed, status_code=code, response=resp, details={"count": len(media)})
+    except Exception as e:
+        return TestResult(name=name, passed=False, error=str(e))
+
+
+def neg_post_media_non_https(backend: str, seed: str) -> TestResult:
+    """Reject non-https media URLs."""
+    name = "Post: media non-https rejected"
+    try:
+        wallet = create_wallet_from_seed(seed)
+        addr = str(wallet.address())
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+
+        topic = "topicok"
+        title = "ok"
+        content = "content"
+        media = ["http://example.com/x.jpg"]
+
+        base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, media=media)
+        proof = _compute_pow(base, diff, min_diff, last)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": last,
+            "timestamp": ts_ms,
+            "pow_difficulty": int(diff),
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "media": media,
+        }
+        code, resp = _post_json(f"{backend}/api/core/post", payload)
+        passed = _expect_fail(resp, code, ["must use https://"])
+        return TestResult(name=name, passed=passed, status_code=code, response=resp, details={"media": media})
+    except Exception as e:
+        return TestResult(name=name, passed=False, error=str(e))
+
+
+def neg_post_media_item_too_long(backend: str, seed: str) -> TestResult:
+    """Reject media URLs exceeding max length."""
+    name = "Post: media item too long rejected"
+    try:
+        wallet = create_wallet_from_seed(seed)
+        addr = str(wallet.address())
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+
+        topic = "topicok"
+        title = "ok"
+        content = "content"
+        media = ["https://example.com/" + ("a" * 2050)]
+
+        base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, media=media)
+        proof = _compute_pow(base, diff, min_diff, last)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": last,
+            "timestamp": ts_ms,
+            "pow_difficulty": int(diff),
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "media": media,
+        }
+        code, resp = _post_json(f"{backend}/api/core/post", payload)
+        passed = _expect_fail(resp, code, ["exceeds length limit"])
+        return TestResult(name=name, passed=passed, status_code=code, response=resp, details={"len": len(media[0])})
     except Exception as e:
         return TestResult(name=name, passed=False, error=str(e))
 
@@ -3878,6 +4139,12 @@ def main() -> int:
     all_results.append(r)
     _print_result(r)
 
+    # Create a post with media (FREE user)
+    r, media_post_tx = pos_create_post_with_media(backend, seed_free)
+    all_results.append(r)
+    _print_result(r)
+    media_expected = (r.details or {}).get("media_expected") if hasattr(r, "details") else None
+
     if post_tx:
         # Clear any existing vote (direction=0)
         r = pos_vote_clear(backend, seed_free, post_tx)
@@ -3905,6 +4172,23 @@ def main() -> int:
         r = pos_edit_post(backend, seed_free, post_tx)
         all_results.append(r)
         _print_result(r)
+
+    if media_post_tx:
+        # Edit the media post and ensure media is preserved
+        sleep(4)
+        r = pos_edit_post(backend, seed_free, media_post_tx)
+        all_results.append(r)
+        _print_result(r)
+        if r.passed and media_expected is not None:
+            media_val = _get_post_media(backend, addr_free, media_post_tx)
+            ok = media_val == media_expected
+            r_media = TestResult(
+                name="Edit preserves media",
+                passed=ok,
+                details={"expected": media_expected, "received": media_val},
+            )
+            all_results.append(r_media)
+            _print_result(r_media)
 
         # Report the post
         r = pos_report_post(backend, seed_free, post_tx)
@@ -3961,6 +4245,10 @@ def main() -> int:
     neg_tests = [
         neg_post_oversize_content,
         neg_post_oversize_title,
+        neg_post_media_not_list,
+        neg_post_media_over_limit,
+        neg_post_media_non_https,
+        neg_post_media_item_too_long,
         neg_missing_pow_free_user,
         # Topic format invalid cases
         # Root post with hyphen in topic

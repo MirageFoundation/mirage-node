@@ -658,8 +658,8 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
 			if balance.GTE(sdkmath.NewIntFromUint64(periodFee)) {
-			// Calculate reserve for new period (SubscriptionReserveFraction is fraction [0,1])
-			reserveFrac := params.SubscriptionReserveFraction
+				// Calculate reserve for new period (SubscriptionReserveFraction is fraction [0,1])
+				reserveFrac := params.SubscriptionReserveFraction
 				if reserveFrac > 1 {
 					reserveFrac = 1
 				}
@@ -1053,6 +1053,19 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	tag := strings.TrimSpace(req.GetTag())
 	if err := validateTag(tag); err != nil {
 		return nil, err
+	}
+
+	// Validate media field (v1.12.0)
+	if len(req.GetMedia()) > 10 {
+		return nil, fmt.Errorf("media exceeds limit: %d > 10", len(req.GetMedia()))
+	}
+	for i, mediaItem := range req.GetMedia() {
+		if len(mediaItem) > 2048 {
+			return nil, fmt.Errorf("media[%d] exceeds length limit: %d > 2048", i, len(mediaItem))
+		}
+		if !strings.HasPrefix(mediaItem, "https://") {
+			return nil, fmt.Errorf("media[%d] must use https://", i)
+		}
 	}
 
 	// Get user level for tier-based limits (only need Level from profile)
@@ -2437,8 +2450,8 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 			return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 		}
 
-	// Calculate reserve (subscription_reserve_fraction is fraction [0,1])
-	reserveFrac := params.SubscriptionReserveFraction
+		// Calculate reserve (subscription_reserve_fraction is fraction [0,1])
+		reserveFrac := params.SubscriptionReserveFraction
 		if reserveFrac > 1 {
 			reserveFrac = 1
 		}

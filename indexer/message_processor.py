@@ -169,6 +169,8 @@ class MessageProcessor:
         content = str(msg_dict.get("content", "") or "")
         target = str(msg_dict.get("target", "") or "").lower()
         tag = str(msg_dict.get("tag", "") or "")
+        media = list(msg_dict.get("media", []) or [])
+        logger.debug("MsgPost media count=%d tx=%s", len(media), (tx_hash or "")[:12])
 
         txhash = (tx_hash or "").lower()
         # Derive paid flag: true if no PoW used (subscribers)
@@ -229,6 +231,7 @@ class MessageProcessor:
             tag=tag,
             root_topic=root_topic,
             root_post_id=root_post_id,
+            media=media,
         )
 
         # Update user topic stats for new posts (not edits)
@@ -265,7 +268,14 @@ class MessageProcessor:
         # Thumbnail discovery for root posts only
         try:
             if not target:
-                thumb = self.discover_post_thumbnail(content)
+                # v1.12.0: prefer media[0] for thumbnail if available
+                thumb = None
+                if media:
+                    thumb = self.discover_post_thumbnail(media[0])
+                if not thumb:
+                    # LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                    # Remove after March 2026 when all old posts have been migrated or expired.
+                    thumb = self.discover_post_thumbnail(content)
                 if thumb:
                     self.db.update_post_thumbnail(txhash, thumb)
         except Exception:
@@ -350,10 +360,7 @@ class MessageProcessor:
 
         # Filter out self-mentions
         mentioner_lower = mentioner_address.lower()
-        mentioned_addresses = [
-            addr for addr in username_to_addr.values()
-            if addr.lower() != mentioner_lower
-        ]
+        mentioned_addresses = [addr for addr in username_to_addr.values() if addr.lower() != mentioner_lower]
         if not mentioned_addresses:
             return
 
@@ -793,13 +800,13 @@ class MessageProcessor:
             logger.warning("Rejected edit %s: owner mismatch", tx_hash)
             return
 
-        # Determine if root (target empty in DB)
-        is_root = True
-        try:
-            existing_topic, _, _, existing_target, _, _, existing_created_at = existing
-            is_root = not bool(existing_target)
-        except Exception:
-            is_root = True
+        # Determine if root (target empty in DB) and preserve media
+        existing_topic, _, _, existing_target, _, _, existing_created_at, existing_media_raw = existing
+        is_root = not bool(existing_target)
+        existing_media = json.loads(existing_media_raw)
+        if not isinstance(existing_media, list):
+            raise ValueError("invalid media payload for existing post")
+        logger.debug("MsgEdit preserve media count=%d override=%s", len(existing_media), override)
 
         # Apply update: preserve created_at, set edited_at
         # Root posts may update topic; comments must not carry topic.
@@ -832,6 +839,7 @@ class MessageProcessor:
             root_topic=root_topic,
             root_post_id=root_post_id,
             edited_at=int(ts),
+            media=existing_media,
         )
 
         # Recompute topic safety stats when root posts change
@@ -1487,6 +1495,8 @@ class MessageProcessor:
     # ------------------------------
     # Thumbnail discovery helpers
     # ------------------------------
+    # LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+    # Remove after March 2026 when all old posts have been migrated or expired.
     @staticmethod
     def _extract_first_url(text: str) -> str:
         if not text:

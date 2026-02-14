@@ -1296,7 +1296,7 @@ class TransactionHandler {
         });
     }
 
-    createPost(topic, title, content, tag = "") {
+    createPost(topic, title, content, tag = "", media = []) {
         let action = "create_post";
 
         let publicKey = Storage.load("publicKey", "");
@@ -1319,6 +1319,7 @@ class TransactionHandler {
             title: title,
             content: content,
             tag: cleanTag,
+            media: Array.isArray(media) ? media : [],
         };
 
         this.transactions.push(transaction);
@@ -1334,7 +1335,7 @@ class TransactionHandler {
      * @param {string} tag
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string}>}
      */
-    async createPostAsync(topic, title, content, tag = "") {
+    async createPostAsync(topic, title, content, tag = "", media = []) {
         try {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
@@ -1367,6 +1368,7 @@ class TransactionHandler {
                 title,
                 content,
                 tag: cleanTag,
+                media: Array.isArray(media) ? media : [],
                 last_block_hash,
                 pow_difficulty,
                 pow_base_bits,
@@ -1772,7 +1774,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgPost
-    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag }) {
+    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, media }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -1816,8 +1818,9 @@ class TransactionHandler {
         const tag102 = Uint8Array.from([102]);
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
+        const tag105 = Uint8Array.from([105]); // media field (v1.12.0)
 
-        return concat(
+        const parts = [
             prefix,
             tag2, encBytes(pub_bytes || new Uint8Array()),
             tag3, encBytes(hexToBytes(last_block_hash)),
@@ -1829,7 +1832,13 @@ class TransactionHandler {
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
-        );
+        ];
+        // Encode repeated media field (tag 105)
+        for (const m of (media || [])) {
+            parts.push(tag105);
+            parts.push(encStr(m));
+        }
+        return concat(...parts);
     }
 
     // Build canonical bytes for MsgEdit (must match chain ante)
@@ -3161,6 +3170,7 @@ class TransactionHandler {
             } else if (msgName === 'MsgPost') {
                 // Sign relay for post
                 const topic = transaction.topic || "";
+                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -3172,6 +3182,7 @@ class TransactionHandler {
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3182,6 +3193,7 @@ class TransactionHandler {
                     signature: sigB64,
                     topic: topic,
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 };
                 endpoint = 'core/post';
             } else if (msgName === 'MsgEdit') {
@@ -3887,7 +3899,13 @@ class TransactionHandler {
                 const tag102 = Uint8Array.from([102]);
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
+                const tag105 = Uint8Array.from([105]); // media (v1.12.0)
                 const topic = transaction.topic || "";
+                const mediaParts = [];
+                for (const m of (transaction.media || [])) {
+                    mediaParts.push(tag105);
+                    mediaParts.push(encStr(m));
+                }
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -3899,6 +3917,7 @@ class TransactionHandler {
                     tag102, encStr(transaction.title || ""),
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
+                    ...mediaParts,
                 );
             } else if (action === 'set_moderators') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetModerators\x00");

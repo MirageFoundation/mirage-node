@@ -137,6 +137,7 @@ message MsgPost {
   string title = 102;
   string content = 103;
   string tag = 104;
+  repeated string media = 105;
 }
 
 message MsgPostResponse {}

@@ -3784,6 +3784,25 @@ function ViewPostView({ state, updatePost }) {
                                                 <StyledContentArea>
                                                     {(() => {
                                                         const raw = String(post.content || '');
+                                                        const mediaArr = Array.isArray(post.media) ? post.media : [];
+
+                                                        // v1.12.0: Render from dedicated media array if available
+                                                        if (mediaArr.length > 0) {
+                                                            return (
+                                                                <>
+                                                                    {mediaArr.map((mediaUrl, i) =>
+                                                                        require("../components/InlineMedia").default
+                                                                            ? React.createElement(require("../components/InlineMedia").default, { key: i, url: mediaUrl, variant: isRoot ? 'root_post' : undefined })
+                                                                            : null
+                                                                    )}
+                                                                    {raw ? <div style={{ height: '0.5rem' }} /> : null}
+                                                                    {raw ? <MarkdownRenderer text={raw} /> : null}
+                                                                </>
+                                                            );
+                                                        }
+
+                                                        // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                                                        // Remove after March 2026 when all old posts have been migrated or expired.
                                                         const idx = raw.indexOf('\n');
                                                         const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
                                                         const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');

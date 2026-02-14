@@ -6,6 +6,10 @@ package types
 import (
 	context "context"
 	fmt "fmt"
+	io "io"
+	math "math"
+	math_bits "math/bits"
+
 	_ "github.com/cosmos/cosmos-proto"
 	_ "github.com/cosmos/cosmos-sdk/types/msgservice"
 	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
@@ -15,9 +19,6 @@ import (
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
-	io "io"
-	math "math"
-	math_bits "math/bits"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -137,11 +138,12 @@ type MsgPost struct {
 	// tags 7-9 reserved
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
-	Target  string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
-	Topic   string `protobuf:"bytes,101,opt,name=topic,proto3" json:"topic,omitempty"`
-	Title   string `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
-	Content string `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
-	Tag     string `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
+	Target  string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
+	Topic   string   `protobuf:"bytes,101,opt,name=topic,proto3" json:"topic,omitempty"`
+	Title   string   `protobuf:"bytes,102,opt,name=title,proto3" json:"title,omitempty"`
+	Content string   `protobuf:"bytes,103,opt,name=content,proto3" json:"content,omitempty"`
+	Tag     string   `protobuf:"bytes,104,opt,name=tag,proto3" json:"tag,omitempty"`
+	Media   []string `protobuf:"bytes,105,rep,name=media,proto3" json:"media,omitempty"`
 }
 
 func (m *MsgPost) Reset()         { *m = MsgPost{} }
@@ -259,6 +261,13 @@ func (m *MsgPost) GetTag() string {
 		return m.Tag
 	}
 	return ""
+}
+
+func (m *MsgPost) GetMedia() []string {
+	if m != nil {
+		return m.Media
+	}
+	return nil
 }
 
 type MsgPostResponse struct {
@@ -5066,6 +5075,17 @@ func (m *MsgPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.Media) > 0 {
+		for iNdEx := len(m.Media) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.Media[iNdEx])
+			copy(dAtA[i:], m.Media[iNdEx])
+			i = encodeVarintTx(dAtA, i, uint64(len(m.Media[iNdEx])))
+			i--
+			dAtA[i] = 0x6
+			i--
+			dAtA[i] = 0xca
+		}
+	}
 	if len(m.Tag) > 0 {
 		i -= len(m.Tag)
 		copy(dAtA[i:], m.Tag)
@@ -7726,6 +7746,12 @@ func (m *MsgPost) Size() (n int) {
 	if l > 0 {
 		n += 2 + l + sovTx(uint64(l))
 	}
+	if len(m.Media) > 0 {
+		for _, s := range m.Media {
+			l = len(s)
+			n += 2 + l + sovTx(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -9449,6 +9475,38 @@ func (m *MsgPost) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Tag = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 105:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Media", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthTx
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthTx
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Media = append(m.Media, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

@@ -518,6 +518,7 @@ def post(
     target: str = "",
     tag: str = "",
     skip_pow: Optional[bool] = None,
+    media: list[str] | None = None,
 ) -> str | None:
     """
     Create a post.
@@ -566,6 +567,7 @@ def post(
             content,
             tag or "",
             0,
+            media=media,
         )
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(wallet, signed)
@@ -580,6 +582,7 @@ def post(
             "title": safe_title,
             "content": content,
             "tag": tag or "",
+            "media": media or [],
         }
     else:
         # Free user mode: compute PoW
@@ -594,6 +597,7 @@ def post(
             content,
             tag or "",
             0,
+            media=media,
         )
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
@@ -610,6 +614,7 @@ def post(
             "title": safe_title,
             "content": content,
             "tag": tag or "",
+            "media": media or [],
         }
 
     r = _session.post(f"{backend}/api/core/post", json=req, timeout=20)
