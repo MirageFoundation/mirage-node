@@ -48,6 +48,8 @@ _REQUIRED_INT_PARAMS = [
     # Relay fee params
     "relay_min_gas_price",
     "relay_max_gas_fee",
+    # Envelope replay protection
+    "max_envelope_age",
 ]
 
 # Required float params
