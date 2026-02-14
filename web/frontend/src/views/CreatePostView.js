@@ -268,11 +268,11 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [editorUpload, setEditorUpload] = useState(null);
     const [globalDragging, setGlobalDragging] = useState(false);
-    const [attachedMediaType, setAttachedMediaType] = useState(null);
-    const [attachedMediaUrl, setAttachedMediaUrl] = useState(null);
+    const [attachedMedia, setAttachedMedia] = useState([]); // [{type: 'image'|'video', url: string}]
+    const MAX_MEDIA = 10;
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
-    const [isThumbLoading, setIsThumbLoading] = useState(false);
+    const [thumbsLoading, setThumbsLoading] = useState(new Set());
     const [tagValue, setTagValue] = useState('');
     const [tagEnabled, setTagEnabled] = useState(false);
     const [tagManuallySet, setTagManuallySet] = useState(false);
@@ -322,24 +322,35 @@ function CreatePostView({ state, setPosts, updatePost }) {
                     setTagValue(tagLower);
                     setTagEnabled(!!tagLower);
                     setTagManuallySet(!!tagLower);
-                    const lines = content.split('\n');
-                    const firstLine = lines[0]?.trim() || '';
-                    if (/^https?:\/\//i.test(firstLine)) {
-                        const isImage = isSafeImageUrl(firstLine);
-                        const isVideo = isSafeVideoUrl(firstLine);
-                        if (isImage || isVideo) {
-                            setAttachedMediaUrl(firstLine);
-                            setAttachedMediaType(isImage ? 'image' : 'video');
-                            const restLines = lines.slice(1);
-                            while (restLines.length > 0 && restLines[0].trim() === '') {
-                                restLines.shift();
+                    // v1.12.0+: Load from dedicated media array if available
+                    const mediaArr = Array.isArray(data.root.media) ? data.root.media : [];
+                    if (mediaArr.length > 0) {
+                        const items = mediaArr.slice(0, MAX_MEDIA).map(url => {
+                            const type = isSafeVideoUrl(url) ? 'video' : 'image';
+                            return { type, url };
+                        });
+                        setAttachedMedia(items);
+                        setContentValue(content);
+                    } else {
+                        // Legacy: extract first-line media from content
+                        const lines = content.split('\n');
+                        const firstLine = lines[0]?.trim() || '';
+                        if (/^https?:\/\//i.test(firstLine)) {
+                            const isImage = isSafeImageUrl(firstLine);
+                            const isVideo = isSafeVideoUrl(firstLine);
+                            if (isImage || isVideo) {
+                                setAttachedMedia([{ type: isImage ? 'image' : 'video', url: firstLine }]);
+                                const restLines = lines.slice(1);
+                                while (restLines.length > 0 && restLines[0].trim() === '') {
+                                    restLines.shift();
+                                }
+                                setContentValue(restLines.join('\n'));
+                            } else {
+                                setContentValue(content);
                             }
-                            setContentValue(restLines.join('\n'));
                         } else {
                             setContentValue(content);
                         }
-                    } else {
-                        setContentValue(content);
                     }
                 }
             } catch (e) {
@@ -503,16 +514,17 @@ function CreatePostView({ state, setPosts, updatePost }) {
     };
 
     useEffect(() => {
-        if (attachedMediaUrl) {
-            setIsThumbLoading(true);
+        if (attachedMedia.length > 0) {
+            setThumbsLoading(new Set(attachedMedia.map((_, i) => i)));
         } else {
-            setIsThumbLoading(false);
+            setThumbsLoading(new Set());
         }
-    }, [attachedMediaType, attachedMediaUrl]);
+    }, [attachedMedia.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const handleTitlePaste = async (e) => {
         try {
             if (isSubmitting || isUploading) return;
+            if (attachedMedia.length >= MAX_MEDIA) return;
             if (!editorUpload || typeof editorUpload.uploadFile !== 'function') return;
             const cd = e.clipboardData || window.clipboardData;
             if (!cd) return;
@@ -557,8 +569,8 @@ function CreatePostView({ state, setPosts, updatePost }) {
         let content = String(contentValue).trim();
         const tag = tagEnabled ? String(tagValue || '').trim().toLowerCase() : '';
 
-        // v1.12.0: Build media array from attached media URL instead of prepending to content
-        const media = attachedMediaUrl ? [attachedMediaUrl] : [];
+        // v1.12.0: Build media array from attached media items
+        const media = attachedMedia.map(m => m.url).filter(Boolean);
 
         if (tagEnabled) {
             const validTags = TAG_OPTIONS_ENABLED.map(t => t.value);
@@ -611,7 +623,14 @@ function CreatePostView({ state, setPosts, updatePost }) {
         setSubmitStartTime(Date.now());
         try {
             if (isEditMode && overrideId) {
-                const res = await tx.editPost(overrideId, { topic, title, content, target: '', tag });
+                const res = await tx.editPost(overrideId, {
+                    topic,
+                    title,
+                    content,
+                    target: '',
+                    tag,
+                    media,
+                });
                 if (res && res.success) {
                     // Only navigate if user is still on this page
                     if (mountedRef.current) {
@@ -678,7 +697,8 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             return /^https?:\/\//i.test(line) ? line : '';
                         } catch (_) { return ''; }
                     })();
-                    const thumb = deriveYoutubeThumb(firstLineUrl);
+                    const thumb = deriveYoutubeThumb(firstLineUrl)
+                        || (media.length > 0 ? media[0] : '');
                     window.dispatchEvent(new CustomEvent('postCreated', {
                         detail: {
                             postId: txHash,
@@ -686,6 +706,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             title,
                             content,
                             tag,
+                            media,
                             thumbnail: thumb,
                         }
                     }));
@@ -751,7 +772,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             }}
                             onDrop={(e) => {
                                 try {
-                                    if (isUploading) {
+                                    if (isUploading || attachedMedia.length >= MAX_MEDIA) {
                                         e.preventDefault();
                                         e.stopPropagation();
                                         return;
@@ -899,25 +920,23 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                     <MediaRow>
                                         <StickerPicker
                                             onSelect={(stickerUrl) => {
-                                                setAttachedMediaType('image');
-                                                setAttachedMediaUrl(stickerUrl);
-                                                setIsThumbLoading(true);
+                                                if (attachedMedia.length >= MAX_MEDIA) return;
+                                                setAttachedMedia(prev => [...prev, { type: 'image', url: stickerUrl }]);
                                             }}
-                                            disabled={isSubmitting || isUploading || !!attachedMediaUrl}
+                                            disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
                                         />
                                         <GifPicker
                                             onSelect={(gifUrl) => {
-                                                setAttachedMediaType('image');
-                                                setAttachedMediaUrl(gifUrl);
-                                                setIsThumbLoading(true);
+                                                if (attachedMedia.length >= MAX_MEDIA) return;
+                                                setAttachedMedia(prev => [...prev, { type: 'image', url: gifUrl }]);
                                             }}
-                                            disabled={isSubmitting || isUploading || !!attachedMediaUrl}
+                                            disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
                                         />
                                         <MediaIconButton
                                             type="button"
                                             tabIndex={-1}
                                             onClick={() => { try { editorUpload && editorUpload.selectFile(); } catch (_) { } }}
-                                            disabled={isSubmitting || isUploading || !!attachedMediaUrl}
+                                            disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
                                             aria-label="Upload"
                                             title="Upload"
                                         >
@@ -927,56 +946,62 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                 <line x1="12" y1="3" x2="12" y2="15" />
                                             </svg>
                                         </MediaIconButton>
-                                        {(isUploading || attachedMediaUrl) && (
+                                        {attachedMedia.length > 0 && (
+                                            <span style={{ fontSize: '0.65rem', color: '#888' }}>
+                                                {attachedMedia.length}/{MAX_MEDIA}
+                                            </span>
+                                        )}
+                                        {attachedMedia.map((item, idx) => (
+                                            <MediaPreviewWrapper key={`${item.url}-${idx}`}>
+                                                <MediaPreviewImage
+                                                    src={item.type === 'image' ? item.url : (getVideoThumbnailUrl(item.url) || item.url)}
+                                                    alt=""
+                                                    onLoad={() => {
+                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                                                    }}
+                                                    onError={() => {
+                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                                                    }}
+                                                />
+                                                {thumbsLoading.has(idx) && (
+                                                    <MediaSpinner />
+                                                )}
+                                                <MediaRemoveButton
+                                                    type="button"
+                                                    tabIndex={-1}
+                                                    disabled={isSubmitting}
+                                                    onClick={() => {
+                                                        if (isSubmitting) return;
+                                                        setAttachedMedia(prev => prev.filter((_, i) => i !== idx));
+                                                    }}
+                                                    aria-label="Remove attached media"
+                                                    title="Remove attached media"
+                                                >
+                                                    ×
+                                                </MediaRemoveButton>
+                                            </MediaPreviewWrapper>
+                                        ))}
+                                        {isUploading && (
                                             <MediaPreviewWrapper>
-                                                {attachedMediaUrl && !isUploading && (
-                                                    <>
-                                                        <MediaPreviewImage
-                                                            src={attachedMediaType === 'image' ? attachedMediaUrl : (getVideoThumbnailUrl(attachedMediaUrl) || attachedMediaUrl)}
-                                                            alt=""
-                                                            onLoad={() => {
-                                                                setIsThumbLoading(false);
-                                                            }}
-                                                            onError={() => {
-                                                                setIsThumbLoading(false);
-                                                            }}
-                                                        />
-                                                        {isThumbLoading && (
-                                                            <MediaSpinner />
-                                                        )}
-                                                        <MediaRemoveButton
-                                                            type="button"
-                                                            tabIndex={-1}
-                                                            disabled={isSubmitting}
-                                                            onClick={() => { if (isSubmitting) return; setAttachedMediaType(null); setAttachedMediaUrl(null); }}
-                                                            aria-label="Remove attached media"
-                                                            title="Remove attached media"
-                                                        >
-                                                            ×
-                                                        </MediaRemoveButton>
-                                                    </>
-                                                )}
-                                                {isUploading && (
-                                                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0.5rem', boxSizing: 'border-box' }}>
-                                                        <span style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>
-                                                            Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}
-                                                        </span>
-                                                        <Button
-                                                            variant="danger"
-                                                            size="xs"
-                                                            tabIndex={-1}
-                                                            onClick={() => {
-                                                                try {
-                                                                    if (editorUpload && editorUpload.cancelUpload) {
-                                                                        editorUpload.cancelUpload();
-                                                                    }
-                                                                } catch (_) { }
-                                                            }}
-                                                        >
-                                                            Cancel
-                                                        </Button>
-                                                    </div>
-                                                )}
+                                                <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0.5rem', boxSizing: 'border-box' }}>
+                                                    <span style={{ fontSize: '0.7rem', color: '#888', marginBottom: '0.25rem' }}>
+                                                        Uploading {uploadProgress !== null ? `${Math.round(uploadProgress)}%` : '...'}
+                                                    </span>
+                                                    <Button
+                                                        variant="danger"
+                                                        size="xs"
+                                                        tabIndex={-1}
+                                                        onClick={() => {
+                                                            try {
+                                                                if (editorUpload && editorUpload.cancelUpload) {
+                                                                    editorUpload.cancelUpload();
+                                                                }
+                                                            } catch (_) { }
+                                                        }}
+                                                    >
+                                                        Cancel
+                                                    </Button>
+                                                </div>
                                             </MediaPreviewWrapper>
                                         )}
                                     </MediaRow>
@@ -991,6 +1016,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                             }}
                                             maxLength={limits.maxContent}
                                             disabled={isSubmitting}
+                                            uploadBlocked={attachedMedia.length >= MAX_MEDIA}
                                             onSubmitShortcut={() => {
                                                 try {
                                                     const form = document.getElementById('create-post-form');
@@ -1011,8 +1037,6 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                             }
                                             onMediaUploaded={(type, url, error) => {
                                                 if (error) {
-                                                    setAttachedMediaType(null);
-                                                    setAttachedMediaUrl(null);
                                                     if (errorClearTimeoutRef.current) {
                                                         clearTimeout(errorClearTimeoutRef.current);
                                                         errorClearTimeoutRef.current = null;
@@ -1025,8 +1049,6 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                         errorClearTimeoutRef.current = null;
                                                     }, 5000);
                                                 } else if (!type || !url) {
-                                                    setAttachedMediaType(null);
-                                                    setAttachedMediaUrl(null);
                                                     if (errorClearTimeoutRef.current) {
                                                         clearTimeout(errorClearTimeoutRef.current);
                                                         errorClearTimeoutRef.current = null;
@@ -1039,8 +1061,10 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                         errorClearTimeoutRef.current = null;
                                                     }, 5000);
                                                 } else {
-                                                    setAttachedMediaType(type);
-                                                    setAttachedMediaUrl(url);
+                                                    setAttachedMedia(prev => {
+                                                        if (prev.length >= MAX_MEDIA) return prev;
+                                                        return [...prev, { type, url }];
+                                                    });
                                                 }
                                             }}
                                             onUploadStateChange={(uploading) => {

@@ -100,6 +100,7 @@ def canon_base_edit(
     content: str,
     tag: str,
     override: str,
+    media: list[str] | None = None,
 ) -> bytes:
     return canon_shared.canon_base_edit(
         pub_dec,
@@ -112,6 +113,7 @@ def canon_base_edit(
         content,
         tag,
         override,
+        media=media,
     )
 
 

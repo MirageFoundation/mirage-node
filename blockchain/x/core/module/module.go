@@ -1070,6 +1070,10 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	if err := validateTag(tag); err != nil {
 		return nil, err
 	}
+	// Validate media field (v1.12.0+ edit support)
+	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
+		return nil, err
+	}
 
 	// Validate media field (v1.12.0)
 	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
@@ -1250,6 +1254,7 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		"owner", owner,
 		"override", override,
 		"target", target,
+		"media_count", len(req.GetMedia()),
 	)
 
 	// Deduct gas fee from paid users

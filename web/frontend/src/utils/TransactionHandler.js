@@ -1111,7 +1111,7 @@ class TransactionHandler {
     /**
      * Edit an existing post/comment
      * @param {string} overrideId - txhash of the post/comment being edited
-     * @param {{target?: string, topic?: string, title?: string, content: string, tag?: string}} changes
+     * @param {{target?: string, topic?: string, title?: string, content: string, tag?: string, media?: string[]}} changes
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
     async editPost(overrideId, changes) {
@@ -1125,6 +1125,7 @@ class TransactionHandler {
             const topic = String(changes?.topic || "").trim();
             const target = String(changes?.target || "").trim();
             const tagRaw = String(changes?.tag || "").trim().toLowerCase();
+            const media = Array.isArray(changes?.media) ? changes.media : [];
             if (!ALLOWED_TAGS.has(tagRaw)) return { success: false, error: "invalid tag" };
 
             const userLevelE = Number(Storage.load('user_level', '0')) || 0;
@@ -1151,6 +1152,7 @@ class TransactionHandler {
                 title,
                 content,
                 tag: tagRaw,
+                media,
                 last_block_hash: last_block_hash_e,
                 pow_difficulty: pow_difficulty_e,
                 pow_base_bits: pow_base_bits_e,
@@ -1568,6 +1570,8 @@ class TransactionHandler {
                     topic: transaction.topic,
                     title: transaction.title,
                     content: transaction.content,
+                    tag: transaction.tag || "",
+                    media: Array.isArray(transaction.media) ? transaction.media : [],
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -1842,7 +1846,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgEdit (must match chain ante)
-    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override }) {
+    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override, media }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -1887,6 +1891,12 @@ class TransactionHandler {
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
         const tag105 = Uint8Array.from([105]); // override field
+        const tag106 = Uint8Array.from([106]); // media field (v1.12.0+)
+        const mediaParts = [];
+        for (const m of (media || [])) {
+            mediaParts.push(tag106);
+            mediaParts.push(encStr(m));
+        }
 
         return concat(
             prefix,
@@ -1901,6 +1911,7 @@ class TransactionHandler {
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
             tag105, encStr(override || ""),
+            ...mediaParts,
         );
     }
 
@@ -3199,6 +3210,7 @@ class TransactionHandler {
             } else if (msgName === 'MsgEdit') {
                 // Sign relay for edit
                 const topic = transaction.topic || "";
+                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalEdit({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -3211,6 +3223,7 @@ class TransactionHandler {
                     content: transaction.content || "",
                     tag: transaction.tag || "",
                     override: String(transaction.override || '').toLowerCase(),
+                    media: mediaArr,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3221,6 +3234,7 @@ class TransactionHandler {
                     signature: sigB64,
                     topic: topic,
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 };
                 endpoint = 'core/edit';
             } else if (msgName === 'MsgVote') {
@@ -3648,6 +3662,9 @@ class TransactionHandler {
                                 if (isRoot) {
                                     patch.title = transaction.title || '';
                                     patch.topic = transaction.topic || '';
+                                }
+                                if (Array.isArray(transaction.media)) {
+                                    patch.media = transaction.media;
                                 }
                                 this.updatePost(overrideId, patch);
                                 // Clear flash after animation delay
@@ -4161,7 +4178,13 @@ class TransactionHandler {
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
                 const tag105 = Uint8Array.from([105]); // override
+                const tag106 = Uint8Array.from([106]); // media
                 const topic = transaction.topic || "";
+                const mediaParts = [];
+                for (const m of (transaction.media || [])) {
+                    mediaParts.push(tag106);
+                    mediaParts.push(encStr(m));
+                }
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -4174,6 +4197,7 @@ class TransactionHandler {
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
                     tag105, encStr(String(transaction.override || "").toLowerCase()),
+                    ...mediaParts,
                 );
             } else if (action === 'upgrade_level') {
                 // upgrade_level should NEVER use PoW - it must be paid with tokens

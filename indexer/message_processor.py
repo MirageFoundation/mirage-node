@@ -800,13 +800,11 @@ class MessageProcessor:
             logger.warning("Rejected edit %s: owner mismatch", tx_hash)
             return
 
-        # Determine if root (target empty in DB) and preserve media
-        existing_topic, _, _, existing_target, _, _, existing_created_at, existing_media_raw = existing
+        # Determine if root (target empty in DB)
+        existing_topic, _, _, existing_target, _, _, existing_created_at, _existing_media_raw = existing
         is_root = not bool(existing_target)
-        existing_media = json.loads(existing_media_raw)
-        if not isinstance(existing_media, list):
-            raise ValueError("invalid media payload for existing post")
-        logger.debug("MsgEdit preserve media count=%d override=%s", len(existing_media), override)
+        media = list(msg_dict.get("media", []) or [])
+        logger.debug("MsgEdit media count=%d override=%s", len(media), override)
 
         # Apply update: preserve created_at, set edited_at
         # Root posts may update topic; comments must not carry topic.
@@ -839,7 +837,7 @@ class MessageProcessor:
             root_topic=root_topic,
             root_post_id=root_post_id,
             edited_at=int(ts),
-            media=existing_media,
+            media=media,
         )
 
         # Recompute topic safety stats when root posts change

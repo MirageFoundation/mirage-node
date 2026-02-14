@@ -890,6 +890,9 @@ func buildCanonForEdit(m *coretypes.MsgEdit) []byte {
 	cw.writeString(103, m.Content)
 	cw.writeString(104, m.Tag)
 	cw.writeString(105, m.Override)
+	for _, mediaItem := range m.Media {
+		cw.writeString(106, mediaItem)
+	}
 	return cw.buf
 }
 

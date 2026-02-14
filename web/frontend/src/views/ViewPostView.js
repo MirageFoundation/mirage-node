@@ -1775,6 +1775,8 @@ function ViewPostView({ state, updatePost }) {
                 topic: isRoot ? (post.topic || '') : '',
                 title: isRoot ? newTitle : '',
                 content: newContent,
+                tag: (post && typeof post.tag === 'string') ? post.tag : '',
+                media: Array.isArray(post && post.media) ? post.media : [],
             };
             // Disable controls while PoW/broadcast happens
             try { updatePost(post.post_id, { editBusy: true }); } catch (_) { }
@@ -3898,13 +3900,16 @@ function ViewPostView({ state, updatePost }) {
 
                                                         // v1.12.0: Render from dedicated media array if available
                                                         if (mediaArr.length > 0) {
+                                                            const Inline = require("../components/InlineMedia").default;
+                                                            const Gallery = require("../components/MediaGallery").default;
+                                                            const mediaNode = (mediaArr.length > 1 && Gallery)
+                                                                ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined })
+                                                                : (Inline
+                                                                    ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined })
+                                                                    : null);
                                                             return (
                                                                 <>
-                                                                    {mediaArr.map((mediaUrl, i) =>
-                                                                        require("../components/InlineMedia").default
-                                                                            ? React.createElement(require("../components/InlineMedia").default, { key: i, url: mediaUrl, variant: isRoot ? 'root_post' : undefined })
-                                                                            : null
-                                                                    )}
+                                                                    {mediaNode}
                                                                     {raw ? <div style={{ height: '0.5rem' }} /> : null}
                                                                     {raw ? <MarkdownRenderer text={raw} /> : null}
                                                                 </>
