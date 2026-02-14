@@ -45,80 +45,17 @@ from shared.canon import (
 
 # Defaults
 DEFAULT_BACKEND = "http://127.0.0.1:80"
-DEFAULT_WORKERS = 10
-DEFAULT_DURATION = 60  # seconds
+DEFAULT_WORKERS = 16
+DEFAULT_DURATION = 60 * 5  # seconds
 
 
-# Generate random seeds for spam workers (each worker gets unique wallet)
-def _generate_seed() -> str:
-    """Generate a random 12-word mnemonic-like seed."""
-    words = [
-        "abandon",
-        "ability",
-        "able",
-        "about",
-        "above",
-        "absent",
-        "absorb",
-        "abstract",
-        "absurd",
-        "abuse",
-        "access",
-        "accident",
-        "account",
-        "accuse",
-        "achieve",
-        "acid",
-        "acoustic",
-        "acquire",
-        "across",
-        "act",
-        "action",
-        "actor",
-        "actress",
-        "actual",
-        "adapt",
-        "add",
-        "addict",
-        "address",
-        "adjust",
-        "admit",
-        "adult",
-        "advance",
-        "advice",
-        "aerobic",
-        "affair",
-        "afford",
-        "afraid",
-        "again",
-        "age",
-        "agent",
-        "agree",
-        "ahead",
-        "aim",
-        "air",
-        "airport",
-        "aisle",
-        "alarm",
-        "album",
-        "alcohol",
-        "alert",
-        "alien",
-        "all",
-        "alley",
-        "allow",
-        "almost",
-        "alone",
-        "alpha",
-        "already",
-        "also",
-        "alter",
-        "always",
-        "amateur",
-        "amazing",
-        "among",
-    ]
-    return " ".join(random.choices(words, k=12))
+def _generate_wallet(seed: Optional[str] = None):
+    """Create a wallet — from seed if given, otherwise random."""
+    if seed:
+        return create_wallet_from_seed(seed)
+    from cosmpy.aerial.wallet import LocalWallet
+
+    return LocalWallet.generate(prefix="mirage")
 
 
 @dataclass
@@ -201,9 +138,7 @@ class SpamStats:
                 mx = max(times)
                 sorted_t = sorted(times)
                 median = sorted_t[count // 2]
-                print(
-                    f"  {diff:>4}  {count:>6}  {avg:>7.2f}s  {mn:>7.2f}s  {mx:>7.2f}s  {median:>7.2f}s"
-                )
+                print(f"  {diff:>4}  {count:>6}  {avg:>7.2f}s  {mn:>7.2f}s  {mx:>7.2f}s  {median:>7.2f}s")
 
 
 def _b64(b: bytes) -> str:
@@ -381,8 +316,7 @@ class SpamWorker:
         self.worker_id = worker_id
         self.backend = backend
         self.stats = stats
-        self.seed = seed or _generate_seed()
-        self.wallet = create_wallet_from_seed(self.seed)
+        self.wallet = _generate_wallet(seed)
         self.address = str(self.wallet.address())
         self.pub = self.wallet.public_key().public_key_bytes
         self.last_block_hash = ""
@@ -448,7 +382,11 @@ class SpamWorker:
             error_msg = str(resp.get("error", resp.get("text", "")))[:80] if not success else ""
 
             # On insufficient pow or stale block hash, refresh params and retry once
-            if not success and _retry < 2 and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg):
+            if (
+                not success
+                and _retry < 2
+                and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg)
+            ):
                 self.stats.record_retry()
                 self.refresh_params()
                 return self.spam_post(_retry=_retry + 1)
@@ -535,7 +473,11 @@ class SpamWorker:
             success = code == 200 and "tx_hash" in resp
             error_msg = str(resp.get("error", resp.get("text", "")))[:80] if not success else ""
 
-            if not success and _retry < 2 and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg):
+            if (
+                not success
+                and _retry < 2
+                and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg)
+            ):
                 self.stats.record_retry()
                 self.refresh_params()
                 return self.spam_vote(_retry=_retry + 1)
@@ -587,9 +529,7 @@ class SpamWorker:
             used_difficulty = self.difficulty
 
             # Comment: target is parent, topic/title are empty
-            base = canon_base_post(
-                self.pub, self.last_block_hash, used_difficulty, target, "", "", content, "", 0, ts
-            )
+            base = canon_base_post(self.pub, self.last_block_hash, used_difficulty, target, "", "", content, "", 0, ts)
 
             proof, solve_time = _compute_pow(
                 base,
@@ -624,7 +564,11 @@ class SpamWorker:
             success = code == 200 and "tx_hash" in resp
             error_msg = str(resp.get("error", resp.get("text", "")))[:80] if not success else ""
 
-            if not success and _retry < 2 and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg):
+            if (
+                not success
+                and _retry < 2
+                and ("insufficient pow" in error_msg or "invalid last_block_hash" in error_msg)
+            ):
                 self.stats.record_retry()
                 self.refresh_params()
                 return self.spam_comment(_retry=_retry + 1)
