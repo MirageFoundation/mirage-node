@@ -714,6 +714,27 @@ class DatabaseManager:
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_bridge_unique_tx ON bridge_transactions(tx_hash, msg_type)"
                 )
 
+                # ========== Mentions Table ==========
+                # mentions: @username mentions extracted from post/comment content
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS mentions (
+                        id SERIAL PRIMARY KEY,
+                        post_txhash TEXT NOT NULL,
+                        mentioned_address TEXT NOT NULL,
+                        mentioner_address TEXT NOT NULL,
+                        created_at BIGINT NOT NULL,
+                        UNIQUE(post_txhash, mentioned_address)
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_mentions_mentioned_at ON mentions(mentioned_address, created_at DESC)"
+                )
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_mentions_post ON mentions(post_txhash)"
+                )
+
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
         with self._connect() as conn:
@@ -887,6 +908,53 @@ class DatabaseManager:
                         (root_post_id or None),
                     ),
                 )
+
+    def insert_mentions(
+        self,
+        post_txhash: str,
+        mentioner_address: str,
+        mentioned_addresses: list[str],
+        created_at: int,
+    ) -> None:
+        """Bulk-insert mentions for a post. Duplicates are silently ignored."""
+        if not mentioned_addresses:
+            return
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                values = [
+                    (post_txhash, addr.lower(), mentioner_address.lower(), int(created_at))
+                    for addr in mentioned_addresses
+                ]
+                cur.executemany(
+                    """
+                    INSERT INTO mentions(post_txhash, mentioned_address, mentioner_address, created_at)
+                    VALUES(%s, %s, %s, %s)
+                    ON CONFLICT(post_txhash, mentioned_address) DO NOTHING
+                    """,
+                    values,
+                )
+
+    def delete_mentions_for_post(self, post_txhash: str) -> None:
+        """Delete all mentions for a post (used before re-extracting on edit)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM mentions WHERE post_txhash = %s", (post_txhash,))
+
+    def resolve_usernames_to_addresses(self, usernames: list[str]) -> dict[str, str]:
+        """Bulk-resolve usernames to addresses. Returns {lowercase_username: owner_address}."""
+        if not usernames:
+            return {}
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cleaned = list({u.lower() for u in usernames if u.strip()})
+                if not cleaned:
+                    return {}
+                ph = ",".join(["%s"] * len(cleaned))
+                cur.execute(
+                    f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph})",
+                    cleaned,
+                )
+                return {row[0]: row[1] for row in cur.fetchall() if row[0] and row[1]}
 
     @classmethod
     def _normalize_tag(cls, tag: str) -> str:

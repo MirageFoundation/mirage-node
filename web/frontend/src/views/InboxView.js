@@ -363,15 +363,16 @@ export default function InboxView({ state }) {
                     <Button variant={unreadCount > 0 ? "subtle" : "ghost"} size="sm" onClick={handleMarkAllAsRead}>Mark all as read</Button>
                 )}
             </HeaderRow>
-            {replies.length === 0 && <div>No replies yet.</div>}
+            {replies.length === 0 && <div>No notifications yet.</div>}
             {replies.map((reply) => {
                 const isUnread = !viewedReplyIds.includes(reply.reply_id);
                 const displayUsername = `@${reply.reply_username || shortenAddress(reply.reply_owner)}`;
+                const isMention = reply.type === 'mention';
                 // Use new clean URL with depth=1 for reply with parent context
                 const replyUrl = `/p/${reply.reply_id}?depth=1`;
                 return (
                     <ReplyItem
-                        key={reply.reply_id}
+                        key={reply.reply_id + (isMention ? '_m' : '_r')}
                         href={replyUrl}
                         $isUnread={isUnread}
                         $isActive={activeReplyId === reply.reply_id}
@@ -385,7 +386,7 @@ export default function InboxView({ state }) {
                     >
                         <ReplyHeaderRow>
                             <ReplyHeader $isUnread={isUnread}>
-                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername> replied to <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
+                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>{isMention ? ' mentioned you in ' : ' replied to '}<ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
                             </ReplyHeader>
                             {isUnread && (
                                 <MarkReadButton

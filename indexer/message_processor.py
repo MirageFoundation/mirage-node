@@ -64,6 +64,12 @@ from bs4 import BeautifulSoup  # type: ignore
 from io import BytesIO
 from PIL import Image  # type: ignore
 
+# Regex to match @username mentions (not preceded by a word character)
+_MENTION_RE = re.compile(r"(?<!\w)@([A-Za-z0-9-]+)")
+# Patterns for stripping code blocks/inline code before mention extraction
+_FENCED_CODE_RE = re.compile(r"```[\s\S]*?```")
+_INLINE_CODE_RE = re.compile(r"`[^`]+`")
+
 logger = logging.getLogger(__name__)
 
 TYPE_URL_TO_PROTO = {
@@ -310,6 +316,54 @@ class MessageProcessor:
                     )
             except Exception as e:
                 logger.warning("Quest progress tracking failed for post %s: %s", txhash, e)
+
+        # Extract @mentions from content for new posts
+        if not existing and owner and content:
+            try:
+                self._extract_and_store_mentions(content, txhash, owner, ts)
+            except Exception:
+                logger.exception("Failed to extract mentions for post %s", txhash)
+
+    def _extract_and_store_mentions(self, content: str, post_txhash: str, mentioner_address: str, ts: int):
+        """Parse @username mentions from content and store them in the mentions table.
+
+        - Strips code blocks and inline code before matching
+        - Resolves usernames to addresses via profiles table
+        - Skips self-mentions (mentioner == mentioned)
+        - Deduplicates via DB UNIQUE constraint
+        """
+        if not content or not post_txhash or not mentioner_address:
+            return
+        # Strip fenced code blocks and inline code so @mentions inside code are ignored
+        stripped = _FENCED_CODE_RE.sub("", content)
+        stripped = _INLINE_CODE_RE.sub("", stripped)
+
+        raw_usernames = list({m.lower() for m in _MENTION_RE.findall(stripped)})
+        if not raw_usernames:
+            return
+
+        # Resolve usernames to addresses
+        username_to_addr = self.db.resolve_usernames_to_addresses(raw_usernames)
+        if not username_to_addr:
+            logger.debug("No valid usernames resolved for mentions in %s", post_txhash)
+            return
+
+        # Filter out self-mentions
+        mentioner_lower = mentioner_address.lower()
+        mentioned_addresses = [
+            addr for addr in username_to_addr.values()
+            if addr.lower() != mentioner_lower
+        ]
+        if not mentioned_addresses:
+            return
+
+        self.db.insert_mentions(post_txhash, mentioner_address, mentioned_addresses, ts)
+        logger.info(
+            "Stored %d mention(s) for post %s: %s",
+            len(mentioned_addresses),
+            post_txhash,
+            [u for u, a in username_to_addr.items() if a.lower() != mentioner_lower],
+        )
 
     def _handle_vote(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgVote."""
@@ -797,6 +851,14 @@ class MessageProcessor:
                 self.db.update_post_thumbnail(override, thumb)
         except Exception:
             pass
+
+        # Re-extract @mentions on edit (delete old, insert new)
+        if owner and content:
+            try:
+                self.db.delete_mentions_for_post(override)
+                self._extract_and_store_mentions(content, override, owner, ts)
+            except Exception:
+                logger.exception("Failed to re-extract mentions for edit %s", tx_hash)
 
         # Log update
         self.log_yaml(
