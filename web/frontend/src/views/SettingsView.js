@@ -530,7 +530,7 @@ export default function SettingsView({ state }) {
         } finally {
             setSecBusy(false);
         }
-    }, []);
+    }, [state.publicKey, state.username]);
 
     const handleModeSelect = useCallback((newMode) => {
         setSecError('');

@@ -405,7 +405,7 @@ _INBOX_CACHE_MAX = 10000
 
 
 def _get_new_inbox_count(cur, address: str) -> int:
-    """Count replies to user's posts that arrived after their last inbox view.
+    """Count replies + @mentions to user's posts that arrived after their last inbox view.
     Results are cached in-memory for 60s per address."""
     if not address or address.lower() == "guest":
         return 0
@@ -418,7 +418,10 @@ def _get_new_inbox_count(cur, address: str) -> int:
         return cached[0]
 
     last_seen = 0
+    reply_count = 0
+    mention_count = 0
     try:
+        # Count new replies
         cur.execute(
             """
             SELECT pr.inbox_last_viewed_at,
@@ -437,10 +440,29 @@ def _get_new_inbox_count(cur, address: str) -> int:
         )
         row = cur.fetchone()
         last_seen = int(row[0]) if row and row[0] else 0
-        count = int(row[1]) if row and row[1] else 0
+        reply_count = int(row[1]) if row and row[1] else 0
     except Exception:
         last_seen = 0
-        count = 0
+        reply_count = 0
+
+    try:
+        # Count new @mentions
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM mentions m
+            JOIN posts p ON p.txhash = m.post_txhash AND p.deleted = FALSE
+            WHERE LOWER(m.mentioned_address) = %s
+              AND LOWER(m.mentioner_address) != %s
+              AND m.created_at > %s
+            """,
+            (viewer, viewer, last_seen),
+        )
+        mrow = cur.fetchone()
+        mention_count = int(mrow[0]) if mrow and mrow[0] else 0
+    except Exception:
+        mention_count = 0
+
+    count = reply_count + mention_count
 
     # Evict expired entries if cache is too large
     if len(_inbox_cache) >= _INBOX_CACHE_MAX:
@@ -733,32 +755,18 @@ def _load_vote_and_comment_stats(
     return vote_totals, comment_counts, user_votes, user_weight_map
 
 
-def _get_following_feed(
+def _load_following_candidates(
     cur,
-    viewer: str,
-    limit: int,
-    page: int,
+    viewer_lower: str,
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    sort_mode: str = "magic",
-) -> dict:
+    max_candidates: int,
+) -> tuple[list[dict], set[str], set[str]]:
     """
-    Following feed:
-    - Candidates: root posts from followed topics/users + your own posts
-    - Sorting:
-      - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
-      - newest: chronological
+    Load candidate posts for the following feed.
+    Returns (candidates, followed_topics, followed_users).
     """
-    viewer_lower = viewer.strip().lower() if viewer else ""
-
-    if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
-
-    sort_mode = (sort_mode or "magic").strip().lower()
-    if sort_mode not in ("magic", "newest"):
-        raise ValueError(f"unsupported sort mode: {sort_mode}")
-
     cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner) = %s", (viewer_lower,))
     followed_topics = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
 
@@ -766,7 +774,7 @@ def _get_following_feed(
     followed_users = {(r[0] or "").strip().lower() for r in cur.fetchall() if r and r[0]}
 
     conditions = []
-    params = []
+    params: list = []
     if followed_topics:
         ph = ",".join(["%s"] * len(followed_topics))
         conditions.append(f"LOWER(p.topic) IN ({ph})")
@@ -781,7 +789,6 @@ def _get_following_feed(
 
     where_clause = " OR ".join(conditions)
     deleted_clause = _deleted_filter()
-    max_candidates = max(500, limit * page * 3)
 
     cur.execute(
         f"""
@@ -804,26 +811,106 @@ def _get_following_feed(
         """,
         params + [max_candidates],
     )
-    rows = cur.fetchall()
 
     seen: set[str] = set()
     candidates: list[dict] = []
-    for row in rows:
+    for row in cur.fetchall():
         post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
-        if not post:
-            continue
-        post["_source"] = "following"
-        candidates.append(post)
+        if post:
+            post["_source"] = "following"
+            candidates.append(post)
+
+    return candidates, followed_topics, followed_users
+
+
+def _get_following_feed(
+    cur,
+    viewer: str,
+    limit: int,
+    page: int,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    allowed_tags: set[str],
+    sort_mode: str = "magic",
+) -> dict:
+    """
+    Following feed:
+    - Candidates: root posts from followed topics/users + your own posts
+    - Sorting:
+      - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
+      - newest: fast chronological path
+    """
+    viewer_lower = viewer.strip().lower() if viewer else ""
+
+    if not viewer_lower or viewer_lower == "guest":
+        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+
+    sort_mode = (sort_mode or "magic").strip().lower()
+    if sort_mode not in ("magic", "newest"):
+        raise ValueError(f"unsupported sort mode: {sort_mode}")
+
+    max_candidates = limit * page * 4
+    candidates, followed_topics, followed_users = _load_following_candidates(
+        cur, viewer_lower, blocked_posts, blocked_users, allowed_tags, max_candidates
+    )
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
+    # ── Newest: fast path (no scoring) ──────────────────────────────
+    if sort_mode == "newest":
+        # Already chronological from DB query
+        start = (page - 1) * limit
+        end = start + limit
+        page_posts = candidates[start:end] if start < len(candidates) else []
+        has_more = len(candidates) > end
+
+        # Only load stats for the page slice
+        page_ids = [p["post_id"] for p in page_posts]
+        vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+            cur, page_ids, blocked_posts, blocked_users, viewer_lower
+        )
+
+        for post in page_posts:
+            pid = post["post_id"]
+            author_lower = (post.get("author") or "").strip().lower()
+            topic_lower = (post.get("topic") or "").strip().lower()
+            is_own = author_lower == viewer_lower
+            in_topic = topic_lower in followed_topics
+            by_user = author_lower in followed_users
+
+            if is_own:
+                reason = "Your post"
+            elif in_topic and by_user:
+                reason = "From a followed topic and user"
+            elif in_topic:
+                reason = "From a followed topic"
+            else:
+                reason = "From a followed user"
+
+            post["points"] = vote_totals.get(pid, 0.0)
+            post["comments"] = comment_counts.get(pid, 0)
+            post["children"] = []
+            post["feed_type"] = "following"
+            post["feed_bucket"] = "newest"
+            post["feed_debug"] = {"reason": reason, "bucket": "newest"}
+            post["user_vote"] = user_votes.get(pid, 0)
+            post["user_weight"] = user_weight_map.get(pid, 0.0)
+
+        return {
+            "posts": page_posts,
+            "total": len(candidates),
+            "page": page,
+            "limit": limit,
+            "has_more": has_more,
+        }
+
+    # ── Magic: full scoring path ────────────────────────────────────
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
 
-    # For Magic scoring consistency with home feed
     from similarity import get_or_compute_similarities
 
     similar_users = get_or_compute_similarities(cur, viewer_lower)
@@ -837,7 +924,6 @@ def _get_following_feed(
 
     for post in candidates:
         pid = post["post_id"]
-        ts = post.get("timestamp", 0)
         pts = float(vote_totals.get(pid, 0.0) or 0.0)
         comments = int(comment_counts.get(pid, 0) or 0)
 
@@ -887,24 +973,19 @@ def _get_following_feed(
         debug["follow_reason"] = reason
         post["feed_debug"] = debug
 
-    if sort_mode == "newest":
-        candidates.sort(key=lambda p: -(p.get("timestamp") or 0))
-        ordered = candidates
-    else:
-        candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
-        ordered = candidates
+    candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
 
     start = (page - 1) * limit
     end = start + limit
-    page_posts = ordered[start:end] if start < len(ordered) else []
-    has_more = len(ordered) > end
+    page_posts = candidates[start:end] if start < len(candidates) else []
+    has_more = len(candidates) > end
 
     for p in page_posts:
         p.pop("_score", None)
 
     return {
         "posts": page_posts,
-        "total": len(ordered),
+        "total": len(candidates),
         "page": page,
         "limit": limit,
         "has_more": has_more,
@@ -934,15 +1015,15 @@ def _get_home_feed(
     if sort_mode not in ("magic", "newest"):
         raise ValueError(f"unsupported sort mode: {sort_mode}")
 
-    # Guest users:
-    # - newest: chronological
-    # - otherwise: magic-style scoring (no personalization; votes + unique commenters + recency)
+    # Newest: fast chronological path (no scoring overhead)
+    if sort_mode == "newest":
+        return _get_home_feed_newest(cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags)
+
+    # Guest users: magic-style scoring without personalization
     if not viewer_lower or viewer_lower == "guest":
-        if sort_mode == "newest":
-            return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
         return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
 
-    # Logged-in users always use Magic (unified score).
+    # Logged-in users: Magic (unified score).
     return _get_home_feed_magic(
         cur,
         viewer_lower,
@@ -951,8 +1032,83 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        sort_mode=sort_mode,
     )
+
+
+def _get_home_feed_newest(
+    cur,
+    viewer: str,
+    limit: int,
+    page: int,
+    blocked_posts: set[str],
+    blocked_users: set[str],
+    allowed_tags: set[str],
+) -> dict:
+    """
+    Fast chronological feed — no scoring, no similarity, no preferences.
+
+    Just fetches the newest root posts, filters blocked/tags, attaches
+    vote/comment stats, and paginates.
+    """
+    _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
+                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+                   COALESCE(pr.level, 0) AS author_level"""
+    _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
+    _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
+
+    # Over-fetch to account for blocked/tag filtering, then take the page slice
+    fetch_limit = limit * page * 2
+    cur.execute(
+        f"""SELECT {_POST_COLS}
+        FROM posts p
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+        ORDER BY p.created_at DESC
+        LIMIT %s""",
+        [fetch_limit],
+    )
+
+    seen: set[str] = set()
+    posts = []
+    for row in cur.fetchall():
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        if post:
+            posts.append(post)
+
+    if not posts:
+        return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
+
+    # Paginate first, then only load stats for the page slice
+    start = (page - 1) * limit
+    end = start + limit
+    page_posts = posts[start:end] if start < len(posts) else []
+    has_more = len(posts) > end
+
+    # Load vote/comment stats only for the posts we're returning
+    page_ids = [p["post_id"] for p in page_posts]
+    viewer_lower = (viewer or "").strip().lower()
+    vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
+        cur, page_ids, blocked_posts, blocked_users, viewer_lower
+    )
+
+    for post in page_posts:
+        pid = post["post_id"]
+        post["points"] = vote_totals.get(pid, 0.0)
+        post["comments"] = comment_counts.get(pid, 0)
+        post["children"] = []
+        post["feed_type"] = "home"
+        post["feed_bucket"] = "newest"
+        post["feed_debug"] = {"reason": "Newest", "bucket": "newest"}
+        post["user_vote"] = user_votes.get(pid, 0)
+        post["user_weight"] = user_weight_map.get(pid, 0.0)
+
+    return {
+        "posts": page_posts,
+        "total": len(posts),
+        "page": page,
+        "limit": limit,
+        "has_more": has_more,
+    }
 
 
 def _get_home_feed_magic(
@@ -963,7 +1119,6 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    sort_mode: str = "magic",
 ) -> dict:
     """
     Magic feed algorithm.
@@ -990,10 +1145,10 @@ def _get_home_feed_magic(
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
 
-    # 3. Load candidate posts
-    max_candidates = max(500, limit * page * 3)
+    # 3. Load candidate posts (small targeted pool + random exploration)
+    per_source = limit * page * 4  # ~60 per source for page 1
     candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
+        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, per_source
     )
 
     if not candidates:
@@ -1041,15 +1196,8 @@ def _get_home_feed_magic(
         post["user_weight"] = user_weight_map.get(post["post_id"], 0.0)
         scored_posts.append(post)
 
-    sort_mode = (sort_mode or "magic").strip().lower()
-    if sort_mode not in ("magic", "newest"):
-        raise ValueError(f"unsupported sort mode: {sort_mode}")
-
-    if sort_mode == "newest":
-        scored_posts.sort(key=lambda p: -(p.get("timestamp") or 0))
-    else:
-        # 7. Sort by score descending
-        scored_posts.sort(key=lambda p: -p["_score"])
+    # 7. Sort by score descending
+    scored_posts.sort(key=lambda p: -p["_score"])
 
     # 8. Paginate
     start = (page - 1) * limit
@@ -1089,7 +1237,7 @@ def _score_magic(
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
     - P = sqrt(max(0, topic_pref + author_pref))
-    - R = 1 / (1 + (age_hours/12)^1.585) — gentle decay: 6h=0.75, 12h=0.5, 24h=0.25
+    - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
 
     Returns (score, debug_info, should_hide).
     """
@@ -1147,9 +1295,9 @@ def _score_magic(
     P = _sqrt_signed(combined_pref)
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
-    # 6h=0.75, 12h=0.50, 24h=0.25
+    # 4.5h=0.75, 9h=0.50, 18h=0.25, 36h=0.11
     age_hours = max(0, (now_ts - timestamp) / 3600)
-    R = 1 / (1 + (age_hours / 12) ** 1.585)
+    R = 1 / (1 + (age_hours / 9) ** 1.585)
 
     # Final score
     score = (S + V + U + P) * R
@@ -1273,31 +1421,34 @@ def _load_home_candidates(
 ) -> list[dict]:
     """
     Load candidate posts for home feed from multiple sources:
-    1. Posts by similar users
-    2. Posts upvoted by similar users
-    3. Recent posts (for discovery)
+    1. Posts by similar users (recent)
+    2. Posts upvoted by similar users (recent)
+    3. Recent posts (discovery)
+    4. Random exploration (upvoted posts from wider time window)
     """
     results = []
     seen = set()
+
+    _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
+                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+                   COALESCE(pr.level, 0) AS author_level"""
+    _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
+    _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
     # Source 1: Posts BY similar users (root posts only)
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
-        query = f"""
-            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level
+        cur.execute(
+            f"""SELECT {_POST_COLS}
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
-              AND (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-              AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-              AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
             ORDER BY p.created_at DESC
-            LIMIT %s
-        """
-        cur.execute(query, similar_list + [max_posts])
+            LIMIT %s""",
+            similar_list + [max_posts],
+        )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
             if post:
@@ -1308,47 +1459,63 @@ def _load_home_candidates(
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
-        query = f"""
-            SELECT DISTINCT ON (p.txhash) 
-                   p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level
+        cur.execute(
+            f"""SELECT DISTINCT ON (p.txhash)
+                   {_POST_COLS}
             FROM votes v
             JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(v.owner) IN ({placeholders})
               AND v.user_vote > 0
-              AND (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-              AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-              AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
             ORDER BY p.txhash, p.created_at DESC
-            LIMIT %s
-        """
-        cur.execute(query, similar_list + [max_posts])
+            LIMIT %s""",
+            similar_list + [max_posts],
+        )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
             if post:
                 post["_source"] = "similar_upvoted"
                 results.append(post)
 
-    # Source 3: Recent posts (discovery - not from blocked, with topics)
-    query = """
-        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-               p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-               COALESCE(pr.level, 0) AS author_level
+    # Source 3: Recent posts (discovery)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-          AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-          AND p.deleted = false
+        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
         ORDER BY p.created_at DESC
-        LIMIT %s
-    """
-    cur.execute(query, [max_posts])
+        LIMIT %s""",
+        [max_posts],
+    )
     for row in cur.fetchall():
         post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
         if post:
             post["_source"] = "recent"
+            results.append(post)
+
+    # Source 4: Random exploration (upvoted posts from last 60 days)
+    # Pulls random posts that have at least one upvote, giving older quality
+    # content a chance to surface. Different results each request.
+    explore_limit = max(20, max_posts // 3)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
+        FROM posts p
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          AND p.created_at > EXTRACT(EPOCH FROM NOW()) - 60 * 86400
+          AND EXISTS (
+              SELECT 1 FROM votes v
+              WHERE LOWER(v.target) = LOWER(p.txhash) AND v.user_vote > 0
+          )
+        ORDER BY RANDOM()
+        LIMIT %s""",
+        [explore_limit],
+    )
+    for row in cur.fetchall():
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        if post:
+            post["_source"] = "explore"
             results.append(post)
 
     return results
@@ -1491,7 +1658,7 @@ def _get_guest_feed_magic(
     """
     import time
 
-    max_candidates = max(500, limit * page * 3)
+    max_candidates = limit * page * 4
     candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags)
 
     if not candidates:
@@ -2615,6 +2782,34 @@ def get_address_from_username():
         return jsonify({"exists": False, "address": None, "username": username})
     except Exception as e:
         return safe_error(e)
+
+
+@public_bp.route("/api/search_username")
+def username_search():
+    """Lightweight username prefix search for @mention autocomplete.
+
+    GET: ?q=<prefix>&limit=8
+    Returns: { results: [{username, address}, ...] }
+    """
+    q = (request.args.get("q") or "").strip().lower()
+    limit = min(max(1, request.args.get("limit", 8, type=int)), 20)
+
+    if not q:
+        return jsonify({"results": []})
+
+    try:
+        conn = connect_db(timeout=5.0, busy_timeout_ms=5000)
+        cur = conn.cursor()
+        # Prefix match on username, exclude empty usernames
+        cur.execute(
+            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' ORDER BY username LIMIT %s",
+            (q + "%", limit),
+        )
+        results = [{"username": row[0], "address": row[1]} for row in cur.fetchall() if row[0] and row[1]]
+        conn.close()
+        return jsonify({"results": results})
+    except Exception as e:
+        return safe_error(e, context="search_username")
 
 
 @public_bp.route("/api/get_username_from_address", methods=["GET", "POST"])
@@ -4700,107 +4895,154 @@ def get_inbox():
 
         deleted_filter = "" if IGNORE_DELETIONS else "AND p.deleted = FALSE"
 
-        # Fixed-depth join to find root posts (up to 10 levels deep, covers 99.9% of cases)
-        # This is MUCH faster than recursive CTE on large datasets
+        # Unified inbox: UNION of replies and @mentions, sorted by timestamp
+        # Replies use a fixed-depth join to find root posts (up to 10 levels)
+        # Mentions join the mentions table with the post containing the mention
         query = f"""
-            SELECT 
-                r.txhash as reply_id,
-                r.owner as reply_owner,
-                r.created_at as reply_timestamp,
-                r.content as reply_content,
-                p.txhash as parent_id,
-                p.content as parent_content,
-                p.title as parent_title,
-                COALESCE(p.target, '') as parent_target,
-                p.owner as parent_owner,
-                COALESCE(pr.username, '') as reply_username,
-                COALESCE(
-                    CASE WHEN COALESCE(p.target, '') = '' THEN p.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p2.target, '') = '' THEN p2.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p3.target, '') = '' THEN p3.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p4.target, '') = '' THEN p4.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p5.target, '') = '' THEN p5.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p6.target, '') = '' THEN p6.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p7.target, '') = '' THEN p7.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p8.target, '') = '' THEN p8.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p9.target, '') = '' THEN p9.txhash ELSE NULL END,
-                    CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
-                ) as root_post_id,
-                COUNT(*) OVER () as total_count,
-                COALESCE(pr.level, 0) as reply_author_level
-            FROM posts r
-            INNER JOIN posts p ON p.txhash = r.target
-            LEFT JOIN profiles pr ON pr.owner = r.owner
-            LEFT JOIN posts p2 ON p2.txhash = p.target AND p.target != ''
-            LEFT JOIN posts p3 ON p3.txhash = p2.target AND p2.target != ''
-            LEFT JOIN posts p4 ON p4.txhash = p3.target AND p3.target != ''
-            LEFT JOIN posts p5 ON p5.txhash = p4.target AND p4.target != ''
-            LEFT JOIN posts p6 ON p6.txhash = p5.target AND p5.target != ''
-            LEFT JOIN posts p7 ON p7.txhash = p6.target AND p6.target != ''
-            LEFT JOIN posts p8 ON p8.txhash = p7.target AND p7.target != ''
-            LEFT JOIN posts p9 ON p9.txhash = p8.target AND p8.target != ''
-            LEFT JOIN posts p10 ON p10.txhash = p9.target AND p9.target != ''
-            WHERE LOWER(p.owner) = %s
-              AND LOWER(r.owner) != %s
-              AND r.deleted = FALSE
-              {deleted_filter}
-            ORDER BY r.created_at DESC
+            SELECT * FROM (
+                SELECT
+                    r.txhash as item_id,
+                    r.owner as actor_owner,
+                    r.created_at as item_timestamp,
+                    r.content as item_content,
+                    p.txhash as context_id,
+                    p.content as context_content,
+                    p.title as context_title,
+                    COALESCE(p.target, '') as context_target,
+                    p.owner as context_owner,
+                    COALESCE(pr.username, '') as actor_username,
+                    COALESCE(
+                        CASE WHEN COALESCE(p.target, '') = '' THEN p.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p2.target, '') = '' THEN p2.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p3.target, '') = '' THEN p3.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p4.target, '') = '' THEN p4.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p5.target, '') = '' THEN p5.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p6.target, '') = '' THEN p6.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p7.target, '') = '' THEN p7.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p8.target, '') = '' THEN p8.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p9.target, '') = '' THEN p9.txhash ELSE NULL END,
+                        CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
+                    ) as root_post_id,
+                    COALESCE(pr.level, 0) as actor_level,
+                    'reply' as item_type
+                FROM posts r
+                INNER JOIN posts p ON p.txhash = r.target
+                LEFT JOIN profiles pr ON pr.owner = r.owner
+                LEFT JOIN posts p2 ON p2.txhash = p.target AND p.target != ''
+                LEFT JOIN posts p3 ON p3.txhash = p2.target AND p2.target != ''
+                LEFT JOIN posts p4 ON p4.txhash = p3.target AND p3.target != ''
+                LEFT JOIN posts p5 ON p5.txhash = p4.target AND p4.target != ''
+                LEFT JOIN posts p6 ON p6.txhash = p5.target AND p5.target != ''
+                LEFT JOIN posts p7 ON p7.txhash = p6.target AND p6.target != ''
+                LEFT JOIN posts p8 ON p8.txhash = p7.target AND p7.target != ''
+                LEFT JOIN posts p9 ON p9.txhash = p8.target AND p8.target != ''
+                LEFT JOIN posts p10 ON p10.txhash = p9.target AND p9.target != ''
+                WHERE LOWER(p.owner) = %s
+                  AND LOWER(r.owner) != %s
+                  AND r.deleted = FALSE
+                  {deleted_filter}
+
+                UNION ALL
+
+                SELECT
+                    mp.txhash as item_id,
+                    m.mentioner_address as actor_owner,
+                    m.created_at as item_timestamp,
+                    mp.content as item_content,
+                    mp.txhash as context_id,
+                    mp.content as context_content,
+                    mp.title as context_title,
+                    COALESCE(mp.target, '') as context_target,
+                    mp.owner as context_owner,
+                    COALESCE(mpr.username, '') as actor_username,
+                    COALESCE(mp.root_post_id, mp.txhash) as root_post_id,
+                    COALESCE(mpr.level, 0) as actor_level,
+                    'mention' as item_type
+                FROM mentions m
+                INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
+                LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
+                WHERE LOWER(m.mentioned_address) = %s
+                  AND LOWER(m.mentioner_address) != %s
+            ) inbox
+            ORDER BY inbox.item_timestamp DESC
             LIMIT %s OFFSET %s
         """
 
-        params = [viewer_lower, viewer_lower, limit, offset]
+        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
 
         t_query = time.time()
         cur.execute(query, params)
         rows = cur.fetchall()
         query_ms = (time.time() - t_query) * 1000
         logger.info(f"[get_inbox] Main query: {query_ms:.1f}ms, rows={len(rows)}")
-        conn.close()
 
-        total = rows[0][11] if rows else 0
+        # Get total count via a separate lightweight query
+        count_query = f"""
+            SELECT (
+                SELECT COUNT(*) FROM posts r
+                INNER JOIN posts p ON p.txhash = r.target
+                WHERE LOWER(p.owner) = %s AND LOWER(r.owner) != %s
+                  AND r.deleted = FALSE {deleted_filter}
+            ) + (
+                SELECT COUNT(*) FROM mentions m
+                INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
+                WHERE LOWER(m.mentioned_address) = %s AND LOWER(m.mentioner_address) != %s
+            )
+        """
+        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower])
+        total_row = cur.fetchone()
+        total = int(total_row[0]) if total_row and total_row[0] else 0
+
+        conn.close()
 
         replies = []
         for row in rows:
-            reply_id = (row[0] or "").lower()
-            reply_owner = (row[1] or "").lower()
-            reply_timestamp = int(row[2]) if row[2] is not None else None
-            reply_content = row[3] or ""
-            parent_id = (row[4] or "").lower()
-            parent_content = row[5] or ""
-            parent_title = row[6] or ""
-            parent_target = (row[7] or "").strip().lower()
-            parent_owner = (row[8] or "").lower()
-            reply_username = row[9] or ""
+            item_id = (row[0] or "").lower()
+            actor_owner = (row[1] or "").lower()
+            item_timestamp = int(row[2]) if row[2] is not None else None
+            item_content = row[3] or ""
+            context_id = (row[4] or "").lower()
+            context_content = row[5] or ""
+            context_title = row[6] or ""
+            context_target = (row[7] or "").strip().lower()
+            context_owner = (row[8] or "").lower()
+            actor_username = row[9] or ""
             root_post_id = (row[10] or "").lower()
-            reply_author_level = int(row[12]) if len(row) > 12 and row[12] else 0
+            actor_level = int(row[11]) if row[11] else 0
+            item_type = row[12] or "reply"
 
-            if reply_id in blocked_posts or reply_owner in blocked_users:
+            if item_id in blocked_posts or actor_owner in blocked_users:
                 continue
-            if parent_id in blocked_posts or parent_owner in blocked_users:
+            if context_id in blocked_posts or context_owner in blocked_users:
                 continue
             if not root_post_id:
                 continue
 
-            if not parent_target:
-                parent_display_text = parent_title or ""
+            if item_type == "reply":
+                if not context_target:
+                    parent_display_text = context_title or ""
+                else:
+                    parent_display_text = context_content or ""
             else:
-                parent_display_text = parent_content or ""
+                # For mentions, show a snippet of the post content
+                parent_display_text = context_title or context_content or ""
 
             if len(parent_display_text) > 200:
                 parent_display_text = parent_display_text[:197] + "..."
 
             replies.append(
                 {
-                    "reply_id": reply_id,
-                    "reply_owner": reply_owner,
-                    "reply_username": reply_username,
-                    "reply_author_level": reply_author_level,
-                    "reply_content": reply_content,
-                    "reply_timestamp": reply_timestamp,
-                    "parent_id": parent_id,
+                    "reply_id": item_id,
+                    "reply_owner": actor_owner,
+                    "reply_username": actor_username,
+                    "reply_author_level": actor_level,
+                    "reply_content": item_content,
+                    "reply_timestamp": item_timestamp,
+                    "parent_id": context_id,
                     "parent_content": parent_display_text,
-                    "parent_owner": parent_owner,
+                    "parent_owner": context_owner,
                     "root_post_id": root_post_id,
+                    "type": item_type,
                 }
             )
 

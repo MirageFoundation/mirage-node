@@ -12,7 +12,7 @@ import * as tx from './utils/tx';
 import MobileBottomNav from './components/MobileBottomNav';
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
-import { getMaxUsernameSize } from './config/chainParams';
+
 
 // Lazy import wrapper that handles chunk load failures after deployments.
 // When a new version is deployed, old chunk files are replaced. Users with stale
@@ -547,12 +547,12 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch node config if not cached or stale (> 24h)
+        // Fetch node config if not cached or stale (> 1h)
         // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
         try {
             const nowMs = Date.now();
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
-            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 86400_000;
+            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000;
             if (nodeStale) {
                 Api.get('get_node_config', undefined, { timeoutMs: 10000 })
                     .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })

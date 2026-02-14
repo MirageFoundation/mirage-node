@@ -2080,15 +2080,15 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (!el) return;
         if (!hasMorePosts || isLoadingMore || isLoading) return;
 
-        // Check if sentinel is already in viewport (handles case where content is short)
+        // Check if sentinel is already in the visible viewport (content shorter than screen)
         const rect = el.getBoundingClientRect();
-        const isAlreadyVisible = rect.top < window.innerHeight + 800;
+        const isAlreadyVisible = rect.top < window.innerHeight;
         if (isAlreadyVisible) {
             loadMore();
             return;
         }
 
-        // Trigger loading when ~5-6 cards away from bottom (1500px margin)
+        // Trigger loading ~2-3 cards before bottom (600px margin)
         const observer = new IntersectionObserver(
             (entries) => {
                 const entry = entries[0];
@@ -2098,7 +2098,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             },
             {
                 root: null,
-                rootMargin: '1500px 0px',
+                rootMargin: '600px 0px',
                 threshold: 0
             }
         );
@@ -2120,8 +2120,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const el = bottomSentinelRef.current;
                 if (!el) return;
                 const rect = el.getBoundingClientRect();
-                // Trigger when sentinel is within 1500px of viewport bottom
-                if (rect.top < window.innerHeight + 1500) {
+                // Trigger when sentinel is within 600px of viewport bottom
+                if (rect.top < window.innerHeight + 600) {
                     loadMore();
                 }
             });

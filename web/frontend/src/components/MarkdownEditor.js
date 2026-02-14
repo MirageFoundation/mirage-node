@@ -1,6 +1,7 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback } from "react";
 import styled from "styled-components";
 import { getUploadUrl, downscaleImage } from "../utils/ImageUpload";
+import Api from "../lib/api";
 
 // Lazy import to keep initial bundle small
 async function uploadVideoLazy(file, onProgress, xhrRef) {
@@ -391,6 +392,65 @@ const SmallText = styled.span`
 	margin-top: -0.25rem;
 `;
 
+const MentionDropdown = styled.div`
+	position: absolute;
+	bottom: 100%;
+	left: 0;
+	right: 0;
+	margin-bottom: 4px;
+	background: ${({ theme }) => theme?.colors?.surface3 || theme?.colors?.panel || "#303640"};
+	border: 1px solid ${({ theme }) => theme?.colors?.borderSubtle || theme?.colors?.border || "#3d444d"};
+	border-radius: 6px;
+	box-shadow: ${({ theme }) =>
+        theme?.name === "dark"
+            ? "0 4px 16px rgba(0, 0, 0, 0.5)"
+            : "0 4px 16px rgba(0, 0, 0, 0.15)"};
+	z-index: 100;
+	max-height: 220px;
+	overflow-y: auto;
+	font-size: 0.8rem;
+`;
+
+const MentionItem = styled.div`
+	padding: 0.35rem 0.6rem;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
+	background: ${({ $active, theme }) =>
+        $active ? (theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)") : "transparent"};
+	&:hover {
+		background: ${({ theme }) => theme?.colors?.accentSubtle || theme?.colors?.panelAlt || "rgba(148, 137, 121, 0.2)"};
+	}
+	&:first-child {
+		border-radius: 6px 6px 0 0;
+	}
+	&:last-child {
+		border-radius: 0 0 6px 6px;
+	}
+`;
+
+const MentionUsername = styled.span`
+	font-weight: 600;
+	color: ${({ theme }) => theme?.colors?.text || "#DFD0B8"};
+`;
+
+const MentionAddress = styled.span`
+	font-size: 0.65rem;
+	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+`;
+
+const MentionHint = styled.div`
+	padding: 0.35rem 0.6rem;
+	color: ${({ theme }) => theme?.colors?.textSecondary || theme?.colors?.subtleText || "#bcb1a2"};
+	font-size: 0.7rem;
+	font-style: italic;
+`;
+
 const HiddenInput = styled.input`
 	display: none;
 `;
@@ -538,6 +598,129 @@ export default function MarkdownEditor({
     const fileInputRef = useRef(null);
     const uploadXhrRef = useRef(null); // Store XHR for cancellation
     const [uploadPct, setUploadPct] = useState(null);
+
+    // ---- @mention autocomplete state ----
+    const [mentionQuery, setMentionQuery] = useState(""); // current search prefix
+    const [mentionResults, setMentionResults] = useState([]); // [{username, address}]
+    const [mentionIndex, setMentionIndex] = useState(0); // highlighted index
+    const [mentionOpen, setMentionOpen] = useState(false); // dropdown visible
+    const [mentionLoading, setMentionLoading] = useState(false);
+    const mentionTimerRef = useRef(null); // debounce timer
+    const mentionAbortRef = useRef(null); // abort controller for in-flight request
+    // Position in the text where the @ trigger started
+    const mentionStartRef = useRef(-1);
+
+    // Detect @mention trigger from cursor position and text value
+    const detectMention = useCallback((text, cursorPos) => {
+        if (!text || cursorPos <= 0) {
+            setMentionOpen(false);
+            return;
+        }
+        // Walk backwards from cursor to find @ trigger
+        let i = cursorPos - 1;
+        while (i >= 0 && /[A-Za-z0-9-]/.test(text[i])) {
+            i--;
+        }
+        if (i < 0 || text[i] !== '@') {
+            setMentionOpen(false);
+            return;
+        }
+        // The char before @ must be a non-word char or start of string (to avoid email@user)
+        if (i > 0 && /\w/.test(text[i - 1])) {
+            setMentionOpen(false);
+            return;
+        }
+        const query = text.slice(i + 1, cursorPos).toLowerCase();
+        if (query.length === 0) {
+            // Just typed '@' with nothing after — show dropdown but no results yet
+            mentionStartRef.current = i;
+            setMentionQuery("");
+            setMentionResults([]);
+            setMentionOpen(true);
+            return;
+        }
+        mentionStartRef.current = i;
+        setMentionQuery(query);
+        setMentionOpen(true);
+        setMentionIndex(0);
+    }, []);
+
+    // Debounced API call when mentionQuery changes
+    useEffect(() => {
+        if (!mentionOpen || !mentionQuery || mentionQuery.length < 1) {
+            setMentionResults([]);
+            setMentionLoading(false);
+            return;
+        }
+        setMentionLoading(true);
+        // Cancel previous timer
+        if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
+        // Cancel previous in-flight request
+        if (mentionAbortRef.current) {
+            try { mentionAbortRef.current.abort(); } catch (_) { /* noop */ }
+        }
+
+        mentionTimerRef.current = setTimeout(async () => {
+            const controller = new AbortController();
+            mentionAbortRef.current = controller;
+            try {
+                const res = await Api.get('search_username', { q: mentionQuery, limit: 8 }, { timeoutMs: 4000 });
+                if (!controller.signal.aborted && res && Array.isArray(res.results)) {
+                    setMentionResults(res.results);
+                    setMentionIndex(0);
+                }
+            } catch (_) {
+                if (!controller.signal.aborted) {
+                    setMentionResults([]);
+                }
+            } finally {
+                if (!controller.signal.aborted) {
+                    setMentionLoading(false);
+                }
+            }
+        }, 200);
+
+        return () => {
+            if (mentionTimerRef.current) clearTimeout(mentionTimerRef.current);
+        };
+    }, [mentionQuery, mentionOpen]);
+
+    // Insert a selected mention into the textarea
+    const insertMention = useCallback((username) => {
+        const ta = areaRef.current;
+        const text = value || "";
+        const atPos = mentionStartRef.current;
+        if (atPos < 0 || !ta) {
+            setMentionOpen(false);
+            return;
+        }
+        // Replace @partial with @username + space
+        const cursorPos = ta.selectionStart ?? 0;
+        const before = text.slice(0, atPos);
+        const after = text.slice(cursorPos);
+        const insert = `@${username} `;
+        const next = before + insert + after;
+        onChange(next);
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionResults([]);
+        // Restore cursor after the inserted mention
+        const newPos = atPos + insert.length;
+        requestAnimationFrame(() => {
+            try {
+                ta.focus();
+                ta.setSelectionRange(newPos, newPos);
+            } catch (_) { /* noop */ }
+        });
+    }, [value, onChange]);
+
+    // Close mention dropdown
+    const closeMention = useCallback(() => {
+        setMentionOpen(false);
+        setMentionQuery("");
+        setMentionResults([]);
+        setMentionIndex(0);
+    }, []);
 
     // Preview toggle with localStorage persistence
     const [previewEnabled, setPreviewEnabled] = useState(() => {
@@ -1007,20 +1190,80 @@ export default function MarkdownEditor({
                 </PreviewToggle>
             </Toolbar>
             <div style={{ position: "relative", pointerEvents: "auto" }}>
+                {mentionOpen && (
+                    <MentionDropdown>
+                        {mentionLoading && mentionResults.length === 0 && mentionQuery.length > 0 && (
+                            <MentionHint>Searching...</MentionHint>
+                        )}
+                        {!mentionLoading && mentionResults.length === 0 && mentionQuery.length > 0 && (
+                            <MentionHint>No users found</MentionHint>
+                        )}
+                        {!mentionQuery && (
+                            <MentionHint>Type a username...</MentionHint>
+                        )}
+                        {mentionResults.map((item, i) => (
+                            <MentionItem
+                                key={item.username}
+                                $active={i === mentionIndex}
+                                onMouseDown={(e) => {
+                                    e.preventDefault(); // prevent textarea blur
+                                    insertMention(item.username);
+                                }}
+                                onMouseEnter={() => setMentionIndex(i)}
+                            >
+                                <MentionUsername>@{item.username}</MentionUsername>
+                                <MentionAddress>{item.address ? `${item.address.slice(0, 12)}…${item.address.slice(-4)}` : ""}</MentionAddress>
+                            </MentionItem>
+                        ))}
+                    </MentionDropdown>
+                )}
                 <Area
                     ref={areaRef}
                     value={value}
                     onChange={(e) => {
                         const next = e.target.value;
+                        let applied;
                         if (typeof maxLength === "number" && next.length > maxLength) {
-                            onChange(next.slice(0, maxLength));
+                            applied = next.slice(0, maxLength);
+                            onChange(applied);
                         } else {
+                            applied = next;
                             onChange(next);
                         }
+                        // Detect @mention trigger after onChange
+                        requestAnimationFrame(() => {
+                            const ta = areaRef.current;
+                            if (ta) detectMention(applied, ta.selectionStart);
+                        });
                     }}
                     disabled={disabled}
                     maxLength={maxLength}
-                    onKeyDown={onKeyDown}
+                    onKeyDown={(e) => {
+                        // Intercept keys when mention dropdown is open
+                        if (mentionOpen && mentionResults.length > 0) {
+                            if (e.key === "ArrowDown") {
+                                e.preventDefault();
+                                setMentionIndex(prev => (prev + 1) % mentionResults.length);
+                                return;
+                            }
+                            if (e.key === "ArrowUp") {
+                                e.preventDefault();
+                                setMentionIndex(prev => (prev - 1 + mentionResults.length) % mentionResults.length);
+                                return;
+                            }
+                            if (e.key === "Enter" || e.key === "Tab") {
+                                e.preventDefault();
+                                insertMention(mentionResults[mentionIndex].username);
+                                return;
+                            }
+                        }
+                        if (mentionOpen && e.key === "Escape") {
+                            e.preventDefault();
+                            closeMention();
+                            return;
+                        }
+                        onKeyDown(e);
+                    }}
                     onPaste={handlePaste}
                     placeholder="Link or content"
                     readOnly={false}

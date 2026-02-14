@@ -66,6 +66,16 @@ const SpoilerSpan = styled.span`
 	}
 `;
 
+const MentionLink = styled.a`
+	color: ${({ theme }) => theme?.colors?.link || theme?.colors?.text || '#DFD0B8'};
+	font-weight: 600;
+	text-decoration: none;
+	cursor: pointer;
+	&:hover {
+		text-decoration: underline;
+	}
+`;
+
 function Spoiler({ children }) {
     const [revealed, setRevealed] = useState(false);
     return (
@@ -108,6 +118,51 @@ function remarkSpoiler() {
             }
 
             if (lastIndex === 0) return; // no spoilers found
+
+            if (lastIndex < node.value.length) {
+                parts.push({ type: 'text', value: node.value.slice(lastIndex) });
+            }
+
+            if (parent && Array.isArray(parent.children)) {
+                parent.children.splice(index, 1, ...parts);
+                return index + parts.length;
+            }
+        });
+    };
+}
+
+/**
+ * Remark plugin: converts @username into clickable profile links.
+ * The node uses data.hName = 'mention-tag' so react-markdown maps it
+ * through the components prop to our styled <MentionLink> component.
+ */
+function remarkMentions() {
+    return (tree) => {
+        visit(tree, 'text', (node, index, parent) => {
+            if (!node.value || typeof node.value !== 'string') return;
+            if (!node.value.includes('@')) return;
+
+            const regex = /(?<!\w)@([A-Za-z0-9-]+)/g;
+            const parts = [];
+            let lastIndex = 0;
+            let match;
+
+            while ((match = regex.exec(node.value)) !== null) {
+                if (match.index > lastIndex) {
+                    parts.push({ type: 'text', value: node.value.slice(lastIndex, match.index) });
+                }
+                parts.push({
+                    type: 'mention',
+                    data: {
+                        hName: 'mention-tag',
+                        hProperties: { username: match[1] },
+                    },
+                    children: [{ type: 'text', value: '@' + match[1] }],
+                });
+                lastIndex = match.index + match[0].length;
+            }
+
+            if (lastIndex === 0) return; // no mentions found
 
             if (lastIndex < node.value.length) {
                 parts.push({ type: 'text', value: node.value.slice(lastIndex) });
@@ -204,7 +259,7 @@ export default function MarkdownRenderer({ text }) {
     return (
         <Container>
             <ReactMarkdown
-                remarkPlugins={[remarkGfm, remarkSpoiler, remarkSoftBreaks]}
+                remarkPlugins={[remarkGfm, remarkSpoiler, remarkMentions, remarkSoftBreaks]}
                 components={{
                     img: ({ src }) => <InlineMedia url={src} />,
                     a: ({ href, children }) => (
@@ -214,6 +269,11 @@ export default function MarkdownRenderer({ text }) {
                         </a>
                     ),
                     'spoiler-tag': ({ children }) => <Spoiler>{children}</Spoiler>,
+                    'mention-tag': ({ username, children }) => (
+                        <MentionLink href={`/u/${username}`}>
+                            {children}
+                        </MentionLink>
+                    ),
                 }}
             >
                 {normalized}
