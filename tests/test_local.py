@@ -2,7 +2,7 @@
 """
 Mirage Local Test Suite — comprehensive end-to-end tests.
 
-Covers read endpoints, social graph, comment threading, v1.11.0 PoW,
+Covers read endpoints, social graph, comment threading, PoW verification,
 all 3 subscription tiers, search/discovery, and validation edge cases.
 
 ** This suite is designed to run ONLY on the local Docker testnet **
@@ -1272,10 +1272,10 @@ def test_social_graph(backend: str):
 
 
 # =========================================================================
-# Category 6: v1.11.0 PoW Specifics
+# Category 6: Proof-of-Work
 # =========================================================================
-def test_pow_v1110(backend: str):
-    print(f"\n{_COLOR_BOLD}[6] v1.11.0 PoW Specifics{_COLOR_RESET}")
+def test_pow(backend: str):
+    print(f"\n{_COLOR_BOLD}[6] Proof-of-Work{_COLOR_RESET}")
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
@@ -1904,7 +1904,7 @@ ALL_CATEGORIES = {
     "post": test_post_lifecycle,
     "comments": test_comments,
     "social": test_social_graph,
-    "pow": test_pow_v1110,
+    "pow": test_pow,
     "subscriber": test_subscriber,
     "search": test_search,
     "edge": test_edge_cases,
