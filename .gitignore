@@ -81,7 +81,6 @@ scripts/*
 !scripts/list_validators.sh
 !scripts/show_balances.py
 !scripts/verify_upgrade.py
-!scripts/proposals/
 !scripts/proposals/proposal_upgrade.json
 !scripts/check_grpc.py
 !scripts/manage_invites.py
