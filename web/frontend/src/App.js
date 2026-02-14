@@ -12,7 +12,7 @@ import * as tx from './utils/tx';
 import MobileBottomNav from './components/MobileBottomNav';
 import UnlockPrompt from './components/UnlockPrompt';
 import Toast from './components/Toast';
-import { getMaxUsernameSize } from './config/chainParams';
+
 
 // Lazy import wrapper that handles chunk load failures after deployments.
 // When a new version is deployed, old chunk files are replaced. Users with stale
