@@ -877,16 +877,25 @@ def test_account(backend: str):
         _fail("account.set_username succeeds", str(e))
         return
 
-    # 2.4 get_address_from_username resolves
-    time.sleep(2)  # indexer delay
-    resolved = get_address_from_username(backend, test_uname)
+    # 2.4 get_address_from_username resolves (poll up to 10s)
+    resolved = None
+    for _ in range(10):
+        time.sleep(1)
+        resolved = get_address_from_username(backend, test_uname)
+        if resolved and resolved.lower() == addr.lower():
+            break
     if resolved and resolved.lower() == addr.lower():
         _pass("account.get_address_from_username resolves")
     else:
         _fail("account.get_address_from_username resolves", f"got {resolved}")
 
-    # 2.5 get_username_from_address resolves
-    resolved_name = get_username_from_address(backend, addr)
+    # 2.5 get_username_from_address resolves (poll up to 10s)
+    resolved_name = None
+    for _ in range(10):
+        time.sleep(1)
+        resolved_name = get_username_from_address(backend, addr)
+        if resolved_name and resolved_name.lower() == test_uname.lower():
+            break
     if resolved_name and resolved_name.lower() == test_uname.lower():
         _pass("account.get_username_from_address resolves")
     else:
