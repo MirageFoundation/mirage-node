@@ -16,10 +16,11 @@ function isImageUrl(url) {
 const NavBar = styled.div`
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     padding: 4px 0 6px;
-    font-size: 0.75rem;
-    color: ${({ theme }) => theme?.colors?.textSecondary || '#999'};
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.textSecondary || '#bbb'};
     user-select: none;
 `;
 
@@ -28,12 +29,21 @@ const ArrowBtn = styled.button`
     border: none;
     color: ${({ theme }) => theme?.colors?.link || '#ccc'};
     cursor: pointer;
-    font-size: 0.85rem;
-    padding: 0 2px;
+    font-size: 1.3rem;
+    padding: 2px 6px;
     line-height: 1;
+    border-radius: 4px;
+    transition: background 0.08s, color 0.08s, transform 0.06s;
 
     &:hover {
         color: #fff;
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    &:active {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(0.9);
     }
 `;
 
