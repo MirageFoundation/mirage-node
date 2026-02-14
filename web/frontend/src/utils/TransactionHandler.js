@@ -3222,6 +3222,8 @@ class TransactionHandler {
                 const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
                 // Only send fields the backend actually reads — omit noise like
                 // min_difficulty, pow_difficulty_step, difficulty, action.
+                // NOTE: direction must be the original signed value (-1/0/1), NOT
+                // signDirUnsigned which is the unsigned encoding for canonical signing.
                 toRelay = {
                     pubkey: toRelay.pubkey,
                     signature: sigB64,
@@ -3229,7 +3231,7 @@ class TransactionHandler {
                     pow_difficulty: resolveTxDifficulty(transaction),
                     pow: Number(proof),
                     target: transaction.target || "",
-                    direction: signDirUnsigned,
+                    direction: Number(transaction.direction),
                     timestamp: transaction.timestamp,
                 };
                 endpoint = 'core/vote';
