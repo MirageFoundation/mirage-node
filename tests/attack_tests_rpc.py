@@ -80,8 +80,6 @@ def _lb_bytes(lb_hex: str) -> bytes:
         return lb_hex.encode("utf-8")
 
 
-
-
 @dataclass
 class TestResult:
     name: str
@@ -124,14 +122,15 @@ def _rpc_get_latest_block_hash() -> str:
         raise RuntimeError(f"status error: {e}")
 
 
-def _rpc_get_current_pow_difficulty(timeout_s: float = 3.0) -> int:
+def _rpc_abci_uint64(key_name: str, timeout_s: float = 3.0) -> int:
+    """Fetch a uint64 value from the core ABCI store."""
     import base64 as _b64
     import struct as _st
 
     if not RPC_URL:
         raise RuntimeError("RPC_URL not set")
     paths = ['"/store/core/key"', "/store/core/key"]
-    key_bytes = b"current_difficulty"
+    key_bytes = key_name.encode("utf-8")
     datas = ["0x" + key_bytes.hex(), _b64.b64encode(key_bytes).decode("ascii")]
     for p in paths:
         for data_param in datas:
@@ -151,7 +150,14 @@ def _rpc_get_current_pow_difficulty(timeout_s: float = 3.0) -> int:
                         return int(_st.unpack(">Q", raw)[0])
             except Exception:
                 continue
-    raise RuntimeError("unable to fetch current_difficulty via ABCI")
+    raise RuntimeError(f"unable to fetch {key_name} via ABCI")
+
+
+def _rpc_get_current_pow_difficulty(timeout_s: float = 3.0) -> tuple[int, int]:
+    """Return (current_difficulty, min_difficulty) from on-chain state."""
+    diff = _rpc_abci_uint64("current_difficulty", timeout_s)
+    min_diff = _rpc_abci_uint64("min_difficulty", timeout_s)
+    return diff, min_diff
 
 
 def _uvarint(n: int) -> bytes:
@@ -168,11 +174,17 @@ def _uvarint(n: int) -> bytes:
     return bytes(out)
 
 
-def _compute_pow(base: bytes, difficulty: int, last_block_hash: str, max_seconds: float = 20.0) -> int:
+def _compute_pow(
+    base: bytes, difficulty: int, min_difficulty: int, last_block_hash: str, max_seconds: float = 20.0
+) -> int:
     try:
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW tests") from e
+    if difficulty < 1000:
+        raise ValueError("difficulty must be >= 1000")
+    if min_difficulty <= 0 or min_difficulty > 256:
+        raise ValueError("min_difficulty must be in [1, 256]")
     try:
         salt = bytes.fromhex(last_block_hash.strip())
     except Exception:
@@ -189,24 +201,22 @@ def _compute_pow(base: bytes, difficulty: int, last_block_hash: str, max_seconds
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _count_leading_zeros(digest) >= int(difficulty):
+        if _check_pow_target(digest, difficulty, min_difficulty):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW mining exceeded {max_seconds:.1f}s")
         proof += 1
 
 
-def _count_leading_zeros(b: bytes) -> int:
-    total = 0
-    for byte in b:
-        if byte == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (byte >> i) & 1:
-                return total + (7 - i)
-        return total
-    return total
+def _check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
+    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
+    if min_difficulty <= 0 or min_difficulty > 256:
+        return False
+    if difficulty < 1000:
+        return False
+    base_target = 1 << (256 - min_difficulty)
+    eff_target = base_target * 1000 // difficulty
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def _build_tx_bytes(body_bytes: bytes, gas_limit: int, fee_payer: str) -> bytes:
@@ -417,7 +427,7 @@ def pos_create_post(seed: str) -> Tuple[TestResult, Optional[str]]:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         topic = f"topic{_rand_str(5)}"
         title = f"Test Post {_rand_str(6)}"
@@ -431,7 +441,7 @@ def pos_create_post(seed: str) -> Tuple[TestResult, Optional[str]]:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -464,7 +474,7 @@ def pos_create_comment(seed: str, parent_tx: str) -> Tuple[TestResult, Optional[
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         content = f"RPC comment at {int(time.time())}"
         details = {
@@ -475,7 +485,7 @@ def pos_create_comment(seed: str, parent_tx: str) -> Tuple[TestResult, Optional[
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, parent_tx, "", "", content)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -508,7 +518,7 @@ def pos_vote(seed: str, target_tx: str, direction: int, label: str) -> TestResul
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {
             "address": addr,
@@ -518,7 +528,7 @@ def pos_vote(seed: str, target_tx: str, direction: int, label: str) -> TestResul
             "uses_pow": True,
         }
         base = canon_base_vote(pub, _lb_bytes(last), diff, ts, target_tx, int(direction))
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgVote()
@@ -549,7 +559,7 @@ def pos_edit_post(seed: str, override_tx: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         content = f"RPC edited at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
@@ -562,7 +572,7 @@ def pos_edit_post(seed: str, override_tx: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_edit(pub, _lb_bytes(last), diff, ts, "", new_topic, "", content, "", override_tx)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgEdit()
@@ -596,7 +606,7 @@ def pos_delete_post(seed: str, target_tx: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {
             "address": addr,
@@ -605,7 +615,7 @@ def pos_delete_post(seed: str, target_tx: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_delete(pub, _lb_bytes(last), diff, ts, target_tx)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgDelete()
@@ -635,7 +645,7 @@ def pos_set_username(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         username = f"user-{_rand_str(4)}-{_rand_str(4)}"
         details = {
@@ -645,7 +655,7 @@ def pos_set_username(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_set_username(pub, _lb_bytes(last), diff, ts, addr, username)
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgSetUsername()
@@ -676,7 +686,7 @@ def pos_follow_moderator(seed: str, moderator_addr: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {
             "address": addr,
@@ -685,7 +695,7 @@ def pos_follow_moderator(seed: str, moderator_addr: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_follow_moderator(pub, _lb_bytes(last), diff, ts, addr, moderator_addr)
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgFollowModerator()
@@ -716,7 +726,7 @@ def pos_unfollow_moderator(seed: str, moderator_addr: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {
             "address": addr,
@@ -725,7 +735,7 @@ def pos_unfollow_moderator(seed: str, moderator_addr: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_unfollow_moderator(pub, _lb_bytes(last), diff, ts, addr, moderator_addr)
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgUnfollowModerator()
@@ -761,7 +771,7 @@ def neg_post_oversize_content(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         content = "x" * 1500
         topic = "topicok"
@@ -775,7 +785,7 @@ def neg_post_oversize_content(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -808,7 +818,7 @@ def neg_post_missing_topic(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         title = "title"
         content = "content"
@@ -821,7 +831,7 @@ def neg_post_missing_topic(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", "", title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -854,7 +864,7 @@ def neg_post_oversize_title(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         # Title limit ~100-150 chars
         title = "t" * 200
@@ -868,7 +878,7 @@ def neg_post_oversize_title(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -901,13 +911,13 @@ def neg_post_topic_invalid(seed: str, topic: str, label: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         title = "t"
         content = "c"
         details = {"address": addr, "topic": topic, "title": title, "content": content, "uses_pow": True}
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -940,13 +950,13 @@ def neg_comment_invalid_target(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         invalid_target = "not-a-valid-hash"
         content = "hello"
         details = {"address": addr, "target": invalid_target, "content": content, "uses_pow": True}
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, invalid_target, "", "", content)
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -979,12 +989,12 @@ def neg_comment_missing_content(seed: str, parent_tx: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         content = ""
         details = {"address": addr, "parent": parent_tx, "content_len": len(content), "uses_pow": True}
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, parent_tx, "", "", content)
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -1017,12 +1027,12 @@ def neg_comment_with_topic(seed: str, parent_tx: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         content = "c"
         details = {"address": addr, "parent": parent_tx, "topic": "wrong", "uses_pow": True}
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, parent_tx, "wrong", "", content)
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -1056,11 +1066,11 @@ def neg_invalid_pubkey_length(seed: str) -> TestResult:
         pub = wallet.public_key().public_key_bytes
         bad_pub = pub[:20]
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", "topicok", "ok", "content")
         details = {"address": addr, "pubkey_len": len(bad_pub), "uses_pow": True}
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -1093,12 +1103,12 @@ def neg_invalid_last_block_hash(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         bad_hash = "not-a-valid-hex-hash"
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", "topicok", "ok", "content")
         details = {"address": addr, "bad_hash": bad_hash, "uses_pow": True}
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -1208,11 +1218,11 @@ def rpc_send_tokens(seed_from: str, to_addr: str, amount: int) -> TestResult:
         sender = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {"sender": sender, "target": to_addr, "amount": amount, "uses_pow": True}
         base = canon_base_send_tokens(pub, _lb_bytes(last), diff, ts, sender, to_addr, int(amount))
-        proof = _compute_pow(base, diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgSendTokens()
@@ -1277,7 +1287,7 @@ def neg_invalid_signature(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         topic = "topicok"
         title = "ok"
@@ -1291,7 +1301,7 @@ def neg_invalid_signature(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = bytearray(sign_canonical(wallet, signed))
         sig[0] ^= 0xFF
@@ -1324,7 +1334,7 @@ def neg_insufficient_pow(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         low_diff = max(1, diff - 5)
         topic = "topicok"
@@ -1340,7 +1350,7 @@ def neg_insufficient_pow(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_post(pub, _lb_bytes(last), low_diff, ts, "", topic, title, content)
-        proof = _compute_pow(base, low_diff, last, max_seconds=10.0)
+        proof = _compute_pow(base, low_diff, min_diff, last, max_seconds=10.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgPost()
@@ -1373,7 +1383,7 @@ def neg_vote_invalid_target(seed: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         invalid_target = "short"
         direction = 1
@@ -1385,7 +1395,7 @@ def neg_vote_invalid_target(seed: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_vote(pub, _lb_bytes(last), diff, ts, invalid_target, direction)
-        proof = _compute_pow(base, diff, last, max_seconds=12.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=12.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgVote()
@@ -1416,7 +1426,7 @@ def neg_delete_not_owner(seed: str, foreign_post_tx: str) -> TestResult:
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
         last = _rpc_get_latest_block_hash()
-        diff = int(_rpc_get_current_pow_difficulty())
+        diff, min_diff = _rpc_get_current_pow_difficulty()
         ts = _now_ms()
         details = {
             "address": addr,
@@ -1425,7 +1435,7 @@ def neg_delete_not_owner(seed: str, foreign_post_tx: str) -> TestResult:
             "uses_pow": True,
         }
         base = canon_base_delete(pub, _lb_bytes(last), diff, ts, foreign_post_tx)
-        proof = _compute_pow(base, diff, last, max_seconds=15.0)
+        proof = _compute_pow(base, diff, min_diff, last, max_seconds=15.0)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         msg = MsgDelete()

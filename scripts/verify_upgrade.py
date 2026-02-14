@@ -252,11 +252,12 @@ def _expected_core_params_v190() -> dict[str, Any]:
         "min_topic_size": 2,
         "max_topic_size": 35,
         "subscription_period": 43200,
-        "subscription_reserve_percent": 80,
+        "subscription_reserve_percent": 0.80,
         "relay_min_gas_price": 5000,
         "relay_max_gas_fee": 500_000_000,
         "max_envelope_age": 60,
-        "bridge_attestation_threshold": 6667,
+        "bridge_attestation_threshold": 0.6667,
+        "pow_difficulty_step": 0.25,
         # bridge_fee is now per-chain in BridgeChainConfig.fee
     }
 
@@ -892,12 +893,12 @@ def check_bridge_queries_strict(core: dict, status: dict, cfg: dict, failures: l
         failures.append(f"bridge config.chains expected list, got {type(chains)}")
 
     try:
-        threshold = _as_int(cfg.get("attestation_threshold", 0))
-        if threshold == 6667:
-            print(f"   [OK] attestation_threshold: {threshold} ({threshold/100:.2f}%)")
+        threshold = float(cfg.get("attestation_threshold", 0))
+        if abs(threshold - 0.6667) < 1e-4:
+            print(f"   [OK] attestation_threshold: {threshold}")
         else:
-            print(f"   [FAIL] attestation_threshold: expected 6667, got {threshold}")
-            failures.append(f"bridge config.attestation_threshold expected 6667, got {threshold}")
+            print(f"   [FAIL] attestation_threshold: expected ~0.6667, got {threshold}")
+            failures.append(f"bridge config.attestation_threshold expected ~0.6667, got {threshold}")
     except Exception as e:
         print(f"   [FAIL] attestation_threshold: invalid")
         failures.append(f"bridge config.attestation_threshold invalid: {e}")
@@ -906,8 +907,8 @@ def check_bridge_queries_strict(core: dict, status: dict, cfg: dict, failures: l
 
     print("\n   Cross-check vs core params:")
     try:
-        core_threshold = _as_int(core.get("bridge_attestation_threshold", 0))
-        cfg_threshold = _as_int(cfg.get("attestation_threshold", 0))
+        core_threshold = float(core.get("bridge_attestation_threshold", 0))
+        cfg_threshold = float(cfg.get("attestation_threshold", 0))
         if core_threshold == cfg_threshold:
             print(f"   [OK] attestation_threshold: {core_threshold} (matches)")
         else:
@@ -975,11 +976,11 @@ def check_difficulty(d: dict, failures: list[str]) -> None:
     _require_keys(d, ["current_difficulty"], "core difficulty", failures)
     try:
         cur = _as_int(d.get("current_difficulty", 0))
-        if cur <= 0:
-            print(f"   [FAIL] current_difficulty: {cur} (must be > 0)")
-            failures.append(f"current_difficulty must be > 0, got {cur}")
+        if cur < 1000:
+            print(f"   [FAIL] current_difficulty: {cur} (must be >= 1000)")
+            failures.append(f"current_difficulty must be >= 1000, got {cur}")
         else:
-            print(f"   [OK] current_difficulty: {cur}")
+            print(f"   [OK] current_difficulty: {cur} ({cur / 1000:.2f}x)")
     except Exception as e:
         print(f"   [FAIL] current_difficulty: {e}")
         failures.append(f"core difficulty invalid: {e}")

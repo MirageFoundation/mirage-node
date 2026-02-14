@@ -35,6 +35,11 @@ func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec, bank bank
 	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing}
 }
 
+// StoreService exposes the KV store service for use in upgrade handlers.
+func (k Keeper) StoreService() corestore.KVStoreService {
+	return k.storeService
+}
+
 func (k Keeper) profileKey(addr string) []byte   { return []byte(types.ProfilesPrefix + addr) }
 func (k Keeper) usernameKey(lower string) []byte { return []byte(types.UsernamesPrefix + lower) }
 func (k Keeper) relayCreditKey(valoper string) []byte {
@@ -1019,16 +1024,28 @@ func (k Keeper) ClearPoWWindow(ctx sdk.Context, params types.Params) error {
 	return nil
 }
 
-// GetCurrentDifficulty returns the current dynamic difficulty
+// BaseDifficulty is the default difficulty factor (1.0x the base target).
+const BaseDifficulty uint64 = 1000
+
+// MaxSafeDifficulty caps the factor to 2^53-1 so JSON/JS Number is lossless.
+const MaxSafeDifficulty uint64 = (1 << 53) - 1
+
+// GetCurrentDifficulty returns the current dynamic difficulty factor.
+// 1000 = base difficulty (1.0x). Higher values = harder.
 func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
 	if err != nil || len(bz) == 0 {
-		// Return default if not set
-		params := k.GetParams(ctx)
-		return params.MinDifficulty
+		return BaseDifficulty
 	}
-	return binary.BigEndian.Uint64(bz)
+	v := binary.BigEndian.Uint64(bz)
+	if v < BaseDifficulty {
+		return BaseDifficulty
+	}
+	if v > MaxSafeDifficulty {
+		return MaxSafeDifficulty
+	}
+	return v
 }
 
 // HasCurrentDifficulty returns true if the current_difficulty key exists in store

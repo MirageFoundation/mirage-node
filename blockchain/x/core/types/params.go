@@ -106,8 +106,11 @@ func DefaultParams() Params {
 		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
 		MintDynamicSplit:     0.5,         // 50% dynamic by default
 
-		// minimum Argon2id difficulty for leading zero bits
+		// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty)
 		MinDifficulty: 10,
+
+		// PoW dynamic difficulty step (fraction [0,1]): on busy *= (1+step), on calm /= (1+step)
+		PowDifficultyStep: 0.25,
 
 		// PoW message window
 		PowMessageWindow:         20,  // sliding window in blocks for difficulty adjustment; 20 = 1 min
@@ -133,8 +136,8 @@ func DefaultParams() Params {
 		// Tier configurations
 		Tiers: DefaultTiers(),
 
-		// Percentage of period fee escrowed as gas reserve (remainder burned)
-		SubscriptionReservePercent: 80,
+		// Fraction of period fee escrowed as gas reserve [0,1] (remainder burned)
+		SubscriptionReservePercent: 0.80,
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
@@ -147,8 +150,8 @@ func DefaultParams() Params {
 		MaxEnvelopeAge: 60,
 
 		// Bridge parameters
-		BridgeChains:              []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
-		BridgeAttestationThreshold: 6667,                  // 66.67% of voting power required
+		BridgeChains:               []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
+		BridgeAttestationThreshold: 0.6667,                 // 66.67% of voting power required
 	}
 }
 
@@ -199,9 +202,13 @@ func (p Params) Validate() error {
 	if p.MinUsernameSize > p.MaxUsernameSize {
 		return fmt.Errorf("min_username_size must be <= max_username_size")
 	}
-	// SubscriptionReservePercent must be in [0,100]
-	if p.SubscriptionReservePercent > 100 {
-		return fmt.Errorf("subscription_reserve_percent must be in [0,100]")
+	// SubscriptionReservePercent must be in [0,1]
+	if p.SubscriptionReservePercent < 0 || p.SubscriptionReservePercent > 1 {
+		return fmt.Errorf("subscription_reserve_percent must be in [0,1]")
+	}
+	// PowDifficultyStep must be in (0,1]
+	if p.PowDifficultyStep <= 0 || p.PowDifficultyStep > 1 {
+		return fmt.Errorf("pow_difficulty_step must be in (0,1]")
 	}
 	// MaxEnvelopeAge must be > 0 (replay protection)
 	if p.MaxEnvelopeAge == 0 {
@@ -227,8 +234,8 @@ func (p Params) Validate() error {
 		}
 	}
 	// Validate bridge params
-	if p.BridgeAttestationThreshold > 10000 {
-		return fmt.Errorf("bridge_attestation_threshold must be <= 10000 (basis points)")
+	if p.BridgeAttestationThreshold <= 0 || p.BridgeAttestationThreshold > 1 {
+		return fmt.Errorf("bridge_attestation_threshold must be in (0,1]")
 	}
 	return nil
 }

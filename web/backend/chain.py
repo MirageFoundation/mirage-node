@@ -95,9 +95,15 @@ def get_latest_block_hash(timeout_s: int = 5) -> str:
 
 
 def get_current_pow_difficulty() -> int:
-    """Get current PoW difficulty via gRPC Query/Difficulty."""
+    """Get current PoW difficulty factor via gRPC Query/Difficulty."""
     info = get_difficulty_info()
-    return int(info.get("current_difficulty", 10))
+    return int(info["current_difficulty"])
+
+
+def get_min_difficulty() -> int:
+    """Get min_difficulty (base target bits) from chain params."""
+    from params import expect_params
+    return int(expect_params()["min_difficulty"])
 
 
 # Cache for recent block hashes

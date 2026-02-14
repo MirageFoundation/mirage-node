@@ -25,6 +25,7 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		"PowCalmPeriodDefinition":  true,
 		"PowCalmSequenceThreshold": true,
 		"PowDifficultyAllowance":   true,
+		"PowDifficultyStep":        true,
 		"BlockHashWindow":          true,
 		// Username/Topic limits
 		"MinUsernameSize": true,

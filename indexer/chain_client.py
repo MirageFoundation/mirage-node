@@ -397,12 +397,12 @@ class ChainClient:
             return False
 
     def get_current_difficulty(self) -> int:
-        """Get current PoW difficulty via gRPC."""
+        """Get current PoW difficulty factor via gRPC."""
         info = self.get_difficulty_info()
-        return info.get("difficulty", 10)
+        return info["difficulty"]
 
     def get_difficulty_info(self) -> dict:
-        """Get current PoW difficulty and message count via gRPC."""
+        """Get current PoW difficulty factor and message count via gRPC."""
         try:
             from shared.datatypes import QueryDifficultyRequest, QueryDifficultyResponse
 
@@ -414,12 +414,12 @@ class ChainClient:
                 )
                 resp = method(QueryDifficultyRequest(), timeout=GRPC_TIMEOUT)
                 return {
-                    "difficulty": int(resp.current_difficulty) if resp.current_difficulty else 10,
+                    "difficulty": int(resp.current_difficulty),
                     "msg_count": int(resp.pow_message_count) if resp.pow_message_count else 0,
                 }
         except Exception as e:
-            logger.warning("Failed to query difficulty info: %s", e)
-            return {"difficulty": 10, "msg_count": 0}
+            logger.error("Failed to query difficulty info: %s", e)
+            raise
 
     def get_total_supply(self) -> int:
         """Get total supply of umirage tokens via gRPC."""

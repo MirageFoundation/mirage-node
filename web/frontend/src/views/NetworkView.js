@@ -857,7 +857,7 @@ export default function NetworkView({ state }) {
                                     <RowCentered>
                                         <Label>Difficulty:</Label>
                                         <ValueBox>
-                                            <Mono>{typeof cfg.pow_difficulty === 'number' ? `${cfg.pow_difficulty} bits` : '(loading...)'}</Mono>
+                                            <Mono>{typeof cfg.pow_difficulty === 'number' ? `${(cfg.pow_difficulty / 1000).toFixed(2)}x` : '(loading...)'}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>

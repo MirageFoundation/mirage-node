@@ -43,7 +43,8 @@ message Params {
   option (amino.name) = "mirage/x/core/Params";
   option (gogoproto.equal) = true;
 
-  // min_difficulty is the absolute minimum difficulty level (never goes below this)
+  // min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty).
+  // The dynamic difficulty (a work multiplier) is stored on-chain and never goes below 1000 (1.0x base).
   uint64 min_difficulty = 1;
 
   // pow_message_window is the sliding window size (in blocks) over which PoW message volume is measured
@@ -98,9 +99,9 @@ message Params {
   // tiers defines the tier configurations; index 0 = free, 1-3 = paid tiers
   repeated TierConfig tiers = 41;
 
-  // subscription_reserve_percent is the percentage of period fee escrowed as gas reserve (0-100)
-  // Default: 80 (80% of period fee goes to reserve, 20% burned)
-  uint64 subscription_reserve_percent = 42;
+  // subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
+  // Default: 0.80 (80% of period fee goes to reserve, 20% burned)
+  double subscription_reserve_percent = 42;
 
   // relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
   // Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
@@ -121,9 +122,14 @@ message Params {
   // bridge_chains defines the configuration for each supported bridge chain
   repeated BridgeChainConfig bridge_chains = 50;
 
-  // bridge_attestation_threshold is the voting power threshold for minting (basis points)
-  // Default: 6667 = 66.67% of total voting power required
-  uint64 bridge_attestation_threshold = 51;
+  // bridge_attestation_threshold is the voting power fraction required for minting [0.0, 1.0]
+  // Default: 0.6667 (66.67% of total voting power required)
+  double bridge_attestation_threshold = 51;
+
+  // pow_difficulty_step is the fractional step for dynamic difficulty adjustment [0.0, 1.0]
+  // On busy: new_difficulty = difficulty * (1 + step). On calm: new_difficulty = difficulty / (1 + step).
+  // Default: 0.25 (25% per step)
+  double pow_difficulty_step = 52;
 }
 
 // BridgeChainConfig defines the configuration for a bridgeable chain.

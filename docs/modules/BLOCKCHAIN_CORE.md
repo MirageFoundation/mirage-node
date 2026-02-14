@@ -222,14 +222,15 @@ The `PowDecorator` enforces Proof-of-Work for free-tier users. This is the key i
 1. Extract `envelope_block_hash`, `envelope_difficulty`, `envelope_pow` from message
 2. Build canonical bytes (deterministic serialization of message fields)
 3. Compute `hash = Argon2id(canonical || ":" || pow, salt=block_hash)`
-4. Count leading zero bits in hash
-5. Reject if bits < required difficulty
+4. Treat hash as a 256-bit integer and compare against target threshold
+5. Reject if `hash > base_target * 1000 / difficulty` (where `base_target = 2^(256 - min_difficulty)`)
 
 **Dynamic Difficulty Adjustment:**
+- Difficulty is a work-multiplier factor (1000 = base 1.0x, 1250 = 1.25x harder, etc.)
 - Monitored in sliding window (`pow_message_window` blocks)
-- If message count >= `pow_message_limit`: increase difficulty
-- If message count < `pow_calm_period_definition` for `pow_calm_sequence_threshold` consecutive windows: decrease difficulty
-- Bounded by `min_difficulty` floor
+- If message count >= `pow_message_limit`: multiply difficulty by `(1 + pow_difficulty_step)`
+- If message count < `pow_calm_period_definition` for `pow_calm_sequence_threshold` consecutive windows: divide difficulty by `(1 + pow_difficulty_step)`
+- Bounded by base difficulty floor (1000) and max safe difficulty ceiling (2^53 - 1)
 
 **Tier-Based PoW Bypass:**
 - Free users (level 0): Must provide valid PoW

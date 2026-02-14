@@ -203,18 +203,15 @@ def _uvarint(n: int) -> bytes:
     return bytes(out)
 
 
-def _count_leading_zeros(data: bytes) -> int:
-    count = 0
-    for byte in data:
-        if byte == 0:
-            count += 8
-        else:
-            for i in range(7, -1, -1):
-                if byte & (1 << i):
-                    return count
-                count += 1
-            break
-    return count
+def _check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
+    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
+    if min_difficulty <= 0 or min_difficulty > 256:
+        return False
+    if difficulty < 1000:
+        return False
+    base_target = 1 << (256 - min_difficulty)
+    eff_target = base_target * 1000 // difficulty
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def canon_base_post(
@@ -250,6 +247,7 @@ def canon_base_vote(
 def _compute_pow(
     base: bytes,
     difficulty: int,
+    min_difficulty: int,
     last_block_hash: str,
     max_seconds: float = 180.0,
     stop_check: callable = None,
@@ -259,6 +257,10 @@ def _compute_pow(
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW") from e
+    if difficulty < 1000:
+        raise ValueError("difficulty must be >= 1000")
+    if min_difficulty <= 0 or min_difficulty > 256:
+        raise ValueError("min_difficulty must be in [1, 256]")
 
     try:
         salt = bytes.fromhex(last_block_hash.strip())
@@ -278,7 +280,7 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _count_leading_zeros(digest) >= int(difficulty):
+        if _check_pow_target(digest, difficulty, min_difficulty):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW not found in {max_seconds}s")
@@ -288,12 +290,13 @@ def _compute_pow(
         proof += 1
 
 
-def _fetch_params(backend: str, address: Optional[str] = None) -> Tuple[str, int]:
-    """Fetch current block hash and difficulty."""
+def _fetch_params(backend: str, address: Optional[str] = None) -> Tuple[str, int, int]:
+    """Fetch current block hash, difficulty, and min_difficulty."""
     st = get_status(backend, address=address)
     last_block_hash = str(st.get("last_block_hash", "") or "")
     pow_difficulty = int(st.get("pow_difficulty", 0) or 0)
-    return last_block_hash, pow_difficulty
+    min_difficulty = int(st.get("min_difficulty", 0) or 0)
+    return last_block_hash, pow_difficulty, min_difficulty
 
 
 def _post_json(url: str, payload: dict, timeout: float = 30.0) -> Tuple[int, dict]:
@@ -320,13 +323,14 @@ class SpamWorker:
         self.pub = self.wallet.public_key().public_key_bytes
         self.last_block_hash = ""
         self.difficulty = 0
+        self.min_difficulty = 0
         self.created_posts: List[str] = []
         self.running = True
 
     def refresh_params(self):
         """Refresh block hash and difficulty."""
         try:
-            self.last_block_hash, self.difficulty = _fetch_params(self.backend, self.address)
+            self.last_block_hash, self.difficulty, self.min_difficulty = _fetch_params(self.backend, self.address)
         except Exception:
             pass
 
@@ -346,7 +350,12 @@ class SpamWorker:
             )
 
             proof = _compute_pow(
-                base, self.difficulty, self.last_block_hash, max_seconds=180.0, stop_check=lambda: not self.running
+                base,
+                self.difficulty,
+                self.min_difficulty,
+                self.last_block_hash,
+                max_seconds=180.0,
+                stop_check=lambda: not self.running,
             )
             self.stats.record_pow()
 
@@ -423,7 +432,12 @@ class SpamWorker:
             base = canon_base_vote(self.pub, self.last_block_hash, self.difficulty, target, direction, ts)
 
             proof = _compute_pow(
-                base, self.difficulty, self.last_block_hash, max_seconds=180.0, stop_check=lambda: not self.running
+                base,
+                self.difficulty,
+                self.min_difficulty,
+                self.last_block_hash,
+                max_seconds=180.0,
+                stop_check=lambda: not self.running,
             )
             self.stats.record_pow()
 
@@ -496,7 +510,12 @@ class SpamWorker:
             base = canon_base_post(self.pub, self.last_block_hash, self.difficulty, target, "", "", content, "", 0, ts)
 
             proof = _compute_pow(
-                base, self.difficulty, self.last_block_hash, max_seconds=180.0, stop_check=lambda: not self.running
+                base,
+                self.difficulty,
+                self.min_difficulty,
+                self.last_block_hash,
+                max_seconds=180.0,
+                stop_check=lambda: not self.running,
             )
             self.stats.record_pow()
 
@@ -618,8 +637,8 @@ def main() -> int:
 
     # Test connection
     try:
-        last, diff = _fetch_params(backend)
-        print(f"Connected! Block: {last[:16]}... | Difficulty: {diff}")
+        last, diff, min_diff = _fetch_params(backend)
+        print(f"Connected! Block: {last[:16]}... | Difficulty: {diff} | MinDifficulty: {min_diff}")
     except Exception as e:
         print(f"ERROR: Cannot connect to backend: {e}")
         return 1

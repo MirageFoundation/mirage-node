@@ -45,17 +45,17 @@ _REQUIRED_INT_PARAMS = [
     "min_topic_size",
     # Subscription params
     "subscription_period",
-    "subscription_reserve_percent",
     # Relay fee params
     "relay_min_gas_price",
     "relay_max_gas_fee",
-    # Bridge params
-    "bridge_attestation_threshold",
 ]
 
 # Required float params
 _REQUIRED_FLOAT_PARAMS = [
     "mint_dynamic_split",
+    "pow_difficulty_step",
+    "subscription_reserve_percent",
+    "bridge_attestation_threshold",
 ]
 
 

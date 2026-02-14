@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	sdkmath "cosmossdk.io/math"
+
 )
 
 const (
@@ -203,16 +203,14 @@ func NewBridgeMintAttestation(burnID, destChain, destTx string, createdAt int64)
 	}
 }
 
-// MeetsThreshold returns true if the attested power meets or exceeds the threshold
-// threshold is in basis points (e.g., 6667 = 66.67%)
-func (a *BridgeMintAttestation) MeetsThreshold(totalPower int64, thresholdBasisPoints uint64) bool {
+// MeetsThreshold returns true if the attested power meets or exceeds the threshold.
+// threshold is a fraction in [0,1] (e.g., 0.6667 = 66.67%).
+func (a *BridgeMintAttestation) MeetsThreshold(totalPower int64, threshold float64) bool {
 	if totalPower <= 0 {
 		return false
 	}
-	required := sdkmath.NewInt(totalPower).
-		MulRaw(int64(thresholdBasisPoints)).
-		QuoRaw(10000)
-	return sdkmath.NewInt(a.AttestedPower).GTE(required)
+	required := int64(float64(totalPower) * threshold)
+	return a.AttestedPower >= required
 }
 
 // Marshal serializes the mint attestation to JSON
@@ -229,31 +227,23 @@ func UnmarshalBridgeMintAttestation(data []byte) (*BridgeMintAttestation, error)
 	return &a, nil
 }
 
-// MeetsThreshold returns true if the attested power meets or exceeds the threshold
-// threshold is in basis points (e.g., 6667 = 66.67%)
-func (a *BridgeAttestation) MeetsThreshold(totalPower int64, thresholdBasisPoints uint64) bool {
+// MeetsThreshold returns true if the attested power meets or exceeds the threshold.
+// threshold is a fraction in [0,1] (e.g., 0.6667 = 66.67%).
+func (a *BridgeAttestation) MeetsThreshold(totalPower int64, threshold float64) bool {
 	if totalPower <= 0 {
 		return false
 	}
-	// Calculate required power safely: (totalPower * threshold) / 10000
-	required := sdkmath.NewInt(totalPower).
-		MulRaw(int64(thresholdBasisPoints)).
-		QuoRaw(10000)
-	return sdkmath.NewInt(a.AttestedPower).GTE(required)
+	required := int64(float64(totalPower) * threshold)
+	return a.AttestedPower >= required
 }
 
-// RequiredPower calculates the voting power required to meet the threshold
-func RequiredPower(totalPower int64, thresholdBasisPoints uint64) int64 {
+// RequiredPower calculates the voting power required to meet the threshold.
+// threshold is a fraction in [0,1].
+func RequiredPower(totalPower int64, threshold float64) int64 {
 	if totalPower <= 0 {
 		return 0
 	}
-	required := sdkmath.NewInt(totalPower).
-		MulRaw(int64(thresholdBasisPoints)).
-		QuoRaw(10000)
-	if !required.IsInt64() {
-		return int64(^uint64(0) >> 1) // math.MaxInt64 without importing math
-	}
-	return required.Int64()
+	return int64(float64(totalPower) * threshold)
 }
 
 // Marshal serializes the attestation to JSON

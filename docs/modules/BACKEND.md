@@ -250,26 +250,20 @@ def argon2_digest(base: bytes, last_block_hash: str, proof: int) -> bytes:
         type=Argon2Type.ID,
     )
 
-def count_leading_zero_bits(b: bytes) -> int:
-    """Count leading zero bits in hash."""
-    total = 0
-    for byte in b:
-        if byte == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (byte >> i) & 1 == 0:
-                total += 1
-            else:
-                return total
-    return total
+def check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
+    """Target-based PoW check. difficulty is a factor (1000=base, 1250=1.25x)."""
+    if difficulty < 1000:
+        return False
+    base_target = 1 << (256 - min_difficulty)
+    eff_target = base_target * 1000 // difficulty
+    return int.from_bytes(digest, "big") <= eff_target
 ```
 
 **Validation Steps:**
 
-1. **Difficulty Check:** `declared_difficulty >= current_chain_difficulty`
+1. **Difficulty Check:** `declared_difficulty >= current_chain_difficulty` (difficulty is a work-multiplier factor, 1000 = base)
 2. **Block Hash Check:** `last_block_hash` is in recent window (configurable, typically 5 blocks)
-3. **Hash Verification:** `count_leading_zero_bits(argon2_digest(...)) >= effective_difficulty`
+3. **Hash Verification:** `check_pow_target(argon2_digest(...), effective_difficulty, min_difficulty)`
 
 ### Difficulty Allowance
 

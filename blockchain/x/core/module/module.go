@@ -471,10 +471,10 @@ func (am AppModule) BeginBlock(ctx context.Context) error {
 		return err
 	}
 
-	// Initialize difficulty if not set
+	// Initialize difficulty if not set (base factor = 1000)
 	params := am.k.GetParams(sdkCtx)
 	if !am.k.HasCurrentDifficulty(sdkCtx) {
-		if err := am.k.SetCurrentDifficulty(sdkCtx, params.MinDifficulty); err != nil {
+		if err := am.k.SetCurrentDifficulty(sdkCtx, keeper.BaseDifficulty); err != nil {
 			return err
 		}
 	}
@@ -528,11 +528,15 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 		"calm_sequence", calmSeq,
 	)
 
-	// Busy window: increase difficulty immediately and reset calm sequence
+	// Busy window: increase difficulty by (1 + pow_difficulty_step) and reset calm sequence
 	if messageCount >= params.PowMessageLimit {
-		newDifficulty := currentDifficulty + 1
-		if newDifficulty > 256 {
-			newDifficulty = 256
+		step := params.PowDifficultyStep
+		newDifficulty := uint64(math.Round(float64(currentDifficulty) * (1 + step)))
+		if newDifficulty <= currentDifficulty {
+			newDifficulty = currentDifficulty + 1
+		}
+		if newDifficulty > keeper.MaxSafeDifficulty {
+			newDifficulty = keeper.MaxSafeDifficulty
 		}
 		if newDifficulty != currentDifficulty {
 			if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
@@ -553,9 +557,13 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 			return err
 		}
 		if calmSeq >= params.PowCalmSequenceThreshold {
-			newDifficulty := currentDifficulty - 1
-			if newDifficulty < params.MinDifficulty {
-				newDifficulty = params.MinDifficulty
+			step := params.PowDifficultyStep
+			newDifficulty := uint64(math.Round(float64(currentDifficulty) / (1 + step)))
+			if newDifficulty >= currentDifficulty && currentDifficulty > keeper.BaseDifficulty {
+				newDifficulty = currentDifficulty - 1
+			}
+			if newDifficulty < keeper.BaseDifficulty {
+				newDifficulty = keeper.BaseDifficulty
 			}
 			if newDifficulty != currentDifficulty {
 				if err := am.k.SetCurrentDifficulty(sdkCtx, newDifficulty); err != nil {
@@ -658,12 +666,12 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
 			if balance.GTE(sdkmath.NewIntFromUint64(periodFee)) {
-				// Calculate reserve for new period
-				reservePercent := params.SubscriptionReservePercent
-				if reservePercent > 100 {
-					reservePercent = 100
+				// Calculate reserve for new period (SubscriptionReservePercent is fraction [0,1])
+				reserveFrac := params.SubscriptionReservePercent
+				if reserveFrac > 1 {
+					reserveFrac = 1
 				}
-				reserveAmount := (periodFee * reservePercent) / 100
+				reserveAmount := uint64(float64(periodFee) * reserveFrac)
 				burnAmount := periodFee - reserveAmount
 
 				// Burn non-reserve portion
@@ -785,6 +793,7 @@ func (am AppModule) GetDifficulty(ctx context.Context, _ *types.QueryDifficultyR
 		ConsecutiveLowUsage: calmSeq,
 		LatestBlockHash:     latestHash,
 		CurrentHeight:       currentHeight,
+		MinDifficulty:       params.MinDifficulty,
 	}, nil
 }
 
@@ -937,6 +946,9 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.PowDifficultyAllowance != 0 {
 		cur.PowDifficultyAllowance = p.PowDifficultyAllowance
 	}
+	if p.PowDifficultyStep != 0 {
+		cur.PowDifficultyStep = p.PowDifficultyStep
+	}
 	if p.BlockHashWindow != 0 {
 		cur.BlockHashWindow = p.BlockHashWindow
 	}
@@ -954,7 +966,7 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.SubscriptionPeriod != 0 {
 		cur.SubscriptionPeriod = p.SubscriptionPeriod
 	}
-	// Subscription reserve percent (0-100)
+	// Subscription reserve fraction [0,1]
 	if p.SubscriptionReservePercent != 0 {
 		cur.SubscriptionReservePercent = p.SubscriptionReservePercent
 	}
@@ -2433,12 +2445,12 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 			return nil, fmt.Errorf("insufficient balance: need %d umirage, have %s", periodFee, balance.String())
 		}
 
-		// Calculate reserve (subscription_reserve_percent% of period fee, floor)
-		reservePercent := params.SubscriptionReservePercent
-		if reservePercent > 100 {
-			reservePercent = 100
+		// Calculate reserve (subscription_reserve_percent is fraction [0,1])
+		reserveFrac := params.SubscriptionReservePercent
+		if reserveFrac > 1 {
+			reserveFrac = 1
 		}
-		reserveAmount = (periodFee * reservePercent) / 100
+		reserveAmount = uint64(float64(periodFee) * reserveFrac)
 		burnAmount := periodFee - reserveAmount
 
 		// Burn the non-reserve portion directly from user

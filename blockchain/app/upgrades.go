@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"time"
 
 	upgradetypes "cosmossdk.io/x/upgrade/types"
@@ -10,6 +12,7 @@ import (
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/module"
 
+	corekeeper "mirage/x/core/keeper"
 	coretypes "mirage/x/core/types"
 )
 
@@ -211,7 +214,7 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// Set SubscriptionReservePercent if not set
 			if params.SubscriptionReservePercent == 0 {
-				params.SubscriptionReservePercent = 20 // 20% of monthly fee goes to reserve
+				params.SubscriptionReservePercent = 0.20 // 20% of monthly fee goes to reserve
 				needsUpdate = true
 				sdkCtx.Logger().Info("v1.3.0-tiers: set SubscriptionReservePercent", "value", params.SubscriptionReservePercent)
 			}
@@ -320,8 +323,8 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			// Increase subscription reserve percent from 20% to 40%
-			if params.SubscriptionReservePercent < 40 {
-				params.SubscriptionReservePercent = 40
+			if params.SubscriptionReservePercent < 0.40 {
+				params.SubscriptionReservePercent = 0.40
 				needsUpdate = true
 				sdkCtx.Logger().Info("v1.5.0-social-graph: set subscription_reserve_percent", "value", params.SubscriptionReservePercent)
 			}
@@ -540,7 +543,7 @@ func (app *App) RegisterUpgradeHandlers() {
 			sdkCtx.Logger().Info("v1.8.0-economics: set relay_max_gas_fee", "value", params.RelayMaxGasFee)
 
 			// SubscriptionReservePercent: 80% to reserve, 20% burned
-			params.SubscriptionReservePercent = 80
+			params.SubscriptionReservePercent = 0.80
 			sdkCtx.Logger().Info("v1.8.0-economics: set subscription_reserve_percent", "value", params.SubscriptionReservePercent)
 
 			// MintQuantity: 350 MIRAGE per 10min
@@ -642,9 +645,9 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.9.0-bridge: enabled Solana bridge with 500 MIRAGE fee")
 			}
 
-			// Set attestation threshold: 66.67% (6667 basis points)
+			// Set attestation threshold: 66.67%
 			if params.BridgeAttestationThreshold == 0 {
-				params.BridgeAttestationThreshold = 6667
+				params.BridgeAttestationThreshold = 0.6667
 				changed = true
 				sdkCtx.Logger().Info("v1.9.0-bridge: set bridge_attestation_threshold", "value", params.BridgeAttestationThreshold)
 			}
@@ -1039,4 +1042,172 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.11.0: Target-based PoW difficulty (gradual scaling)
+	// - Difficulty changes from bit-count to work-multiplier factor (1000 = base, 1250 = 1.25x)
+	// - Validation changes from leadingZeroBits to big.Int target comparison
+	// - subscription_reserve_percent changes from integer percent (0-100) to double fraction [0,1]
+	// - bridge_attestation_threshold changes from basis points (0-10000) to double fraction [0,1]
+	// - New param: pow_difficulty_step (double, default 0.25 = 25% per step)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.11.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.11.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// --- 1. Read old param values from raw protobuf bytes ---
+			// The wire type for subscription_reserve_percent (field 42) and bridge_attestation_threshold (field 51)
+			// changed from varint to double, so we must extract old values from raw bytes before unmarshal.
+			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
+			rawParams, err := store.Get([]byte("params"))
+			if err != nil || len(rawParams) == 0 {
+				sdkCtx.Logger().Error("v1.11.0: no raw params found, using defaults")
+				rawParams = nil
+			}
+
+			oldSubReserve := uint64(80) // default if not found
+			oldBridgeThreshold := uint64(6667)
+			if rawParams != nil {
+				if v, ok := extractProtoVarint(rawParams, 42); ok {
+					oldSubReserve = v
+				}
+				if v, ok := extractProtoVarint(rawParams, 51); ok {
+					oldBridgeThreshold = v
+				}
+			}
+			sdkCtx.Logger().Info("v1.11.0: extracted old param values",
+				"old_subscription_reserve_percent", oldSubReserve,
+				"old_bridge_attestation_threshold", oldBridgeThreshold)
+
+			// --- 2. Write fresh default params first so GetParams doesn't fail ---
+			// (The old bytes will fail unmarshal due to wire type change.)
+			defaults := coretypes.DefaultParams()
+			if err := app.CoreKeeper.SetParams(sdkCtx, defaults); err != nil {
+				return nil, err
+			}
+
+			// --- 3. Now read params with new types and apply merges ---
+			params := app.CoreKeeper.GetParams(sdkCtx)
+
+			// Convert subscription_reserve_percent: old integer (0-100) → fraction [0,1]
+			newSubReserve := float64(oldSubReserve) / 100.0
+			if newSubReserve > 1 {
+				newSubReserve = 1
+			}
+			params.SubscriptionReservePercent = newSubReserve
+			sdkCtx.Logger().Info("v1.11.0: converted subscription_reserve_percent", "old", oldSubReserve, "new", newSubReserve)
+
+			// Convert bridge_attestation_threshold: old basis points (0-10000) → fraction [0,1]
+			newBridgeThreshold := float64(oldBridgeThreshold) / 10000.0
+			if newBridgeThreshold > 1 {
+				newBridgeThreshold = 1
+			}
+			if newBridgeThreshold <= 0 {
+				newBridgeThreshold = 0.6667
+			}
+			params.BridgeAttestationThreshold = newBridgeThreshold
+			sdkCtx.Logger().Info("v1.11.0: converted bridge_attestation_threshold", "old", oldBridgeThreshold, "new", newBridgeThreshold)
+
+			// Set pow_difficulty_step if zero
+			if params.PowDifficultyStep == 0 {
+				params.PowDifficultyStep = 0.25
+				sdkCtx.Logger().Info("v1.11.0: set pow_difficulty_step", "value", 0.25)
+			}
+
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Info("v1.11.0: params migrated successfully")
+
+			// --- 4. Convert difficulty from bit-count to factor ---
+			oldDiff := app.CoreKeeper.GetCurrentDifficulty(sdkCtx)
+			minDiff := params.MinDifficulty
+
+			// After GetCurrentDifficulty with new code, the old bit-count value was read as-is.
+			// If it's below BaseDifficulty, it was an old bit-count value that needs conversion.
+			// If it's already >= BaseDifficulty, it was somehow already converted or set by the new
+			// fallback. We read the raw bytes to get the original value.
+			rawDiffBz, _ := store.Get([]byte("current_difficulty"))
+			if len(rawDiffBz) == 8 {
+				oldDiff = binary.BigEndian.Uint64(rawDiffBz)
+			}
+
+			if oldDiff < corekeeper.BaseDifficulty {
+				// Old value is a bit-count; convert to factor: 1000 * 2^(old - minDiff)
+				shift := uint64(0)
+				if oldDiff > minDiff {
+					shift = oldDiff - minDiff
+				}
+				newDiff := uint64(1000) << shift
+				if newDiff > corekeeper.MaxSafeDifficulty || shift > 53 {
+					newDiff = corekeeper.MaxSafeDifficulty
+				}
+				sdkCtx.Logger().Info("v1.11.0: converting difficulty bit-count to factor",
+					"old_bits", oldDiff, "min_diff", minDiff, "shift", shift, "new_factor", newDiff)
+				if err := app.CoreKeeper.SetCurrentDifficulty(sdkCtx, newDiff); err != nil {
+					return nil, err
+				}
+			} else {
+				sdkCtx.Logger().Info("v1.11.0: difficulty already in factor format", "value", oldDiff)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.11.0 complete - target-based PoW difficulty enabled")
+			return toVM, nil
+		},
+	)
+}
+
+// extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)
+// and returns its value. Returns (0, false) if not found.
+func extractProtoVarint(data []byte, fieldNum uint64) (uint64, bool) {
+	i := 0
+	for i < len(data) {
+		// Decode tag (field_number << 3 | wire_type)
+		tag, n := binary.Uvarint(data[i:])
+		if n <= 0 {
+			return 0, false
+		}
+		i += n
+		wireType := tag & 0x7
+		fnum := tag >> 3
+
+		switch wireType {
+		case 0: // varint
+			val, n := binary.Uvarint(data[i:])
+			if n <= 0 {
+				return 0, false
+			}
+			i += n
+			if fnum == fieldNum {
+				return val, true
+			}
+		case 1: // 64-bit
+			if i+8 > len(data) {
+				return 0, false
+			}
+			if fnum == fieldNum {
+				// Interpret as float64 → uint64 (for reading old double fields)
+				bits := binary.LittleEndian.Uint64(data[i:])
+				f := math.Float64frombits(bits)
+				return uint64(f), true
+			}
+			i += 8
+		case 2: // length-delimited
+			length, n := binary.Uvarint(data[i:])
+			if n <= 0 {
+				return 0, false
+			}
+			i += n + int(length)
+		case 5: // 32-bit
+			i += 4
+		default:
+			return 0, false
+		}
+	}
+	return 0, false
 }

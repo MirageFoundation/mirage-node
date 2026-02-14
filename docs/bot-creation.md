@@ -73,19 +73,18 @@ def sign(privkey: bytes, message: bytes) -> bytes:
 
 
 # ── Proof of Work ───────────────────────────────────────────────────
-def leading_zero_bits(b: bytes) -> int:
-    total = 0
-    for byte in b:
-        if byte == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (byte >> i) & 1:
-                return total
-            total += 1
-    return total
+# difficulty is a work-multiplier factor (1000 = base, 1250 = 1.25x harder).
+# min_difficulty defines the base target: base_target = 2^(256 - min_difficulty).
+# A hash passes if int(hash) <= base_target * 1000 // difficulty.
 
-def compute_pow(base: bytes, difficulty: int, block_hash_hex: str, max_seconds: float = 120) -> int:
+def check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
+    if difficulty < 1000:
+        return False
+    base_target = 1 << (256 - min_difficulty)
+    eff_target = base_target * 1000 // difficulty
+    return int.from_bytes(digest, "big") <= eff_target
+
+def compute_pow(base: bytes, difficulty: int, min_difficulty: int, block_hash_hex: str, max_seconds: float = 120) -> int:
     salt = bytes.fromhex(block_hash_hex)
     start = time.time()
     nonce = 0
@@ -95,7 +94,7 @@ def compute_pow(base: bytes, difficulty: int, block_hash_hex: str, max_seconds: 
         password = base + b":" + uvarint(nonce)
         digest = hash_secret_raw(password, salt, time_cost=1, memory_cost=4096,
                                  parallelism=1, hash_len=32, type=Argon2Type.ID)
-        if leading_zero_bits(digest) >= difficulty:
+        if check_pow_target(digest, difficulty, min_difficulty):
             return nonce
         nonce += 1
 
@@ -139,23 +138,23 @@ def insert_pow(base: bytes, pow_val: int) -> bytes:
 
 
 # ── API Helpers ─────────────────────────────────────────────────────
-def get_params() -> tuple[str, int]:
-    """Return (last_block_hash, pow_difficulty)."""
+def get_params() -> tuple[str, int, int]:
+    """Return (last_block_hash, pow_difficulty, min_difficulty)."""
     r = requests.get(f"{NODE}/api/get_parameters?address={ADDRESS}").json()
-    return r["last_block_hash"], int(r["pow_difficulty"])
+    return r["last_block_hash"], int(r["pow_difficulty"]), int(r["min_difficulty"])
 
 def get_user_level() -> int:
     r = requests.get(f"{NODE}/api/get_user_status?address={ADDRESS}").json()
     return int(r.get("user_level", 0) or 0)
 
-def submit(endpoint: str, base: bytes, fields: dict, block_hash: str, difficulty: int, ts_ms: int):
+def submit(endpoint: str, base: bytes, fields: dict, block_hash: str, difficulty: int, min_difficulty: int, ts_ms: int):
     """Compute PoW (if needed), sign, and POST."""
     is_subscriber = get_user_level() >= 1
     if is_subscriber:
         pow_val = 0
         use_diff = 0
     else:
-        pow_val = compute_pow(base, difficulty, block_hash)
+        pow_val = compute_pow(base, difficulty, min_difficulty, block_hash)
         use_diff = difficulty
 
     signed_bytes = insert_pow(base, pow_val)
@@ -178,7 +177,7 @@ def submit(endpoint: str, base: bytes, fields: dict, block_hash: str, difficulty
 
 # ── Actions ─────────────────────────────────────────────────────────
 def make_post(topic: str, title: str, content: str, tag: str = ""):
-    block_hash, diff = get_params()
+    block_hash, diff, min_diff = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     base = (canon_prefix("MsgPost")
@@ -191,10 +190,10 @@ def make_post(topic: str, title: str, content: str, tag: str = ""):
     return submit("/core/post", base, {
         "target": "", "topic": topic, "title": title,
         "content": content, "tag": tag,
-    }, block_hash, diff, ts)
+    }, block_hash, diff, min_diff, ts)
 
 def make_comment(parent_txhash: str, content: str):
-    block_hash, diff = get_params()
+    block_hash, diff, min_diff = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     base = (canon_prefix("MsgPost")
@@ -207,11 +206,11 @@ def make_comment(parent_txhash: str, content: str):
     return submit("/core/post", base, {
         "target": parent_txhash, "topic": "", "title": "",
         "content": content, "tag": "",
-    }, block_hash, diff, ts)
+    }, block_hash, diff, min_diff, ts)
 
 def vote(target_txhash: str, direction: int):
     """direction: 1=upvote, -1=downvote, 0=remove"""
-    block_hash, diff = get_params()
+    block_hash, diff, min_diff = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     dir_val = direction if direction >= 0 else (direction & 0xFFFFFFFF)
@@ -221,7 +220,7 @@ def vote(target_txhash: str, direction: int):
           + enc_u64(101, dir_val))
     return submit("/core/vote", base, {
         "target": target_txhash, "direction": direction,
-    }, block_hash, diff, ts)
+    }, block_hash, diff, min_diff, ts)
 
 def read_posts(topic: str = "", limit: int = 10) -> list:
     params = {"limit": limit}
@@ -250,7 +249,7 @@ if __name__ == "__main__":
 
 1. **Wallet** — `cosmpy` derives a secp256k1 keypair + `mirage1...` address from a BIP39 mnemonic.
 
-2. **Parameters** — `GET /api/get_parameters` returns `last_block_hash` and `pow_difficulty`. These anchor every request to a recent block.
+2. **Parameters** — `GET /api/get_parameters` returns `last_block_hash`, `pow_difficulty` (work-multiplier factor, 1000 = base), and `min_difficulty`. These anchor every request to a recent block.
 
 3. **Canonical bytes** — Each message type has a deterministic byte encoding:
 
@@ -265,7 +264,7 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
   ...
 ```
 
-4. **Proof of Work** — Free users must solve Argon2id PoW. The nonce is inserted as `tag5` between difficulty and timestamp. Subscribers (level >= 1) skip PoW.
+4. **Proof of Work** — Free users must solve Argon2id PoW using a target-based system. The hash (as a 256-bit integer) must be <= `base_target * 1000 / difficulty`. The nonce is inserted as `tag5` between difficulty and timestamp. Subscribers (level >= 1) skip PoW.
 
 5. **Signature** — ECDSA-SHA256 over the final canonical bytes (with PoW inserted). Low-S normalized, 64-byte compact format.
 

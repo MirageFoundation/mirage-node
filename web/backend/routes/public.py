@@ -47,6 +47,7 @@ from chain import (
     get_current_pow_difficulty as _get_current_pow_difficulty,
     get_difficulty_info as _get_difficulty_info,
     get_latest_block_hash as _latest_block_hash,
+    get_min_difficulty as _get_min_difficulty,
     is_node_catching_up as _is_catching_up,
     get_connected_peers as _get_connected_peers,
 )
@@ -1919,7 +1920,8 @@ def get_parameters():
         else:
             last = _latest_block_hash()
             diff = _get_current_pow_difficulty()
-            base = {"last_block_hash": last, "pow_difficulty": diff}
+            min_diff = _get_min_difficulty()
+            base = {"last_block_hash": last, "pow_difficulty": diff, "min_difficulty": min_diff}
             _PARAMS_CACHE["data"] = base
             _PARAMS_CACHE["expires"] = now + _PARAMS_CACHE_TTL
             cache_hit = False
@@ -2298,7 +2300,7 @@ def get_network_stats():
             "server_balance": server_balance,
             "staked_balance": staked_balance,
             "block_time": block_time,
-            "pow_difficulty": int(diff_info.get("current_difficulty", 10)),
+            "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
             "pow_calm_sequence": int(diff_info.get("consecutive_low_usage", 0)),
             "pow_last_change_height": int(diff_info.get("last_change_height", 0)),

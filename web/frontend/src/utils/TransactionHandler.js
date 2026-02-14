@@ -18,6 +18,38 @@ async function ensureCosmCrypto() {
     }
 }
 
+function requireMinDifficulty(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+        try { console.error('[PoW] invalid min_difficulty', { value }); } catch (_) { }
+        throw new Error('min_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function requirePowDifficulty(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 1000) {
+        try { console.error('[PoW] invalid pow_difficulty', { value }); } catch (_) { }
+        throw new Error('pow_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function requireTxDifficulty(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
+        throw new Error('pow_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function resolveTxDifficulty(tx) {
+    if (typeof tx?.pow_difficulty !== 'undefined') return requireTxDifficulty(tx.pow_difficulty);
+    if (typeof tx?.difficulty !== 'undefined') return requireTxDifficulty(tx.difficulty);
+    throw new Error('pow_difficulty missing or invalid');
+}
+
 
 class TransactionHandler {
     constructor() {
@@ -325,7 +357,8 @@ class TransactionHandler {
                 updateNotification("Fetching transaction parameters");
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash;
-                pow_difficulty = Number(statusData.pow_difficulty) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
 
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
@@ -337,7 +370,8 @@ class TransactionHandler {
                 action: 'set_username',
                 username,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
                 timestamp: Math.max(0, Date.now() - 15000),
                 // Include invite code if provided (backend marks it as used)
@@ -372,7 +406,8 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash2 = statusData.last_block_hash || "";
-                pow_difficulty2 = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty2 = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty2 = requireMinDifficulty(statusData.min_difficulty);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -384,6 +419,7 @@ class TransactionHandler {
                 username,
                 last_block_hash: userLevel2 >= 1 ? "" : last_block_hash2,
                 pow_difficulty: userLevel2 >= 1 ? 0 : pow_difficulty2,
+                min_difficulty: min_difficulty2,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -429,7 +465,8 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -440,7 +477,8 @@ class TransactionHandler {
                 action: 'block_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -471,14 +509,16 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
                 action: 'unblock_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -518,14 +558,16 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash_b = statusData.last_block_hash || "";
-                pow_difficulty_b = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty_b = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
                 action: 'block_user',
                 target: addressTrimmed,
                 last_block_hash: last_block_hash_b,
-                pow_difficulty: pow_difficulty_b >>> 0,
+                pow_difficulty: pow_difficulty_b,
+                min_difficulty: min_difficulty_b,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -556,14 +598,16 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash_b = statusData.last_block_hash || "";
-                pow_difficulty_b = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty_b = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty_b = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
                 action: 'unblock_user',
                 target: addressTrimmed,
                 last_block_hash: last_block_hash_b,
-                pow_difficulty: pow_difficulty_b >>> 0,
+                pow_difficulty: pow_difficulty_b,
+                min_difficulty: min_difficulty_b,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -762,7 +806,8 @@ class TransactionHandler {
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
             ]);
             const last_block_hash = statusData.last_block_hash;
-            let pow_difficulty = Number(statusData.pow_difficulty);
+            let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+            const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
             // Level >= 1 users don't need PoW
             const userLevel = Number(statusData.user_level !== undefined ? statusData.user_level : Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -774,7 +819,8 @@ class TransactionHandler {
                 target: txhashTrimmed,
                 reason: why,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -822,7 +868,8 @@ class TransactionHandler {
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
             ]);
             let last_block_hash = statusData?.last_block_hash || "";
-            let pow_difficulty = statusData?.pow_difficulty || 0;
+            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
+            const min_difficulty = requireMinDifficulty(statusData?.min_difficulty);
             const balance = statusData?.balance || 0;
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -844,7 +891,8 @@ class TransactionHandler {
                 target: targetTrimmed,
                 amount: amountUmirage,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -991,7 +1039,8 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -1002,7 +1051,8 @@ class TransactionHandler {
                 action: 'delete_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1045,7 +1095,8 @@ class TransactionHandler {
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash_e = statusData.last_block_hash || "";
-                pow_difficulty_e = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty_e = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
@@ -1057,7 +1108,8 @@ class TransactionHandler {
                 content,
                 tag: tagRaw,
                 last_block_hash: last_block_hash_e,
-                pow_difficulty: pow_difficulty_e >>> 0,
+                pow_difficulty: pow_difficulty_e,
+                min_difficulty: min_difficulty_e,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
@@ -1256,7 +1308,8 @@ class TransactionHandler {
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
@@ -1267,7 +1320,8 @@ class TransactionHandler {
                 content,
                 tag: cleanTag,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1324,7 +1378,8 @@ class TransactionHandler {
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                const min_difficulty = requireMinDifficulty(statusData.min_difficulty);
             }
 
             const tx = {
@@ -1334,7 +1389,8 @@ class TransactionHandler {
                 target: parentId,
                 content,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                min_difficulty,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1386,7 +1442,8 @@ class TransactionHandler {
                     const addrNow = Storage.load('publicKey', '');
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
                     last_block_hash = status.last_block_hash || "";
-                    pow_difficulty = Number(status.pow_difficulty || 0);
+                    pow_difficulty = requirePowDifficulty(status.pow_difficulty);
+                    const min_difficulty_relay = requireMinDifficulty(status.min_difficulty);
                     const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
                     const prevOnChain = this.lastOnchainBalanceUmirage;
                     this.lastOnchainBalanceUmirage = onChainBalance;
@@ -1427,6 +1484,7 @@ class TransactionHandler {
                     username: transaction.username,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1438,6 +1496,7 @@ class TransactionHandler {
                     direction: Number(transaction.direction),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1451,6 +1510,7 @@ class TransactionHandler {
                     content: transaction.content,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1463,6 +1523,7 @@ class TransactionHandler {
                     content: transaction.content,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1473,6 +1534,7 @@ class TransactionHandler {
                     user: transaction.user,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1483,6 +1545,7 @@ class TransactionHandler {
                     user: transaction.user,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1493,6 +1556,7 @@ class TransactionHandler {
                     topic: transaction.topic,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1503,6 +1567,7 @@ class TransactionHandler {
                     topic: transaction.topic,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    min_difficulty: min_difficulty_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -2517,7 +2582,7 @@ class TransactionHandler {
             let endpoint = '';
             if (msgName === 'MsgSetUsername') {
                 // Sign relay for set username (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalSetUsername({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2558,7 +2623,7 @@ class TransactionHandler {
                 endpoint = 'core/set_username';
             } else if (msgName === 'MsgSetModerators') {
                 // Sign relay for set moderators (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalSetModerators({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2583,7 +2648,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/set_moderators';
             } else if (msgName === 'MsgFollowModerator') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const modLower = (transaction.moderator || "").toLowerCase();
                 const canon = this.canonicalFollowModerator({
@@ -2610,7 +2675,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_moderator';
             } else if (msgName === 'MsgUnfollowModerator') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const modLower = (transaction.moderator || "").toLowerCase();
                 const canon = this.canonicalUnfollowModerator({
@@ -2637,7 +2702,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_moderator';
             } else if (msgName === 'MsgFollowUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const userLower = (transaction.user || "").toLowerCase();
                 const canon = this.canonicalFollowUser({
@@ -2665,7 +2730,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_user';
             } else if (msgName === 'MsgUnfollowUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const userLower = (transaction.user || "").toLowerCase();
                 const canon = this.canonicalUnfollowUser({
@@ -2693,7 +2758,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_user';
             } else if (msgName === 'MsgFollowTopic') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const topicLower = (transaction.topic || "").toLowerCase();
                 const canon = this.canonicalFollowTopic({
@@ -2721,7 +2786,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_topic';
             } else if (msgName === 'MsgUnfollowTopic') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const topicLower = (transaction.topic || "").toLowerCase();
                 const canon = this.canonicalUnfollowTopic({
@@ -2749,7 +2814,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_topic';
             } else if (msgName === 'MsgBlockPost') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalBlockPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2773,7 +2838,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/block_post';
             } else if (msgName === 'MsgUnblockPost') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalUnblockPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2797,7 +2862,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unblock_post';
             } else if (msgName === 'MsgBlockUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalBlockUser({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2821,7 +2886,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/block_user';
             } else if (msgName === 'MsgUnblockUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalUnblockUser({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2846,7 +2911,7 @@ class TransactionHandler {
                 endpoint = 'core/unblock_user';
             } else if (msgName === 'MsgDelete') {
                 // Sign relay for delete post (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalDelete({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2871,7 +2936,7 @@ class TransactionHandler {
                 endpoint = 'core/delete_post';
             } else if (msgName === 'MsgSendTokens') {
                 // Sign relay for send tokens (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 // Ensure addresses are lowercase for consistency with backend
                 const senderLower = (signerAddress || "").toLowerCase();
                 const targetLower = (transaction.target || "").toLowerCase();
@@ -2902,7 +2967,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/send_tokens';
             } else if (msgName === 'MsgReport') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const uvarint = (n) => {
                     const out = [];
                     let v = (n >>> 0);
@@ -2974,7 +3039,7 @@ class TransactionHandler {
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
-                    difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3000,7 +3065,7 @@ class TransactionHandler {
                 const canon = this.canonicalEdit({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
-                    difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3070,7 +3135,7 @@ class TransactionHandler {
                     : (Number(transaction.direction) >>> 0);
                 const voteSignData = {
                     last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    pow_difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3218,7 +3283,7 @@ class TransactionHandler {
                 endpoint = 'core/set_auto_renewal';
             } else if (msgName === 'MsgBridgeBurn') {
                 // Sign relay for bridge burn (e.g., Solana)
-                const difficulty = Number(transaction.pow_difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const uvarint = (n) => {
                     const out = [];
                     let v = (n >>> 0);
@@ -3566,7 +3631,7 @@ class TransactionHandler {
             // Level >= 1 users skip PoW (chain trusts them)
             // Also skip PoW entirely when difficulty is 0 (e.g., fee-only tx like set_auto_renewal).
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const powDifficulty = Number(transaction?.pow_difficulty || transaction?.difficulty || 0) || 0;
+            const powDifficulty = resolveTxDifficulty(transaction);
             const canSkipPow = !forcePow && (userLevel >= 1 || powDifficulty <= 0);
 
             // Inform UI that we are starting a transaction
@@ -3628,7 +3693,10 @@ class TransactionHandler {
             };
             const privBytes = new Uint8Array(privateKeyHex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
             const pubBytes = secp256k1GetPublicKey(privBytes, true);
-            const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0) >>> 0;
+            const difficulty = requirePowDifficulty(
+                typeof transaction.pow_difficulty !== 'undefined' ? transaction.pow_difficulty : transaction.difficulty
+            );
+            const minDifficulty = requireMinDifficulty(transaction.min_difficulty);
 
             let baseBytes;
             const action = transaction.action;
@@ -3975,7 +4043,7 @@ class TransactionHandler {
             // Use a random starting nonce so repeated clicks in the same block
             // produce different valid PoW solutions (and thus different tx hashes).
             const start = Math.floor(Math.random() * 0xffffffff) >>> 0;
-            worker.postMessage({ baseHex, difficulty, saltHex, start });
+            worker.postMessage({ baseHex, difficulty, minDifficulty, saltHex, start });
 
             let taken = 0;
             let powTimedOut = false;
@@ -4019,12 +4087,26 @@ class TransactionHandler {
 
                 updateNotification("Preparing and broadcasting tx");
 
+                const workerData = e ? e.data : null;
+                if (workerData && typeof workerData === 'object' && workerData.error) {
+                    try { console.error('[PoW] worker error', workerData); } catch (_) { }
+                    updateNotification("PoW failed. Please try again.", 5.0, true);
+                    wrapResolve({ success: false, error: `Proof of work failed: ${workerData.error}` });
+                    return;
+                }
+                if (typeof workerData !== 'number' || !Number.isFinite(workerData)) {
+                    try { console.error('[PoW] invalid worker response', workerData); } catch (_) { }
+                    updateNotification("PoW failed. Please try again.", 5.0, true);
+                    wrapResolve({ success: false, error: "Proof of work failed: invalid worker response." });
+                    return;
+                }
+
                 // IMPORTANT: PoW worker uses uint32 varint encoding (>>> 0). If the random start nonce is
                 // near 0xffffffff, the worker can increment past 2^32 and still validate using uint32 wrap.
                 // We MUST normalize to uint32 here so:
                 // - the signature canonical bytes match backend verification
                 // - the backend PoW digest uses the same uvarint(proof) encoding as the worker
-                const rawProof = Number(e.data);
+                const rawProof = Number(workerData);
                 const proof = rawProof >>> 0;
 
                 // Log PoW completion stats

@@ -9,7 +9,7 @@ Canonical bytes only include envelope fields (2-6) and payload fields (100+).
 Functions:
 - uvarint(n): Encode unsigned varint (64-bit cap).
 - canon_base_set_username(...), canon_base_post(...), canon_base_vote(...): Canon bytes.
-- count_leading_zero_bits(b): Count leading zero bits in digest.
+- check_pow_target(digest, difficulty, min_difficulty): Target-based PoW check.
 - argon2_digest(base, last_block_hash, proof, ...): Argon2id digest.
 - decode_b64(s): Base64 decode convenience.
 """
@@ -316,23 +316,33 @@ def canon_base_bridge_burn(
     amount: int,
 ) -> bytes:
     return canon_shared.canon_base_bridge_burn(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp),
-        destination_chain, destination_address, int(amount)
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        destination_chain,
+        destination_address,
+        int(amount),
     )
 
 
-def count_leading_zero_bits(b: bytes) -> int:
-    total = 0
-    for by in b:
-        if by == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (by >> i) & 1 == 0:
-                total += 1
-            else:
-                return total
-    return total
+_BASE_DIFFICULTY = 1000
+
+
+def check_pow_target(digest: bytes, difficulty: int, min_difficulty: int) -> bool:
+    """Check if the Argon2 digest meets the target-based difficulty.
+
+    base_target = 2^(256 - min_difficulty)
+    eff_target  = base_target * 1000 // difficulty
+    Pass if int(digest) <= eff_target.
+    """
+    if min_difficulty <= 0 or min_difficulty > 256:
+        return False
+    if difficulty < _BASE_DIFFICULTY:
+        return False
+    base_target = 1 << (256 - min_difficulty)
+    eff_target = base_target * 1000 // difficulty
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def argon2_digest(
@@ -417,7 +427,7 @@ __all__ = [
     "canon_base_upgrade_level",
     "canon_base_set_auto_renewal",
     "canon_base_bridge_burn",
-    "count_leading_zero_bits",
+    "check_pow_target",
     "argon2_digest",
     "decode_b64",
     "decode_any",
