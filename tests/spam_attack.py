@@ -206,22 +206,22 @@ def _uvarint(n: int) -> bytes:
 
 _BASE_DIFFICULTY_FACTOR = 1000
 _MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
-_POW_DIFFICULTY_STEP: float | None = None
+_POW_FACTOR: float | None = None
 
 
 def _round_half_up(value: float) -> int:
     return int(math.floor(value + 0.5))
 
 
-def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     if difficulty_steps < 0:
         return None
-    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
     if difficulty_steps == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -232,14 +232,14 @@ def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int
     return max(_BASE_DIFFICULTY_FACTOR, rounded)
 
 
-def _check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+def _check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-    if min_difficulty <= 0 or min_difficulty > 256:
+    if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    factor = _difficulty_factor(difficulty_steps, pow_factor)
     if factor is None:
         return False
-    base_target = 1 << (256 - min_difficulty)
+    base_target = 1 << (256 - pow_base_bits)
     eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
@@ -277,7 +277,7 @@ def canon_base_vote(
 def _compute_pow(
     base: bytes,
     difficulty_steps: int,
-    min_difficulty: int,
+    pow_base_bits: int,
     last_block_hash: str,
     max_seconds: float = 180.0,
     stop_check: callable = None,
@@ -289,10 +289,10 @@ def _compute_pow(
         raise RuntimeError("argon2-cffi is required for PoW") from e
     if difficulty_steps < 0:
         raise ValueError("difficulty must be >= 0")
-    if min_difficulty <= 0 or min_difficulty > 256:
-        raise ValueError("min_difficulty must be in [1, 256]")
-    if _POW_DIFFICULTY_STEP is None:
-        raise ValueError("pow_difficulty_step missing")
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        raise ValueError("pow_base_bits must be in [1, 256]")
+    if _POW_FACTOR is None:
+        raise ValueError("pow_factor missing")
 
     try:
         salt = bytes.fromhex(last_block_hash.strip())
@@ -312,7 +312,7 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _check_pow_target(digest, difficulty_steps, min_difficulty, _POW_DIFFICULTY_STEP):
+        if _check_pow_target(digest, difficulty_steps, pow_base_bits, _POW_FACTOR):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW not found in {max_seconds}s")
@@ -323,14 +323,14 @@ def _compute_pow(
 
 
 def _fetch_params(backend: str, address: Optional[str] = None) -> Tuple[str, int, int]:
-    """Fetch current block hash, difficulty, and min_difficulty."""
+    """Fetch current block hash, difficulty, and pow_base_bits."""
     st = get_status(backend, address=address)
     last_block_hash = str(st.get("last_block_hash", "") or "")
     pow_difficulty = int(st.get("pow_difficulty", 0) or 0)
-    min_difficulty = int(st.get("min_difficulty", 0) or 0)
-    global _POW_DIFFICULTY_STEP
-    _POW_DIFFICULTY_STEP = float(st["pow_difficulty_step"])
-    return last_block_hash, pow_difficulty, min_difficulty
+    pow_base_bits = int(st.get("pow_base_bits", 0) or 0)
+    global _POW_FACTOR
+    _POW_FACTOR = float(st["pow_factor"])
+    return last_block_hash, pow_difficulty, pow_base_bits
 
 
 def _post_json(url: str, payload: dict, timeout: float = 30.0) -> Tuple[int, dict]:
@@ -357,14 +357,14 @@ class SpamWorker:
         self.pub = self.wallet.public_key().public_key_bytes
         self.last_block_hash = ""
         self.difficulty = 0
-        self.min_difficulty = 0
+        self.pow_base_bits = 0
         self.created_posts: List[str] = []
         self.running = True
 
     def refresh_params(self):
         """Refresh block hash and difficulty."""
         try:
-            self.last_block_hash, self.difficulty, self.min_difficulty = _fetch_params(self.backend, self.address)
+            self.last_block_hash, self.difficulty, self.pow_base_bits = _fetch_params(self.backend, self.address)
         except Exception:
             pass
 
@@ -386,7 +386,7 @@ class SpamWorker:
             proof = _compute_pow(
                 base,
                 self.difficulty,
-                self.min_difficulty,
+                self.pow_base_bits,
                 self.last_block_hash,
                 max_seconds=180.0,
                 stop_check=lambda: not self.running,
@@ -468,7 +468,7 @@ class SpamWorker:
             proof = _compute_pow(
                 base,
                 self.difficulty,
-                self.min_difficulty,
+                self.pow_base_bits,
                 self.last_block_hash,
                 max_seconds=180.0,
                 stop_check=lambda: not self.running,
@@ -546,7 +546,7 @@ class SpamWorker:
             proof = _compute_pow(
                 base,
                 self.difficulty,
-                self.min_difficulty,
+                self.pow_base_bits,
                 self.last_block_hash,
                 max_seconds=180.0,
                 stop_check=lambda: not self.running,

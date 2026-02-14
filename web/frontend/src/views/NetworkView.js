@@ -646,7 +646,7 @@ export default function NetworkView({ state }) {
     const [cfg, setCfg] = useState({
         block_time: undefined,
         pow_difficulty: undefined,
-        pow_difficulty_step: undefined,
+        pow_factor: undefined,
         pow_message_count: undefined,
         pow_calm_sequence: undefined,
         pow_last_change_height: undefined,
@@ -705,7 +705,7 @@ export default function NetworkView({ state }) {
                         ...prev,
                         block_time: (typeof data.block_time !== 'undefined') ? Number(data.block_time) : undefined,
                         pow_difficulty: (typeof data.pow_difficulty !== 'undefined') ? Number(data.pow_difficulty) : undefined,
-                        pow_difficulty_step: (typeof data.pow_difficulty_step !== 'undefined') ? Number(data.pow_difficulty_step) : undefined,
+                        pow_factor: (typeof data.pow_factor !== 'undefined') ? Number(data.pow_factor) : undefined,
                         pow_message_count: (typeof data.pow_message_count !== 'undefined') ? Number(data.pow_message_count) : undefined,
                         pow_calm_sequence: (typeof data.pow_calm_sequence !== 'undefined') ? Number(data.pow_calm_sequence) : undefined,
                         pow_last_change_height: (typeof data.pow_last_change_height !== 'undefined') ? Number(data.pow_last_change_height) : undefined,

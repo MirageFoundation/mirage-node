@@ -7,7 +7,7 @@ This migration updates app.toml on existing deployments:
 Chain-side changes (via upgrade handler):
 - RelayMinGasPrice: 25 → 5000 (now umirage per gas, was per 1000 gas)
 - RelayMaxGasFee: 5000 → 500,000,000 (500 MIRAGE cap)
-- SubscriptionReservePercent: 40 → 80 (80% to reserve, 20% burned)
+- SubscriptionReserveFraction: 40 → 80 (80% to reserve, 20% burned)
 - MintQuantity: 100,000 → 350,000,000 (350 MIRAGE per 10min)
 - Tier period fees: 10/20/30 MIRAGE → 100K/200K/300K MIRAGE
 - Gov min_deposit: 10 MIRAGE → 500K MIRAGE ($5)

@@ -9,7 +9,7 @@ Canonical bytes only include envelope fields (2-6) and payload fields (100+).
 Functions:
 - uvarint(n): Encode unsigned varint (64-bit cap).
 - canon_base_set_username(...), canon_base_post(...), canon_base_vote(...): Canon bytes.
-- check_pow_target(digest, difficulty_steps, min_difficulty, pow_difficulty_step): Target-based PoW check.
+- check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor): Target-based PoW check.
 - argon2_digest(base, last_block_hash, proof, ...): Argon2id digest.
 - decode_b64(s): Base64 decode convenience.
 """
@@ -335,15 +335,15 @@ def _round_half_up(value: float) -> int:
     return int(math.floor(value + 0.5))
 
 
-def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     if difficulty_steps < 0:
         return None
-    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
     if difficulty_steps == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -354,19 +354,19 @@ def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int
     return max(_BASE_DIFFICULTY_FACTOR, rounded)
 
 
-def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Check if the Argon2 digest meets the target-based difficulty.
 
-    base_target = 2^(256 - min_difficulty)
-    eff_target  = base_target * 1000 // (1000 * (1 + step)^difficulty_steps)
+    base_target = 2^(256 - pow_base_bits)
+    eff_target  = base_target * 1000 // (1000 * (1 + pow_factor)^difficulty_steps)
     Pass if int(digest) <= eff_target.
     """
-    if min_difficulty <= 0 or min_difficulty > 256:
+    if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    factor = _difficulty_factor(difficulty_steps, pow_factor)
     if factor is None:
         return False
-    base_target = 1 << (256 - min_difficulty)
+    base_target = 1 << (256 - pow_base_bits)
     eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 

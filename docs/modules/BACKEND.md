@@ -252,12 +252,12 @@ def argon2_digest(base: bytes, last_block_hash: str, proof: int) -> bytes:
 
 import math
 
-def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-    if difficulty_steps < 0 or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+    if difficulty_steps < 0 or pow_factor <= 0 or pow_factor > 1:
         return False
-    base_target = 1 << (256 - min_difficulty)
-    factor = int(math.floor(1000 * (1 + pow_difficulty_step) ** difficulty_steps + 0.5))
+    base_target = 1 << (256 - pow_base_bits)
+    factor = int(math.floor(1000 * (1 + pow_factor) ** difficulty_steps + 0.5))
     eff_target = base_target * 1000 // factor
     return int.from_bytes(digest, "big") <= eff_target
 ```
@@ -266,7 +266,7 @@ def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, 
 
 1. **Difficulty Steps:** `declared_difficulty` is a step count (0 = base)
 2. **Block Hash Check:** `last_block_hash` is in recent window (configurable, typically 5 blocks)
-3. **Hash Verification:** `check_pow_target(argon2_digest(...), effective_difficulty, min_difficulty, pow_difficulty_step)`
+3. **Hash Verification:** `check_pow_target(argon2_digest(...), effective_difficulty, pow_base_bits, pow_factor)`
 
 ### Difficulty Allowance
 
@@ -280,7 +280,7 @@ def _effective_difficulty(declared: int) -> int:
     prev = info["previous_difficulty"]
     last_change = info["last_change_height"]
     height = info["current_height"]
-    allowance = params["pow_difficulty_allowance"]
+    allowance = params["pow_difficulty_grace_period"]
     
     min_required = current
     if allowance > 0 and height - last_change <= allowance:
@@ -490,7 +490,7 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /api/get_parameters` | Block hash, difficulty, min_difficulty, pow_difficulty_step, optional balance |
+| `GET /api/get_parameters` | Block hash, difficulty, pow_base_bits, pow_factor, optional balance |
 | `GET /api/get_chain_config` | Chain governance params (tiers, limits, periods) |
 | `GET /api/get_node_config` | Per-node static settings (validator info, flags) |
 | `GET /api/get_user_status` | User status (level, balance, subscription) |

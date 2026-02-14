@@ -136,15 +136,15 @@ def _round_half_up(value: float) -> int:
     return int(math.floor(value + 0.5))
 
 
-def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     if difficulty_steps < 0:
         return None
-    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+	if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
     if difficulty_steps == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+		factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -155,14 +155,14 @@ def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int
     return max(_BASE_DIFFICULTY_FACTOR, rounded)
 
 
-def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-    if min_difficulty <= 0 or min_difficulty > 256:
+	if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+	factor = _difficulty_factor(difficulty_steps, pow_factor)
     if factor is None:
         return False
-    base_target = 1 << (256 - min_difficulty)
+	base_target = 1 << (256 - pow_base_bits)
     eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
@@ -239,13 +239,13 @@ def canon_base_vote(
     )
 
 
-def compute_pow(base: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float, lb_hash: str) -> int:
+def compute_pow(base: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float, lb_hash: str) -> int:
     if _argon2_hash_raw is None:
         raise RuntimeError("argon2-cffi is required for PoW")
     if difficulty_steps < 0:
         raise ValueError("difficulty must be >= 0")
-    if min_difficulty <= 0 or min_difficulty > 256:
-        raise ValueError("min_difficulty must be in [1, 256]")
+	if pow_base_bits <= 0 or pow_base_bits > 256:
+		raise ValueError("pow_base_bits must be in [1, 256]")
     try:
         salt = bytes.fromhex(lb_hash.strip())
     except Exception:
@@ -256,7 +256,7 @@ def compute_pow(base: bytes, difficulty_steps: int, min_difficulty: int, pow_dif
     parallelism = 1
 
     _log(
-        f"[pow] argon2id: difficulty_steps={difficulty_steps} min_difficulty={min_difficulty} step={pow_difficulty_step} mem_kib={mem_kib} t={time_cost} p={parallelism}"
+		f"[pow] argon2id: difficulty_steps={difficulty_steps} pow_base_bits={pow_base_bits} pow_factor={pow_factor} mem_kib={mem_kib} t={time_cost} p={parallelism}"
     )
 
     proof = 0
@@ -281,7 +281,7 @@ def compute_pow(base: bytes, difficulty_steps: int, min_difficulty: int, pow_dif
             type=_Argon2Type.ID,
         )
         attempts += 1
-        if check_pow_target(digest, difficulty_steps, min_difficulty, pow_difficulty_step):
+		if check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor):
             total = time.perf_counter() - start
             rate = attempts / max(1e-6, total)
             _log(
@@ -466,8 +466,8 @@ def set_username(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
-    min_diff = int(st["min_difficulty"])
-    pow_step = float(st["pow_difficulty_step"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub_bytes = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -492,7 +492,7 @@ def set_username(
     else:
         # Free user mode: compute PoW
         base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), diff, ts_ms, addr, username)
-        proof = compute_pow(base, diff, min_diff, pow_step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {
@@ -543,8 +543,8 @@ def post(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
-    min_diff = int(st["min_difficulty"])
-    pow_step = float(st["pow_difficulty_step"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -595,7 +595,7 @@ def post(
             tag or "",
             0,
         )
-        proof = compute_pow(base, diff, min_diff, pow_step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {
@@ -643,8 +643,8 @@ def vote(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
-    min_diff = int(st["min_difficulty"])
-    pow_step = float(st["pow_difficulty_step"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -670,7 +670,7 @@ def vote(
     else:
         # Free user mode: compute PoW
         base = _canon_base_vote(pub, bytes.fromhex(lb), diff, ts_ms, target, int(direction))
-        proof = compute_pow(base, diff, min_diff, pow_step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {

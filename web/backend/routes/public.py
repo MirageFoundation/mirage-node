@@ -47,8 +47,8 @@ from chain import (
     get_current_pow_difficulty as _get_current_pow_difficulty,
     get_difficulty_info as _get_difficulty_info,
     get_latest_block_hash as _latest_block_hash,
-    get_min_difficulty as _get_min_difficulty,
-    get_pow_difficulty_step as _get_pow_difficulty_step,
+    get_pow_base_bits as _get_pow_base_bits,
+    get_pow_factor as _get_pow_factor,
     is_node_catching_up as _is_catching_up,
     get_connected_peers as _get_connected_peers,
 )
@@ -1921,13 +1921,13 @@ def get_parameters():
         else:
             last = _latest_block_hash()
             diff = _get_current_pow_difficulty()
-            min_diff = _get_min_difficulty()
-            pow_step = _get_pow_difficulty_step()
+            base_bits = _get_pow_base_bits()
+            pow_factor = _get_pow_factor()
             base = {
                 "last_block_hash": last,
                 "pow_difficulty": diff,
-                "min_difficulty": min_diff,
-                "pow_difficulty_step": pow_step,
+                "pow_base_bits": base_bits,
+                "pow_factor": pow_factor,
             }
             _PARAMS_CACHE["data"] = base
             _PARAMS_CACHE["expires"] = now + _PARAMS_CACHE_TTL
@@ -1940,7 +1940,7 @@ def get_parameters():
             "get_parameters.cached" if cache_hit else "get_parameters.ok",
             last=base["last_block_hash"][:8],
             diff=base["pow_difficulty"],
-            step=base.get("pow_difficulty_step"),
+            pow_factor=base.get("pow_factor"),
             operator=op_addr,
             addr=addr,
             bal=bal,
@@ -2309,7 +2309,7 @@ def get_network_stats():
             "staked_balance": staked_balance,
             "block_time": block_time,
             "pow_difficulty": int(diff_info["current_difficulty"]),
-            "pow_difficulty_step": float(_get_pow_difficulty_step()),
+            "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
             "pow_calm_sequence": int(diff_info.get("consecutive_low_usage", 0)),
             "pow_last_change_height": int(diff_info.get("last_change_height", 0)),

@@ -202,7 +202,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				"migrated", migratedCount,
 			)
 
-			// Update params with new fields (SubscriptionReservePercent, RelayMinGasPrice, RelayMaxGasFee, Tiers)
+			// Update params with new fields (SubscriptionReserveFraction, RelayMinGasPrice, RelayMaxGasFee, Tiers)
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			needsUpdate := false
 
@@ -213,11 +213,11 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.3.0-tiers: set default tiers", "count", len(params.Tiers))
 			}
 
-			// Set SubscriptionReservePercent if not set
-			if params.SubscriptionReservePercent == 0 {
-				params.SubscriptionReservePercent = 0.20 // 20% of monthly fee goes to reserve
+			// Set SubscriptionReserveFraction if not set
+			if params.SubscriptionReserveFraction == 0 {
+				params.SubscriptionReserveFraction = 0.20 // 20% of monthly fee goes to reserve
 				needsUpdate = true
-				sdkCtx.Logger().Info("v1.3.0-tiers: set SubscriptionReservePercent", "value", params.SubscriptionReservePercent)
+				sdkCtx.Logger().Info("v1.3.0-tiers: set SubscriptionReserveFraction", "value", params.SubscriptionReserveFraction)
 			}
 
 			// Set RelayMinGasPrice (25 = 0.025 umirage per gas, using /1000 divisor)
@@ -323,11 +323,11 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.5.0-social-graph: set max_envelope_age", "value", params.MaxEnvelopeAge)
 			}
 
-			// Increase subscription reserve percent from 20% to 40%
-			if params.SubscriptionReservePercent < 0.40 {
-				params.SubscriptionReservePercent = 0.40
+			// Increase subscription reserve fraction from 20% to 40%
+			if params.SubscriptionReserveFraction < 0.40 {
+				params.SubscriptionReserveFraction = 0.40
 				needsUpdate = true
-				sdkCtx.Logger().Info("v1.5.0-social-graph: set subscription_reserve_percent", "value", params.SubscriptionReservePercent)
+				sdkCtx.Logger().Info("v1.5.0-social-graph: set subscription_reserve_fraction", "value", params.SubscriptionReserveFraction)
 			}
 
 			if needsUpdate {
@@ -505,7 +505,7 @@ func (app *App) RegisterUpgradeHandlers() {
 	// v1.8.0-economics: Major economics rebalancing for 10,000x token multiplier
 	// - RelayMinGasPrice: 25 → 5000 (now umirage per gas, was per 1000 gas)
 	// - RelayMaxGasFee: 5000 → 500,000,000 (500 MIRAGE cap)
-	// - SubscriptionReservePercent: 40 → 80 (80% to reserve, 20% burned)
+	// - SubscriptionReserveFraction: 40 → 80 (80% to reserve, 20% burned)
 	// - MintQuantity: 100,000 → 350,000,000 (350 MIRAGE per 10min)
 	// - Tier period fees: 10/20/30 MIRAGE → 100K/200K/300K MIRAGE
 	// - Gov min_deposit: 10 MIRAGE → 500K MIRAGE ($5)
@@ -528,7 +528,7 @@ func (app *App) RegisterUpgradeHandlers() {
 			sdkCtx.Logger().Info("v1.8.0-economics: current core params",
 				"relay_min_gas_price", params.RelayMinGasPrice,
 				"relay_max_gas_fee", params.RelayMaxGasFee,
-				"subscription_reserve_percent", params.SubscriptionReservePercent,
+				"subscription_reserve_fraction", params.SubscriptionReserveFraction,
 				"mint_quantity", params.MintQuantity,
 				"tier1_period_fee", params.Tiers[1].PeriodFee,
 				"tier2_period_fee", params.Tiers[2].PeriodFee,
@@ -543,9 +543,9 @@ func (app *App) RegisterUpgradeHandlers() {
 			params.RelayMaxGasFee = 500_000_000
 			sdkCtx.Logger().Info("v1.8.0-economics: set relay_max_gas_fee", "value", params.RelayMaxGasFee)
 
-			// SubscriptionReservePercent: 80% to reserve, 20% burned
-			params.SubscriptionReservePercent = 0.80
-			sdkCtx.Logger().Info("v1.8.0-economics: set subscription_reserve_percent", "value", params.SubscriptionReservePercent)
+			// SubscriptionReserveFraction: 80% to reserve, 20% burned
+			params.SubscriptionReserveFraction = 0.80
+			sdkCtx.Logger().Info("v1.8.0-economics: set subscription_reserve_fraction", "value", params.SubscriptionReserveFraction)
 
 			// MintQuantity: 350 MIRAGE per 10min
 			params.MintQuantity = 350_000_000
@@ -1047,9 +1047,9 @@ func (app *App) RegisterUpgradeHandlers() {
 	// v1.11.0: Target-based PoW difficulty (gradual scaling)
 	// - Difficulty changes from bit-count to step count (0 = base, factor = 1000 * (1+step)^difficulty)
 	// - Validation changes from leadingZeroBits to big.Int target comparison
-	// - subscription_reserve_percent changes from integer percent (0-100) to double fraction [0,1]
+	// - subscription_reserve_fraction changes from integer percent (0-100) to double fraction [0,1]
 	// - bridge_attestation_threshold changes from basis points (0-10000) to double fraction [0,1]
-	// - New param: pow_difficulty_step (double, default 0.25 = 25% per step)
+	// - New param: pow_factor (double, default 0.25 = 25% per step)
 	app.UpgradeKeeper.SetUpgradeHandler(
 		"v1.11.0",
 		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
@@ -1062,7 +1062,7 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			// --- 1. Read old param values from raw protobuf bytes ---
-			// The wire type for subscription_reserve_percent (field 42) and bridge_attestation_threshold (field 51)
+			// The wire type for subscription_reserve_fraction (field 42) and bridge_attestation_threshold (field 51)
 			// changed from varint to double, so we must extract old values from raw bytes before unmarshal.
 			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
 			rawParams, err := store.Get([]byte("params"))
@@ -1082,7 +1082,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 			}
 			sdkCtx.Logger().Info("v1.11.0: extracted old param values",
-				"old_subscription_reserve_percent", oldSubReserve,
+				"old_subscription_reserve_pct", oldSubReserve,
 				"old_bridge_attestation_threshold", oldBridgeThreshold)
 
 			// --- 2. Write fresh default params first so GetParams doesn't fail ---
@@ -1095,13 +1095,13 @@ func (app *App) RegisterUpgradeHandlers() {
 			// --- 3. Now read params with new types and apply merges ---
 			params := app.CoreKeeper.GetParams(sdkCtx)
 
-			// Convert subscription_reserve_percent: old integer (0-100) → fraction [0,1]
+			// Convert subscription_reserve_fraction: old integer (0-100) → fraction [0,1]
 			newSubReserve := float64(oldSubReserve) / 100.0
 			if newSubReserve > 1 {
 				newSubReserve = 1
 			}
-			params.SubscriptionReservePercent = newSubReserve
-			sdkCtx.Logger().Info("v1.11.0: converted subscription_reserve_percent", "old", oldSubReserve, "new", newSubReserve)
+			params.SubscriptionReserveFraction = newSubReserve
+			sdkCtx.Logger().Info("v1.11.0: converted subscription_reserve_fraction", "old", oldSubReserve, "new", newSubReserve)
 
 			// Convert bridge_attestation_threshold: old basis points (0-10000) → fraction [0,1]
 			newBridgeThreshold := float64(oldBridgeThreshold) / 10000.0
@@ -1114,10 +1114,10 @@ func (app *App) RegisterUpgradeHandlers() {
 			params.BridgeAttestationThreshold = newBridgeThreshold
 			sdkCtx.Logger().Info("v1.11.0: converted bridge_attestation_threshold", "old", oldBridgeThreshold, "new", newBridgeThreshold)
 
-			// Set pow_difficulty_step if zero
-			if params.PowDifficultyStep == 0 {
-				params.PowDifficultyStep = 0.25
-				sdkCtx.Logger().Info("v1.11.0: set pow_difficulty_step", "value", 0.25)
+			// Set pow_factor if zero
+			if params.PowFactor == 0 {
+				params.PowFactor = 0.25
+				sdkCtx.Logger().Info("v1.11.0: set pow_factor", "value", 0.25)
 			}
 
 			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
@@ -1127,7 +1127,7 @@ func (app *App) RegisterUpgradeHandlers() {
 
 			// --- 4. Convert difficulty from bit-count to factor ---
 			oldDiff := app.CoreKeeper.GetCurrentDifficulty(sdkCtx)
-			minDiff := params.MinDifficulty
+			baseBits := params.PowBaseBits
 
 			// After GetCurrentDifficulty with new code, the old bit-count value was read as-is.
 			// If it's below BaseDifficultyFactor, it was an old bit-count value that needs conversion.
@@ -1138,36 +1138,36 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			baseFactor := corekeeper.BaseDifficultyFactor
-			step := params.PowDifficultyStep
+			powFactor := params.PowFactor
 			factor := oldDiff
 			if oldDiff < baseFactor {
-				// Old value is a bit-count; convert to factor: base_factor * 2^(old - minDiff)
-			shift := uint64(0)
-			if oldDiff > minDiff {
-				shift = oldDiff - minDiff
-			}
-			if shift > 53 {
-				factor = corekeeper.MaxSafeDifficultyFactor
-			} else {
-				factor = baseFactor << shift
-				if factor > corekeeper.MaxSafeDifficultyFactor {
-					factor = corekeeper.MaxSafeDifficultyFactor
+				// Old value is a bit-count; convert to factor: base_factor * 2^(old - pow_base_bits)
+				shift := uint64(0)
+				if oldDiff > baseBits {
+					shift = oldDiff - baseBits
 				}
-			}
+				if shift > 53 {
+					factor = corekeeper.MaxSafeDifficultyFactor
+				} else {
+					factor = baseFactor << shift
+					if factor > corekeeper.MaxSafeDifficultyFactor {
+						factor = corekeeper.MaxSafeDifficultyFactor
+					}
+				}
 				sdkCtx.Logger().Info("v1.11.0: converted difficulty bit-count to factor",
-					"old_bits", oldDiff, "min_diff", minDiff, "shift", shift, "factor", factor)
+					"old_bits", oldDiff, "pow_base_bits", baseBits, "shift", shift, "factor", factor)
 			} else {
 				sdkCtx.Logger().Info("v1.11.0: difficulty already in factor format", "value", oldDiff)
 			}
 
-			// Convert factor to difficulty steps: steps = log(factor/base_factor) / log(1 + step)
-			if math.IsNaN(step) || math.IsInf(step, 0) || step <= 0 || step > 1 {
-				return nil, fmt.Errorf("v1.11.0: invalid pow_difficulty_step: %v", step)
+			// Convert factor to difficulty steps: steps = log(factor/base_factor) / log(1 + pow_factor)
+			if math.IsNaN(powFactor) || math.IsInf(powFactor, 0) || powFactor <= 0 || powFactor > 1 {
+				return nil, fmt.Errorf("v1.11.0: invalid pow_factor: %v", powFactor)
 			}
 			steps := uint64(0)
 			if factor > baseFactor {
 				ratio := float64(factor) / float64(baseFactor)
-				exp := math.Log(ratio) / math.Log(1+step)
+				exp := math.Log(ratio) / math.Log(1+powFactor)
 				if math.IsNaN(exp) || math.IsInf(exp, 0) {
 					return nil, fmt.Errorf("v1.11.0: difficulty step conversion overflow")
 				}
@@ -1177,7 +1177,7 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 			}
 			sdkCtx.Logger().Info("v1.11.0: converted difficulty factor to steps",
-				"factor", factor, "step", step, "steps", steps)
+				"factor", factor, "pow_factor", powFactor, "steps", steps)
 			if err := app.CoreKeeper.SetCurrentDifficulty(sdkCtx, steps); err != nil {
 				return nil, err
 			}

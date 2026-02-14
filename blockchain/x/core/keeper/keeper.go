@@ -562,7 +562,7 @@ func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	if err == nil && len(bz) > 0 {
 		_ = k.cdc.Unmarshal(bz, &p)
 	}
-	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
+	if p.PowBaseBits == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
 		p.MaxUsernameSize == 0 || p.MaxTopicSize == 0 || p.MinUsernameSize == 0 || p.MinTopicSize == 0 || len(p.Tiers) == 0 {
 		p = types.DefaultParams()
 	}
@@ -704,8 +704,8 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		return vals[i].OperatorAddress < vals[j].OperatorAddress
 	})
 
-	// Split pools based on param MintDynamicSplit [0,1]
-	split := params.MintDynamicSplit
+	// Split pools based on param MintDynamicFraction [0,1]
+	split := params.MintDynamicFraction
 	if split < 0 {
 		split = 0
 	}
@@ -1037,7 +1037,7 @@ const MaxSafeDifficultyFactor uint64 = (1 << 53) - 1
 const MaxSafeDifficultySteps uint64 = (1 << 53) - 1
 
 // GetCurrentDifficulty returns the current dynamic difficulty step.
-// 0 = base difficulty. Higher values = harder via (1 + pow_difficulty_step)^difficulty.
+// 0 = base difficulty. Higher values = harder via (1 + pow_factor)^difficulty.
 func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())

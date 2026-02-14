@@ -213,13 +213,13 @@ func (m *TierConfig) GetCanHaveBanner() bool {
 
 // Params defines the parameters for the module.
 type Params struct {
-	// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty).
+	// pow_base_bits defines the base PoW target: base_target = 2^(256 - pow_base_bits).
 	// The dynamic difficulty is stored on-chain as integer steps (0 = base).
-	MinDifficulty uint64 `protobuf:"varint,1,opt,name=min_difficulty,json=minDifficulty,proto3" json:"min_difficulty,omitempty"`
+	PowBaseBits uint64 `protobuf:"varint,1,opt,name=pow_base_bits,json=powBaseBits,proto3" json:"pow_base_bits,omitempty"`
 	// pow_message_window is the sliding window size (in blocks) over which PoW message volume is measured
 	PowMessageWindow uint64 `protobuf:"varint,2,opt,name=pow_message_window,json=powMessageWindow,proto3" json:"pow_message_window,omitempty"`
-	// pow_message_limit: if >= this many PoW messages observed in the window, increase difficulty
-	PowMessageLimit uint64 `protobuf:"varint,3,opt,name=pow_message_limit,json=powMessageLimit,proto3" json:"pow_message_limit,omitempty"`
+	// pow_increase_threshold: if >= this many PoW messages observed in the window, increase difficulty
+	PowIncreaseThreshold uint64 `protobuf:"varint,3,opt,name=pow_increase_threshold,json=powIncreaseThreshold,proto3" json:"pow_increase_threshold,omitempty"`
 	// pow_calm_period_definition: if < this many PoW messages observed in the window, it's a calm period
 	PowCalmPeriodDefinition uint64 `protobuf:"varint,4,opt,name=pow_calm_period_definition,json=powCalmPeriodDefinition,proto3" json:"pow_calm_period_definition,omitempty"`
 	// pow_calm_sequence_threshold: number of consecutive calm periods before decreasing difficulty
@@ -230,8 +230,8 @@ type Params struct {
 	MintQuantity uint64 `protobuf:"varint,8,opt,name=mint_quantity,json=mintQuantity,proto3" json:"mint_quantity,omitempty"`
 	// block_hash_window is the number of recent committed block hashes to accept for PoW validation
 	BlockHashWindow uint64 `protobuf:"varint,9,opt,name=block_hash_window,json=blockHashWindow,proto3" json:"block_hash_window,omitempty"`
-	// pow_difficulty_allowance: number of blocks after a change where previous difficulty is accepted
-	PowDifficultyAllowance uint64 `protobuf:"varint,10,opt,name=pow_difficulty_allowance,json=powDifficultyAllowance,proto3" json:"pow_difficulty_allowance,omitempty"`
+	// pow_difficulty_grace_period: number of blocks after a change where previous difficulty is accepted
+	PowDifficultyGracePeriod uint64 `protobuf:"varint,10,opt,name=pow_difficulty_grace_period,json=powDifficultyGracePeriod,proto3" json:"pow_difficulty_grace_period,omitempty"`
 	// max_username_size is the maximum username length
 	MaxUsernameSize uint64 `protobuf:"varint,34,opt,name=max_username_size,json=maxUsernameSize,proto3" json:"max_username_size,omitempty"`
 	// max_topic_size is the maximum topic length
@@ -242,15 +242,15 @@ type Params struct {
 	MinTopicSize uint64 `protobuf:"varint,37,opt,name=min_topic_size,json=minTopicSize,proto3" json:"min_topic_size,omitempty"`
 	// mint_dynamic_credit_cap caps per-interval relay credits per validator
 	MintDynamicCreditCap uint64 `protobuf:"varint,38,opt,name=mint_dynamic_credit_cap,json=mintDynamicCreditCap,proto3" json:"mint_dynamic_credit_cap,omitempty"`
-	// mint_dynamic_split is fraction [0,1] of MintQuantity allocated to dynamic pool
-	MintDynamicSplit float64 `protobuf:"fixed64,39,opt,name=mint_dynamic_split,json=mintDynamicSplit,proto3" json:"mint_dynamic_split,omitempty"`
+	// mint_dynamic_fraction is fraction [0,1] of MintQuantity allocated to dynamic pool
+	MintDynamicFraction float64 `protobuf:"fixed64,39,opt,name=mint_dynamic_fraction,json=mintDynamicFraction,proto3" json:"mint_dynamic_fraction,omitempty"`
 	// subscription_period is the renewal period in minutes; 0 = one-time payment, 43200 = 30 days
 	SubscriptionPeriod uint64 `protobuf:"varint,40,opt,name=subscription_period,json=subscriptionPeriod,proto3" json:"subscription_period,omitempty"`
 	// tiers defines the tier configurations; index 0 = free, 1-3 = paid tiers
 	Tiers []*TierConfig `protobuf:"bytes,41,rep,name=tiers,proto3" json:"tiers,omitempty"`
-	// subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
+	// subscription_reserve_fraction is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
 	// Default: 0.80 (80% of period fee goes to reserve, 20% burned)
-	SubscriptionReservePercent float64 `protobuf:"fixed64,42,opt,name=subscription_reserve_percent,json=subscriptionReservePercent,proto3" json:"subscription_reserve_percent,omitempty"`
+	SubscriptionReserveFraction float64 `protobuf:"fixed64,42,opt,name=subscription_reserve_fraction,json=subscriptionReserveFraction,proto3" json:"subscription_reserve_fraction,omitempty"`
 	// relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
 	// Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.
 	RelayMinGasPrice uint64 `protobuf:"varint,43,opt,name=relay_min_gas_price,json=relayMinGasPrice,proto3" json:"relay_min_gas_price,omitempty"`
@@ -267,10 +267,10 @@ type Params struct {
 	// bridge_attestation_threshold is the voting power fraction required for minting [0.0, 1.0]
 	// Default: 0.6667 (66.67% of total voting power required)
 	BridgeAttestationThreshold float64 `protobuf:"fixed64,51,opt,name=bridge_attestation_threshold,json=bridgeAttestationThreshold,proto3" json:"bridge_attestation_threshold,omitempty"`
-	// pow_difficulty_step is the fractional step for the exponential difficulty factor [0.0, 1.0]
-	// Effective factor: 1000 * (1 + step)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
+	// pow_factor is the fractional step for the exponential difficulty factor [0.0, 1.0]
+	// Effective factor: 1000 * (1 + pow_factor)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
 	// Default: 0.25 (25% per step)
-	PowDifficultyStep float64 `protobuf:"fixed64,52,opt,name=pow_difficulty_step,json=powDifficultyStep,proto3" json:"pow_difficulty_step,omitempty"`
+	PowFactor float64 `protobuf:"fixed64,52,opt,name=pow_factor,json=powFactor,proto3" json:"pow_factor,omitempty"`
 }
 
 func (m *Params) Reset()         { *m = Params{} }
@@ -306,9 +306,9 @@ func (m *Params) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_Params proto.InternalMessageInfo
 
-func (m *Params) GetMinDifficulty() uint64 {
+func (m *Params) GetPowBaseBits() uint64 {
 	if m != nil {
-		return m.MinDifficulty
+		return m.PowBaseBits
 	}
 	return 0
 }
@@ -320,9 +320,9 @@ func (m *Params) GetPowMessageWindow() uint64 {
 	return 0
 }
 
-func (m *Params) GetPowMessageLimit() uint64 {
+func (m *Params) GetPowIncreaseThreshold() uint64 {
 	if m != nil {
-		return m.PowMessageLimit
+		return m.PowIncreaseThreshold
 	}
 	return 0
 }
@@ -362,9 +362,9 @@ func (m *Params) GetBlockHashWindow() uint64 {
 	return 0
 }
 
-func (m *Params) GetPowDifficultyAllowance() uint64 {
+func (m *Params) GetPowDifficultyGracePeriod() uint64 {
 	if m != nil {
-		return m.PowDifficultyAllowance
+		return m.PowDifficultyGracePeriod
 	}
 	return 0
 }
@@ -404,9 +404,9 @@ func (m *Params) GetMintDynamicCreditCap() uint64 {
 	return 0
 }
 
-func (m *Params) GetMintDynamicSplit() float64 {
+func (m *Params) GetMintDynamicFraction() float64 {
 	if m != nil {
-		return m.MintDynamicSplit
+		return m.MintDynamicFraction
 	}
 	return 0
 }
@@ -425,9 +425,9 @@ func (m *Params) GetTiers() []*TierConfig {
 	return nil
 }
 
-func (m *Params) GetSubscriptionReservePercent() float64 {
+func (m *Params) GetSubscriptionReserveFraction() float64 {
 	if m != nil {
-		return m.SubscriptionReservePercent
+		return m.SubscriptionReserveFraction
 	}
 	return 0
 }
@@ -467,9 +467,9 @@ func (m *Params) GetBridgeAttestationThreshold() float64 {
 	return 0
 }
 
-func (m *Params) GetPowDifficultyStep() float64 {
+func (m *Params) GetPowFactor() float64 {
 	if m != nil {
-		return m.PowDifficultyStep
+		return m.PowFactor
 	}
 	return 0
 }
@@ -719,13 +719,13 @@ func (this *Params) Equal(that interface{}) bool {
 	} else if this == nil {
 		return false
 	}
-	if this.MinDifficulty != that1.MinDifficulty {
+	if this.PowBaseBits != that1.PowBaseBits {
 		return false
 	}
 	if this.PowMessageWindow != that1.PowMessageWindow {
 		return false
 	}
-	if this.PowMessageLimit != that1.PowMessageLimit {
+	if this.PowIncreaseThreshold != that1.PowIncreaseThreshold {
 		return false
 	}
 	if this.PowCalmPeriodDefinition != that1.PowCalmPeriodDefinition {
@@ -743,7 +743,7 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.BlockHashWindow != that1.BlockHashWindow {
 		return false
 	}
-	if this.PowDifficultyAllowance != that1.PowDifficultyAllowance {
+	if this.PowDifficultyGracePeriod != that1.PowDifficultyGracePeriod {
 		return false
 	}
 	if this.MaxUsernameSize != that1.MaxUsernameSize {
@@ -761,7 +761,7 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.MintDynamicCreditCap != that1.MintDynamicCreditCap {
 		return false
 	}
-	if this.MintDynamicSplit != that1.MintDynamicSplit {
+	if this.MintDynamicFraction != that1.MintDynamicFraction {
 		return false
 	}
 	if this.SubscriptionPeriod != that1.SubscriptionPeriod {
@@ -775,7 +775,7 @@ func (this *Params) Equal(that interface{}) bool {
 			return false
 		}
 	}
-	if this.SubscriptionReservePercent != that1.SubscriptionReservePercent {
+	if this.SubscriptionReserveFraction != that1.SubscriptionReserveFraction {
 		return false
 	}
 	if this.RelayMinGasPrice != that1.RelayMinGasPrice {
@@ -798,7 +798,7 @@ func (this *Params) Equal(that interface{}) bool {
 	if this.BridgeAttestationThreshold != that1.BridgeAttestationThreshold {
 		return false
 	}
-	if this.PowDifficultyStep != that1.PowDifficultyStep {
+	if this.PowFactor != that1.PowFactor {
 		return false
 	}
 	return true
@@ -1000,9 +1000,9 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.PowDifficultyStep != 0 {
+	if m.PowFactor != 0 {
 		i -= 8
-		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.PowDifficultyStep))))
+		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.PowFactor))))
 		i--
 		dAtA[i] = 0x3
 		i--
@@ -1053,9 +1053,9 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xd8
 	}
-	if m.SubscriptionReservePercent != 0 {
+	if m.SubscriptionReserveFraction != 0 {
 		i -= 8
-		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.SubscriptionReservePercent))))
+		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.SubscriptionReserveFraction))))
 		i--
 		dAtA[i] = 0x2
 		i--
@@ -1084,9 +1084,9 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0xc0
 	}
-	if m.MintDynamicSplit != 0 {
+	if m.MintDynamicFraction != 0 {
 		i -= 8
-		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.MintDynamicSplit))))
+		encoding_binary.LittleEndian.PutUint64(dAtA[i:], uint64(math.Float64bits(float64(m.MintDynamicFraction))))
 		i--
 		dAtA[i] = 0x2
 		i--
@@ -1127,8 +1127,8 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x90
 	}
-	if m.PowDifficultyAllowance != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.PowDifficultyAllowance))
+	if m.PowDifficultyGracePeriod != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.PowDifficultyGracePeriod))
 		i--
 		dAtA[i] = 0x50
 	}
@@ -1157,8 +1157,8 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x20
 	}
-	if m.PowMessageLimit != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.PowMessageLimit))
+	if m.PowIncreaseThreshold != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.PowIncreaseThreshold))
 		i--
 		dAtA[i] = 0x18
 	}
@@ -1167,8 +1167,8 @@ func (m *Params) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x10
 	}
-	if m.MinDifficulty != 0 {
-		i = encodeVarintParams(dAtA, i, uint64(m.MinDifficulty))
+	if m.PowBaseBits != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.PowBaseBits))
 		i--
 		dAtA[i] = 0x8
 	}
@@ -1300,14 +1300,14 @@ func (m *Params) Size() (n int) {
 	}
 	var l int
 	_ = l
-	if m.MinDifficulty != 0 {
-		n += 1 + sovParams(uint64(m.MinDifficulty))
+	if m.PowBaseBits != 0 {
+		n += 1 + sovParams(uint64(m.PowBaseBits))
 	}
 	if m.PowMessageWindow != 0 {
 		n += 1 + sovParams(uint64(m.PowMessageWindow))
 	}
-	if m.PowMessageLimit != 0 {
-		n += 1 + sovParams(uint64(m.PowMessageLimit))
+	if m.PowIncreaseThreshold != 0 {
+		n += 1 + sovParams(uint64(m.PowIncreaseThreshold))
 	}
 	if m.PowCalmPeriodDefinition != 0 {
 		n += 1 + sovParams(uint64(m.PowCalmPeriodDefinition))
@@ -1324,8 +1324,8 @@ func (m *Params) Size() (n int) {
 	if m.BlockHashWindow != 0 {
 		n += 1 + sovParams(uint64(m.BlockHashWindow))
 	}
-	if m.PowDifficultyAllowance != 0 {
-		n += 1 + sovParams(uint64(m.PowDifficultyAllowance))
+	if m.PowDifficultyGracePeriod != 0 {
+		n += 1 + sovParams(uint64(m.PowDifficultyGracePeriod))
 	}
 	if m.MaxUsernameSize != 0 {
 		n += 2 + sovParams(uint64(m.MaxUsernameSize))
@@ -1342,7 +1342,7 @@ func (m *Params) Size() (n int) {
 	if m.MintDynamicCreditCap != 0 {
 		n += 2 + sovParams(uint64(m.MintDynamicCreditCap))
 	}
-	if m.MintDynamicSplit != 0 {
+	if m.MintDynamicFraction != 0 {
 		n += 10
 	}
 	if m.SubscriptionPeriod != 0 {
@@ -1354,7 +1354,7 @@ func (m *Params) Size() (n int) {
 			n += 2 + l + sovParams(uint64(l))
 		}
 	}
-	if m.SubscriptionReservePercent != 0 {
+	if m.SubscriptionReserveFraction != 0 {
 		n += 10
 	}
 	if m.RelayMinGasPrice != 0 {
@@ -1375,7 +1375,7 @@ func (m *Params) Size() (n int) {
 	if m.BridgeAttestationThreshold != 0 {
 		n += 10
 	}
-	if m.PowDifficultyStep != 0 {
+	if m.PowFactor != 0 {
 		n += 10
 	}
 	return n
@@ -1826,9 +1826,9 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MinDifficulty", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field PowBaseBits", wireType)
 			}
-			m.MinDifficulty = 0
+		m.PowBaseBits = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -1838,7 +1838,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MinDifficulty |= uint64(b&0x7F) << shift
+			m.PowBaseBits |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1864,9 +1864,9 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 		case 3:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PowMessageLimit", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field PowIncreaseThreshold", wireType)
 			}
-			m.PowMessageLimit = 0
+		m.PowIncreaseThreshold = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -1876,7 +1876,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.PowMessageLimit |= uint64(b&0x7F) << shift
+			m.PowIncreaseThreshold |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -1978,9 +1978,9 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 		case 10:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PowDifficultyAllowance", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field PowDifficultyGracePeriod", wireType)
 			}
-			m.PowDifficultyAllowance = 0
+		m.PowDifficultyGracePeriod = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowParams
@@ -1990,7 +1990,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.PowDifficultyAllowance |= uint64(b&0x7F) << shift
+			m.PowDifficultyGracePeriod |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -2092,7 +2092,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 		case 39:
 			if wireType != 1 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MintDynamicSplit", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field MintDynamicFraction", wireType)
 			}
 			var v uint64
 			if (iNdEx + 8) > l {
@@ -2100,7 +2100,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 			v = uint64(encoding_binary.LittleEndian.Uint64(dAtA[iNdEx:]))
 			iNdEx += 8
-			m.MintDynamicSplit = float64(math.Float64frombits(v))
+		m.MintDynamicFraction = float64(math.Float64frombits(v))
 		case 40:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionPeriod", wireType)
@@ -2156,7 +2156,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 42:
 			if wireType != 1 {
-				return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionReservePercent", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field SubscriptionReserveFraction", wireType)
 			}
 			var v uint64
 			if (iNdEx + 8) > l {
@@ -2164,7 +2164,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 			v = uint64(encoding_binary.LittleEndian.Uint64(dAtA[iNdEx:]))
 			iNdEx += 8
-			m.SubscriptionReservePercent = float64(math.Float64frombits(v))
+		m.SubscriptionReserveFraction = float64(math.Float64frombits(v))
 		case 43:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field RelayMinGasPrice", wireType)
@@ -2269,7 +2269,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			m.BridgeAttestationThreshold = float64(math.Float64frombits(v))
 		case 52:
 			if wireType != 1 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PowDifficultyStep", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field PowFactor", wireType)
 			}
 			var v uint64
 			if (iNdEx + 8) > l {
@@ -2277,7 +2277,7 @@ func (m *Params) Unmarshal(dAtA []byte) error {
 			}
 			v = uint64(encoding_binary.LittleEndian.Uint64(dAtA[iNdEx:]))
 			iNdEx += 8
-			m.PowDifficultyStep = float64(math.Float64frombits(v))
+		m.PowFactor = float64(math.Float64frombits(v))
 		default:
 			iNdEx = preIndex
 			skippy, err := skipParams(dAtA[iNdEx:])

@@ -56,13 +56,13 @@ def test_difficulty_ramp():
         log.error("Could not fetch params. Is the node running?")
         return
 
-    pow_step = params.get("pow_difficulty_step")
-    min_diff = params.get("min_difficulty")
+    pow_factor = params.get("pow_factor")
+    base_bits = params.get("pow_base_bits")
     
-    log.info(f"Chain Params: pow_step={pow_step}, min_diff={min_diff}")
+    log.info(f"Chain Params: pow_factor={pow_factor}, pow_base_bits={base_bits}")
 
-    if pow_step is None:
-        log.error("pow_difficulty_step missing from params!")
+    if pow_factor is None:
+        log.error("pow_factor missing from params!")
         return
 
     # 2. Check current difficulty
@@ -76,7 +76,7 @@ def test_difficulty_ramp():
     # (it exposes steps now), but we can verify that our local calculation matches
     # what the frontend/backend would expect.
     
-    expected_factor = calculate_expected_factor(current_steps, pow_step)
+    expected_factor = calculate_expected_factor(current_steps, pow_factor)
     log.info(f"Expected Work Factor for step {current_steps}: {expected_factor}")
     
     # 4. Simulate Ramp Up (Conceptual)
@@ -87,14 +87,14 @@ def test_difficulty_ramp():
     log.info("Verifying Ramp Formula for next 10 steps:")
     for i in range(1, 11):
         next_step = current_steps + i
-        factor = calculate_expected_factor(next_step, pow_step)
+        factor = calculate_expected_factor(next_step, pow_factor)
         multiplier = factor / 1000.0
         log.info(f"  Step {next_step}: Factor {factor} ({multiplier:.2f}x)")
         
         # Sanity checks
         if i == 1:
             # Step 1 should be roughly 1 + step_size
-            expected_mult = 1 + pow_step
+            expected_mult = 1 + pow_factor
             if abs(multiplier - expected_mult) > 0.01:
                 log.error(f"  [FAIL] Step 1 multiplier {multiplier} != expected {expected_mult}")
             else:

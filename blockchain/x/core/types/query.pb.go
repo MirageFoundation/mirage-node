@@ -168,8 +168,8 @@ type QueryDifficultyResponse struct {
 	LatestBlockHash string `protobuf:"bytes,6,opt,name=latest_block_hash,json=latestBlockHash,proto3" json:"latest_block_hash,omitempty"`
 	// current_height is the current block height
 	CurrentHeight int64 `protobuf:"varint,7,opt,name=current_height,json=currentHeight,proto3" json:"current_height,omitempty"`
-	// min_difficulty is the base difficulty (leading zero bits) used to compute the PoW target
-	MinDifficulty uint64 `protobuf:"varint,8,opt,name=min_difficulty,json=minDifficulty,proto3" json:"min_difficulty,omitempty"`
+	// pow_base_bits is the base difficulty (leading zero bits) used to compute the PoW target
+	PowBaseBits uint64 `protobuf:"varint,8,opt,name=pow_base_bits,json=powBaseBits,proto3" json:"pow_base_bits,omitempty"`
 }
 
 func (m *QueryDifficultyResponse) Reset()         { *m = QueryDifficultyResponse{} }
@@ -254,9 +254,9 @@ func (m *QueryDifficultyResponse) GetCurrentHeight() int64 {
 	return 0
 }
 
-func (m *QueryDifficultyResponse) GetMinDifficulty() uint64 {
+func (m *QueryDifficultyResponse) GetPowBaseBits() uint64 {
 	if m != nil {
-		return m.MinDifficulty
+		return m.PowBaseBits
 	}
 	return 0
 }
@@ -1958,8 +1958,8 @@ func (m *QueryDifficultyResponse) MarshalToSizedBuffer(dAtA []byte) (int, error)
 	_ = i
 	var l int
 	_ = l
-	if m.MinDifficulty != 0 {
-		i = encodeVarintQuery(dAtA, i, uint64(m.MinDifficulty))
+	if m.PowBaseBits != 0 {
+		i = encodeVarintQuery(dAtA, i, uint64(m.PowBaseBits))
 		i--
 		dAtA[i] = 0x40
 	}
@@ -2882,8 +2882,8 @@ func (m *QueryDifficultyResponse) Size() (n int) {
 	if m.CurrentHeight != 0 {
 		n += 1 + sovQuery(uint64(m.CurrentHeight))
 	}
-	if m.MinDifficulty != 0 {
-		n += 1 + sovQuery(uint64(m.MinDifficulty))
+	if m.PowBaseBits != 0 {
+		n += 1 + sovQuery(uint64(m.PowBaseBits))
 	}
 	return n
 }
@@ -3629,9 +3629,9 @@ func (m *QueryDifficultyResponse) Unmarshal(dAtA []byte) error {
 			}
 		case 8:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MinDifficulty", wireType)
+			return fmt.Errorf("proto: wrong wireType = %d for field PowBaseBits", wireType)
 			}
-			m.MinDifficulty = 0
+		m.PowBaseBits = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowQuery
@@ -3641,7 +3641,7 @@ func (m *QueryDifficultyResponse) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.MinDifficulty |= uint64(b&0x7F) << shift
+			m.PowBaseBits |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

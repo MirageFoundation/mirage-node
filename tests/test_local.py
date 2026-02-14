@@ -350,21 +350,21 @@ def setup_test_wallets(backend: str) -> bool:
 # Transaction helpers
 # ---------------------------------------------------------------------------
 
-# Global PoW step cache (set during param fetch)
-_POW_STEP: float = 0.25
+# Global PoW factor cache (set during param fetch)
+_POW_FACTOR: float = 0.25
 
 
 def _fetch_params(backend: str, address: str | None = None) -> tuple:
-    """Returns (last_block_hash, pow_difficulty, min_difficulty, pow_difficulty_step, balance)."""
-    global _POW_STEP
+    """Returns (last_block_hash, pow_difficulty, pow_base_bits, pow_factor, balance)."""
+    global _POW_FACTOR
     st = get_status(backend, address=address)
     lb = str(st.get("last_block_hash", ""))
     diff = int(st.get("pow_difficulty", 0) or 0)
-    min_diff = int(st.get("min_difficulty", 0) or 0)
-    step = float(st.get("pow_difficulty_step", 0.25))
+    base_bits = int(st.get("pow_base_bits", 0) or 0)
+    pow_factor = float(st.get("pow_factor", 0.25))
     bal = int(st["balance"]) if st.get("balance") is not None else 0
-    _POW_STEP = step
-    return lb, diff, min_diff, step, bal
+    _POW_FACTOR = pow_factor
+    return lb, diff, base_bits, pow_factor, bal
 
 
 def _do_post(backend: str, wallet, topic: str, title: str, content: str,
@@ -619,23 +619,23 @@ def test_params(backend: str):
         _fail("params.get_parameters returns valid data", f"code={code}")
         return  # can't continue without params
 
-    # 1.2 pow_difficulty_step is float in (0,1]
-    step = data.get("pow_difficulty_step")
+    # 1.2 pow_factor is float in (0,1]
+    step = data.get("pow_factor")
     try:
         fstep = float(step)
         if 0 < fstep <= 1:
-            _pass("params.pow_difficulty_step valid", value=fstep)
+            _pass("params.pow_factor valid", value=fstep)
         else:
-            _fail("params.pow_difficulty_step valid", f"out of range: {fstep}")
+            _fail("params.pow_factor valid", f"out of range: {fstep}")
     except Exception as e:
-        _fail("params.pow_difficulty_step valid", str(e))
+        _fail("params.pow_factor valid", str(e))
 
-    # 1.3 min_difficulty present and > 0
-    md = data.get("min_difficulty")
+    # 1.3 pow_base_bits present and > 0
+    md = data.get("pow_base_bits")
     if md and int(md) > 0:
-        _pass("params.min_difficulty > 0", value=int(md))
+        _pass("params.pow_base_bits > 0", value=int(md))
     else:
-        _fail("params.min_difficulty > 0", f"got {md}")
+        _fail("params.pow_base_bits > 0", f"got {md}")
 
     # 1.4 pow_difficulty is int >= 0
     pd = data.get("pow_difficulty")
@@ -647,11 +647,11 @@ def test_params(backend: str):
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")
     if code2 == 200 and stats.get("pow_difficulty") is not None:
-        if str(stats.get("pow_difficulty_step")) == str(data.get("pow_difficulty_step")):
+        if str(stats.get("pow_factor")) == str(data.get("pow_factor")):
             _pass("params.network_stats consistent with get_parameters")
         else:
             _fail("params.network_stats consistent with get_parameters",
-                  f"step mismatch: {stats.get('pow_difficulty_step')} vs {data.get('pow_difficulty_step')}")
+                  f"step mismatch: {stats.get('pow_factor')} vs {data.get('pow_factor')}")
     else:
         _fail("params.network_stats consistent with get_parameters", f"code={code2}")
 
@@ -1101,9 +1101,9 @@ def test_pow_v1110(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, step, _ = _fetch_params(backend, addr)
 
-    # 6.1 pow_difficulty_step present and valid
+    # 6.1 pow_factor present and valid
     if 0 < step <= 1:
         _pass("pow.difficulty_step valid", value=step)
     else:

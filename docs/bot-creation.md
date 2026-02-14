@@ -74,25 +74,25 @@ def sign(privkey: bytes, message: bytes) -> bytes:
 
 # ── Proof of Work ───────────────────────────────────────────────────
 # difficulty is a step count (0 = base). Effective factor = 1000 * (1 + step)^difficulty.
-# min_difficulty defines the base target: base_target = 2^(256 - min_difficulty).
+# pow_base_bits defines the base target: base_target = 2^(256 - pow_base_bits).
 # A hash passes if int(hash) <= base_target * 1000 // factor.
 
 def _round_half_up(x: float) -> int:
     return int(math.floor(x + 0.5))
 
-def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int:
-    return _round_half_up(1000 * (1 + pow_difficulty_step) ** difficulty_steps)
+def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int:
+    return _round_half_up(1000 * (1 + pow_factor) ** difficulty_steps)
 
-def check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
-    if difficulty_steps < 0 or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
+    if difficulty_steps < 0 or pow_factor <= 0 or pow_factor > 1:
         return False
-    base_target = 1 << (256 - min_difficulty)
-    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    base_target = 1 << (256 - pow_base_bits)
+    factor = _difficulty_factor(difficulty_steps, pow_factor)
     eff_target = base_target * 1000 // factor
     return int.from_bytes(digest, "big") <= eff_target
 
 def compute_pow(
-    base: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float, block_hash_hex: str, max_seconds: float = 120
+    base: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float, block_hash_hex: str, max_seconds: float = 120
 ) -> int:
     salt = bytes.fromhex(block_hash_hex)
     start = time.time()
@@ -103,7 +103,7 @@ def compute_pow(
         password = base + b":" + uvarint(nonce)
         digest = hash_secret_raw(password, salt, time_cost=1, memory_cost=4096,
                                  parallelism=1, hash_len=32, type=Argon2Type.ID)
-        if check_pow_target(digest, difficulty_steps, min_difficulty, pow_difficulty_step):
+        if check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor):
             return nonce
         nonce += 1
 
@@ -148,13 +148,13 @@ def insert_pow(base: bytes, pow_val: int) -> bytes:
 
 # ── API Helpers ─────────────────────────────────────────────────────
 def get_params() -> tuple[str, int, int, float]:
-    """Return (last_block_hash, pow_difficulty, min_difficulty, pow_difficulty_step)."""
+    """Return (last_block_hash, pow_difficulty, pow_base_bits, pow_factor)."""
     r = requests.get(f"{NODE}/api/get_parameters?address={ADDRESS}").json()
     return (
         r["last_block_hash"],
         int(r["pow_difficulty"]),
-        int(r["min_difficulty"]),
-        float(r["pow_difficulty_step"]),
+        int(r["pow_base_bits"]),
+        float(r["pow_factor"]),
     )
 
 def get_user_level() -> int:
@@ -167,8 +167,8 @@ def submit(
     fields: dict,
     block_hash: str,
     difficulty: int,
-    min_difficulty: int,
-    pow_difficulty_step: float,
+    pow_base_bits: int,
+    pow_factor: float,
     ts_ms: int,
 ):
     """Compute PoW (if needed), sign, and POST."""
@@ -177,7 +177,7 @@ def submit(
         pow_val = 0
         use_diff = 0
     else:
-        pow_val = compute_pow(base, difficulty, min_difficulty, pow_difficulty_step, block_hash)
+        pow_val = compute_pow(base, difficulty, pow_base_bits, pow_factor, block_hash)
         use_diff = difficulty
 
     signed_bytes = insert_pow(base, pow_val)
@@ -272,7 +272,7 @@ if __name__ == "__main__":
 
 1. **Wallet** — `cosmpy` derives a secp256k1 keypair + `mirage1...` address from a BIP39 mnemonic.
 
-2. **Parameters** — `GET /api/get_parameters` returns `last_block_hash`, `pow_difficulty` (step count), `pow_difficulty_step`, and `min_difficulty`. These anchor every request to a recent block.
+2. **Parameters** — `GET /api/get_parameters` returns `last_block_hash`, `pow_difficulty` (step count), `pow_factor`, and `pow_base_bits`. These anchor every request to a recent block.
 
 3. **Canonical bytes** — Each message type has a deterministic byte encoding:
 
@@ -287,7 +287,7 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
   ...
 ```
 
-4. **Proof of Work** — Free users must solve Argon2id PoW using a target-based system. The hash (as a 256-bit integer) must be <= `base_target * 1000 / factor`, where `factor = 1000 * (1 + pow_difficulty_step)^difficulty`. The nonce is inserted as `tag5` between difficulty and timestamp. Subscribers (level >= 1) skip PoW.
+4. **Proof of Work** — Free users must solve Argon2id PoW using a target-based system. The hash (as a 256-bit integer) must be <= `base_target * 1000 / factor`, where `factor = 1000 * (1 + pow_factor)^difficulty`. The nonce is inserted as `tag5` between difficulty and timestamp. Subscribers (level >= 1) skip PoW.
 
 5. **Signature** — ECDSA-SHA256 over the final canonical bytes (with PoW inserted). Low-S normalized, 64-byte compact format.
 

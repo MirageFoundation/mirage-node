@@ -100,16 +100,16 @@ def get_current_pow_difficulty() -> int:
     return int(info["current_difficulty"])
 
 
-def get_min_difficulty() -> int:
-    """Get min_difficulty (base target bits) from chain params."""
+def get_pow_base_bits() -> int:
+    """Get pow_base_bits (base target bits) from chain params."""
     from params import expect_params
-    return int(expect_params()["min_difficulty"])
+    return int(expect_params()["pow_base_bits"])
 
 
-def get_pow_difficulty_step() -> float:
-    """Get pow_difficulty_step (fractional step) from chain params."""
+def get_pow_factor() -> float:
+    """Get pow_factor (fractional step) from chain params."""
     from params import expect_params
-    return float(expect_params()["pow_difficulty_step"])
+    return float(expect_params()["pow_factor"])
 
 
 # Cache for recent block hashes
@@ -379,7 +379,8 @@ __all__ = [
     "get_recent_block_hashes",
     "is_valid_recent_block_hash",
     "get_current_pow_difficulty",
-    "get_pow_difficulty_step",
+    "get_pow_factor",
+    "get_pow_base_bits",
     "get_block_time_seconds",
     "is_node_catching_up",
     "classify_reject",

@@ -4,9 +4,9 @@ Verify v1.11.0 chain upgrade — checks ONLY what changed in this release.
 
 What v1.11.0 changed:
 - PoW difficulty: bit-count/factor → step-based (0 = base)
-- Effective factor: 1000 * (1 + pow_difficulty_step)^difficulty
-- pow_difficulty_step: new governable double param (default 0.25)
-- subscription_reserve_percent: integer percent → double fraction [0,1]
+- Effective factor: 1000 * (1 + pow_factor)^difficulty
+- pow_factor: new governable double param (default 0.25)
+- subscription_reserve_fraction: integer percent → double fraction [0,1]
 - bridge_attestation_threshold: basis points → double fraction [0,1]
 - Upgrade handler migrates old difficulty values to step counts
 
@@ -116,7 +116,7 @@ def check_difficulty_steps(miraged: str, rpc: str, failures: list[str]) -> None:
 
 
 def check_param_types(miraged: str, rpc: str, failures: list[str]) -> None:
-    """Verify v1.11.0 param type changes: new doubles, new pow_difficulty_step."""
+    """Verify v1.11.0 param type changes: new doubles, new pow_factor."""
     print("\n-> Checking v1.11.0 param types...")
     try:
         raw = _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
@@ -126,39 +126,39 @@ def check_param_types(miraged: str, rpc: str, failures: list[str]) -> None:
         failures.append(f"cannot fetch core params: {e}")
         return
 
-    # pow_difficulty_step must exist and be a float in (0, 1]
-    step = params.get("pow_difficulty_step")
+    # pow_factor must exist and be a float in (0, 1]
+    step = params.get("pow_factor")
     if step is not None:
         try:
             fstep = float(step)
             if 0 < fstep <= 1:
-                print(f"   [OK] pow_difficulty_step = {fstep}")
+                print(f"   [OK] pow_factor = {fstep}")
             else:
-                print(f"   [FAIL] pow_difficulty_step = {fstep} (must be in (0, 1])")
-                failures.append(f"pow_difficulty_step out of range: {fstep}")
+                print(f"   [FAIL] pow_factor = {fstep} (must be in (0, 1])")
+                failures.append(f"pow_factor out of range: {fstep}")
         except (ValueError, TypeError) as e:
-            print(f"   [FAIL] pow_difficulty_step not a valid float: {step!r}")
-            failures.append(f"pow_difficulty_step invalid: {step!r}")
+            print(f"   [FAIL] pow_factor not a valid float: {step!r}")
+            failures.append(f"pow_factor invalid: {step!r}")
     else:
-        print("   [FAIL] pow_difficulty_step missing from params")
-        failures.append("pow_difficulty_step missing")
+        print("   [FAIL] pow_factor missing from params")
+        failures.append("pow_factor missing")
 
-    # subscription_reserve_percent must be a float in [0, 1]
-    srp = params.get("subscription_reserve_percent")
+    # subscription_reserve_fraction must be a float in [0, 1]
+    srp = params.get("subscription_reserve_fraction")
     if srp is not None:
         try:
             fsrp = float(srp)
             if 0 <= fsrp <= 1:
-                print(f"   [OK] subscription_reserve_percent = {fsrp} (double fraction)")
+                print(f"   [OK] subscription_reserve_fraction = {fsrp} (double fraction)")
             else:
-                print(f"   [FAIL] subscription_reserve_percent = {fsrp} (expected [0, 1])")
-                failures.append(f"subscription_reserve_percent out of range: {fsrp}")
+                print(f"   [FAIL] subscription_reserve_fraction = {fsrp} (expected [0, 1])")
+                failures.append(f"subscription_reserve_fraction out of range: {fsrp}")
         except (ValueError, TypeError):
-            print(f"   [FAIL] subscription_reserve_percent not float: {srp!r}")
-            failures.append(f"subscription_reserve_percent invalid: {srp!r}")
+            print(f"   [FAIL] subscription_reserve_fraction not float: {srp!r}")
+            failures.append(f"subscription_reserve_fraction invalid: {srp!r}")
     else:
-        print("   [FAIL] subscription_reserve_percent missing")
-        failures.append("subscription_reserve_percent missing")
+        print("   [FAIL] subscription_reserve_fraction missing")
+        failures.append("subscription_reserve_fraction missing")
 
     # bridge_attestation_threshold must be a float in [0, 1]
     bat = params.get("bridge_attestation_threshold")
@@ -249,16 +249,16 @@ def check_source_level(failures: list[str]) -> None:
         REPO_ROOT / "web" / "backend" / "pow.py",
         [
             ("_BASE_DIFFICULTY_FACTOR", "pow.py: step-based factor", "pow.py: step-based factor missing"),
-            ("pow_difficulty_step", "pow.py: pow_difficulty_step", "pow.py: pow_difficulty_step missing"),
+            ("pow_factor", "pow.py: pow_factor", "pow.py: pow_factor missing"),
         ],
     )
     _check(
         REPO_ROOT / "web" / "backend" / "params.py",
         [
             (
-                "re:_REQUIRED_FLOAT_PARAMS.*pow_difficulty_step",
-                "params.py: pow_difficulty_step as float",
-                "params.py: pow_difficulty_step not float",
+                "re:_REQUIRED_FLOAT_PARAMS.*pow_factor",
+                "params.py: pow_factor as float",
+                "params.py: pow_factor not float",
             ),
         ],
     )
@@ -284,9 +284,9 @@ def check_source_level(failures: list[str]) -> None:
         REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js",
         [
             (
-                "pow_difficulty_step",
-                "TransactionHandler.js: pow_difficulty_step",
-                "TransactionHandler.js: pow_difficulty_step missing",
+                "pow_factor",
+                "TransactionHandler.js: pow_factor",
+                "TransactionHandler.js: pow_factor missing",
             ),
         ],
     )

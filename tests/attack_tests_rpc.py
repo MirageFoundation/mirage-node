@@ -63,7 +63,7 @@ from shared.datatypes import (
 
 MIN_GAS_PRICE = 0.025
 RPC_URL = ""
-_POW_DIFFICULTY_STEP: float | None = None
+_POW_FACTOR: float | None = None
 
 # Default RPC
 DEFAULT_RPC = "http://127.0.0.1:26657"
@@ -156,15 +156,15 @@ def _rpc_abci_uint64(key_name: str, timeout_s: float = 3.0) -> int:
 
 
 def _rpc_get_current_pow_difficulty(timeout_s: float = 3.0) -> tuple[int, int]:
-    """Return (current_difficulty, min_difficulty) from on-chain state."""
-    global _POW_DIFFICULTY_STEP
+    """Return (current_difficulty, pow_base_bits) from on-chain state."""
+    global _POW_FACTOR
     diff = _rpc_abci_uint64("current_difficulty", timeout_s)
-    min_diff = _rpc_abci_uint64("min_difficulty", timeout_s)
-    _POW_DIFFICULTY_STEP = _rpc_get_pow_difficulty_step(timeout_s)
-    return diff, min_diff
+    base_bits = _rpc_abci_uint64("pow_base_bits", timeout_s)
+    _POW_FACTOR = _rpc_get_pow_factor(timeout_s)
+    return diff, base_bits
 
 
-def _rpc_get_pow_difficulty_step(timeout_s: float = 3.0) -> float:
+def _rpc_get_pow_factor(timeout_s: float = 3.0) -> float:
     if not RPC_URL:
         raise RuntimeError("RPC_URL not set")
     # Prefer LCD if available
@@ -176,9 +176,9 @@ def _rpc_get_pow_difficulty_step(timeout_s: float = 3.0) -> float:
         r.raise_for_status()
         data = r.json() or {}
     params = data.get("params") or {}
-    if "pow_difficulty_step" not in params:
-        raise RuntimeError("pow_difficulty_step missing from params")
-    return float(params["pow_difficulty_step"])
+    if "pow_factor" not in params:
+        raise RuntimeError("pow_factor missing from params")
+    return float(params["pow_factor"])
 
 
 def _uvarint(n: int) -> bytes:
@@ -196,7 +196,7 @@ def _uvarint(n: int) -> bytes:
 
 
 def _compute_pow(
-    base: bytes, difficulty_steps: int, min_difficulty: int, last_block_hash: str, max_seconds: float = 20.0
+    base: bytes, difficulty_steps: int, pow_base_bits: int, last_block_hash: str, max_seconds: float = 20.0
 ) -> int:
     try:
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
@@ -204,10 +204,10 @@ def _compute_pow(
         raise RuntimeError("argon2-cffi is required for PoW tests") from e
     if difficulty_steps < 0:
         raise ValueError("difficulty must be >= 0")
-    if min_difficulty <= 0 or min_difficulty > 256:
-        raise ValueError("min_difficulty must be in [1, 256]")
-    if _POW_DIFFICULTY_STEP is None:
-        raise ValueError("pow_difficulty_step missing")
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        raise ValueError("pow_base_bits must be in [1, 256]")
+    if _POW_FACTOR is None:
+        raise ValueError("pow_factor missing")
     try:
         salt = bytes.fromhex(last_block_hash.strip())
     except Exception:
@@ -224,7 +224,7 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _check_pow_target(digest, difficulty_steps, min_difficulty, _POW_DIFFICULTY_STEP):
+        if _check_pow_target(digest, difficulty_steps, pow_base_bits, _POW_FACTOR):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW mining exceeded {max_seconds:.1f}s")
@@ -239,15 +239,15 @@ def _round_half_up(value: float) -> int:
     return int(math.floor(value + 0.5))
 
 
-def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int | None:
+def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     if difficulty_steps < 0:
         return None
-    if not math.isfinite(pow_difficulty_step) or pow_difficulty_step <= 0 or pow_difficulty_step > 1:
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
     if difficulty_steps == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_difficulty_step, float(difficulty_steps))
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -258,14 +258,14 @@ def _difficulty_factor(difficulty_steps: int, pow_difficulty_step: float) -> int
     return max(_BASE_DIFFICULTY_FACTOR, rounded)
 
 
-def _check_pow_target(digest: bytes, difficulty_steps: int, min_difficulty: int, pow_difficulty_step: float) -> bool:
+def _check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-    if min_difficulty <= 0 or min_difficulty > 256:
+    if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-    factor = _difficulty_factor(difficulty_steps, pow_difficulty_step)
+    factor = _difficulty_factor(difficulty_steps, pow_factor)
     if factor is None:
         return False
-    base_target = 1 << (256 - min_difficulty)
+    base_target = 1 << (256 - pow_base_bits)
     eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 
