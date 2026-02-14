@@ -311,7 +311,7 @@ def ensure_local_container(image_ref: str):
             "-lc",
             f"docker run -d -p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
             f"--name mirage --hostname local-testnet --restart no "
-            f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
+            f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 -e RESET_MODE=1 "
             f"-v {home}/.mirage:/root/.mirage -v {home}/.caddy:/root/.local/share/caddy '{image_ref}'",
         ]
     )
@@ -1009,22 +1009,12 @@ def write_working_genesis(genesis_json: str):
     run(["bash", "-lc", "docker exec mirage tmux set-option -g automatic-rename off 2>/dev/null || true"])
     run(["bash", "-lc", "docker exec mirage tmux set-option -g allow-rename off 2>/dev/null || true"])
 
-    # Kill-and-recreate tmux window to avoid races with the entrypoint.
-    # The entrypoint also creates these windows when RPC comes up, so we
-    # must forcefully replace them to own the process lifecycle.
+    # Create a fresh tmux window (kill first if it exists from a previous run).
     def ensure_tmux_window(window_name: str):
         run(["bash", "-lc", f"docker exec mirage tmux kill-window -t mirage:{window_name} 2>/dev/null || true"])
         time.sleep(0.2)
         run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
         time.sleep(0.5)
-
-    # Kill any services the entrypoint may have started (race with our lifecycle)
-    status("Killing entrypoint-managed services ...")
-    run(["bash", "-lc", "docker exec mirage pkill -f 'python3.*indexer/main.py' 2>/dev/null || true"])
-    run(["bash", "-lc", "docker exec mirage pkill -f 'gunicorn' 2>/dev/null || true"])
-    run(["bash", "-lc", "docker exec mirage pkill -f 'orchestrator' 2>/dev/null || true"])
-    run(["bash", "-lc", "docker exec mirage pkill -f 'status_dashboard' 2>/dev/null || true"])
-    time.sleep(1)
 
     status("Starting node in tmux ...")
     ensure_tmux_window("node")

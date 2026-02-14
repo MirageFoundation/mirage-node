@@ -279,6 +279,13 @@ if [ -n "${DOMAIN:-}" ]; then
   fi
 fi
 
+# Reset mode: external script (reset_local_testnet.py) manages all services.
+# Entrypoint only handles init (env, migrations, postgres, caddy, tmux session).
+if [ "${RESET_MODE:-}" = "1" ]; then
+  echo "==> Reset mode: skipping service startup (external script manages services)"
+  while true; do sleep 60; done
+fi
+
 # Node (second)
 tmux new-window -t "$SESSION" -n node -c "$ROOT_DIR"
 # Node home is always ~/.mirage/node (hardcoded)
