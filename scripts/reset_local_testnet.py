@@ -425,6 +425,14 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
         for item in sorted(env_dir.iterdir()):
             if item.is_file():
                 run(["bash", "-lc", f"docker cp '{item}' mirage:/root/.mirage/env/"])
+        # Clear DOMAIN to prevent entrypoint from attempting HTTPS/LetsEncrypt setup locally
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage sed -i 's/^DOMAIN=.*/DOMAIN=/' /root/.mirage/env/node.env 2>/dev/null || true",
+            ]
+        )
 
     run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/node.clone || true"])
 
@@ -1007,9 +1015,7 @@ def start_with_entrypoint(image_ref: str):
             break
         time.sleep(2)
     else:
-        status("WARNING: Node not ready after 240s")
-        status("Check: docker exec -it mirage tmux attach -t mirage")
-        return
+        raise RuntimeError("Node not ready after 240s. Check: docker exec -it mirage tmux attach -t mirage")
 
     # Quick verification that entrypoint started everything
     time.sleep(5)
