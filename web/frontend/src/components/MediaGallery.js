@@ -46,6 +46,11 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
     );
     const [index, setIndex] = React.useState(0);
     const touchStartXRef = React.useRef(null);
+    const scrollYRef = React.useRef(0);
+
+    // Track which items have been visited so we mount them lazily
+    // but never unmount them (preserving resize state).
+    const [mounted, setMounted] = React.useState(() => new Set([0]));
 
     const isMobile = React.useMemo(() => {
         try {
@@ -68,14 +73,24 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
         if (index >= urls.length) setIndex(0);
     }, [urls.length, index]);
 
+    // Restore scroll position after index change to prevent viewport jump
+    React.useLayoutEffect(() => {
+        window.scrollTo(0, scrollYRef.current);
+    }, [index]);
+
     if (!urls.length) return null;
     if (urls.length === 1) {
         return <InlineMedia url={urls[0]} variant={variant} autoPlay={autoPlay} />;
     }
 
-    /* ── wrapping navigation ── */
-    const goPrev = () => setIndex(prev => (prev <= 0 ? urls.length - 1 : prev - 1));
-    const goNext = () => setIndex(prev => (prev >= urls.length - 1 ? 0 : prev + 1));
+    /* ── wrapping navigation (saves scroll before state change) ── */
+    const navigate = (newIndex) => {
+        scrollYRef.current = window.scrollY;
+        setMounted(prev => { const n = new Set(prev); n.add(newIndex); return n; });
+        setIndex(newIndex);
+    };
+    const goPrev = () => navigate(index <= 0 ? urls.length - 1 : index - 1);
+    const goNext = () => navigate(index >= urls.length - 1 ? 0 : index + 1);
 
     const handleTouchStart = (e) => {
         if (!isMobile) return;
@@ -104,12 +119,14 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
                 <span>{index + 1} of {urls.length}</span>
                 <ArrowBtn type="button" onClick={goNext} aria-label="Next media">&#8594;</ArrowBtn>
             </NavBar>
-            <InlineMedia
-                key={urls[index]}
-                url={urls[index]}
-                variant={variant}
-                autoPlay={autoPlay}
-            />
+            {urls.map((url, i) => {
+                if (!mounted.has(i)) return null;
+                return (
+                    <div key={url} style={i === index ? undefined : { display: 'none' }}>
+                        <InlineMedia url={url} variant={variant} autoPlay={i === index && autoPlay} />
+                    </div>
+                );
+            })}
         </div>
     );
 }
