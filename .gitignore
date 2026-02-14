@@ -89,3 +89,8 @@ scripts/*
 
 cursor.md.cursor/
 .cursor/
+
+
+
+# temporary
+tests/test_pow_scaling.py
