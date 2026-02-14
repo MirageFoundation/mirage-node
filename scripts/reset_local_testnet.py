@@ -119,23 +119,12 @@ def read_positive_int(key: str) -> int:
 
 LOCAL_BLOCK_TIME_SECONDS = 2
 LOCAL_RETENTION_BLOCKS = read_positive_int("RETENTION_BLOCKS")
-LOCAL_PRUNING_INTERVAL = read_positive_int("PRUNING_INTERVAL")
-LOCAL_SNAPSHOT_INTERVAL = read_positive_int("SNAPSHOT_INTERVAL")
-LOCAL_SNAPSHOT_KEEP_RECENT = read_positive_int("SNAPSHOT_KEEP_RECENT")
 LOCAL_RETENTION_SECONDS = LOCAL_RETENTION_BLOCKS * LOCAL_BLOCK_TIME_SECONDS
 
 LOCAL_EVIDENCE_PARAMS = {
     "max_age_num_blocks": str(LOCAL_RETENTION_BLOCKS),
     "max_age_duration": str(LOCAL_RETENTION_SECONDS * 1_000_000_000),
     "max_bytes": "1048576",
-}
-
-LOCAL_APP_TOML_OVERRIDES = {
-    "pruning-keep-recent": f'"{LOCAL_RETENTION_BLOCKS}"',
-    "pruning-interval": f'"{LOCAL_PRUNING_INTERVAL}"',
-    "min-retain-blocks": str(LOCAL_RETENTION_BLOCKS),
-    "snapshot-interval": str(LOCAL_SNAPSHOT_INTERVAL),
-    "snapshot-keep-recent": str(LOCAL_SNAPSHOT_KEEP_RECENT),
 }
 
 
@@ -179,32 +168,6 @@ def run(cmd, check=True, capture=False):
         return result.stdout
     subprocess.run(cmd, check=check, text=True)
     return ""
-
-
-def apply_local_pruning_settings():
-    status("Applying local pruning settings (app.toml)...")
-    overrides = LOCAL_APP_TOML_OVERRIDES
-    script = f"""import re
-from pathlib import Path
-
-path = Path("/root/.mirage/node/config/app.toml")
-if not path.exists():
-    raise RuntimeError(f"app.toml not found at {{path}}")
-
-content = path.read_text()
-overrides = {overrides}
-
-for key, value in overrides.items():
-    pattern = rf"^{{re.escape(key)}}\\s*=.*$"
-    repl = f"{{key}} = {{value}}"
-    content, count = re.subn(pattern, repl, content, flags=re.MULTILINE)
-    if count != 1:
-        raise RuntimeError(f"expected 1 match for {{key}}, got {{count}}")
-
-path.write_text(content)
-"""
-    run(["bash", "-lc", f"docker exec -i mirage python3 - <<'PY'\n{script}\nPY"])
-    status(f"Local pruning settings applied: {LOCAL_APP_TOML_OVERRIDES}")
 
 
 def apply_local_evidence_params(gen: dict):
@@ -453,11 +416,15 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
     status("Copying PostgreSQL indexer dump...")
     run(["bash", "-lc", f"docker cp '{indexer_sql}' mirage:/root/.mirage/node.clone/indexer.sql"])
 
-    migrations_file = backup_root / "env" / ".migrations"
-    if migrations_file.exists():
-        status("Copying .migrations file...")
+    # Copy env directory (node.env, backend.env, .migrations, etc.)
+    # These provide RETENTION_BLOCKS, INDEXER_DB_URL, etc. for the entrypoint
+    env_dir = backup_root / "env"
+    if env_dir.exists() and env_dir.is_dir():
+        status("Copying env files from backup...")
         run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/env"])
-        run(["bash", "-lc", f"docker cp '{migrations_file}' mirage:/root/.mirage/env/.migrations"])
+        for item in sorted(env_dir.iterdir()):
+            if item.is_file():
+                run(["bash", "-lc", f"docker cp '{item}' mirage:/root/.mirage/env/"])
 
     run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/node.clone || true"])
 
@@ -515,14 +482,6 @@ echo "Index DB restored from dump"
         run(["bash", "-lc", "docker exec mirage rm -f /tmp/restore_indexer.sh"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-
-
-def stop_node_in_container():
-    status("Stopping any running node ...")
-    run(["bash", "-lc", "docker exec mirage tmux send-keys -t mirage:node C-c 2>/dev/null || true"])
-    time.sleep(2)
-    run(["bash", "-lc", "docker exec mirage pkill -9 -f miraged 2>/dev/null || true"])
-    time.sleep(1)
 
 
 def reinitialize_postgres():
@@ -939,7 +898,14 @@ def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple
     return json.dumps(gen, ensure_ascii=False), val_addr, valoper, valcons
 
 
-def write_working_genesis(genesis_json: str):
+def prepare_local_node(genesis_json: str):
+    """Prepare node directory with transformed genesis for local testnet.
+
+    This only sets up files in ~/.mirage/ so the container can start
+    with the normal entrypoint (which handles all service orchestration).
+    Config files (config.toml, app.toml, client.toml, Caddyfile) are NOT
+    copied from backup - they are rendered fresh from templates by init.sh.
+    """
     status("Writing genesis to /root/.mirage/node/config/genesis.json ...")
     ensure_mirage_tmp()
     tmp = Path(tempfile.mkdtemp(prefix="genesis-", dir=str(MIRAGE_TMP)))
@@ -950,14 +916,15 @@ def write_working_genesis(genesis_json: str):
     run(["bash", "-lc", f"docker cp '{local_path}' mirage:/root/.mirage/node/config/genesis.json"])
     shutil.rmtree(tmp, ignore_errors=True)
 
-    status("Copying config files from node.clone ...")
+    # Copy identity files only (config is rendered fresh by entrypoint/init.sh from templates)
+    status("Copying identity files from backup ...")
     run(
         [
             "bash",
             "-lc",
             "docker exec mirage bash -lc '"
             "mkdir -p /root/.mirage/node/config; "
-            "for f in app.toml config.toml client.toml priv_validator_key.json node_key.json; do "
+            "for f in priv_validator_key.json node_key.json; do "
             "  cp -f /root/.mirage/node.clone/config/$f /root/.mirage/node/config/ 2>/dev/null || true; "
             "done; "
             "for d in /root/.mirage/node.clone/keyring-*; do "
@@ -966,31 +933,7 @@ def write_working_genesis(genesis_json: str):
         ]
     )
 
-    status("Configuring node for local testnet ...")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage bash -lc '"
-            'cfg="/root/.mirage/node/config/config.toml"; '
-            'sed -i "/^\\[rpc\\]/,/^\\[/{s/^laddr *= *.*/laddr = \\"tcp:\\/\\/0.0.0.0:26657\\"/}" "$cfg"; '
-            'sed -i "/^\\[p2p\\]/,/^\\[/{s/^pex *= *.*/pex = false/}" "$cfg"; '
-            'sed -i "/^\\[p2p\\]/,/^\\[/{s/^persistent_peers *= *.*/persistent_peers = \\"\\"/}" "$cfg"; '
-            'sed -i "/^\\[p2p\\]/,/^\\[/{s/^max_num_inbound_peers *= *.*/max_num_inbound_peers = 0/}" "$cfg"; '
-            'sed -i "/^\\[p2p\\]/,/^\\[/{s/^max_num_outbound_peers *= *.*/max_num_outbound_peers = 0/}" "$cfg"; '
-            'sed -i "/^\\[consensus\\]/,/^\\[/{s/^create_empty_blocks *= *.*/create_empty_blocks = true/}" "$cfg"; '
-            'sed -i "/^\\[consensus\\]/,/^\\[/{s/^create_empty_blocks_interval *= *.*/create_empty_blocks_interval = \\"2s\\"/}" "$cfg"; '
-            'sed -i "/^\\[consensus\\]/,/^\\[/{s/^timeout_commit *= *.*/timeout_commit = \\"2s\\"/}" "$cfg"; '
-            'sed -i "s/^chain-id *= *.*/chain-id = \\"mirage-1\\"/" /root/.mirage/node/config/client.toml; '
-            'sed -i "s/^keyring-backend *= *.*/keyring-backend = \\"test\\"/" /root/.mirage/node/config/client.toml || true\'',
-        ]
-    )
-
-    apply_local_pruning_settings()
-
-    stop_node_in_container()
-
-    status("Clearing data directory (preserving postgres)...")
+    status("Clearing data directory ...")
     run(
         [
             "bash",
@@ -1009,89 +952,48 @@ def write_working_genesis(genesis_json: str):
             'docker exec mirage bash -lc \'echo "{\\"height\\": \\"0\\", \\"round\\": 0, \\"step\\": 0}" > /root/.mirage/node/data/priv_validator_state.json\'',
         ]
     )
-    reinitialize_postgres()
 
-    # Restore full indexer DB before starting services
+    reinitialize_postgres()
     restore_indexer_database()
 
-    # Note: We use the binary from the pulled image (same version as source chain)
-    # No need to copy binary from backup
 
-    status("Creating tmux session ...")
-    run(["bash", "-lc", "docker exec mirage tmux kill-server 2>/dev/null || true"])
-    run(["bash", "-lc", "docker exec mirage tmux new-session -d -s mirage -n caddy -c /opt/mirage"])
+def start_with_entrypoint(image_ref: str):
+    """Stop prep container and start with the normal entrypoint (identical to production).
 
-    # Disable tmux automatic-rename so windows created with -n keep their names
-    # (otherwise tmux renames them to the running process, breaking send-keys by name)
-    run(["bash", "-lc", "docker exec mirage tmux set-option -g automatic-rename off"])
-    run(["bash", "-lc", "docker exec mirage tmux set-option -g allow-rename off"])
+    The entrypoint.sh handles everything: loading env files, running init.sh
+    (which renders config templates, Caddyfile, etc.), starting all services
+    (caddy, postgres, node, indexer, backend, orchestrator, status dashboard),
+    maintenance mode, and health checks.
 
-    _created_windows: set[str] = {"caddy"}  # caddy created by new-session
+    Local testnet overrides are passed as container env vars:
+    - SKIP_PEERS=1: no peer connections
+    - SKIP_VALIDATOR_CHECK=1: skip key validation in init.sh
+    - CREATE_EMPTY_BLOCKS=true: produce blocks even with no txs
+    - CREATE_EMPTY_BLOCKS_INTERVAL=2s: fast block time
+    - TIMEOUT_COMMIT=2s: fast consensus
+    """
+    status("Starting container with normal entrypoint (like production) ...")
+    run(["bash", "-lc", "docker rm -f mirage 2>/dev/null || true"])
 
-    def ensure_tmux_window(window_name: str):
-        """Create a tmux window if it doesn't already exist."""
-        if window_name in _created_windows:
-            return
-        run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
-        _created_windows.add(window_name)
-
-    # --- 1. Run init.sh (renders Caddyfile, copies maintenance page, etc.) ---
-    status("Running init.sh inside container...")
+    home = str(Path.home())
     run(
         [
             "bash",
             "-lc",
-            "docker exec -e MONIKER=local-testnet -e CHAIN_ID=mirage-1 mirage bash /opt/mirage/deploy/init.sh",
+            f"docker run -d --name mirage --hostname local-testnet --restart no "
+            f"-e SKIP_PEERS=1 -e SKIP_VALIDATOR_CHECK=1 "
+            f"-e CREATE_EMPTY_BLOCKS=true "
+            f"-e CREATE_EMPTY_BLOCKS_INTERVAL=2s "
+            f"-e TIMEOUT_COMMIT=2s "
+            f"-p 80:80 -p 26656:26656 -p 26657:26657 -p 443:443 "
+            f"-v {home}/.mirage:/root/.mirage "
+            f"-v {home}/.caddy:/root/.local/share/caddy "
+            f"'{image_ref}'",
         ]
     )
 
-    # Enable maintenance mode until all services are up
-    run(["bash", "-lc", "docker exec mirage touch /etc/caddy/.maintenance"])
-
-    # --- 2. Start Caddy ---
-    status("Starting Caddy ...")
-    run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/logs/caddy"])
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage tmux send-keys -t mirage:caddy "
-            "'caddy run --config /etc/caddy/Caddyfile --adapter caddyfile "
-            '2>&1 | tee >(cronolog "/root/.mirage/logs/caddy/caddy-%Y-%m-%d.log")\' C-m',
-        ]
-    )
-
-    # --- 3. Start PostgreSQL (ensure running + tmux window for logs) ---
-    status("Ensuring PostgreSQL is running...")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage bash -c '"
-            "pg_ctlcluster 16 main start 2>/dev/null || true; "
-            "for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1 && break || sleep 1; done'",
-        ]
-    )
-    ensure_tmux_window("postgres")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage tmux send-keys -t mirage:postgres "
-            "'pg_ctlcluster 16 main start 2>/dev/null; "
-            "tail -f /root/.mirage/logs/postgres/postgres-$(date -u +%Y-%m-%d).log' C-m",
-        ]
-    )
-
-    # --- 4. Start node ---
-    status("Starting node in tmux ...")
-    ensure_tmux_window("node")
-    miraged = get_container_miraged_path()
-    start_cmd = f'{miraged} start --home "/root/.mirage/node" 2>&1 | tee >(cronolog "/root/.mirage/logs/node/miraged-%Y-%m-%d.log")'
-    run(["bash", "-lc", f"docker exec mirage tmux send-keys -t mirage:node '{start_cmd}' C-m"])
-
-    status("Waiting for RPC ...")
-    for _ in range(30):
+    status("Waiting for services (entrypoint handles startup) ...")
+    for _ in range(120):
         ok = run(
             [
                 "bash",
@@ -1101,91 +1003,21 @@ def write_working_genesis(genesis_json: str):
             capture=True,
         ).strip()
         if ok == "ok":
-            status("RPC is ready")
+            status("Node RPC is ready")
             break
-        time.sleep(1)
+        time.sleep(2)
     else:
-        status("WARNING: RPC not available after 30s")
+        status("WARNING: Node not ready after 240s")
+        status("Check: docker exec -it mirage tmux attach -t mirage")
         return
 
-    # --- 5. Start indexer ---
-    status("Starting indexer ...")
-    ensure_tmux_window("indexer")
-    initial_height = run(
-        ["bash", "-lc", "docker exec mirage jq -r .initial_height /root/.mirage/node/config/genesis.json"],
-        capture=True,
-    ).strip()
-    run(
-        [
-            "bash",
-            "-lc",
-            f"docker exec mirage tmux send-keys -t mirage:indexer 'PYTHONPATH=/opt/mirage python3 /opt/mirage/indexer/main.py --height {initial_height}' C-m",
-        ]
-    )
-
-    # --- 6. Start backend ---
-    status("Starting backend ...")
-    ensure_tmux_window("backend")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage tmux send-keys -t mirage:backend 'cd /opt/mirage/web/backend && PYTHONPATH=/opt/mirage python3 -m gunicorn -c gunicorn_config.py factory:app' C-m",
-        ]
-    )
-
-    # --- 7. Start orchestrator (optional) ---
-    orchestrator_exists = run(
-        ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/orchestrator && echo yes || echo no"],
-        capture=True,
-    ).strip()
-    if orchestrator_exists == "yes":
-        try:
-            status("Starting orchestrator ...")
-            run(
-                [
-                    "bash",
-                    "-lc",
-                    "docker exec mirage mkdir -p /root/.mirage/orchestrator /root/.mirage/logs/orchestrator",
-                ]
-            )
-            ensure_tmux_window("orchestrator")
-            run(
-                [
-                    "bash",
-                    "-lc",
-                    "docker exec mirage tmux send-keys -t mirage:orchestrator "
-                    "'/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog "
-                    '"/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
-                ]
-            )
-        except Exception as e:
-            status(f"WARNING: Orchestrator startup failed (optional): {e}")
-
-    # --- 8. Start status dashboard ---
-    status("Starting status dashboard ...")
-    ensure_tmux_window("status")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage tmux send-keys -t mirage:status "
-            "'PYTHONPATH=/opt/mirage python3 /opt/mirage/scripts/status_dashboard.py' C-m",
-        ]
-    )
-
-    # --- 9. Disable maintenance mode ---
-    run(["bash", "-lc", "docker exec mirage rm -f /etc/caddy/.maintenance"])
-
-    # --- 10. Verify all services are running ---
-    status("Verifying services ...")
-    time.sleep(3)  # give services a moment to start/crash
-
+    # Quick verification that entrypoint started everything
+    time.sleep(5)
     checks = {
-        "node (miraged)": "pgrep -f 'miraged start' >/dev/null 2>&1",
+        "node": "pgrep -f 'miraged start' >/dev/null 2>&1",
         "caddy": "pgrep -f 'caddy run' >/dev/null 2>&1",
         "postgres": "pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1",
-        "backend (gunicorn)": "pgrep -f gunicorn >/dev/null 2>&1",
+        "backend": "pgrep -f gunicorn >/dev/null 2>&1",
         "indexer": "pgrep -f 'indexer/main.py' >/dev/null 2>&1",
     }
     all_ok = True
@@ -1201,7 +1033,7 @@ def write_working_genesis(genesis_json: str):
             all_ok = False
 
     if not all_ok:
-        status("WARNING: Some services failed to start! Check tmux: docker exec -it mirage tmux attach -t mirage")
+        status("WARNING: Some services failed. Check: docker exec -it mirage tmux attach -t mirage")
     else:
         status("All services running")
 
@@ -1242,31 +1074,30 @@ def main():
     # Step 3: Export chain state from backup data (exact binary from image)
     export_path = run_export_from_backup(backup_root, image_ref)
 
-    # Step 4: Stop old container, pull exact image, start new container
+    # Step 4: Stop old container, start prep container (entrypoint disabled for file setup)
     stop_local_container()
     ensure_local_container(image_ref)
 
-    # Important: prevent the entrypoint from running the node while we rewrite home
-    stop_node_in_container()
-
-    # Step 5: Stage backup files into container
+    # Step 5: Stage backup files into container (config, keyring, env, indexer dump)
     export_path = stage_backup_into_container(backup_root, export_path)
     status("Cleaning up extracted backup files...")
     shutil.rmtree(extract_dir, ignore_errors=True)
 
+    # Step 6: Transform genesis to single-validator
     cons_pub_b64 = read_priv_validator_pubkey_b64()
     new_genesis, val_addr, valoper, valcons_addr = transform_to_single_validator(export_path, cons_pub_b64)
-    write_working_genesis(new_genesis)
 
-    # Clean up temp files (keep only backup tarballs)
+    # Step 7: Prepare node directory (genesis, identity files, fresh data, postgres, indexer)
+    prepare_local_node(new_genesis)
+
+    # Clean up temp files
     if export_path.exists():
         export_path.unlink()
     for item in MIRAGE_TMP.iterdir():
         if item.is_dir():
             shutil.rmtree(item, ignore_errors=True)
 
-    # Clean up redundant directories in container
-    status("Cleaning up redundant directories...")
+    # Clean up staging directory in container
     run(
         [
             "bash",
@@ -1274,6 +1105,9 @@ def main():
             "docker exec mirage bash -lc 'rm -rf /root/.mirage/node/.mirage /root/.mirage/node.clone 2>/dev/null || true'",
         ]
     )
+
+    # Step 8: Start container with normal entrypoint (handles ALL service orchestration)
+    start_with_entrypoint(image_ref)
 
     status("Local testnet reset: COMPLETE")
     print("Summary:")
