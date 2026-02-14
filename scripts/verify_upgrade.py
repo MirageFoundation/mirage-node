@@ -1228,25 +1228,33 @@ def check_v1_11_pow_difficulty(failures: list[str], warnings: list[str]) -> None
         print("   [WARN] TransactionHandler.js not found")
 
     # 11. Python backend routes: core.py handles difficulty=0 correctly
+    #     The old bug was: `if not (int(difficulty) > 0 and proof):` which rejected
+    #     difficulty=0 in the non-subscriber PoW validation path.
+    #     Note: `int(difficulty) > 0 or int(proof) > 0` in subscriber-rejection
+    #     branches is correct (detects subscribers accidentally sending PoW data).
     core_py = REPO_ROOT / "web" / "backend" / "routes" / "core.py"
     if core_py.exists():
         cr_text = core_py.read_text()
-        # Old pattern: int(difficulty) > 0 should NOT be present
-        if "int(difficulty) > 0" in cr_text:
-            print("   [FAIL] core.py: still uses 'int(difficulty) > 0' (rejects difficulty=0)")
-            failures.append("v1.11.0: core.py still rejects difficulty=0 with old check")
+        # Old pattern used for non-subscriber PoW *validation* that rejects difficulty=0
+        if re.search(r'not\s*\(\s*int\(difficulty\)\s*>\s*0\s+and\s+proof\s*\)', cr_text):
+            print("   [FAIL] core.py: still uses 'not (int(difficulty) > 0 and proof)' (rejects difficulty=0)")
+            failures.append("v1.11.0: core.py still rejects difficulty=0 with old validation check")
         else:
-            print("   [OK] core.py: no 'int(difficulty) > 0' check (allows difficulty=0)")
+            print("   [OK] core.py: old 'not (int(difficulty) > 0 and proof)' pattern removed")
     else:
         print("   [WARN] core.py not found")
 
-    # 12. Update doc exists
+    # 12. Update doc exists (warn-only; docs/ may not be present on deployed nodes)
     update_doc = REPO_ROOT / "docs" / "updates" / "update_v1.11.0.md"
     if update_doc.exists():
         print("   [OK] docs/updates/update_v1.11.0.md exists")
     else:
-        print("   [FAIL] docs/updates/update_v1.11.0.md not found")
-        failures.append("v1.11.0: update documentation not found")
+        docs_dir = REPO_ROOT / "docs"
+        if docs_dir.exists():
+            print("   [FAIL] docs/updates/update_v1.11.0.md not found")
+            failures.append("v1.11.0: update documentation not found")
+        else:
+            print("   [SKIP] docs/ directory not present (deployed node)")
 
     # 13. Proposal file updated
     proposal = REPO_ROOT / "scripts" / "proposals" / "proposal_upgrade.json"
