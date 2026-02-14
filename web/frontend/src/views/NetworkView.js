@@ -860,8 +860,8 @@ export default function NetworkView({ state }) {
                                         <Label>Difficulty:</Label>
                                         <ValueBox>
                                         <Mono>{
-                                            (typeof cfg.pow_difficulty === 'number' && typeof cfg.pow_difficulty_step === 'number')
-                                                ? `${Math.pow(1 + cfg.pow_difficulty_step, cfg.pow_difficulty).toFixed(2)}x`
+                                            (typeof cfg.pow_difficulty === 'number')
+                                                ? `${cfg.pow_difficulty}`
                                                 : '(loading...)'
                                         }</Mono>
                                         </ValueBox>

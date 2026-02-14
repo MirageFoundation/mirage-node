@@ -77,7 +77,6 @@ from shared.canon import canon_signed_with_pow
 from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast_tx
 from chain import (
     classify_reject,
-    get_current_pow_difficulty,
     get_difficulty_info,
     get_min_difficulty,
     is_node_catching_up,
@@ -234,8 +233,15 @@ def _hex_to_bytes(s: str) -> bytes:
 
 
 
-def _effective_difficulty(declared: int) -> int:
-    """Mirror chain's PoW threshold logic for difficulty steps."""
+def _min_required_difficulty() -> int:
+    """Return the minimum required difficulty steps, honouring the chain's
+    PowDifficultyAllowance grace window.
+
+    During the allowance period after a difficulty change the chain accepts
+    the *previous* (possibly lower) difficulty.  The backend precheck must
+    mirror this so we don't reject transactions that the chain itself would
+    accept.
+    """
     info = get_difficulty_info()
     current = int(info["current_difficulty"])
     prev = int(info.get("previous_difficulty", current))
@@ -246,10 +252,15 @@ def _effective_difficulty(declared: int) -> int:
     allowance = int(p.get("pow_difficulty_allowance", 0))
 
     min_required = current
-    if allowance > 0 and last_change > 0 and height - last_change <= allowance:
+    if allowance > 0 and last_change > 0 and height - last_change <= int(allowance):
         if prev < min_required:
             min_required = prev
+    return min_required
 
+
+def _effective_difficulty(declared: int) -> int:
+    """Mirror chain's PoW threshold logic for difficulty steps."""
+    min_required = _min_required_difficulty()
     eff = int(declared)
     if eff < min_required:
         eff = min_required
@@ -858,7 +869,7 @@ def core_unfollow_moderator():
         validator_addr = require_runtime().validator_payer_addr
 
         if not is_subscriber(user_addr):
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -1762,7 +1773,7 @@ def core_delete_post():
         validator_addr = require_runtime().validator_payer_addr
 
         if not is_subscriber(user_addr):
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -2307,7 +2318,7 @@ def core_post():
         if not is_subscriber(user_addr):
             if not (has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -2478,14 +2489,14 @@ def core_vote():
                     ),
                     400,
                 )
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
-            # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
+                # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
             try:
                 base = canon_base_vote(pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction))
                 digest = argon2_digest(base, last_block_hash, proof)
