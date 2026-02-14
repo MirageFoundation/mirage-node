@@ -120,8 +120,6 @@ def _deleted_filter_bare() -> str:
 
 # Allowed content tags used for topic safety classification
 _TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "porn")
-_HOME_FEED_MAGIC_JITTER_STRENGTH = 0.08
-_HOME_FEED_MAGIC_SEED_SECONDS = 300
 
 
 def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
@@ -923,7 +921,6 @@ def _get_home_feed(
     allowed_tags: set[str],
     seed: int = 0,
     sort_mode: str = "magic",
-    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Home feed.
@@ -943,16 +940,7 @@ def _get_home_feed(
     if not viewer_lower or viewer_lower == "guest":
         if sort_mode == "newest":
             return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
-        return _get_guest_feed_magic(
-            cur,
-            limit,
-            page,
-            blocked_posts,
-            blocked_users,
-            allowed_tags,
-            seed=seed,
-            jitter_strength=jitter_strength,
-        )
+        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
 
     # Logged-in users always use Magic (unified score).
     return _get_home_feed_magic(
@@ -963,9 +951,7 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
-        seed=seed,
         sort_mode=sort_mode,
-        jitter_strength=jitter_strength,
     )
 
 
@@ -977,9 +963,7 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
     sort_mode: str = "magic",
-    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Magic feed algorithm.
@@ -1006,10 +990,10 @@ def _get_home_feed_magic(
     sim_lookup = {u[0]: u[1] for u in similar_users}
     similar_addrs = set(sim_lookup.keys())
 
-    # 3. Load candidate posts
-    max_candidates = max(500, limit * page * 3)
+    # 3. Load candidate posts (small targeted pool + random exploration)
+    per_source = limit * page * 4  # ~60 per source for page 1
     candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, max_candidates
+        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, per_source
     )
 
     if not candidates:
@@ -1040,9 +1024,6 @@ def _get_home_feed_magic(
             author_prefs,
             now_ts,
             True,
-            jitter_seed=seed,
-            jitter_strength=jitter_strength,
-            viewer=viewer_lower,
         )
 
         if should_hide:
@@ -1089,13 +1070,6 @@ def _get_home_feed_magic(
     }
 
 
-def _stable_feed_jitter(seed: int, viewer: str, post_id: str) -> float:
-    key = f"{seed}:{viewer}:{post_id}".encode("utf-8")
-    digest = hashlib.sha256(key).digest()
-    val = int.from_bytes(digest[:8], "big")
-    return (val / 2**64) * 2.0 - 1.0
-
-
 def _score_magic(
     post: dict,
     sim_lookup: dict[str, float],
@@ -1106,9 +1080,6 @@ def _score_magic(
     author_prefs: dict[str, float],
     now_ts: int,
     use_prefs: bool = True,
-    jitter_seed: int | None = None,
-    jitter_strength: float = 0.0,
-    viewer: str = "",
 ) -> tuple[float, dict, bool]:
     """
     Magic scoring: (S + V + U + P) × R
@@ -1180,14 +1151,8 @@ def _score_magic(
     age_hours = max(0, (now_ts - timestamp) / 3600)
     R = 1 / (1 + (age_hours / 12) ** 1.585)
 
-    # Final score (with optional deterministic jitter)
-    base_score = (S + V + U + P) * R
-    score = base_score
-    jitter = 0.0
-    if jitter_seed is not None and jitter_strength > 0:
-        viewer_key = (viewer or "").strip().lower()
-        jitter = _stable_feed_jitter(jitter_seed, viewer_key, pid)
-        score = base_score * (1.0 + jitter_strength * jitter)
+    # Final score
+    score = (S + V + U + P) * R
 
     # Determine primary reason based on dominant component
     components = [("S", S), ("V", V), ("U", U), ("P", P)]
@@ -1230,11 +1195,6 @@ def _score_magic(
         "a_pref": round(author_pref, 1),
         "source": post.get("_source", "unknown"),
     }
-    if jitter_seed is not None and jitter_strength > 0:
-        debug["score_base"] = round(float(base_score), 4)
-        debug["jitter"] = round(float(jitter), 4)
-        debug["jitter_strength"] = round(float(jitter_strength), 4)
-        debug["jitter_seed"] = int(jitter_seed)
 
     return score, debug, False
 
@@ -1313,31 +1273,34 @@ def _load_home_candidates(
 ) -> list[dict]:
     """
     Load candidate posts for home feed from multiple sources:
-    1. Posts by similar users
-    2. Posts upvoted by similar users
-    3. Recent posts (for discovery)
+    1. Posts by similar users (recent)
+    2. Posts upvoted by similar users (recent)
+    3. Recent posts (discovery)
+    4. Random exploration (upvoted posts from wider time window)
     """
     results = []
     seen = set()
+
+    _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
+                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
+                   COALESCE(pr.level, 0) AS author_level"""
+    _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
+    _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
     # Source 1: Posts BY similar users (root posts only)
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
-        query = f"""
-            SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level
+        cur.execute(
+            f"""SELECT {_POST_COLS}
             FROM posts p
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
-              AND (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-              AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-              AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
             ORDER BY p.created_at DESC
-            LIMIT %s
-        """
-        cur.execute(query, similar_list + [max_posts])
+            LIMIT %s""",
+            similar_list + [max_posts],
+        )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
             if post:
@@ -1348,47 +1311,63 @@ def _load_home_candidates(
     if similar_addrs:
         similar_list = list(similar_addrs)
         placeholders = ",".join(["%s"] * len(similar_list))
-        query = f"""
-            SELECT DISTINCT ON (p.txhash) 
-                   p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-                   p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level
+        cur.execute(
+            f"""SELECT DISTINCT ON (p.txhash)
+                   {_POST_COLS}
             FROM votes v
             JOIN posts p ON LOWER(v.target) = LOWER(p.txhash)
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(v.owner) IN ({placeholders})
               AND v.user_vote > 0
-              AND (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-              AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-              AND p.deleted = false
+              AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
             ORDER BY p.txhash, p.created_at DESC
-            LIMIT %s
-        """
-        cur.execute(query, similar_list + [max_posts])
+            LIMIT %s""",
+            similar_list + [max_posts],
+        )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
             if post:
                 post["_source"] = "similar_upvoted"
                 results.append(post)
 
-    # Source 3: Recent posts (discovery - not from blocked, with topics)
-    query = """
-        SELECT p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
-               p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-               COALESCE(pr.level, 0) AS author_level
+    # Source 3: Recent posts (discovery)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE (p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))
-          AND p.topic IS NOT NULL AND TRIM(p.topic) != ''
-          AND p.deleted = false
+        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
         ORDER BY p.created_at DESC
-        LIMIT %s
-    """
-    cur.execute(query, [max_posts])
+        LIMIT %s""",
+        [max_posts],
+    )
     for row in cur.fetchall():
         post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
         if post:
             post["_source"] = "recent"
+            results.append(post)
+
+    # Source 4: Random exploration (upvoted posts from last 60 days)
+    # Pulls random posts that have at least one upvote, giving older quality
+    # content a chance to surface. Different results each request.
+    explore_limit = max(20, max_posts // 3)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
+        FROM posts p
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          AND p.created_at > EXTRACT(EPOCH FROM NOW()) - 60 * 86400
+          AND EXISTS (
+              SELECT 1 FROM votes v
+              WHERE LOWER(v.target) = LOWER(p.txhash) AND v.user_vote > 0
+          )
+        ORDER BY RANDOM()
+        LIMIT %s""",
+        [explore_limit],
+    )
+    for row in cur.fetchall():
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        if post:
+            post["_source"] = "explore"
             results.append(post)
 
     return results
@@ -1523,8 +1502,6 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
-    seed: int = 0,
-    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Guest home feed, Magic-style:
@@ -1533,7 +1510,7 @@ def _get_guest_feed_magic(
     """
     import time
 
-    max_candidates = max(500, limit * page * 3)
+    max_candidates = limit * page * 4
     candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags)
 
     if not candidates:
@@ -1563,9 +1540,6 @@ def _get_guest_feed_magic(
             author_prefs,
             now_ts,
             False,
-            jitter_seed=seed,
-            jitter_strength=jitter_strength,
-            viewer="guest",
         )
         if should_hide:
             continue
@@ -3493,8 +3467,6 @@ def get_posts():
 
         sort_mode = sort_mode or "magic"
         if feed in ("home", "following"):
-            seed = int(time.time() // _HOME_FEED_MAGIC_SEED_SECONDS)
-            jitter_strength = _HOME_FEED_MAGIC_JITTER_STRENGTH if (feed == "home" and sort_mode == "magic") else 0.0
             try:
                 log_event(
                     next_request_id(),
@@ -3504,8 +3476,6 @@ def get_posts():
                     page=page,
                     limit=limit,
                     by=sort_mode,
-                    seed=seed,
-                    jitter_strength=jitter_strength,
                 )
             except Exception:
                 pass
@@ -3520,9 +3490,8 @@ def get_posts():
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
-                    seed=seed,
+                    seed=int(time.time() // 60),
                     sort_mode=sort_mode,
-                    jitter_strength=jitter_strength,
                 )
             else:
                 resp = _get_following_feed(
