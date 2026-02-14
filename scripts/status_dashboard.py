@@ -670,7 +670,7 @@ def check_node() -> ServiceStatus:
                 message = "Slow blocks"
 
         if peers == 0 and status == Status.OK:
-            status = Status.WARN
+            status = Status.ERROR
             message = "No peers"
 
         if rpc_health_ok is False and status == Status.OK:
@@ -1222,6 +1222,24 @@ def check_indexer() -> ServiceStatus:
         )
 
 
+def _query_balance_rest(address: str) -> Optional[int]:
+    """Query umirage balance for an address via REST API (port 1317)."""
+    if not address:
+        return None
+    try:
+        resp = requests.get(
+            f"http://127.0.0.1:1317/cosmos/bank/v1beta1/balances/{address}/by_denom?denom=umirage",
+            timeout=3,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            amount = data.get("balance", {}).get("amount", "0")
+            return int(amount)
+    except Exception as e:
+        debug_log(f"balance query failed for {address[:20]}: {e}")
+    return None
+
+
 def check_rewards() -> ServiceStatus:
     """Check rewards/quest enablement consistency (backend + indexer)."""
     details: dict = {}
@@ -1250,14 +1268,28 @@ def check_rewards() -> ServiceStatus:
             details={"backend_env": str(env_path), "QUESTS_ENABLED": backend_quests_raw},
         )
 
+    # Read payouts configuration
+    payouts_enabled_raw = env_data.get("QUESTS_PAYOUTS_ENABLED")
+    payouts_enabled = parse_env_bool(payouts_enabled_raw)
+    pool_address = env_data.get("QUESTS_REWARDS_POOL_ADDRESS", "").strip()
+
     backend_debug_raw = env_data.get("BACKEND_DEBUG")
     backend_debug = parse_env_bool(backend_debug_raw)
     details.update(
         {
             "backend_quests_enabled": backend_quests,
             "backend_debug": backend_debug,
+            "payouts_enabled": payouts_enabled,
+            "pool_address": pool_address or None,
         }
     )
+
+    # Query reward pool balance if address is configured
+    pool_balance = None
+    if pool_address:
+        pool_balance = _query_balance_rest(pool_address)
+        if pool_balance is not None:
+            details["pool_balance"] = pool_balance
 
     try:
         from indexer import settings as indexer_settings
@@ -1289,13 +1321,116 @@ def check_rewards() -> ServiceStatus:
         else:
             message = "Indexing active"
 
+    # Payouts check: payouts OFF is only OK if backend quests are also OFF
+    if payouts_enabled is False and backend_quests:
+        status = Status.ERROR
+        message = "Payouts OFF"
+    elif payouts_enabled and not pool_address:
+        status = Status.ERROR
+        message = "No pool address"
+
     debug_log(
         "rewards: "
         f"backend_quests={backend_quests} indexer_quests={indexer_quests} "
+        f"payouts_enabled={payouts_enabled} pool_address={bool(pool_address)} "
+        f"pool_balance={pool_balance} "
         f"backend_debug={backend_debug} status={status.value} message={message}"
     )
 
     return ServiceStatus(name="Rewards", status=status, message=message, details=details)
+
+
+# Server balance thresholds (in MIRAGE, not umirage)
+SERVER_BALANCE_WARN = int(os.environ.get("MIRAGE_SERVER_BALANCE_WARN", "2000000"))   # 2MM
+SERVER_BALANCE_ERROR = int(os.environ.get("MIRAGE_SERVER_BALANCE_ERROR", "1000000"))  # 1MM
+
+
+def _get_validator_payer_address() -> Optional[str]:
+    """Get the validator payer address from the keyring."""
+    node_home = os.path.expanduser("~/.mirage/node")
+    try:
+        result = subprocess.run(
+            [get_miraged_bin(), "keys", "list", "--output", "json", "--home", node_home, "--keyring-backend", "test"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout)
+            for entry in data or []:
+                if str(entry.get("name", "")) == "validator":
+                    addr = str(entry.get("address", "")).strip()
+                    if addr and re.fullmatch(r"mirage1[0-9a-z]{38}", addr):
+                        return addr
+    except Exception as e:
+        debug_log(f"server: failed to get validator payer address: {e}")
+    return None
+
+
+def _query_difficulty_rest() -> Optional[dict]:
+    """Query PoW difficulty info via REST API (port 1317)."""
+    try:
+        resp = requests.get("http://127.0.0.1:1317/mirage/core/v1/difficulty", timeout=3)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        debug_log(f"server: difficulty query failed: {e}")
+    return None
+
+
+def check_server() -> ServiceStatus:
+    """Check server internals: validator balance and PoW difficulty."""
+    details: dict = {}
+
+    # Get validator payer address and balance
+    payer_addr = _get_validator_payer_address()
+    balance_mirage = None
+    if payer_addr:
+        details["payer_address"] = payer_addr
+        raw_balance = _query_balance_rest(payer_addr)
+        if raw_balance is not None:
+            balance_mirage = raw_balance / 1_000_000
+            details["balance"] = raw_balance
+            details["balance_mirage"] = balance_mirage
+    else:
+        debug_log("server: no validator payer address found")
+
+    # Query PoW difficulty
+    diff_data = _query_difficulty_rest()
+    if diff_data:
+        current_diff = int(diff_data.get("current_difficulty", diff_data.get("currentDifficulty", 0)))
+        pow_msg_count = int(diff_data.get("pow_message_count", diff_data.get("powMessageCount", 0)))
+        calm_seq = int(diff_data.get("consecutive_low_usage", diff_data.get("consecutiveLowUsage", 0)))
+        pow_base_bits = int(diff_data.get("pow_base_bits", diff_data.get("powBaseBits", 0)))
+        details["pow_difficulty"] = current_diff
+        details["pow_msg_count"] = pow_msg_count
+        details["pow_calm_sequence"] = calm_seq
+        details["pow_base_bits"] = pow_base_bits
+
+    # Determine overall status based on balance
+    status = Status.OK
+    message = "Running"
+
+    if balance_mirage is not None:
+        if balance_mirage < SERVER_BALANCE_ERROR:
+            status = Status.ERROR
+            message = "Balance critical"
+        elif balance_mirage < SERVER_BALANCE_WARN:
+            status = Status.WARN
+            message = "Balance low"
+    elif payer_addr:
+        status = Status.WARN
+        message = "Balance unknown"
+    else:
+        status = Status.WARN
+        message = "No payer key"
+
+    debug_log(
+        f"server: payer={payer_addr} balance_mirage={balance_mirage} "
+        f"pow_diff={details.get('pow_difficulty')} status={status.value} message={message}"
+    )
+
+    return ServiceStatus(name="Server", status=status, message=message, details=details)
 
 
 def check_caddy() -> ServiceStatus:
@@ -2180,7 +2315,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             lines.append(f"{bullet}{Colors.DIM}Validators:{Colors.RESET} {val_total}")
         if "peers" in details:
             peers = details["peers"]
-            peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_YELLOW
+            peer_color = Colors.BRIGHT_GREEN if peers > 0 else Colors.BRIGHT_RED
             lines.append(f"{bullet}{Colors.DIM}Peers:{Colors.RESET} {peer_color}{peers}{Colors.RESET}")
         if details.get("block_age"):
             age_secs = details.get("block_age_secs")
@@ -2298,7 +2433,7 @@ def format_card_content(status: ServiceStatus) -> list[str]:
     elif status.name == "Rewards":
         backend_quests = details.get("backend_quests_enabled")
         indexer_quests = details.get("indexer_quests_enabled")
-        backend_debug = details.get("backend_debug")
+        payouts_enabled = details.get("payouts_enabled")
         both_enabled = details.get("both_enabled")
 
         if backend_quests is not None:
@@ -2309,19 +2444,56 @@ def format_card_content(status: ServiceStatus) -> list[str]:
             i_color = Colors.BRIGHT_GREEN if indexer_quests else Colors.BRIGHT_RED
             i_text = "ON" if indexer_quests else "OFF"
             lines.append(f"{bullet}{Colors.DIM}Indexing quests:{Colors.RESET} {i_color}{i_text}{Colors.RESET}")
-        if both_enabled is not None:
-            if both_enabled:
-                both_color = Colors.BRIGHT_GREEN
-            elif backend_quests and not indexer_quests:
-                both_color = Colors.BRIGHT_RED
+        if payouts_enabled is not None:
+            # Payouts OFF is fine if quests are also OFF; otherwise it's an error
+            if payouts_enabled:
+                p_color = Colors.BRIGHT_GREEN
+            elif backend_quests:
+                p_color = Colors.BRIGHT_RED  # Quests ON but payouts OFF = problem
             else:
-                both_color = Colors.BRIGHT_YELLOW
-            both_text = "YES" if both_enabled else "NO"
-            lines.append(f"{bullet}{Colors.DIM}Both enabled:{Colors.RESET} {both_color}{both_text}{Colors.RESET}")
-        if backend_debug is not None:
-            d_color = Colors.BRIGHT_GREEN if backend_debug else Colors.BRIGHT_YELLOW
-            d_text = "ON" if backend_debug else "OFF"
-            lines.append(f"{bullet}{Colors.DIM}Debug:{Colors.RESET} {d_color}{d_text}{Colors.RESET}")
+                p_color = Colors.BRIGHT_YELLOW  # Both off = acceptable
+            p_text = "ON" if payouts_enabled else "OFF"
+            lines.append(f"{bullet}{Colors.DIM}Payouts:{Colors.RESET} {p_color}{p_text}{Colors.RESET}")
+        # Reward pool balance
+        pool_balance = details.get("pool_balance")
+        if pool_balance is not None:
+            pool_mirage = pool_balance / 1_000_000
+            if pool_mirage >= 1_000_000:
+                pool_color = Colors.BRIGHT_GREEN
+            elif pool_mirage >= 100_000:
+                pool_color = Colors.BRIGHT_YELLOW
+            else:
+                pool_color = Colors.BRIGHT_RED
+            lines.append(
+                f"{bullet}{Colors.DIM}Pool:{Colors.RESET} {pool_color}{pool_mirage:,.0f} MRG{Colors.RESET}"
+            )
+
+    elif status.name == "Server":
+        # Validator payer balance
+        balance_mirage = details.get("balance_mirage")
+        if balance_mirage is not None:
+            if balance_mirage < SERVER_BALANCE_ERROR:
+                bal_color = Colors.BRIGHT_RED
+            elif balance_mirage < SERVER_BALANCE_WARN:
+                bal_color = Colors.BRIGHT_YELLOW
+            else:
+                bal_color = Colors.BRIGHT_GREEN
+            lines.append(
+                f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {bal_color}{balance_mirage:,.0f} MRG{Colors.RESET}"
+            )
+        elif details.get("payer_address"):
+            lines.append(f"{bullet}{Colors.DIM}Balance:{Colors.RESET} {Colors.BRIGHT_YELLOW}unknown{Colors.RESET}")
+        # PoW difficulty
+        pow_diff = details.get("pow_difficulty")
+        if pow_diff is not None:
+            diff_color = Colors.BRIGHT_GREEN if pow_diff == 0 else Colors.BRIGHT_CYAN
+            lines.append(f"{bullet}{Colors.DIM}PoW difficulty:{Colors.RESET} {diff_color}{pow_diff}{Colors.RESET}")
+        pow_msg = details.get("pow_msg_count")
+        if pow_msg is not None:
+            lines.append(f"{bullet}{Colors.DIM}PoW msg count:{Colors.RESET} {pow_msg}")
+        calm = details.get("pow_calm_sequence")
+        if calm is not None:
+            lines.append(f"{bullet}{Colors.DIM}Calm sequence:{Colors.RESET} {calm}")
 
     elif status.name == "Caddy":
         if details.get("domain"):
@@ -2499,6 +2671,7 @@ def render_dashboard(refresh_secs: int):
         check_postgres(),
         check_backend(),
         check_rewards(),
+        check_server(),
         check_indexer(),
         check_caddy(),
         check_endpoints(),
@@ -2512,7 +2685,7 @@ def render_dashboard(refresh_secs: int):
         s
         for s in statuses
         if s.status != Status.UNKNOWN
-        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "System")
+        or s.name in ("CometBFT", "Retention", "PostgreSQL", "Backend", "Indexer", "Caddy", "Endpoints", "Server", "System")
     ]
 
     # Render header

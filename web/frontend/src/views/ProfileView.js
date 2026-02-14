@@ -1540,7 +1540,7 @@ export default function ProfileView({ state }) {
                                             <div>
                                                 {prefsTopics.map((t) => (
                                                     <div key={t.topic} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                                                        <Mono>#{t.topic}</Mono>
+                                                        <Mono onClick={() => navigate(`/t/${encodeURIComponent(t.topic)}`)} style={{ cursor: 'pointer' }}>#{t.topic}</Mono>
                                                         <Mono style={{ color: colorForWeight(t.weight) }}>
                                                             {formatPrefWeight(t.weight)}
                                                         </Mono>
