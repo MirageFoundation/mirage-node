@@ -77,6 +77,7 @@ scripts/*
 !scripts/create_snapshot.sh
 !scripts/reset_statesync.sh
 !scripts/reset_local_testnet.sh
+!scripts/reset_local_testnet.py
 !scripts/restore_from_peer.sh
 !scripts/list_validators.sh
 !scripts/show_balances.py
