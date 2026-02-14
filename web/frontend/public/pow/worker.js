@@ -123,6 +123,7 @@ self.onmessage = function (e) {
         !Number.isFinite(minDiff) ||
         !Number.isInteger(minDiff) ||
         minDiff <= 0 ||
+        minDiff > 256 ||
         !Number.isFinite(powStep) ||
         powStep <= 0 ||
         powStep > 1

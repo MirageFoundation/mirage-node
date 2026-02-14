@@ -1142,14 +1142,18 @@ func (app *App) RegisterUpgradeHandlers() {
 			factor := oldDiff
 			if oldDiff < baseFactor {
 				// Old value is a bit-count; convert to factor: base_factor * 2^(old - minDiff)
-				shift := uint64(0)
-				if oldDiff > minDiff {
-					shift = oldDiff - minDiff
-				}
+			shift := uint64(0)
+			if oldDiff > minDiff {
+				shift = oldDiff - minDiff
+			}
+			if shift > 53 {
+				factor = corekeeper.MaxSafeDifficultyFactor
+			} else {
 				factor = baseFactor << shift
-				if factor > corekeeper.MaxSafeDifficultyFactor || shift > 53 {
+				if factor > corekeeper.MaxSafeDifficultyFactor {
 					factor = corekeeper.MaxSafeDifficultyFactor
 				}
+			}
 				sdkCtx.Logger().Info("v1.11.0: converted difficulty bit-count to factor",
 					"old_bits", oldDiff, "min_diff", minDiff, "shift", shift, "factor", factor)
 			} else {

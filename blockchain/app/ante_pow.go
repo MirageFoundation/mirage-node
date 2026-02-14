@@ -918,6 +918,9 @@ func computeDifficultyFactor(step float64, difficultySteps uint64) (uint64, erro
 	if difficultySteps == 0 {
 		return corekeeper.BaseDifficultyFactor, nil
 	}
+	if difficultySteps > corekeeper.MaxSafeDifficultySteps {
+		return corekeeper.MaxSafeDifficultyFactor, nil
+	}
 	pow := math.Pow(1+step, float64(difficultySteps))
 	if math.IsNaN(pow) || math.IsInf(pow, 0) {
 		return corekeeper.MaxSafeDifficultyFactor, nil
