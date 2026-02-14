@@ -196,13 +196,13 @@ def _uvarint(n: int) -> bytes:
 
 
 def _compute_pow(
-    base: bytes, difficulty_steps: int, pow_base_bits: int, last_block_hash: str, max_seconds: float = 20.0
+    base: bytes, difficulty: int, pow_base_bits: int, last_block_hash: str, max_seconds: float = 20.0
 ) -> int:
     try:
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW tests") from e
-    if difficulty_steps < 0:
+    if difficulty < 0:
         raise ValueError("difficulty must be >= 0")
     if pow_base_bits <= 0 or pow_base_bits > 256:
         raise ValueError("pow_base_bits must be in [1, 256]")
@@ -224,7 +224,7 @@ def _compute_pow(
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _check_pow_target(digest, difficulty_steps, pow_base_bits, _POW_FACTOR):
+        if _check_pow_target(digest, difficulty, pow_base_bits, _POW_FACTOR):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW mining exceeded {max_seconds:.1f}s")
@@ -239,15 +239,15 @@ def _round_half_up(value: float) -> int:
     return int(math.floor(value + 0.5))
 
 
-def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
-    if difficulty_steps < 0:
+def _difficulty_factor(difficulty: int, pow_factor: float) -> int | None:
+    if difficulty < 0:
         return None
     if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
         return None
-    if difficulty_steps == 0:
+    if difficulty == 0:
         return _BASE_DIFFICULTY_FACTOR
     try:
-        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty_steps))
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty))
     except Exception:
         return _MAX_SAFE_DIFFICULTY_FACTOR
     if not math.isfinite(factor):
@@ -258,11 +258,11 @@ def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int | None:
     return max(_BASE_DIFFICULTY_FACTOR, rounded)
 
 
-def _check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
+def _check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
     if pow_base_bits <= 0 or pow_base_bits > 256:
         return False
-    factor = _difficulty_factor(difficulty_steps, pow_factor)
+    factor = _difficulty_factor(difficulty, pow_factor)
     if factor is None:
         return False
     base_target = 1 << (256 - pow_base_bits)

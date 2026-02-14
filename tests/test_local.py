@@ -159,13 +159,22 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
 # Local Docker testnet helpers
 # ---------------------------------------------------------------------------
 
+# Detect if we're already running inside the container.
+_INSIDE_CONTAINER = os.path.exists("/.dockerenv") or os.path.isfile("/opt/mirage/deploy/entrypoint.sh")
+
+
 def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
-    """Run a command inside the local 'mirage' Docker container.
-    Returns (exit_code, stdout)."""
-    result = subprocess.run(
-        ["docker", "exec", "mirage", "bash", "-lc", cmd],
-        capture_output=True, text=True, timeout=timeout,
-    )
+    """Run a command inside the mirage environment.
+
+    If running inside the container, executes directly via bash.
+    If running on the host, uses ``docker exec mirage``.
+    Returns (exit_code, stdout).
+    """
+    if _INSIDE_CONTAINER:
+        argv = ["bash", "-lc", cmd]
+    else:
+        argv = ["docker", "exec", "mirage", "bash", "-lc", cmd]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     return result.returncode, result.stdout.strip()
 
 
@@ -179,13 +188,31 @@ def _miraged_cmd() -> str:
     return out.strip() or "/opt/mirage/blockchain/miraged"
 
 
+# Detect keyring backend from client.toml (os vs test).
+_KEYRING_BACKEND: Optional[str] = None
+
+
+def _keyring_backend() -> str:
+    """Return the keyring-backend configured in client.toml."""
+    global _KEYRING_BACKEND
+    if _KEYRING_BACKEND is None:
+        code, out = _docker_exec(
+            "grep -oP '(?<=keyring-backend = \")\\w+' /root/.mirage/node/config/client.toml 2>/dev/null || echo test"
+        )
+        val = out.strip()
+        _KEYRING_BACKEND = val if val else "test"
+    return _KEYRING_BACKEND
+
+
 def _generate_wallet() -> LocalWallet:
     """Generate a fresh random wallet."""
     return LocalWallet(PrivateKey(), prefix="mirage")
 
 
 def _check_local_docker() -> bool:
-    """Verify the local 'mirage' Docker container is running."""
+    """Verify we can execute commands in the mirage environment."""
+    if _INSIDE_CONTAINER:
+        return True
     try:
         code, out = _docker_exec("echo ok", timeout=5)
         return code == 0 and "ok" in out
@@ -194,23 +221,63 @@ def _check_local_docker() -> bool:
 
 
 def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
-    """Send tokens from the validator to an address via Docker CLI.
+    """Send tokens from the validator to an address via CLI.
 
     Uses the chain's bank module directly (no relay/PoW needed).
     Default: 500 MIRAGE (500_000_000 umirage).
+    Waits for the tx to be committed before returning (avoids sequence mismatch).
     """
     miraged = _miraged_cmd()
+    kb = _keyring_backend()
     cmd = (
         f"{miraged} tx bank send "
-        f"$({miraged} keys list --home /root/.mirage/node --keyring-backend test "
+        f"$({miraged} keys list --home /root/.mirage/node --keyring-backend {kb} "
         f"--output json 2>/dev/null | python3 -c "
         f"\"import sys,json; print(json.load(sys.stdin)[0]['address'])\") "
         f"{address} {amount}umirage "
-        f"--home /root/.mirage/node --keyring-backend test "
-        f"--chain-id mirage-1 --yes --fees 5000umirage -o json 2>&1"
+        f"--home /root/.mirage/node --keyring-backend {kb} "
+        f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
     )
     code, out = _docker_exec(cmd, timeout=30)
-    return code == 0
+    if code != 0:
+        print(f"    [faucet] exit code {code}: {out[:200]}")
+        return False
+    # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
+    try:
+        # The JSON response may follow a "gas estimate:" line from --gas auto
+        lines = out.strip().split("\n")
+        json_line = lines[-1]
+        resp = json.loads(json_line)
+        tx_code = int(resp.get("code", 1))
+        tx_hash = resp.get("txhash", "")
+        if tx_code != 0:
+            print(f"    [faucet] tx failed code={tx_code}: {resp.get('raw_log', '')[:200]}")
+            return False
+    except Exception as e:
+        print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+        return False
+    # Wait for tx to be committed so the next send gets the right sequence number
+    if tx_hash:
+        for _ in range(15):
+            time.sleep(1)
+            qcode, qout = _docker_exec(
+                f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
+            )
+            if qcode == 0 and qout:
+                try:
+                    # The output may have a log line before the JSON
+                    json_str = qout[qout.index("{"):]
+                    tx_resp = json.loads(json_str)
+                    on_chain_code = int(tx_resp.get("code", -1))
+                    if on_chain_code == 0:
+                        return True
+                    # Tx committed but failed on-chain
+                    print(f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}")
+                    return False
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+    return False
 
 
 def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
@@ -226,19 +293,20 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
     signed = canon_signed_with_pow(base, 0)
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
         "level": level,
     }
     code, resp = _post(f"{backend}/api/core/upgrade_level", payload)
     return resp
 
 
-def _do_send_tokens(backend: str, wallet: LocalWallet, target: str,
-                    amount: int, skip_pow: bool = False) -> dict:
+def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int, skip_pow: bool = False) -> dict:
     """Send tokens from wallet to target address via the backend API."""
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -247,13 +315,17 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str,
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target, "amount": amount,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "amount": amount,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -281,10 +353,10 @@ def setup_test_wallets(backend: str) -> bool:
     # Tier fees (umirage): T1=100_000_000_000, T2=200_000_000_000, T3=300_000_000_000
     # i.e. T1=100k MIRAGE, T2=200k MIRAGE, T3=300k MIRAGE  (1 MIRAGE = 1_000_000 umirage)
     FAUCET_AMOUNTS = {
-        "free": 1_000_000_000,       #     1,000 MIRAGE
-        "sub1": 150_000_000_000,     #   150,000 MIRAGE  (T1 fee = 100,000)
-        "sub2": 250_000_000_000,     #   250,000 MIRAGE  (T2 fee = 200,000)
-        "sub3": 400_000_000_000,     #   400,000 MIRAGE  (T3 fee = 300,000)
+        "free": 1_000_000_000,  #     1,000 MIRAGE
+        "sub1": 150_000_000_000,  #   150,000 MIRAGE  (T1 fee = 100,000)
+        "sub2": 250_000_000_000,  #   250,000 MIRAGE  (T2 fee = 200,000)
+        "sub3": 400_000_000_000,  #   400,000 MIRAGE  (T3 fee = 300,000)
     }
     for name, w in WALLETS.items():
         addr = str(w.address())
@@ -299,14 +371,24 @@ def setup_test_wallets(backend: str) -> bool:
     print("  Waiting for faucet transactions...")
     time.sleep(6)
 
-    # Verify balances
+    # Verify balances — use chain query directly (backend/indexer may lag)
+    miraged = _miraged_cmd()
+    kb = _keyring_backend()
     for name, w in WALLETS.items():
         addr = str(w.address())
         try:
-            st = get_status(backend, address=addr)
-            bal = int(st.get("balance", 0) or 0)
+            qcode, qout = _docker_exec(
+                f"{miraged} q bank balances {addr} --home /root/.mirage/node "
+                f"--node tcp://127.0.0.1:26657 -o json 2>/dev/null"
+            )
+            bal = 0
+            if qcode == 0 and qout:
+                bals = json.loads(qout).get("balances", [])
+                for b in bals:
+                    if b.get("denom") == "umirage":
+                        bal = int(b.get("amount", 0))
             if bal <= 0:
-                print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} balance is 0 after faucet")
+                print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name} balance is 0 after faucet (addr={addr})")
                 return False
             print(f"  Balance {name:4s}: {bal / 1_000_000:.1f} MIRAGE")
         except Exception as e:
@@ -336,7 +418,9 @@ def setup_test_wallets(backend: str) -> bool:
             us = get_user_status(backend, addr)
             actual_level = int(us.get("user_level", 0) or 0)
             if actual_level != level:
-                print(f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  {name} level={actual_level}, expected {level} (may need more time)")
+                print(
+                    f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  {name} level={actual_level}, expected {level} (may need more time)"
+                )
             else:
                 print(f"  Verified {name} level={actual_level}")
         except Exception as e:
@@ -367,11 +451,12 @@ def _fetch_params(backend: str, address: str | None = None) -> tuple:
     return lb, diff, base_bits, pow_factor, bal
 
 
-def _do_post(backend: str, wallet, topic: str, title: str, content: str,
-             target: str = "", tag: str = "", skip_pow: bool = False) -> str | None:
+def _do_post(
+    backend: str, wallet, topic: str, title: str, content: str, target: str = "", tag: str = "", skip_pow: bool = False
+) -> str | None:
     """Create a post/comment and return the tx_hash or None."""
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -380,14 +465,20 @@ def _do_post(backend: str, wallet, topic: str, title: str, content: str,
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target,
-        "topic": topic, "title": title, "content": content, "tag": tag,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -398,7 +489,7 @@ def _do_post(backend: str, wallet, topic: str, title: str, content: str,
 
 def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool = False) -> dict:
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -407,13 +498,17 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target, "direction": direction,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "direction": direction,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -421,8 +516,17 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
     return resp
 
 
-def _do_edit(backend: str, wallet, override_hash: str, topic: str, title: str,
-             content: str, target: str = "", tag: str = "", skip_pow: bool = False) -> dict:
+def _do_edit(
+    backend: str,
+    wallet,
+    override_hash: str,
+    topic: str,
+    title: str,
+    content: str,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> dict:
     """Edit a post or comment.
 
     Args:
@@ -435,7 +539,7 @@ def _do_edit(backend: str, wallet, override_hash: str, topic: str, title: str,
         skip_pow:      True for subscribers.
     """
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -444,14 +548,21 @@ def _do_edit(backend: str, wallet, override_hash: str, topic: str, title: str,
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target,
-        "topic": topic, "title": title, "content": content, "tag": tag, "override": override_hash,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "override": override_hash,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -461,7 +572,7 @@ def _do_edit(backend: str, wallet, override_hash: str, topic: str, title: str,
 
 def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dict:
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -470,13 +581,16 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -487,7 +601,7 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
 def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, skip_pow: bool = False) -> dict:
     """Follow or unfollow a user."""
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -498,13 +612,17 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": addr, "user": user_addr,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "user": user_addr,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -515,7 +633,7 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
 def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip_pow: bool = False) -> dict:
     """Follow or unfollow a topic."""
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -526,13 +644,17 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": addr, "topic": topic,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "topic": topic,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -543,7 +665,7 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
 def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = True, skip_pow: bool = False) -> dict:
     """Block or unblock a post/user. block_type is 'post' or 'user'."""
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
@@ -559,13 +681,16 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     if skip_pow:
         proof = 0
     else:
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload = {
-        "pubkey": _b64(pub), "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": d, "target": target,
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -650,8 +775,10 @@ def test_params(backend: str):
         if str(stats.get("pow_factor")) == str(data.get("pow_factor")):
             _pass("params.network_stats consistent with get_parameters")
         else:
-            _fail("params.network_stats consistent with get_parameters",
-                  f"step mismatch: {stats.get('pow_factor')} vs {data.get('pow_factor')}")
+            _fail(
+                "params.network_stats consistent with get_parameters",
+                f"step mismatch: {stats.get('pow_factor')} vs {data.get('pow_factor')}",
+            )
     else:
         _fail("params.network_stats consistent with get_parameters", f"code={code2}")
 
@@ -680,12 +807,16 @@ def test_params(backend: str):
     else:
         _pass("params.bridge_attestation_threshold (bridge endpoint may not be available)")
 
-    # 1.9 get_total_supply positive
-    code4, supply = _get(f"{backend}/api/get_total_supply")
-    if code4 == 200 and int(supply.get("total_supply", 0) or 0) > 0:
-        _pass("params.get_total_supply positive")
-    else:
-        _fail("params.get_total_supply positive", f"code={code4}")
+    # 1.9 get_total_supply positive (returns plain text, not JSON)
+    try:
+        r4 = requests.get(f"{backend}/api/get_total_supply", timeout=10)
+        supply_val = float(r4.text.strip()) if r4.status_code == 200 else 0
+        if supply_val > 0:
+            _pass("params.get_total_supply positive", value=supply_val)
+        else:
+            _fail("params.get_total_supply positive", f"code={r4.status_code}")
+    except Exception as e:
+        _fail("params.get_total_supply positive", str(e))
 
     # 1.10 get_welcome_stats valid structure
     code5, ws = _get(f"{backend}/api/get_welcome_stats")
@@ -722,9 +853,10 @@ def test_account(backend: str):
         _fail("account.get_profile returns 200", f"code={code}")
 
     # 2.3 Set a unique test username
-    test_uname = f"test_{_rand_str(6)}"
+    test_uname = f"test-{_rand_str(6)}"
     try:
         from shared.client import set_username
+
         resp = set_username(backend, wallet, test_uname, skip_pow=False)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
@@ -808,10 +940,15 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.appears in get_user_posts", "not found after 15s")
 
-    # 3.3 Verify in get_posts feed
-    code, feed = _get(f"{backend}/api/get_posts", {"limit": 50})
-    posts = (feed or {}).get("posts") or []
-    found = [p for p in posts if str(p.get("post_id", "")).lower() == txh]
+    # 3.3 Verify in get_posts feed (poll up to 10s)
+    found = []
+    for _ in range(10):
+        code, feed = _get(f"{backend}/api/get_posts", {"limit": 50})
+        posts = (feed or {}).get("posts") or []
+        found = [p for p in posts if str(p.get("post_id", "")).lower() == txh]
+        if found:
+            break
+        time.sleep(1)
     if found:
         p = found[0]
         _pass("post.appears in get_posts feed")
@@ -831,25 +968,33 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
-    # 3.5 Vote up
+    # 3.5 Vote up (poll up to 10s)
     _do_vote(backend, wallet, txh, 1)
-    time.sleep(2)
-    code, feed2 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
-    posts2 = (feed2 or {}).get("posts") or []
-    p2 = next((p for p in posts2 if str(p.get("post_id", "")).lower() == txh), None)
-    votes_after_up = int(p2.get("votes", 0)) if p2 else 0
+    votes_after_up = 0
+    for _ in range(10):
+        time.sleep(1)
+        code, feed2 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
+        posts2 = (feed2 or {}).get("posts") or []
+        p2 = next((p for p in posts2 if str(p.get("post_id", "")).lower() == txh), None)
+        votes_after_up = int(p2.get("votes", 0)) if p2 else 0
+        if votes_after_up >= 1:
+            break
     if votes_after_up >= 1:
         _pass("post.vote_up reflected", votes=votes_after_up)
     else:
         _fail("post.vote_up reflected", f"votes={votes_after_up}")
 
-    # 3.6 Vote down
+    # 3.6 Vote down (poll up to 10s)
     _do_vote(backend, wallet, txh, -1)
-    time.sleep(2)
-    code, feed3 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
-    posts3 = (feed3 or {}).get("posts") or []
-    p3 = next((p for p in posts3 if str(p.get("post_id", "")).lower() == txh), None)
-    votes_after_down = int(p3.get("votes", 0)) if p3 else 0
+    votes_after_down = votes_after_up
+    for _ in range(10):
+        time.sleep(1)
+        code, feed3 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
+        posts3 = (feed3 or {}).get("posts") or []
+        p3 = next((p for p in posts3 if str(p.get("post_id", "")).lower() == txh), None)
+        votes_after_down = int(p3.get("votes", 0)) if p3 else 0
+        if votes_after_down < votes_after_up:
+            break
     if votes_after_down <= votes_after_up:
         _pass("post.vote_down reflected", votes=votes_after_down)
     else:
@@ -944,31 +1089,41 @@ def test_comments(backend: str):
     else:
         _fail("comments.nested_reply succeeds")
 
-    # 4.4 get_root_post_id returns correct root
-    time.sleep(2)
+    # 4.4 get_root_post_id returns correct root (poll up to 10s for indexing)
     if c2_txh:
-        code, root_data = _get(f"{backend}/api/get_root_post_id", {"post_id": c2_txh})
-        if code == 200:
-            root_id = str(root_data.get("root_post_id", "")).lower()
-            if root_id == parent_txh:
-                _pass("comments.get_root_post_id correct")
-            else:
-                _pass("comments.get_root_post_id returns 200")
-        else:
+        root_ok = False
+        for _ in range(10):
+            time.sleep(1)
+            code, root_data = _get(f"{backend}/api/get_root_post_id", {"post_id": c2_txh})
+            if code == 200:
+                root_id = str(root_data.get("root_post_id", "")).lower()
+                if root_id == parent_txh:
+                    _pass("comments.get_root_post_id correct")
+                else:
+                    _pass("comments.get_root_post_id returns 200")
+                root_ok = True
+                break
+        if not root_ok:
             _fail("comments.get_root_post_id correct", f"code={code}")
 
-    # 4.5 get_comment_context
+    # 4.5 get_comment_context (may need indexing time)
     if c2_txh:
-        code, ctx = _get(f"{backend}/api/get_comment_context", {"post_id": c2_txh})
-        if code == 200:
-            _pass("comments.get_comment_context returns 200")
-        else:
+        ctx_ok = False
+        for _ in range(10):
+            code, ctx = _get(f"{backend}/api/get_comment_context", {"post_id": c2_txh})
+            if code == 200:
+                _pass("comments.get_comment_context returns 200")
+                ctx_ok = True
+                break
+            time.sleep(1)
+        if not ctx_ok:
             _fail("comments.get_comment_context returns 200", f"code={code}")
 
     # 4.6 Edit comment (comment: target=parent, override=comment hash)
     if c1_txh:
-        _do_edit(backend, wallet, override_hash=c1_txh, topic="", title="",
-                 content="Edited comment body", target=parent_txh)
+        _do_edit(
+            backend, wallet, override_hash=c1_txh, topic="", title="", content="Edited comment body", target=parent_txh
+        )
         time.sleep(2)
         _pass("comments.edit submitted")
 
@@ -1101,13 +1256,13 @@ def test_pow_v1110(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
-    lb, diff, base_bits, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 6.1 pow_factor present and valid
-    if 0 < step <= 1:
-        _pass("pow.difficulty_step valid", value=step)
+    if 0 < pow_factor <= 1:
+        _pass("pow.difficulty_step valid", value=pow_factor)
     else:
-        _fail("pow.difficulty_step valid", f"got {step}")
+        _fail("pow.difficulty_step valid", f"got {pow_factor}")
 
     # 6.2 Difficulty is >= 0 (step format)
     if diff >= 0:
@@ -1117,9 +1272,9 @@ def test_pow_v1110(backend: str):
 
     # 6.3 Factor computation matches formula
     for d in [0, 1, 2, 3, 5, 10]:
-        expected_raw = _BASE_DIFFICULTY_FACTOR * math.pow(1 + step, d)
+        expected_raw = _BASE_DIFFICULTY_FACTOR * math.pow(1 + pow_factor, d)
         expected = int(math.floor(expected_raw + 0.5))
-        computed = _difficulty_factor(d, step)
+        computed = _difficulty_factor(d, pow_factor)
         if computed == expected:
             _pass(f"pow.factor_step_{d} = {computed}")
         else:
@@ -1130,7 +1285,7 @@ def test_pow_v1110(backend: str):
     ts = _now_ms()
     base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", "test", "pow test", "body", "", 0)
     try:
-        proof = compute_pow(base, 0, min_diff, step, lb)
+        proof = compute_pow(base, 0, base_bits, pow_factor, lb)
         _pass("pow.compute at difficulty=0 succeeds", proof=proof)
     except Exception as e:
         _fail("pow.compute at difficulty=0 succeeds", str(e))
@@ -1139,12 +1294,18 @@ def test_pow_v1110(backend: str):
     try:
         from argon2.low_level import hash_secret_raw, Type as ArgonType  # noqa: E402
         from shared.canon import uvarint  # noqa: E402
+
         salt = bytes.fromhex(lb.strip())
         digest = hash_secret_raw(
             base + b":" + uvarint(int(proof)),
-            salt, time_cost=1, memory_cost=4096, parallelism=1, hash_len=32, type=ArgonType.ID
+            salt,
+            time_cost=1,
+            memory_cost=4096,
+            parallelism=1,
+            hash_len=32,
+            type=ArgonType.ID,
         )
-        ok = check_pow_target(digest, 0, min_diff, step)
+        ok = check_pow_target(digest, 0, base_bits, pow_factor)
         if ok:
             _pass("pow.target_check at difficulty=0 passes")
         else:
@@ -1254,18 +1415,24 @@ def test_subscriber(backend: str):
     ]:
         try:
             a = str(w.address())
-            lb, diff, min_diff, step, _ = _fetch_params(backend, a)
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, a)
             pub_s = w.public_key().public_key_bytes
             ts = _now_ms()
             base = _canon_base_post_raw(pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0)
-            proof = compute_pow(base, 1, min_diff, step, lb)
+            proof = compute_pow(base, 1, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(w, signed)
             payload = {
-                "pubkey": _b64(pub_s), "signature": _b64(sig),
-                "last_block_hash": lb, "timestamp": ts,
-                "pow_difficulty": 1, "pow": int(proof),
-                "target": "", "topic": "test", "title": f"{name} pow", "content": "body",
+                "pubkey": _b64(pub_s),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 1,
+                "pow": int(proof),
+                "target": "",
+                "topic": "test",
+                "title": f"{name} pow",
+                "content": "body",
             }
             code, resp = _post(f"{backend}/api/core/post", payload)
             if code >= 400:
@@ -1277,17 +1444,22 @@ def test_subscriber(backend: str):
 
     # 7.8 Free user without PoW should be REJECTED
     try:
-        lb2, _, min_diff2, step2, _ = _fetch_params(backend, free_addr)
+        lb2, _, base_bits2, pow_factor2, _ = _fetch_params(backend, free_addr)
         pub_free = free_wallet.public_key().public_key_bytes
         ts2 = _now_ms()
         base2 = _canon_base_post_raw(pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0)
         signed2 = canon_signed_with_pow(base2, 0)
         sig2 = sign_canonical(free_wallet, signed2)
         payload2 = {
-            "pubkey": _b64(pub_free), "signature": _b64(sig2),
-            "last_block_hash": lb2, "timestamp": ts2,
+            "pubkey": _b64(pub_free),
+            "signature": _b64(sig2),
+            "last_block_hash": lb2,
+            "timestamp": ts2,
             "pow_difficulty": 0,
-            "target": "", "topic": "test", "title": "no pow", "content": "body",
+            "target": "",
+            "topic": "test",
+            "title": "no pow",
+            "content": "body",
         }
         code2, resp2 = _post(f"{backend}/api/core/post", payload2)
         if code2 >= 400:
@@ -1301,8 +1473,15 @@ def test_subscriber(backend: str):
     for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("sub3", sub3_wallet)]:
         if name in tier_posts:
             time.sleep(2)
-            resp = _do_edit(backend, w, tier_posts[name], "test", f"Edited {name} {_rand_str(4)}",
-                            f"edited body {name}", skip_pow=True)
+            resp = _do_edit(
+                backend,
+                w,
+                tier_posts[name],
+                "test",
+                f"Edited {name} {_rand_str(4)}",
+                f"edited body {name}",
+                skip_pow=True,
+            )
             txh_e = str(resp.get("tx_hash", "")).lower()
             if txh_e:
                 _pass(f"tiers.{name}_edit_own_post succeeds")
@@ -1378,20 +1557,27 @@ def test_edge_cases(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
 
     def _try_post(topic, title, content, tag="", target="") -> Tuple[int, dict]:
         ts = _now_ms()
         base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, target, topic, title, content, tag, 0)
-        proof = compute_pow(base, diff, min_diff, step, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
-            "pubkey": _b64(pub), "signature": _b64(sig),
-            "last_block_hash": lb, "timestamp": ts,
-            "pow_difficulty": diff, "pow": int(proof),
-            "target": target, "topic": topic, "title": title, "content": content, "tag": tag,
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": lb,
+            "timestamp": ts,
+            "pow_difficulty": diff,
+            "pow": int(proof),
+            "target": target,
+            "topic": topic,
+            "title": title,
+            "content": content,
+            "tag": tag,
         }
         return _post(f"{backend}/api/core/post", payload)
 
@@ -1404,7 +1590,7 @@ def test_edge_cases(backend: str):
         _pass("edge.empty_content submitted (backend may allow)")
 
     # Re-fetch params (PoW is single-use)
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.2 Oversize content rejected
     huge = "x" * 100_001
@@ -1414,7 +1600,7 @@ def test_edge_cases(backend: str):
     else:
         _pass("edge.oversize_content submitted (chain may reject)")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.3 Oversize title rejected
     huge_title = "T" * 500
@@ -1424,7 +1610,7 @@ def test_edge_cases(backend: str):
     else:
         _pass("edge.oversize_title submitted (chain may reject)")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.4 Invalid topic format rejected
     code, resp = _try_post("INVALID TOPIC!!!", "Title", "body")
@@ -1433,7 +1619,7 @@ def test_edge_cases(backend: str):
     else:
         _pass("edge.invalid_topic submitted (chain may reject)")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.5 Missing topic for root post rejected
     code, resp = _try_post("", "Title", "body")
@@ -1445,14 +1631,20 @@ def test_edge_cases(backend: str):
     # 9.6 Timestamp too old rejected
     ts_old = _now_ms() - 120_000  # 2 minutes ago
     base_old = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0)
-    proof_old = compute_pow(base_old, diff, min_diff, step, lb)
+    proof_old = compute_pow(base_old, diff, base_bits, pow_factor, lb)
     signed_old = canon_signed_with_pow(base_old, int(proof_old))
     sig_old = sign_canonical(wallet, signed_old)
     payload_old = {
-        "pubkey": _b64(pub), "signature": _b64(sig_old),
-        "last_block_hash": lb, "timestamp": ts_old,
-        "pow_difficulty": diff, "pow": int(proof_old),
-        "target": "", "topic": "test", "title": "Old ts", "content": "body",
+        "pubkey": _b64(pub),
+        "signature": _b64(sig_old),
+        "last_block_hash": lb,
+        "timestamp": ts_old,
+        "pow_difficulty": diff,
+        "pow": int(proof_old),
+        "target": "",
+        "topic": "test",
+        "title": "Old ts",
+        "content": "body",
     }
     code_old, _ = _post(f"{backend}/api/core/post", payload_old)
     if code_old >= 400:
@@ -1460,19 +1652,25 @@ def test_edge_cases(backend: str):
     else:
         _pass("edge.old_timestamp submitted (chain validates envelope age)")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.7 Timestamp too far in future rejected
     ts_future = _now_ms() + 120_000  # 2 minutes in future
     base_fut = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0)
-    proof_fut = compute_pow(base_fut, diff, min_diff, step, lb)
+    proof_fut = compute_pow(base_fut, diff, base_bits, pow_factor, lb)
     signed_fut = canon_signed_with_pow(base_fut, int(proof_fut))
     sig_fut = sign_canonical(wallet, signed_fut)
     payload_fut = {
-        "pubkey": _b64(pub), "signature": _b64(sig_fut),
-        "last_block_hash": lb, "timestamp": ts_future,
-        "pow_difficulty": diff, "pow": int(proof_fut),
-        "target": "", "topic": "test", "title": "future ts", "content": "body",
+        "pubkey": _b64(pub),
+        "signature": _b64(sig_fut),
+        "last_block_hash": lb,
+        "timestamp": ts_future,
+        "pow_difficulty": diff,
+        "pow": int(proof_fut),
+        "target": "",
+        "topic": "test",
+        "title": "future ts",
+        "content": "body",
     }
     code_fut, _ = _post(f"{backend}/api/core/post", payload_fut)
     if code_fut >= 400:
@@ -1480,10 +1678,12 @@ def test_edge_cases(backend: str):
     else:
         _pass("edge.future_timestamp submitted (chain validates envelope age)")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.8 Non-existent target fails gracefully
-    code, resp = _get(f"{backend}/api/get_comments", {"post_id": "0000000000000000000000000000000000000000000000000000000000000000"})
+    code, resp = _get(
+        f"{backend}/api/get_comments", {"post_id": "0000000000000000000000000000000000000000000000000000000000000000"}
+    )
     if code == 200:
         comments = (resp or {}).get("comments") or []
         if len(comments) == 0:
@@ -1496,15 +1696,20 @@ def test_edge_cases(backend: str):
     # 9.9 Invalid pubkey rejected
     ts = _now_ms()
     base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", "test", "bad pk", "body", "", 0)
-    proof = compute_pow(base, diff, min_diff, step, lb)
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
     payload_bad = {
         "pubkey": _b64(b"\x00" * 33),  # invalid pubkey
         "signature": _b64(sig),
-        "last_block_hash": lb, "timestamp": ts,
-        "pow_difficulty": diff, "pow": int(proof),
-        "target": "", "topic": "test", "title": "bad pk", "content": "body",
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": diff,
+        "pow": int(proof),
+        "target": "",
+        "topic": "test",
+        "title": "bad pk",
+        "content": "body",
     }
     code_bad, _ = _post(f"{backend}/api/core/post", payload_bad)
     if code_bad >= 400:
@@ -1512,22 +1717,27 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.invalid_pubkey_rejected", f"code={code_bad}")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.10 Mismatched signature — sign with wallet A, send pubkey of wallet B
     wallet_b = WALLETS["sub1"]
     pub_b = wallet_b.public_key().public_key_bytes
     ts_mis = _now_ms()
     base_mis = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0)
-    proof_mis = compute_pow(base_mis, diff, min_diff, step, lb)
+    proof_mis = compute_pow(base_mis, diff, base_bits, pow_factor, lb)
     signed_mis = canon_signed_with_pow(base_mis, int(proof_mis))
     sig_mis = sign_canonical(wallet, signed_mis)  # signed by wallet A
     payload_mis = {
         "pubkey": _b64(pub_b),  # but pubkey is wallet B's
         "signature": _b64(sig_mis),
-        "last_block_hash": lb, "timestamp": ts_mis,
-        "pow_difficulty": diff, "pow": int(proof_mis),
-        "target": "", "topic": "test", "title": "mismatch", "content": "body",
+        "last_block_hash": lb,
+        "timestamp": ts_mis,
+        "pow_difficulty": diff,
+        "pow": int(proof_mis),
+        "target": "",
+        "topic": "test",
+        "title": "mismatch",
+        "content": "body",
     }
     code_mis, resp_mis = _post(f"{backend}/api/core/post", payload_mis)
     if code_mis >= 400:
@@ -1535,20 +1745,28 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.signature_mismatch_rejected", f"code={code_mis}")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.11 Stale/invalid block hash rejected
     ts_stale = _now_ms()
     fake_lb = "aa" * 32  # valid hex but not a real block hash
-    base_stale = _canon_base_post_raw(pub, bytes.fromhex(fake_lb), diff, ts_stale, "", "test", "stale lb", "body", "", 0)
-    proof_stale = compute_pow(base_stale, diff, min_diff, step, fake_lb)
+    base_stale = _canon_base_post_raw(
+        pub, bytes.fromhex(fake_lb), diff, ts_stale, "", "test", "stale lb", "body", "", 0
+    )
+    proof_stale = compute_pow(base_stale, diff, base_bits, pow_factor, fake_lb)
     signed_stale = canon_signed_with_pow(base_stale, int(proof_stale))
     sig_stale = sign_canonical(wallet, signed_stale)
     payload_stale = {
-        "pubkey": _b64(pub), "signature": _b64(sig_stale),
-        "last_block_hash": fake_lb, "timestamp": ts_stale,
-        "pow_difficulty": diff, "pow": int(proof_stale),
-        "target": "", "topic": "test", "title": "stale lb", "content": "body",
+        "pubkey": _b64(pub),
+        "signature": _b64(sig_stale),
+        "last_block_hash": fake_lb,
+        "timestamp": ts_stale,
+        "pow_difficulty": diff,
+        "pow": int(proof_stale),
+        "target": "",
+        "topic": "test",
+        "title": "stale lb",
+        "content": "body",
     }
     code_stale, _ = _post(f"{backend}/api/core/post", payload_stale)
     if code_stale >= 400:
@@ -1556,7 +1774,7 @@ def test_edge_cases(backend: str):
     else:
         _fail("edge.stale_block_hash_rejected", f"code={code_stale}")
 
-    lb, diff, min_diff, step, _ = _fetch_params(backend, addr)
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
     # 9.12 XSS injection in content — should not cause server error
     xss_content = '<script>alert("xss")</script><img src=x onerror=alert(1)>'
@@ -1623,6 +1841,7 @@ def test_edge_cases(backend: str):
         if existing_name:
             # Try to claim the subscriber's existing username from the free wallet
             from shared.client import set_username as _set_username
+
             resp_dup = _set_username(backend, wallet, existing_name, skip_pow=False)
             txh_dup = str(resp_dup.get("tx_hash", "")).lower()
             code_dup = int(resp_dup.get("code", 0) or 0)
@@ -1672,8 +1891,9 @@ ALL_CATEGORIES = {
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage Local Test Suite")
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
-    parser.add_argument("--category", "-c", default=None,
-                        help=f"Run single category: {', '.join(ALL_CATEGORIES.keys())}")
+    parser.add_argument(
+        "--category", "-c", default=None, help=f"Run single category: {', '.join(ALL_CATEGORIES.keys())}"
+    )
     args = parser.parse_args()
     backend = args.backend.rstrip("/")
 
@@ -1685,20 +1905,26 @@ def main() -> int:
     # ── Local-only guard ──────────────────────────────────────────
     # This suite is ONLY for the local Docker testnet.
     from urllib.parse import urlparse
+
     parsed = urlparse(backend)
     hostname = (parsed.hostname or "").lower()
     if hostname not in ("127.0.0.1", "localhost", "::1"):
-        print(f"\n{_COLOR_RED}ABORT: This test suite is designed to run ONLY on the local Docker testnet.{_COLOR_RESET}")
+        print(
+            f"\n{_COLOR_RED}ABORT: This test suite is designed to run ONLY on the local Docker testnet.{_COLOR_RESET}"
+        )
         print(f"  Backend host '{hostname}' is not localhost.")
         print(f"  Run scripts/reset_local_testnet.py first, then use --backend http://127.0.0.1:80")
         return 1
 
     if not _check_local_docker():
-        print(f"\n{_COLOR_RED}ABORT: Docker container 'mirage' is not running.{_COLOR_RESET}")
-        print(f"  Run scripts/reset_local_testnet.py first to set up the local testnet.")
+        print(f"\n{_COLOR_RED}ABORT: Cannot execute commands in the mirage environment.{_COLOR_RESET}")
+        print(f"  Either run this from inside the container, or ensure the 'mirage' Docker container is running.")
         return 1
 
-    print(f"  Docker container 'mirage' is running.")
+    if _INSIDE_CONTAINER:
+        print(f"  Running inside container.")
+    else:
+        print(f"  Docker container 'mirage' is running.")
 
     # ── Verify connectivity ───────────────────────────────────────
     try:

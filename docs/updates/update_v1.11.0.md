@@ -128,11 +128,11 @@ def _round_half_up(x: float) -> int:
 def _difficulty_factor(steps: int, step: float) -> int:
     return _round_half_up(BASE_FACTOR * (1 + step) ** steps)
 
-def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
-    if difficulty_steps < 0 or pow_factor <= 0 or pow_factor > 1:
+def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
+    if difficulty < 0 or pow_factor <= 0 or pow_factor > 1:
         return False
     base_target = 1 << (256 - pow_base_bits)
-    factor = _difficulty_factor(difficulty_steps, pow_factor)
+    factor = _difficulty_factor(difficulty, pow_factor)
     eff_target = base_target * BASE_FACTOR // factor
     return int.from_bytes(digest, "big") <= eff_target
 ```

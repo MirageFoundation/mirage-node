@@ -252,12 +252,12 @@ def argon2_digest(base: bytes, last_block_hash: str, proof: int) -> bytes:
 
 import math
 
-def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
+def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
     """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
-    if difficulty_steps < 0 or pow_factor <= 0 or pow_factor > 1:
+    if difficulty < 0 or pow_factor <= 0 or pow_factor > 1:
         return False
     base_target = 1 << (256 - pow_base_bits)
-    factor = int(math.floor(1000 * (1 + pow_factor) ** difficulty_steps + 0.5))
+    factor = int(math.floor(1000 * (1 + pow_factor) ** difficulty + 0.5))
     eff_target = base_target * 1000 // factor
     return int.from_bytes(digest, "big") <= eff_target
 ```

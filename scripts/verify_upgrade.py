@@ -99,7 +99,7 @@ def check_upgrade_applied(miraged: str, rpc: str, failures: list[str]) -> None:
         failures.append(f"cannot check upgrade state: {e}")
 
 
-def check_difficulty_steps(miraged: str, rpc: str, failures: list[str]) -> None:
+def check_difficulty(miraged: str, rpc: str, failures: list[str]) -> None:
     """current_difficulty must be >= 0 (step-based, not old factor format)."""
     print("\n-> Checking difficulty (step format)...")
     try:
@@ -318,7 +318,7 @@ def main() -> int:
 
     check_binary_version(miraged, failures)
     check_upgrade_applied(miraged, rpc, failures)
-    check_difficulty_steps(miraged, rpc, failures)
+    check_difficulty(miraged, rpc, failures)
     check_param_types(miraged, rpc, failures)
     check_source_level(failures)
 

@@ -80,19 +80,19 @@ def sign(privkey: bytes, message: bytes) -> bytes:
 def _round_half_up(x: float) -> int:
     return int(math.floor(x + 0.5))
 
-def _difficulty_factor(difficulty_steps: int, pow_factor: float) -> int:
-    return _round_half_up(1000 * (1 + pow_factor) ** difficulty_steps)
+def _difficulty_factor(difficulty: int, pow_factor: float) -> int:
+    return _round_half_up(1000 * (1 + pow_factor) ** difficulty)
 
-def check_pow_target(digest: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float) -> bool:
-    if difficulty_steps < 0 or pow_factor <= 0 or pow_factor > 1:
+def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
+    if difficulty < 0 or pow_factor <= 0 or pow_factor > 1:
         return False
     base_target = 1 << (256 - pow_base_bits)
-    factor = _difficulty_factor(difficulty_steps, pow_factor)
+    factor = _difficulty_factor(difficulty, pow_factor)
     eff_target = base_target * 1000 // factor
     return int.from_bytes(digest, "big") <= eff_target
 
 def compute_pow(
-    base: bytes, difficulty_steps: int, pow_base_bits: int, pow_factor: float, block_hash_hex: str, max_seconds: float = 120
+    base: bytes, difficulty: int, pow_base_bits: int, pow_factor: float, block_hash_hex: str, max_seconds: float = 120
 ) -> int:
     salt = bytes.fromhex(block_hash_hex)
     start = time.time()
@@ -103,7 +103,7 @@ def compute_pow(
         password = base + b":" + uvarint(nonce)
         digest = hash_secret_raw(password, salt, time_cost=1, memory_cost=4096,
                                  parallelism=1, hash_len=32, type=Argon2Type.ID)
-        if check_pow_target(digest, difficulty_steps, pow_base_bits, pow_factor):
+        if check_pow_target(digest, difficulty, pow_base_bits, pow_factor):
             return nonce
         nonce += 1
 
