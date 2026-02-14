@@ -120,6 +120,8 @@ def _deleted_filter_bare() -> str:
 
 # Allowed content tags used for topic safety classification
 _TOPIC_TAGS = ("sensitive", "gore", "violence", "death", "porn")
+_HOME_FEED_MAGIC_JITTER_STRENGTH = 0.08
+_HOME_FEED_MAGIC_SEED_SECONDS = 300
 
 
 def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
@@ -921,6 +923,7 @@ def _get_home_feed(
     allowed_tags: set[str],
     seed: int = 0,
     sort_mode: str = "magic",
+    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Home feed.
@@ -940,7 +943,16 @@ def _get_home_feed(
     if not viewer_lower or viewer_lower == "guest":
         if sort_mode == "newest":
             return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
-        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+        return _get_guest_feed_magic(
+            cur,
+            limit,
+            page,
+            blocked_posts,
+            blocked_users,
+            allowed_tags,
+            seed=seed,
+            jitter_strength=jitter_strength,
+        )
 
     # Logged-in users always use Magic (unified score).
     return _get_home_feed_magic(
@@ -951,7 +963,9 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
+        seed=seed,
         sort_mode=sort_mode,
+        jitter_strength=jitter_strength,
     )
 
 
@@ -963,7 +977,9 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    seed: int = 0,
     sort_mode: str = "magic",
+    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Magic feed algorithm.
@@ -1024,6 +1040,9 @@ def _get_home_feed_magic(
             author_prefs,
             now_ts,
             True,
+            jitter_seed=seed,
+            jitter_strength=jitter_strength,
+            viewer=viewer_lower,
         )
 
         if should_hide:
@@ -1070,6 +1089,13 @@ def _get_home_feed_magic(
     }
 
 
+def _stable_feed_jitter(seed: int, viewer: str, post_id: str) -> float:
+    key = f"{seed}:{viewer}:{post_id}".encode("utf-8")
+    digest = hashlib.sha256(key).digest()
+    val = int.from_bytes(digest[:8], "big")
+    return (val / 2**64) * 2.0 - 1.0
+
+
 def _score_magic(
     post: dict,
     sim_lookup: dict[str, float],
@@ -1080,6 +1106,9 @@ def _score_magic(
     author_prefs: dict[str, float],
     now_ts: int,
     use_prefs: bool = True,
+    jitter_seed: int | None = None,
+    jitter_strength: float = 0.0,
+    viewer: str = "",
 ) -> tuple[float, dict, bool]:
     """
     Magic scoring: (S + V + U + P) × R
@@ -1151,8 +1180,14 @@ def _score_magic(
     age_hours = max(0, (now_ts - timestamp) / 3600)
     R = 1 / (1 + (age_hours / 12) ** 1.585)
 
-    # Final score
-    score = (S + V + U + P) * R
+    # Final score (with optional deterministic jitter)
+    base_score = (S + V + U + P) * R
+    score = base_score
+    jitter = 0.0
+    if jitter_seed is not None and jitter_strength > 0:
+        viewer_key = (viewer or "").strip().lower()
+        jitter = _stable_feed_jitter(jitter_seed, viewer_key, pid)
+        score = base_score * (1.0 + jitter_strength * jitter)
 
     # Determine primary reason based on dominant component
     components = [("S", S), ("V", V), ("U", U), ("P", P)]
@@ -1195,6 +1230,11 @@ def _score_magic(
         "a_pref": round(author_pref, 1),
         "source": post.get("_source", "unknown"),
     }
+    if jitter_seed is not None and jitter_strength > 0:
+        debug["score_base"] = round(float(base_score), 4)
+        debug["jitter"] = round(float(jitter), 4)
+        debug["jitter_strength"] = round(float(jitter_strength), 4)
+        debug["jitter_seed"] = int(jitter_seed)
 
     return score, debug, False
 
@@ -1483,6 +1523,8 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    seed: int = 0,
+    jitter_strength: float = 0.0,
 ) -> dict:
     """
     Guest home feed, Magic-style:
@@ -1521,6 +1563,9 @@ def _get_guest_feed_magic(
             author_prefs,
             now_ts,
             False,
+            jitter_seed=seed,
+            jitter_strength=jitter_strength,
+            viewer="guest",
         )
         if should_hide:
             continue
@@ -3448,6 +3493,8 @@ def get_posts():
 
         sort_mode = sort_mode or "magic"
         if feed in ("home", "following"):
+            seed = int(time.time() // _HOME_FEED_MAGIC_SEED_SECONDS)
+            jitter_strength = _HOME_FEED_MAGIC_JITTER_STRENGTH if (feed == "home" and sort_mode == "magic") else 0.0
             try:
                 log_event(
                     next_request_id(),
@@ -3457,6 +3504,8 @@ def get_posts():
                     page=page,
                     limit=limit,
                     by=sort_mode,
+                    seed=seed,
+                    jitter_strength=jitter_strength,
                 )
             except Exception:
                 pass
@@ -3471,8 +3520,9 @@ def get_posts():
                     blocked_posts=blocked_posts,
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
-                    seed=int(time.time() // 60),
+                    seed=seed,
                     sort_mode=sort_mode,
+                    jitter_strength=jitter_strength,
                 )
             else:
                 resp = _get_following_feed(

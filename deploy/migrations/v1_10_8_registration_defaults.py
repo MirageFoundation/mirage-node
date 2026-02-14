@@ -10,7 +10,7 @@ This ensures only the primary node accepts new accounts.
 
 from pathlib import Path
 
-from deploy.migrations._helpers import parse_env_file, update_env_value
+from deploy.migrations._helpers import append_env_value, parse_env_file, update_env_value
 
 MIGRATION_KEY = "v1_10_8_registration_defaults"
 DESCRIPTION = "Set registration enabled/invite codes per node domain"
@@ -46,10 +46,14 @@ def run(config_dir: Path, logger) -> str:
         logger.info(f"    Domain is {label} — disabling registration")
 
     changes = []
-    if update_env_value(backend_env, "REGISTRATION_ENABLED", reg_enabled):
-        changes.append(f"REGISTRATION_ENABLED={reg_enabled}")
-    if update_env_value(backend_env, "REGISTRATION_INVITE_CODE_REQUIRED", invite_required):
-        changes.append(f"REGISTRATION_INVITE_CODE_REQUIRED={invite_required}")
+    for key, value in [
+        ("REGISTRATION_ENABLED", reg_enabled),
+        ("REGISTRATION_INVITE_CODE_REQUIRED", invite_required),
+    ]:
+        if update_env_value(backend_env, key, value):
+            changes.append(f"{key}={value}")
+        elif append_env_value(backend_env, key, value):
+            changes.append(f"{key}={value} (added)")
 
     if changes:
         return f"set: {', '.join(changes)}"
