@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _find_miraged() -> str:
     candidates = [
         "/opt/mirage/blockchain/miraged",
@@ -64,6 +65,7 @@ def _run_json(cmd: list[str]) -> dict:
 # ---------------------------------------------------------------------------
 # v1.11.0 specific checks
 # ---------------------------------------------------------------------------
+
 
 def check_binary_version(miraged: str, failures: list[str]) -> None:
     """Binary version must match v1.11.0 (or v1.11.0-*)."""
@@ -190,7 +192,7 @@ def check_source_level(failures: list[str]) -> None:
         text = path.read_text()
         for pattern, ok_msg, fail_msg in checks:
             if pattern.startswith("re:"):
-                hit = bool(re.search(pattern[3:], text))
+                hit = bool(re.search(pattern[3:], text, re.DOTALL))
             else:
                 hit = pattern in text
             if hit:
@@ -205,7 +207,7 @@ def check_source_level(failures: list[str]) -> None:
             return
         found_any = True
         text = path.read_text()
-        hit = bool(re.search(pattern[3:], text)) if pattern.startswith("re:") else (pattern in text)
+        hit = bool(re.search(pattern[3:], text, re.DOTALL)) if pattern.startswith("re:") else (pattern in text)
         if not hit:
             print(f"   [OK] {ok_msg}")
         else:
@@ -213,26 +215,53 @@ def check_source_level(failures: list[str]) -> None:
             failures.append(f"v1.11.0: {fail_msg}")
 
     # Go
-    _check(REPO_ROOT / "blockchain" / "app" / "upgrades.go", [
-        ("v1.11.0", "upgrades.go: v1.11.0 handler", "upgrades.go: v1.11.0 handler missing"),
-    ])
-    _check(REPO_ROOT / "blockchain" / "app" / "ante_pow.go", [
-        ("computeDifficultyFactor", "ante_pow.go: computeDifficultyFactor", "ante_pow.go: computeDifficultyFactor missing"),
-        ("MaxSafeDifficultyFactor", "ante_pow.go: MaxSafeDifficultyFactor cap", "ante_pow.go: MaxSafeDifficultyFactor missing"),
-    ])
-    _check(REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go", [
-        ("BaseDifficultySteps", "keeper.go: BaseDifficultySteps", "keeper.go: BaseDifficultySteps missing"),
-        ("BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor missing"),
-    ])
+    _check(
+        REPO_ROOT / "blockchain" / "app" / "upgrades.go",
+        [
+            ("v1.11.0", "upgrades.go: v1.11.0 handler", "upgrades.go: v1.11.0 handler missing"),
+        ],
+    )
+    _check(
+        REPO_ROOT / "blockchain" / "app" / "ante_pow.go",
+        [
+            (
+                "computeDifficultyFactor",
+                "ante_pow.go: computeDifficultyFactor",
+                "ante_pow.go: computeDifficultyFactor missing",
+            ),
+            (
+                "MaxSafeDifficultyFactor",
+                "ante_pow.go: MaxSafeDifficultyFactor cap",
+                "ante_pow.go: MaxSafeDifficultyFactor missing",
+            ),
+        ],
+    )
+    _check(
+        REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go",
+        [
+            ("BaseDifficultySteps", "keeper.go: BaseDifficultySteps", "keeper.go: BaseDifficultySteps missing"),
+            ("BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor missing"),
+        ],
+    )
 
     # Python backend
-    _check(REPO_ROOT / "web" / "backend" / "pow.py", [
-        ("_BASE_DIFFICULTY_FACTOR", "pow.py: step-based factor", "pow.py: step-based factor missing"),
-        ("pow_difficulty_step", "pow.py: pow_difficulty_step", "pow.py: pow_difficulty_step missing"),
-    ])
-    _check(REPO_ROOT / "web" / "backend" / "params.py", [
-        ("re:_REQUIRED_FLOAT_PARAMS.*pow_difficulty_step", "params.py: pow_difficulty_step as float", "params.py: pow_difficulty_step not float"),
-    ])
+    _check(
+        REPO_ROOT / "web" / "backend" / "pow.py",
+        [
+            ("_BASE_DIFFICULTY_FACTOR", "pow.py: step-based factor", "pow.py: step-based factor missing"),
+            ("pow_difficulty_step", "pow.py: pow_difficulty_step", "pow.py: pow_difficulty_step missing"),
+        ],
+    )
+    _check(
+        REPO_ROOT / "web" / "backend" / "params.py",
+        [
+            (
+                "re:_REQUIRED_FLOAT_PARAMS.*pow_difficulty_step",
+                "params.py: pow_difficulty_step as float",
+                "params.py: pow_difficulty_step not float",
+            ),
+        ],
+    )
     _check_absent(
         REPO_ROOT / "web" / "backend" / "routes" / "core.py",
         r"re:not\s*\(\s*int\(difficulty\)\s*>\s*0\s+and\s+proof\s*\)",
@@ -241,12 +270,26 @@ def check_source_level(failures: list[str]) -> None:
     )
 
     # Frontend
-    _check(REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js", [
-        ("BASE_DIFFICULTY_FACTOR", "worker.js: BASE_DIFFICULTY_FACTOR", "worker.js: BASE_DIFFICULTY_FACTOR missing"),
-    ])
-    _check(REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js", [
-        ("pow_difficulty_step", "TransactionHandler.js: pow_difficulty_step", "TransactionHandler.js: pow_difficulty_step missing"),
-    ])
+    _check(
+        REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js",
+        [
+            (
+                "BASE_DIFFICULTY_FACTOR",
+                "worker.js: BASE_DIFFICULTY_FACTOR",
+                "worker.js: BASE_DIFFICULTY_FACTOR missing",
+            ),
+        ],
+    )
+    _check(
+        REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js",
+        [
+            (
+                "pow_difficulty_step",
+                "TransactionHandler.js: pow_difficulty_step",
+                "TransactionHandler.js: pow_difficulty_step missing",
+            ),
+        ],
+    )
 
     if not found_any:
         print("   (no source files present — skipped)")
@@ -255,6 +298,7 @@ def check_source_level(failures: list[str]) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=f"Verify {UPGRADE_NAME} chain upgrade")
