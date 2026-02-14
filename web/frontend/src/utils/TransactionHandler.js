@@ -1637,12 +1637,73 @@ class TransactionHandler {
             }
 
             const privateKey = derivePrivateKeyFromSeed(seedPhrase);
+
+            // Retry loop: PoW-related failures (difficulty changed between compute and submit)
+            // warrant re-fetching params and recomputing PoW, up to 3 times.
+            const MAX_POW_RETRIES = 3;
+            const POW_RETRY_DELAY_MS = 3000;
             let result;
-            try {
-                result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress);
-            } catch (error) {
-                // If performTransaction throws, treat as failure
-                const errMsg = String(error && error.message ? error.message : error);
+            let lastError = null;
+
+            for (let attempt = 0; attempt <= MAX_POW_RETRIES; attempt++) {
+                if (attempt > 0) {
+                    // Re-fetch params and rebuild transaction for retry
+                    updateNotification(`PoW stale — retrying (${attempt}/${MAX_POW_RETRIES})...`);
+                    await new Promise(r => setTimeout(r, POW_RETRY_DELAY_MS));
+
+                    if (userLevelNow === 0) {
+                        try {
+                            const addrRetry = Storage.load('publicKey', '');
+                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined, { timeoutMs: 10000 });
+                            last_block_hash = statusRetry.last_block_hash || "";
+                            pow_difficulty = requirePowDifficulty(statusRetry.pow_difficulty);
+                            min_difficulty_relay = requireMinDifficulty(statusRetry.min_difficulty);
+                            pow_difficulty_step_relay = requirePowDifficultyStep(statusRetry.pow_difficulty_step);
+                        } catch (retryErr) {
+                            continue; // param fetch failed, try again next iteration
+                        }
+                    }
+
+                    // Rebuild the transaction with fresh params + timestamp
+                    const retryTimestamp = Math.max(0, Date.now() - 15000);
+                    if (final_transaction) {
+                        final_transaction.last_block_hash = last_block_hash;
+                        final_transaction.pow_difficulty = Number(pow_difficulty);
+                        final_transaction.min_difficulty = min_difficulty_relay;
+                        final_transaction.pow_difficulty_step = pow_difficulty_step_relay;
+                        final_transaction.timestamp = retryTimestamp;
+                    }
+                    challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                }
+
+                try {
+                    result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress);
+                } catch (error) {
+                    lastError = error;
+                    const errMsg = String(error && error.message ? error.message : error);
+                    // Retry on PoW-related failures (difficulty may have changed)
+                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
+                        if (attempt < MAX_POW_RETRIES) continue;
+                    }
+                    // Non-retryable throw — handle below
+                    break;
+                }
+
+                if (result && !result.success) {
+                    const errMsg = String(result.error || '');
+                    // Retry on PoW-related failures
+                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
+                        if (attempt < MAX_POW_RETRIES) continue;
+                    }
+                }
+
+                // Success or non-retryable failure — stop retrying
+                break;
+            }
+
+            // Handle final failure (after all retries exhausted)
+            if (lastError && (!result || !result.success)) {
+                const errMsg = String(lastError && lastError.message ? lastError.message : lastError);
                 if (/insufficient reserve/i.test(errMsg) || /subscription terminated/i.test(errMsg)) {
                     const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
