@@ -4,6 +4,7 @@ import hashlib
 import requests
 import urllib3
 import ssl
+import math
 from typing import Optional
 from dataclasses import dataclass, field
 from cosmpy.aerial.wallet import LocalWallet
@@ -127,18 +128,43 @@ def _log(msg: str) -> None:
         pass
 
 
-def count_leading_zeros(digest: bytes) -> int:
-    total = 0
-    for by in digest:
-        if by == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (by >> i) & 1 == 0:
-                total += 1
-            else:
-                return total
-    return total
+_BASE_DIFFICULTY_FACTOR = 1000
+_MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
+
+
+def _round_half_up(value: float) -> int:
+    return int(math.floor(value + 0.5))
+
+
+def _difficulty_factor(difficulty: int, pow_factor: float) -> int | None:
+    if difficulty < 0:
+        return None
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
+        return None
+    if difficulty == 0:
+        return _BASE_DIFFICULTY_FACTOR
+    try:
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty))
+    except Exception:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if not math.isfinite(factor):
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if factor > _MAX_SAFE_DIFFICULTY_FACTOR:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    rounded = _round_half_up(factor)
+    return max(_BASE_DIFFICULTY_FACTOR, rounded)
+
+
+def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
+    """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        return False
+    factor = _difficulty_factor(difficulty, pow_factor)
+    if factor is None:
+        return False
+    base_target = 1 << (256 - pow_base_bits)
+    eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def canon_base_set_username(
@@ -213,9 +239,13 @@ def canon_base_vote(
     )
 
 
-def compute_pow(base: bytes, difficulty: int, lb_hash: str) -> int:
+def compute_pow(base: bytes, difficulty: int, pow_base_bits: int, pow_factor: float, lb_hash: str) -> int:
     if _argon2_hash_raw is None:
         raise RuntimeError("argon2-cffi is required for PoW")
+    if difficulty < 0:
+        raise ValueError("difficulty must be >= 0")
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        raise ValueError("pow_base_bits must be in [1, 256]")
     try:
         salt = bytes.fromhex(lb_hash.strip())
     except Exception:
@@ -225,7 +255,9 @@ def compute_pow(base: bytes, difficulty: int, lb_hash: str) -> int:
     time_cost = 1
     parallelism = 1
 
-    _log(f"[pow] argon2id: target_bits={int(difficulty)} mem_kib={mem_kib} t={time_cost} p={parallelism}")
+    _log(
+        f"[pow] argon2id: difficulty={difficulty} pow_base_bits={pow_base_bits} pow_factor={pow_factor} mem_kib={mem_kib} t={time_cost} p={parallelism}"
+    )
 
     proof = 0
     attempts = 0
@@ -249,11 +281,11 @@ def compute_pow(base: bytes, difficulty: int, lb_hash: str) -> int:
             type=_Argon2Type.ID,
         )
         attempts += 1
-        if count_leading_zeros(digest) >= int(difficulty):
+        if check_pow_target(digest, difficulty, pow_base_bits, pow_factor):
             total = time.perf_counter() - start
             rate = attempts / max(1e-6, total)
             _log(
-                f"[pow] success proof={proof} bits>={difficulty} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s"
+                f"[pow] success proof={proof} difficulty={difficulty} attempts={attempts} time={total:.2f}s rate={rate:.1f}/s"
             )
             return proof
         proof += 1
@@ -434,6 +466,8 @@ def set_username(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub_bytes = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -458,7 +492,7 @@ def set_username(
     else:
         # Free user mode: compute PoW
         base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), diff, ts_ms, addr, username)
-        proof = compute_pow(base, diff, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {
@@ -509,6 +543,8 @@ def post(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -559,7 +595,7 @@ def post(
             tag or "",
             0,
         )
-        proof = compute_pow(base, diff, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {
@@ -607,6 +643,8 @@ def vote(
     st = get_status(backend, address=addr)
     lb = st["last_block_hash"]
     diff = int(st["pow_difficulty"])
+    base_bits = int(st["pow_base_bits"])
+    pow_factor = float(st["pow_factor"])
     pub = wallet.public_key().public_key_bytes
 
     # Auto-detect subscriber status if not specified
@@ -632,7 +670,7 @@ def vote(
     else:
         # Free user mode: compute PoW
         base = _canon_base_vote(pub, bytes.fromhex(lb), diff, ts_ms, target, int(direction))
-        proof = compute_pow(base, diff, lb)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         req = {

@@ -17,7 +17,7 @@ The chain endpoints have been reorganized under `/chain/rpc` and `/chain/rest` f
 - **Gas pricing simplified:** Removed /1000 divisor from fee calculations
 - **RelayMinGasPrice:** 25 → 5000 umirage/gas
 - **RelayMaxGasFee:** 5000 → 500,000,000 (500 MIRAGE cap)
-- **SubscriptionReservePercent:** 40% → 80% (only 20% burned now)
+- **SubscriptionReserveFraction:** 40% → 80% (only 20% burned now)
 - **MintQuantity:** 100,000 → 350,000,000 (350 MIRAGE per 10min)
 - **Tier fees:** 10/20/30M → 100/200/300B umirage ($1/$2/$3 per month)
 - **Gov min_deposit:** 10M → 500B umirage ($5)

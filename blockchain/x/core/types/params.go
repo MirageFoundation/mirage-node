@@ -103,15 +103,18 @@ func DefaultParams() Params {
 		// Minting
 		MintInterval:         200,         // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
 		MintQuantity:         350_000_000, // 350 MIRAGE per 10min
-		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
-		MintDynamicSplit:     0.5,         // 50% dynamic by default
+		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowIncreaseThreshold)
+		MintDynamicFraction:  0.5,         // 50% dynamic by default
 
-		// minimum Argon2id difficulty for leading zero bits
-		MinDifficulty: 10,
+		// pow_base_bits defines the base PoW target: base_target = 2^(256 - pow_base_bits)
+		PowBaseBits: 10,
+
+		// PoW factor size (fraction (0,1]): factor = 1000 * (1+pow_factor)^difficulty, steps +/-1
+		PowFactor: 0.25,
 
 		// PoW message window
 		PowMessageWindow:         20,  // sliding window in blocks for difficulty adjustment; 20 = 1 min
-		PowMessageLimit:          15,  // if >= this many pow msgs in window, increase difficulty
+		PowIncreaseThreshold:     15,  // if >= this many pow msgs in window, increase difficulty
 		PowCalmPeriodDefinition:  10,  // if < this many pow msgs in window, calm period
 		PowCalmSequenceThreshold: 100, // consecutive calm periods before decreasing difficulty; 100 = 5 mins
 
@@ -119,7 +122,7 @@ func DefaultParams() Params {
 		BlockHashWindow: 10, // in blocks; how many recent block hashes to accept for PoW validation
 
 		// Grace window during a difficulty change where both old and new thresholds are accepted
-		PowDifficultyAllowance: 2, // in blocks
+		PowDifficultyGracePeriod: 2, // in blocks
 
 		// Username limits
 		MinUsernameSize: 3,
@@ -133,8 +136,8 @@ func DefaultParams() Params {
 		// Tier configurations
 		Tiers: DefaultTiers(),
 
-		// Percentage of period fee escrowed as gas reserve (remainder burned)
-		SubscriptionReservePercent: 80,
+		// Fraction of period fee escrowed as gas reserve [0,1] (remainder burned)
+		SubscriptionReserveFraction: 0.80,
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
@@ -147,24 +150,24 @@ func DefaultParams() Params {
 		MaxEnvelopeAge: 60,
 
 		// Bridge parameters
-		BridgeChains:              []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
-		BridgeAttestationThreshold: 6667,                  // 66.67% of voting power required
+		BridgeChains:               []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
+		BridgeAttestationThreshold: 0.6667,                 // 66.67% of voting power required
 	}
 }
 
 // Validate validates the set of params.
 func (p Params) Validate() error {
-	if p.MinDifficulty == 0 || p.MinDifficulty > 256 {
-		return fmt.Errorf("min_difficulty must be in [1,256]")
+	if p.PowBaseBits == 0 || p.PowBaseBits > 256 {
+		return fmt.Errorf("pow_base_bits must be in [1,256]")
 	}
 	if p.PowMessageWindow == 0 {
 		return fmt.Errorf("pow_message_window must be > 0")
 	}
-	if p.PowMessageLimit == 0 {
-		return fmt.Errorf("pow_message_limit must be > 0")
+	if p.PowIncreaseThreshold == 0 {
+		return fmt.Errorf("pow_increase_threshold must be > 0")
 	}
-	if p.PowCalmPeriodDefinition >= p.PowMessageLimit {
-		return fmt.Errorf("pow_calm_period_definition must be < pow_message_limit")
+	if p.PowCalmPeriodDefinition >= p.PowIncreaseThreshold {
+		return fmt.Errorf("pow_calm_period_definition must be < pow_increase_threshold")
 	}
 	if p.PowCalmSequenceThreshold == 0 {
 		return fmt.Errorf("pow_calm_sequence_threshold must be > 0")
@@ -175,14 +178,14 @@ func (p Params) Validate() error {
 	if p.MintQuantity == 0 {
 		return fmt.Errorf("mint_quantity must be > 0")
 	}
-	if p.MintDynamicSplit < 0 || p.MintDynamicSplit > 1 {
-		return fmt.Errorf("mint_dynamic_split must be in [0,1]")
+	if p.MintDynamicFraction < 0 || p.MintDynamicFraction > 1 {
+		return fmt.Errorf("mint_dynamic_fraction must be in [0,1]")
 	}
 	if p.BlockHashWindow == 0 || p.BlockHashWindow > 1000 {
 		return fmt.Errorf("block_hash_window must be in [1,1000]")
 	}
-	if p.PowDifficultyAllowance > p.PowMessageWindow*2 {
-		return fmt.Errorf("pow_difficulty_allowance must be <= 2*pow_message_window")
+	if p.PowDifficultyGracePeriod > p.PowMessageWindow*2 {
+		return fmt.Errorf("pow_difficulty_grace_period must be <= 2*pow_message_window")
 	}
 	if p.MaxUsernameSize == 0 || p.MaxUsernameSize > 128 {
 		return fmt.Errorf("max_username_size must be in [1,128]")
@@ -199,9 +202,13 @@ func (p Params) Validate() error {
 	if p.MinUsernameSize > p.MaxUsernameSize {
 		return fmt.Errorf("min_username_size must be <= max_username_size")
 	}
-	// SubscriptionReservePercent must be in [0,100]
-	if p.SubscriptionReservePercent > 100 {
-		return fmt.Errorf("subscription_reserve_percent must be in [0,100]")
+	// SubscriptionReserveFraction must be in [0,1]
+	if p.SubscriptionReserveFraction < 0 || p.SubscriptionReserveFraction > 1 {
+		return fmt.Errorf("subscription_reserve_fraction must be in [0,1]")
+	}
+	// PowFactor must be in (0,1]
+	if p.PowFactor <= 0 || p.PowFactor > 1 {
+		return fmt.Errorf("pow_factor must be in (0,1]")
 	}
 	// MaxEnvelopeAge must be > 0 (replay protection)
 	if p.MaxEnvelopeAge == 0 {
@@ -227,8 +234,8 @@ func (p Params) Validate() error {
 		}
 	}
 	// Validate bridge params
-	if p.BridgeAttestationThreshold > 10000 {
-		return fmt.Errorf("bridge_attestation_threshold must be <= 10000 (basis points)")
+	if p.BridgeAttestationThreshold <= 0 || p.BridgeAttestationThreshold > 1 {
+		return fmt.Errorf("bridge_attestation_threshold must be in (0,1]")
 	}
 	return nil
 }

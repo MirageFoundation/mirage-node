@@ -15,6 +15,7 @@ import json
 import os
 import sys
 import time
+import math
 import random
 import string
 from dataclasses import dataclass, field
@@ -396,12 +397,12 @@ def _neg_post_topic_invalid(backend: str, seed: str, topic: str, name: str) -> T
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         title = "t"
         content = "c"
         base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -477,12 +478,15 @@ def wait_post_indexed(
     return False
 
 
-def _fetch_params(backend: str, address: Optional[str]) -> Tuple[str, int, Optional[int]]:
+def _fetch_params(backend: str, address: Optional[str]) -> Tuple[str, int, int, Optional[int]]:
     st = get_status(backend, address=address)
     last_block_hash = str(st.get("last_block_hash", "") or "")
     pow_difficulty = int(st.get("pow_difficulty", 0) or 0)
+    pow_base_bits = int(st.get("pow_base_bits", 0) or 0)
+    global _POW_FACTOR
+    _POW_FACTOR = float(st["pow_factor"])
     balance = int(st["balance"]) if "balance" in st and st["balance"] is not None else None
-    return last_block_hash, pow_difficulty, balance
+    return last_block_hash, pow_difficulty, pow_base_bits, balance
 
 
 def _fetch_foreign_post_id(backend: str, exclude_owner: str) -> Optional[str]:
@@ -502,11 +506,26 @@ def _fetch_foreign_post_id(backend: str, exclude_owner: str) -> Optional[str]:
         return None
 
 
-def _compute_pow(base: bytes, difficulty: int, last_block_hash: str, max_seconds: float = 30.0) -> int:
+def _compute_pow(
+    base: bytes,
+    difficulty: int,
+    pow_base_bits: int,
+    last_block_hash: str,
+    max_seconds: float = 30.0,
+    pow_factor: float | None = None,
+) -> int:
     try:
         from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
     except Exception as e:
         raise RuntimeError("argon2-cffi is required for PoW tests") from e
+    if difficulty < 0:
+        raise ValueError("difficulty must be >= 0")
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        raise ValueError("pow_base_bits must be in [1, 256]")
+    if pow_factor is None:
+        if _POW_FACTOR is None:
+            raise ValueError("pow_factor missing")
+        pow_factor = _POW_FACTOR
 
     try:
         salt = bytes.fromhex(last_block_hash.strip())
@@ -525,7 +544,7 @@ def _compute_pow(base: bytes, difficulty: int, last_block_hash: str, max_seconds
             hash_len=32,
             type=_Argon2Type.ID,
         )
-        if _count_leading_zeros(digest) >= int(difficulty):
+        if _check_pow_target(digest, difficulty, pow_base_bits, pow_factor):
             return proof
         if (time.perf_counter() - start) > max_seconds:
             raise TimeoutError(f"PoW mining exceeded {max_seconds:.1f}s")
@@ -546,17 +565,44 @@ def _uvarint(n: int) -> bytes:
     return bytes(out)
 
 
-def _count_leading_zeros(b: bytes) -> int:
-    total = 0
-    for byte in b:
-        if byte == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (byte >> i) & 1:
-                return total + (7 - i)
-        return total
-    return total
+_BASE_DIFFICULTY_FACTOR = 1000
+_MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
+_POW_FACTOR: float | None = None
+
+
+def _round_half_up(value: float) -> int:
+    return int(math.floor(value + 0.5))
+
+
+def _difficulty_factor(difficulty: int, pow_factor: float) -> int | None:
+    if difficulty < 0:
+        return None
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
+        return None
+    if difficulty == 0:
+        return _BASE_DIFFICULTY_FACTOR
+    try:
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty))
+    except Exception:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if not math.isfinite(factor):
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if factor > _MAX_SAFE_DIFFICULTY_FACTOR:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    rounded = _round_half_up(factor)
+    return max(_BASE_DIFFICULTY_FACTOR, rounded)
+
+
+def _check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
+    """Target-based PoW check. difficulty is steps (0=base, 1=+step, 2=+step^2)."""
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        return False
+    factor = _difficulty_factor(difficulty, pow_factor)
+    if factor is None:
+        return False
+    base_target = 1 << (256 - pow_base_bits)
+    eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def _print_result(r: TestResult) -> None:
@@ -621,7 +667,7 @@ def pos_create_post(backend: str, seed: str) -> Tuple[TestResult, Optional[str]]
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, bal = _fetch_params(backend, addr)
+        last, diff, min_diff, bal = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         title = f"Test Post {_rand_str(6)}"
@@ -629,7 +675,7 @@ def pos_create_post(backend: str, seed: str) -> Tuple[TestResult, Optional[str]]
         topic = f"topic{_rand_str(5)}"
 
         base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -688,7 +734,7 @@ def pos_create_post_with_tag(backend: str, seed: str, tag: str) -> Tuple[TestRes
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, bal = _fetch_params(backend, addr)
+        last, diff, min_diff, bal = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         title = f"Test Post {_rand_str(6)}"
@@ -696,7 +742,7 @@ def pos_create_post_with_tag(backend: str, seed: str, tag: str) -> Tuple[TestRes
         topic = f"topic{_rand_str(5)}"
 
         base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, tag=tag)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -759,13 +805,13 @@ def pos_create_comment(backend: str, seed: str, parent_tx: str) -> Tuple[TestRes
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         content = f"Comment at {int(time.time())}"
 
         base = canon_base_post(pub, last, diff, parent_tx, "", "", content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -812,12 +858,12 @@ def neg_comment_missing_content(backend: str, seed: str, parent_tx: str) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         content = ""
         base = canon_base_post(pub, last, diff, parent_tx, "", "", content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -845,11 +891,11 @@ def pos_vote_upvote(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_vote(pub, last, diff, target_tx, 1)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -900,11 +946,11 @@ def pos_vote_downvote(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_vote(pub, last, diff, target_tx, -1)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -953,11 +999,11 @@ def pos_vote_clear(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_vote(pub, last, diff, target_tx, 0)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1003,14 +1049,14 @@ def pos_edit_post(backend: str, seed: str, override_tx: str) -> TestResult:
         if not wait_post_indexed(backend, addr, override_tx, timeout_s=15.0):
             return TestResult(name=name, passed=False, error="post not indexed yet", details={"override": override_tx})
 
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Edited content at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
 
         base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, override_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1057,11 +1103,11 @@ def pos_delete_post(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_delete(pub, last, diff, target_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1105,14 +1151,14 @@ def pos_set_username(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Allow hyphens + lowercase alphanumeric
         username = f"user-{_rand_str(4)}-{_rand_str(4)}"
 
         base, ts_ms = build_canon_set_username(pub, last, diff, addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1164,11 +1210,11 @@ def pos_follow_moderator(backend: str, seed: str, moderator_addr: str) -> TestRe
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base, ts_ms = build_canon_follow(pub, last, diff, addr, moderator_addr)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1211,11 +1257,11 @@ def pos_unfollow_moderator(backend: str, seed: str, moderator_addr: str) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base, ts_ms = build_canon_unfollow(pub, last, diff, addr, moderator_addr)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1258,14 +1304,14 @@ def pos_report_post(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         reason = "Test report"
 
         # Report has its own canonical base (no direction)
         base = canon_base_report(pub, last, diff, target_tx, reason)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -1308,7 +1354,7 @@ def pos_upgrade_to_level(backend: str, seed: str, level: int = 1) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # No PoW for upgrade_level
@@ -1339,7 +1385,7 @@ def neg_upgrade_insufficient_funds(backend: str, seed: str, level: int) -> TestR
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         from shared.canon import canon_base_upgrade_level as _canon_upgrade
 
@@ -1370,7 +1416,7 @@ def neg_upgrade_invalid_level(backend: str, seed: str, level: int = 100) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         from shared.canon import canon_base_upgrade_level as _canon_upgrade
 
@@ -1400,11 +1446,11 @@ def neg_subscriber_pow_post(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_post(pub, last, diff, "", "topicok", "ok", "content")
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1430,7 +1476,7 @@ def pos_subscriber_post_no_pow(backend: str, seed: str) -> Tuple[TestResult, Opt
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         topic = f"topic{_rand_str(4)}"
@@ -1475,7 +1521,7 @@ def sub_pos_vote(backend: str, seed: str, target_tx: str, direction: int, label:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_vote(pub, last, 0, target_tx, int(direction))
         signed = canon_signed_with_pow(base, 0)
@@ -1510,7 +1556,7 @@ def sub_pos_create_comment(backend: str, seed: str, parent_tx: str) -> Tuple[Tes
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         content = f"sub comment at {int(time.time())}"
         base = canon_base_post(pub, last, 0, parent_tx, "", "", content)
@@ -1552,7 +1598,7 @@ def sub_pos_edit_post(backend: str, seed: str, override_tx: str) -> TestResult:
         addr = str(wallet.address())
         if not wait_post_indexed(backend, addr, override_tx, timeout_s=15.0):
             return TestResult(name=name, passed=False, error="post not indexed yet", details={"override": override_tx})
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         new_content = f"Sub edited at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
@@ -1592,7 +1638,7 @@ def sub_pos_delete_post(backend: str, seed: str, target_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_delete(pub, last, 0, target_tx)
         signed = canon_signed_with_pow(base, 0)
@@ -1626,7 +1672,7 @@ def sub_pos_set_username(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         # Allow hyphens + lowercase alphanumeric
         username = f"sub-{_rand_str(4)}-{_rand_str(4)}"
@@ -1671,7 +1717,7 @@ def sub_pos_follow_moderator(backend: str, seed: str, moderator_addr: str) -> Te
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_follow_moderator(pub, last, 0, addr, moderator_addr)
         signed = canon_signed_with_pow(base, 0)
@@ -1710,7 +1756,7 @@ def sub_pos_unfollow_moderator(backend: str, seed: str, moderator_addr: str) -> 
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_unfollow_moderator(pub, last, 0, addr, moderator_addr)
         signed = canon_signed_with_pow(base, 0)
@@ -1748,10 +1794,10 @@ def neg_subscriber_pow_vote(backend: str, seed: str, target_tx: str, direction: 
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_vote(pub, last, diff, target_tx, int(direction))
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1775,10 +1821,10 @@ def neg_subscriber_pow_edit(backend: str, seed: str, override_tx: str) -> TestRe
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_edit(pub, last, diff, "", "topicok", "", "c", override_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1805,11 +1851,11 @@ def neg_subscriber_pow_set_username(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         username = f"subpow{_rand_str(6)}"
         base = canon_base_set_username(pub, last, diff, addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1832,11 +1878,11 @@ def neg_subscriber_pow_send_tokens(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         amount = 1
         base, ts_ms = build_canon_send_tokens(pub, last, int(diff), addr, addr, amount)
-        proof = _compute_pow(base, int(diff), last)
+        proof = _compute_pow(base, int(diff), min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1861,10 +1907,10 @@ def neg_subscriber_pow_follow(backend: str, seed: str, moderator_addr: str) -> T
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_follow_moderator(pub, last, int(diff), addr, moderator_addr)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1888,10 +1934,10 @@ def neg_subscriber_pow_unfollow(backend: str, seed: str, moderator_addr: str) ->
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_unfollow_moderator(pub, last, int(diff), addr, moderator_addr)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -1921,7 +1967,7 @@ def sub_neg_delete_not_owner(backend: str, seed: str, foreign_post_tx: str) -> T
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_delete(pub, last, 0, foreign_post_tx)
         signed = canon_signed_with_pow(base, 0)
@@ -1949,7 +1995,7 @@ def sub_neg_comment_with_topic(backend: str, seed: str, parent_tx: str) -> TestR
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_post(pub, last, 0, parent_tx, "wrong", "", "c")
         signed = canon_signed_with_pow(base, 0)
@@ -1978,7 +2024,7 @@ def sub_neg_comment_missing_content(backend: str, seed: str, parent_tx: str) -> 
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_post(pub, last, 0, parent_tx, "", "", "")
         signed = canon_signed_with_pow(base, 0)
@@ -2007,7 +2053,7 @@ def sub_neg_post_missing_topic(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_post(pub, last, 0, "", "", "t", "c")
         signed = canon_signed_with_pow(base, 0)
@@ -2036,7 +2082,7 @@ def sub_neg_vote_invalid_target(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         invalid = "short"
         base = canon_base_vote(pub, last, 0, invalid, 1)
@@ -2069,7 +2115,7 @@ def neg_post_oversize_content(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Free tier limit is typically 1000 chars
@@ -2078,7 +2124,7 @@ def neg_post_oversize_content(backend: str, seed: str) -> TestResult:
         title = "ok"
 
         base = canon_base_post(pub, last, diff, "", topic, title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2123,7 +2169,7 @@ def neg_post_oversize_title(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Title limit is typically 100-150 chars
@@ -2132,7 +2178,7 @@ def neg_post_oversize_title(backend: str, seed: str) -> TestResult:
         topic = "topicok"
 
         base = canon_base_post(pub, last, diff, "", topic, title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2173,12 +2219,12 @@ def neg_post_missing_topic(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         title = "title"
         content = "content"
         base = canon_base_post(pub, last, diff, "", "", title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2204,14 +2250,14 @@ def neg_post_invalid_tag(backend: str, seed: str, tag: str, label: str) -> TestR
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         title = f"Test Post {_rand_str(6)}"
         content = f"Content with invalid tag at {int(time.time())}"
         topic = f"topic{_rand_str(5)}"
 
         base, ts_ms = build_canon_post(pub, last, diff, "", topic, title, content, tag=tag)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2256,10 +2302,10 @@ def neg_comment_with_topic(backend: str, seed: str, parent_tx: str) -> TestResul
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_post(pub, last, diff, parent_tx, "wrong", "", "c")
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2285,14 +2331,14 @@ def neg_comment_invalid_target(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         invalid_target = "not-a-valid-hash"
         content = "hello"
 
         base = canon_base_post(pub, last, diff, invalid_target, "", "", content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2333,14 +2379,14 @@ def neg_invalid_pubkey_length(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Truncate pubkey
         bad_pub = pub[:20]
 
         base = canon_base_post(pub, last, diff, "", "topicok", "ok", "content")
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2373,11 +2419,11 @@ def neg_tampered_signature(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_post(pub, last, diff, "", "topicok", "ok", "content")
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2422,14 +2468,14 @@ def neg_insufficient_pow(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Use difficulty lower than required
         low_diff = max(1, diff - 5)
 
         base, ts_ms = build_canon_post(pub, last, low_diff, "", "topicok", "ok", "content")
-        proof = _compute_pow(base, low_diff, last)
+        proof = _compute_pow(base, low_diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2462,7 +2508,7 @@ def neg_missing_pow_free_user(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         # Build base but do not compute PoW, set difficulty/proof to 0
         base = canon_base_post(pub, last, max(1, diff), "", "topicok", "ok", "content")
@@ -2491,7 +2537,7 @@ def neg_invalid_last_block_hash(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Use invalid hash format
@@ -2499,7 +2545,7 @@ def neg_invalid_last_block_hash(backend: str, seed: str) -> TestResult:
 
         # Still compute PoW with real hash so we don't fail on that
         base = canon_base_post(pub, last, diff, "", "topicok", "ok", "content")
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2538,11 +2584,11 @@ def neg_delete_not_owner(backend: str, seed: str) -> TestResult:
             # Skip this test if no foreign posts exist (single-user testnet)
             return TestResult(name=name, passed=True, details={"skipped": "no foreign post found"})
 
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_delete(pub, last, diff, foreign_post)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2581,10 +2627,10 @@ def neg_delete_not_owner_with_tx(backend: str, seed: str, foreign_post_tx: str) 
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_delete(pub, last, diff, foreign_post_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2616,13 +2662,13 @@ def neg_vote_invalid_target(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         invalid_target = "short"
 
         base = canon_base_vote(pub, last, diff, invalid_target, 1)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2661,14 +2707,14 @@ def neg_report_reason_too_long(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         target = "f" * 64  # Valid format but non-existent
         reason = "r" * 500  # Too long
 
         base = canon_base_vote(pub, last, diff, target, 0)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2698,13 +2744,13 @@ def neg_send_tokens_invalid(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Build a valid envelope with PoW, but invalid target format to trigger the target validation
         amount = 1
         base, ts_ms = build_canon_send_tokens(pub, last, int(diff), addr, "not-an-address", amount)
-        proof = _compute_pow(base, int(diff), last)
+        proof = _compute_pow(base, int(diff), min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2734,13 +2780,13 @@ def neg_send_tokens_insufficient_funds(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         # Use own address as valid target, compute proper PoW envelope
         amount = 10_000_000_000  # 10,000 MIRAGE (likely > balance)
         base, ts_ms = build_canon_send_tokens(pub, last, int(diff), addr, addr, amount)
-        proof = _compute_pow(base, int(diff), last)
+        proof = _compute_pow(base, int(diff), min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2773,10 +2819,10 @@ def neg_username_invalid(backend: str, seed: str, username: str, label: str) -> 
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_set_username(pub, last, diff, addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2804,11 +2850,11 @@ def pos_free_username_prefixed(backend: str, seed_free: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed_free)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         desired = f"free-{_rand_str(6)}"
         base, ts_ms = build_canon_set_username(pub, last, diff, addr, desired)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2844,11 +2890,11 @@ def pos_free_username_prefixed_once(backend: str, seed_free: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed_free)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         requested = f"anon-{_rand_str(6)}"
         base, ts_ms = build_canon_set_username(pub, last, diff, addr, requested)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2886,10 +2932,10 @@ def neg_edit_root_missing_topic(backend: str, seed: str, override_tx: str) -> Te
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_edit(pub, last, diff, "", "", "", "edit", override_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2916,10 +2962,10 @@ def neg_edit_comment_with_topic(backend: str, seed: str, override_tx: str, paren
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         base = canon_base_edit(pub, last, diff, parent_tx, "bad", "", "c", override_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
         payload = {
@@ -2946,13 +2992,13 @@ def neg_username_too_short(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         username = "ab"  # Too short (min 3)
 
         base = canon_base_set_username(pub, last, diff, addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -2990,13 +3036,13 @@ def neg_username_too_long(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         username = "u" * 200  # Too long (max 64)
 
         base = canon_base_set_username(pub, last, diff, addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3039,14 +3085,14 @@ def neg_edit_foreign_post_free(backend: str, seed: str, foreign_post_tx: str) ->
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Hacked content at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
 
         base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, foreign_post_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3078,7 +3124,7 @@ def neg_edit_foreign_post_subscriber(backend: str, seed: str, foreign_post_tx: s
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Hacked content at {int(time.time())}"
@@ -3116,13 +3162,13 @@ def neg_edit_foreign_comment_free(backend: str, seed: str, foreign_comment_tx: s
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Hacked comment at {int(time.time())}"
 
         base = canon_base_edit(pub, last, diff, parent_tx, "", "", new_content, foreign_comment_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3158,7 +3204,7 @@ def neg_edit_foreign_comment_subscriber(backend: str, seed: str, foreign_comment
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, _diff, _ = _fetch_params(backend, addr)
+        last, _diff, _min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Hacked comment at {int(time.time())}"
@@ -3199,13 +3245,13 @@ def neg_set_username_foreign(backend: str, seed: str, foreign_addr: str) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         username = f"hacked-{_rand_str(4)}"
 
         base = canon_base_set_username(pub, last, diff, foreign_addr, username)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3247,7 +3293,7 @@ def neg_replay_old_signature(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         topic = f"topic{_rand_str(4)}"
@@ -3255,7 +3301,7 @@ def neg_replay_old_signature(backend: str, seed: str) -> TestResult:
         content = "Original content"
 
         base = canon_base_post(pub, last, diff, "", topic, title, content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3287,19 +3333,19 @@ def neg_replay_old_block_hash(backend: str, seed: str) -> TestResult:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
         pub = wallet.public_key().public_key_bytes
-        last_old, diff_old, _ = _fetch_params(backend, addr)
+        last_old, diff_old, min_diff_old, _ = _fetch_params(backend, addr)
 
         topic = f"topic{_rand_str(4)}"
         title = "Test"
         content = "Content"
 
         base_old = canon_base_post(pub, last_old, diff_old, "", topic, title, content)
-        proof_old = _compute_pow(base_old, diff_old, last_old)
+        proof_old = _compute_pow(base_old, diff_old, min_diff_old, last_old)
         signed_old = canon_signed_with_pow(base_old, int(proof_old))
         sig_old = sign_canonical(wallet, signed_old)
 
         sleep(2)
-        last_new, diff_new, _ = _fetch_params(backend, addr)
+        last_new, diff_new, _min_diff_new, _ = _fetch_params(backend, addr)
 
         payload = {
             "pubkey": _b64(pub),
@@ -3337,7 +3383,7 @@ def neg_pow_proof_reuse(backend: str, seed: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         topic1 = f"topic{_rand_str(4)}"
@@ -3345,7 +3391,7 @@ def neg_pow_proof_reuse(backend: str, seed: str) -> TestResult:
         content1 = "First content"
 
         base1 = canon_base_post(pub, last, diff, "", topic1, title1, content1)
-        proof1 = _compute_pow(base1, diff, last)
+        proof1 = _compute_pow(base1, diff, min_diff, last)
         signed1 = canon_signed_with_pow(base1, int(proof1))
         sig1 = sign_canonical(wallet, signed1)
 
@@ -3387,14 +3433,14 @@ def neg_edit_deleted_post(backend: str, seed: str, deleted_post_tx: str) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Edit deleted at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
 
         base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, deleted_post_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3430,11 +3476,11 @@ def neg_vote_deleted_post(backend: str, seed: str, deleted_post_tx: str) -> Test
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         base = canon_base_vote(pub, last, diff, deleted_post_tx, 1)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3476,13 +3522,13 @@ def neg_comment_deleted_post(backend: str, seed: str, deleted_post_tx: str) -> T
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         content = f"Comment on deleted at {int(time.time())}"
 
         base = canon_base_post(pub, last, diff, deleted_post_tx, "", "", content)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3531,7 +3577,7 @@ def neg_rapid_multiple_edits(backend: str, seed: str, post_tx: str) -> TestResul
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         results = []
@@ -3540,7 +3586,7 @@ def neg_rapid_multiple_edits(backend: str, seed: str, post_tx: str) -> TestResul
             new_topic = f"topic{_rand_str(4)}"
 
             base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, post_tx)
-            proof = _compute_pow(base, diff, last)
+            proof = _compute_pow(base, diff, min_diff, last)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(wallet, signed)
 
@@ -3573,14 +3619,14 @@ def neg_rapid_multiple_votes(backend: str, seed: str, post_tx: str) -> TestResul
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         results = []
         directions = [1, -1, 0, 1]
         for direction in directions:
             base = canon_base_vote(pub, last, diff, post_tx, direction)
-            proof = _compute_pow(base, diff, last)
+            proof = _compute_pow(base, diff, min_diff, last)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(wallet, signed)
 
@@ -3615,14 +3661,14 @@ def neg_edit_wrong_target_type(backend: str, seed: str, comment_tx: str, parent_
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Wrong edit at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
 
         base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, comment_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3665,14 +3711,14 @@ def neg_edit_vote_as_post(backend: str, seed: str, vote_tx: str) -> TestResult:
     try:
         wallet = create_wallet_from_seed(seed)
         addr = str(wallet.address())
-        last, diff, _ = _fetch_params(backend, addr)
+        last, diff, min_diff, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
 
         new_content = f"Edit vote as post at {int(time.time())}"
         new_topic = f"topic{_rand_str(4)}"
 
         base = canon_base_edit(pub, last, diff, "", new_topic, "", new_content, vote_tx)
-        proof = _compute_pow(base, diff, last)
+        proof = _compute_pow(base, diff, min_diff, last)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
 
@@ -3735,7 +3781,7 @@ def sub_stress_reserve_downgrade(
             content = ("x" * max(16, content_len))[:content_len]
 
             # Submit subscriber post without PoW
-            last, _diff, _ = _fetch_params(backend, addr)
+            last, _diff, _min_diff, _ = _fetch_params(backend, addr)
             pub = wallet.public_key().public_key_bytes
             base = canon_base_post(pub, last, 0, "", topic, title, content)
             signed = canon_signed_with_pow(base, 0)
@@ -3807,11 +3853,11 @@ def main() -> int:
     try:
         w_free = create_wallet_from_seed(seed_free)
         addr_free = str(w_free.address())
-        last_f, diff_f, bal_f = _fetch_params(backend, addr_free)
+        last_f, diff_f, min_diff_f, bal_f = _fetch_params(backend, addr_free)
         print(f"FREE addr: {addr_free} | balance: {bal_f} | pow_difficulty: {diff_f} | last_block_hash: {last_f}")
         w_sub = create_wallet_from_seed(seed_sub)
         addr_sub = str(w_sub.address())
-        last_s, diff_s, bal_s = _fetch_params(backend, addr_sub)
+        last_s, diff_s, min_diff_s, bal_s = _fetch_params(backend, addr_sub)
         print(f"SUB  addr: {addr_sub} | balance: {bal_s} | pow_difficulty: {diff_s} | last_block_hash: {last_s}")
     except Exception as e:
         print(f"Failed to init: {e}")

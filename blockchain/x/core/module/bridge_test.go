@@ -282,7 +282,7 @@ func TestBridgeMintAttestationThreshold(t *testing.T) {
 	attestation := types.NewBridgeMintAttestation("1", "solana", "sig123", 100)
 
 	totalPower := int64(10000)
-	threshold := uint64(6667) // 66.67%
+	threshold := 0.6667 // 66.67%
 
 	// Add 50% power - should not meet threshold
 	attestation.AttestedPower = 5000
@@ -1040,11 +1040,11 @@ func TestBridgeAttestationAccumulation(t *testing.T) {
 	}
 	attestation.AttestedPower = 70
 
-	// Check threshold (need 67% = 6700 bps)
+	// Check threshold (need 67%)
 	totalPower := int64(100)
-	thresholdBps := uint64(6700)
+	threshold := 0.67
 
-	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+	if !attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("Expected 70% to meet 67% threshold")
 	}
 
@@ -1086,24 +1086,24 @@ func TestThresholdExactlyAtBoundary(t *testing.T) {
 	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
 
 	totalPower := int64(100)
-	thresholdBps := uint64(6667) // 66.67%
+	threshold := 0.6667 // 66.67%
 
-	// Implementation uses floor: required = floor(100 * 6667 / 10000) = 66
+	// required = int(100 * 0.6667) = 66
 	// So 66 power SHOULD meet threshold (66 >= 66)
 	attestation.AttestedPower = 66
-	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
-		t.Error("66% should meet threshold (required=66 due to floor)")
+	if !attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("66% should meet threshold (required=66 due to truncation)")
 	}
 
 	// 65 power should NOT meet threshold
 	attestation.AttestedPower = 65
-	if attestation.MeetsThreshold(totalPower, thresholdBps) {
+	if attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("65% should not meet 66.67% threshold")
 	}
 
 	// 67 power should definitely meet threshold
 	attestation.AttestedPower = 67
-	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
+	if !attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("67% should meet 66.67% threshold")
 	}
 }
@@ -1113,18 +1113,18 @@ func TestThresholdWithOddTotalPower(t *testing.T) {
 	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
 
 	totalPower := int64(150)
-	thresholdBps := uint64(6667) // 66.67%
+	threshold := 0.6667 // 66.67%
 
-	// Required: floor(150 * 6667 / 10000) = floor(100.005) = 100
+	// Required: int(150 * 0.6667) = int(100.005) = 100
 	// So 100 SHOULD meet threshold
 	attestation.AttestedPower = 100
-	if !attestation.MeetsThreshold(totalPower, thresholdBps) {
-		t.Error("100/150 should meet threshold (required=100 due to floor)")
+	if !attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("100/150 should meet threshold (required=100 due to truncation)")
 	}
 
 	// 99 should NOT meet
 	attestation.AttestedPower = 99
-	if attestation.MeetsThreshold(totalPower, thresholdBps) {
+	if attestation.MeetsThreshold(totalPower, threshold) {
 		t.Error("99/150 should not meet threshold")
 	}
 }

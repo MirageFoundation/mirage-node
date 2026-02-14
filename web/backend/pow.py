@@ -9,12 +9,13 @@ Canonical bytes only include envelope fields (2-6) and payload fields (100+).
 Functions:
 - uvarint(n): Encode unsigned varint (64-bit cap).
 - canon_base_set_username(...), canon_base_post(...), canon_base_vote(...): Canon bytes.
-- count_leading_zero_bits(b): Count leading zero bits in digest.
+- check_pow_target(digest, difficulty, pow_base_bits, pow_factor): Target-based PoW check.
 - argon2_digest(base, last_block_hash, proof, ...): Argon2id digest.
 - decode_b64(s): Base64 decode convenience.
 """
 
 import base64
+import math
 from typing import Optional
 import re as _re
 
@@ -316,23 +317,58 @@ def canon_base_bridge_burn(
     amount: int,
 ) -> bytes:
     return canon_shared.canon_base_bridge_burn(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp),
-        destination_chain, destination_address, int(amount)
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        destination_chain,
+        destination_address,
+        int(amount),
     )
 
 
-def count_leading_zero_bits(b: bytes) -> int:
-    total = 0
-    for by in b:
-        if by == 0:
-            total += 8
-            continue
-        for i in range(7, -1, -1):
-            if (by >> i) & 1 == 0:
-                total += 1
-            else:
-                return total
-    return total
+_BASE_DIFFICULTY_FACTOR = 1000
+_MAX_SAFE_DIFFICULTY_FACTOR = (1 << 53) - 1
+
+
+def _round_half_up(value: float) -> int:
+    return int(math.floor(value + 0.5))
+
+
+def _difficulty_factor(difficulty: int, pow_factor: float) -> int | None:
+    if difficulty < 0:
+        return None
+    if not math.isfinite(pow_factor) or pow_factor <= 0 or pow_factor > 1:
+        return None
+    if difficulty == 0:
+        return _BASE_DIFFICULTY_FACTOR
+    try:
+        factor = _BASE_DIFFICULTY_FACTOR * math.pow(1.0 + pow_factor, float(difficulty))
+    except Exception:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if not math.isfinite(factor):
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    if factor > _MAX_SAFE_DIFFICULTY_FACTOR:
+        return _MAX_SAFE_DIFFICULTY_FACTOR
+    rounded = _round_half_up(factor)
+    return max(_BASE_DIFFICULTY_FACTOR, rounded)
+
+
+def check_pow_target(digest: bytes, difficulty: int, pow_base_bits: int, pow_factor: float) -> bool:
+    """Check if the Argon2 digest meets the target-based difficulty.
+
+    base_target = 2^(256 - pow_base_bits)
+    eff_target  = base_target * 1000 // (1000 * (1 + pow_factor)^difficulty)
+    Pass if int(digest) <= eff_target.
+    """
+    if pow_base_bits <= 0 or pow_base_bits > 256:
+        return False
+    factor = _difficulty_factor(difficulty, pow_factor)
+    if factor is None:
+        return False
+    base_target = 1 << (256 - pow_base_bits)
+    eff_target = base_target * _BASE_DIFFICULTY_FACTOR // factor
+    return int.from_bytes(digest, "big") <= eff_target
 
 
 def argon2_digest(
@@ -417,7 +453,7 @@ __all__ = [
     "canon_base_upgrade_level",
     "canon_base_set_auto_renewal",
     "canon_base_bridge_burn",
-    "count_leading_zero_bits",
+    "check_pow_target",
     "argon2_digest",
     "decode_b64",
     "decode_any",

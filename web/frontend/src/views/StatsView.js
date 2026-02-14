@@ -1161,8 +1161,8 @@ export default function StatsView() {
                                     </SectionTitle>
                                     <SummaryBox>
                                         <SummaryItem>
-                                            <SummaryValue $color={rewardsData.summary?.payouts_enabled ? '#22c55e' : '#ef4444'}>
-                                                {rewardsData.summary?.payouts_enabled ? 'Active' : 'Disabled'}
+                                            <SummaryValue $color={rewardsData.summary?.quest_payouts_enabled ? '#22c55e' : '#ef4444'}>
+                                                {rewardsData.summary?.quest_payouts_enabled ? 'Active' : 'Disabled'}
                                             </SummaryValue>
                                             <SummaryLabel>Payouts</SummaryLabel>
                                         </SummaryItem>

@@ -35,6 +35,11 @@ func NewKeeper(storeService corestore.KVStoreService, cdc codec.Codec, bank bank
 	return Keeper{storeService: storeService, cdc: cdc, bank: bank, staking: staking, distribution: distribution, slashing: slashing}
 }
 
+// StoreService exposes the KV store service for use in upgrade handlers.
+func (k Keeper) StoreService() corestore.KVStoreService {
+	return k.storeService
+}
+
 func (k Keeper) profileKey(addr string) []byte   { return []byte(types.ProfilesPrefix + addr) }
 func (k Keeper) usernameKey(lower string) []byte { return []byte(types.UsernamesPrefix + lower) }
 func (k Keeper) relayCreditKey(valoper string) []byte {
@@ -557,7 +562,7 @@ func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	if err == nil && len(bz) > 0 {
 		_ = k.cdc.Unmarshal(bz, &p)
 	}
-	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
+	if p.PowBaseBits == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
 		p.MaxUsernameSize == 0 || p.MaxTopicSize == 0 || p.MinUsernameSize == 0 || p.MinTopicSize == 0 || len(p.Tiers) == 0 {
 		p = types.DefaultParams()
 	}
@@ -699,8 +704,8 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		return vals[i].OperatorAddress < vals[j].OperatorAddress
 	})
 
-	// Split pools based on param MintDynamicSplit [0,1]
-	split := params.MintDynamicSplit
+	// Split pools based on param MintDynamicFraction [0,1]
+	split := params.MintDynamicFraction
 	if split < 0 {
 		split = 0
 	}
@@ -1019,16 +1024,31 @@ func (k Keeper) ClearPoWWindow(ctx sdk.Context, params types.Params) error {
 	return nil
 }
 
-// GetCurrentDifficulty returns the current dynamic difficulty
+// BaseDifficultySteps is the default difficulty step (0 = base).
+const BaseDifficultySteps uint64 = 0
+
+// BaseDifficultyFactor is the base work factor (1.0x).
+const BaseDifficultyFactor uint64 = 1000
+
+// MaxSafeDifficultyFactor caps the factor to 2^53-1 so JSON/JS Number is lossless.
+const MaxSafeDifficultyFactor uint64 = (1 << 53) - 1
+
+// MaxSafeDifficultySteps caps the step count to 2^53-1 so JSON/JS Number is lossless.
+const MaxSafeDifficultySteps uint64 = (1 << 53) - 1
+
+// GetCurrentDifficulty returns the current dynamic difficulty step.
+// 0 = base difficulty. Higher values = harder via (1 + pow_factor)^difficulty.
 func (k Keeper) GetCurrentDifficulty(ctx sdk.Context) uint64 {
 	store := k.storeService.OpenKVStore(ctx)
 	bz, err := store.Get(k.currentDifficultyKey())
 	if err != nil || len(bz) == 0 {
-		// Return default if not set
-		params := k.GetParams(ctx)
-		return params.MinDifficulty
+		return BaseDifficultySteps
 	}
-	return binary.BigEndian.Uint64(bz)
+	v := binary.BigEndian.Uint64(bz)
+	if v > MaxSafeDifficultySteps {
+		return MaxSafeDifficultySteps
+	}
+	return v
 }
 
 // HasCurrentDifficulty returns true if the current_difficulty key exists in store

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"strings"
 	"sync"
 
@@ -24,7 +26,7 @@ import (
 // For each custom message (CreateUser, CreatePost, CreateVote), it checks:
 //
 //	challenge = Argon2id(canonical_without_signature || ":" || pow, salt=last_block_hash)
-//	leading zero bits(challenge) >= difficulty
+//	int(challenge) <= base_target * 1000 / (1000 * (1 + pow_factor)^difficulty)
 //	last_block_hash matches one of the last Window committed block hashes (case-insensitive)
 //	difficulty >= current dynamic difficulty (prevents spam with artificially low difficulty)
 //
@@ -206,7 +208,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	// Refresh params from the blockchain state
 	params := d.Keeper.GetParams(ctx)
 	d.Window = uint32(params.BlockHashWindow)
-	// Use current dynamic difficulty (falls back to MinDifficulty if not set)
+	// Use current dynamic difficulty steps (0 = base)
 	d.DefaultDifficulty = d.Keeper.GetCurrentDifficulty(ctx)
 
 	// derive last committed block id hash from header and remember it
@@ -216,11 +218,13 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	// Enforce last_block_hash even in CheckTx so stale/invalid PoW fails fast and doesn't linger
 	skipHashCheck := false
 
-	// Current and previous difficulty and allowance
+	// Current and previous difficulty steps and grace period
 	currentDifficulty := d.Keeper.GetCurrentDifficulty(ctx)
 	prevDifficulty := d.Keeper.GetPreviousDifficulty(ctx)
 	lastChange := d.Keeper.GetLastDifficultyChangeHeight(ctx)
-	allowance := params.PowDifficultyAllowance
+	gracePeriod := params.PowDifficultyGracePeriod
+	baseBits := params.PowBaseBits
+	powFactor := params.PowFactor
 
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 
@@ -264,7 +268,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue // Skip PoW validation, user pays gas from reserve
 			}
 			canon := buildCanonForPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
 			}
@@ -289,7 +293,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForVote(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgVote", "err", err.Error())
 				return ctx, err
 			}
@@ -314,7 +318,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForEdit(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
@@ -339,7 +343,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSetUsername(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
@@ -364,7 +368,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForDelete(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
@@ -389,7 +393,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForSendTokens(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSendTokens", "err", err.Error())
 				return ctx, err
 			}
@@ -424,7 +428,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForFollowModerator(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowModerator", "err", err.Error())
 				return ctx, err
 			}
@@ -449,7 +453,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnfollowModerator(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowModerator", "err", err.Error())
 				return ctx, err
 			}
@@ -474,7 +478,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForFollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -499,7 +503,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnfollowUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowUser", "err", err.Error())
 				return ctx, err
 			}
@@ -524,7 +528,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForFollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -549,7 +553,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnfollowTopic(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowTopic", "err", err.Error())
 				return ctx, err
 			}
@@ -574,7 +578,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForBlockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -599,7 +603,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnblockPost(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockPost", "err", err.Error())
 				return ctx, err
 			}
@@ -624,7 +628,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForBlockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -649,7 +653,7 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				continue
 			}
 			canon := buildCanonForUnblockUser(m)
-			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, allowance, ctx.BlockHeight()); err != nil {
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockUser", "err", err.Error())
 				return ctx, err
 			}
@@ -671,24 +675,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 }
 
 // (legacy helpers removed)
-
-func leadingZeroBits(b []byte) int {
-	total := 0
-	for _, by := range b {
-		if by == 0x00 {
-			total += 8
-			continue
-		}
-		for i := 7; i >= 0; i-- {
-			if (by>>uint(i))&1 == 0 {
-				total++
-			} else {
-				return total
-			}
-		}
-	}
-	return total
-}
 
 func deriveAddrFromPubKey(pk []byte) string {
 	if len(pk) != 33 {
@@ -915,19 +901,66 @@ func buildCanonForUpgradeLevel(m *coretypes.MsgUpgradeLevel) []byte {
 	return cw.buf
 }
 
+// bigOne and bigBaseFactor are pre-allocated for target computation.
+var (
+	bigOne        = big.NewInt(1)
+	bigBaseFactor = big.NewInt(int64(corekeeper.BaseDifficultyFactor))
+	bigMaxHash    = new(big.Int).Lsh(bigOne, 256) // 2^256 (used as shift base)
+)
+
+func computeDifficultyFactor(powFactor float64, difficultySteps uint64) (uint64, error) {
+	if math.IsNaN(powFactor) || math.IsInf(powFactor, 0) || powFactor <= 0 || powFactor > 1 {
+		return 0, fmt.Errorf("invalid pow_factor: %v", powFactor)
+	}
+	if corekeeper.BaseDifficultyFactor == 0 {
+		return 0, fmt.Errorf("invalid base difficulty factor")
+	}
+	if difficultySteps == 0 {
+		return corekeeper.BaseDifficultyFactor, nil
+	}
+	if difficultySteps > corekeeper.MaxSafeDifficultySteps {
+		return corekeeper.MaxSafeDifficultyFactor, nil
+	}
+	pow := math.Pow(1+powFactor, float64(difficultySteps))
+	if math.IsNaN(pow) || math.IsInf(pow, 0) {
+		return corekeeper.MaxSafeDifficultyFactor, nil
+	}
+	factorFloat := float64(corekeeper.BaseDifficultyFactor) * pow
+	if factorFloat > float64(corekeeper.MaxSafeDifficultyFactor) {
+		return corekeeper.MaxSafeDifficultyFactor, nil
+	}
+	factor := uint64(math.Round(factorFloat))
+	if factor < corekeeper.BaseDifficultyFactor {
+		return corekeeper.BaseDifficultyFactor, nil
+	}
+	return factor, nil
+}
+
+// computeTarget returns base_target * base_factor / effective_factor where base_target = 2^(256-pow_base_bits).
+func computeTarget(baseBits uint64, difficultySteps uint64, powFactor float64) (*big.Int, error) {
+	difficultyFactor, err := computeDifficultyFactor(powFactor, difficultySteps)
+	if err != nil {
+		return nil, err
+	}
+	baseTarget := new(big.Int).Rsh(bigMaxHash, uint(baseBits))
+	effTarget := new(big.Int).Mul(baseTarget, bigBaseFactor)
+	effTarget.Div(effTarget, new(big.Int).SetUint64(difficultyFactor))
+	return effTarget, nil
+}
+
 // validatePoWBytesArgon2 computes Argon2id(password=canonical||":"||uvarint(pow), salt=last_block_hash bytes)
-// and requires leading zero bits >= required (with allowance window).
-func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty uint64, pow uint64, currentLastID string, ring interface{ seen(string) bool }, skipHashCheck bool, required uint64, prev uint64, lastChange int64, allowance uint64, currentHeight int64) error {
-	if difficulty > 256 {
-		return fmt.Errorf("invalid difficulty: too high")
+// and requires hash <= target derived from difficulty steps and pow_base_bits (with grace period).
+func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty uint64, pow uint64, currentLastID string, ring interface{ seen(string) bool }, skipHashCheck bool, required uint64, prev uint64, lastChange int64, gracePeriod uint64, currentHeight int64, baseBits uint64, powFactor float64) error {
+	if difficulty > corekeeper.MaxSafeDifficultySteps {
+		return fmt.Errorf("invalid difficulty: exceeds max safe value")
 	}
 	minRequired := required
-	if allowance > 0 && lastChange > 0 && currentHeight-lastChange <= int64(allowance) {
+	if gracePeriod > 0 && lastChange > 0 && currentHeight-lastChange <= int64(gracePeriod) {
 		if prev < minRequired {
 			minRequired = prev
 		}
 	}
-	// Effective threshold is the max of declared difficulty and chain-required minimum
+	// Effective threshold is the max of declared difficulty steps and chain-required minimum
 	effectiveRequired := difficulty
 	if effectiveRequired < minRequired {
 		effectiveRequired = minRequired
@@ -945,10 +978,15 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	}
 	// Parameters tuned for mobile/browser parity
 	sum := argon2.IDKey(guess, salt, 1, 4096, 1, 32)
-	actualBits := uint64(leadingZeroBits(sum))
-	if actualBits < effectiveRequired {
-		return fmt.Errorf("insufficient pow: got %d bits, need %d bits (declared=%d, chain_min=%d, prev=%d, allowance=%d, last_change=%d, current_height=%d, pow=%d, hash_hex=%x, salt_hex=%x)",
-			actualBits, effectiveRequired, difficulty, required, prev, allowance, lastChange, currentHeight, pow, sum, salt)
+	// Target-based comparison: hash must be <= base_target * base_factor / effectiveRequired
+	effTarget, err := computeTarget(baseBits, effectiveRequired, powFactor)
+	if err != nil {
+		return err
+	}
+	hashInt := new(big.Int).SetBytes(sum)
+	if hashInt.Cmp(effTarget) > 0 {
+		return fmt.Errorf("insufficient pow: hash exceeds target (declared=%d, chain_min=%d, prev=%d, grace_period=%d, last_change=%d, current_height=%d, pow=%d, hash_hex=%x, salt_hex=%x)",
+			difficulty, required, prev, gracePeriod, lastChange, currentHeight, pow, sum, salt)
 	}
 	if skipHashCheck || strings.TrimSpace(currentLastID) == "" {
 		return nil

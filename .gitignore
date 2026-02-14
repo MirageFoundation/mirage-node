@@ -77,13 +77,20 @@ scripts/*
 !scripts/create_snapshot.sh
 !scripts/reset_statesync.sh
 !scripts/reset_local_testnet.sh
+!scripts/reset_local_testnet.py
 !scripts/restore_from_peer.sh
 !scripts/list_validators.sh
 !scripts/show_balances.py
 !scripts/verify_upgrade.py
+!scripts/proposals/proposal_upgrade.json
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
 
 cursor.md.cursor/
 .cursor/
+
+
+
+# temporary
+tests/test_pow_scaling.py

@@ -388,21 +388,21 @@ def _build_pool():
     # Params (module parameters) - ALL fields from proto/mirage/core/v1/params.proto
     msg4 = file_proto.message_type.add()
     msg4.name = "Params"
-    add_f(msg4, "min_difficulty", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "pow_base_bits", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_message_window", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "pow_message_limit", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "pow_increase_threshold", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_calm_period_definition", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "pow_calm_sequence_threshold", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_interval", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_quantity", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "block_hash_window", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "pow_difficulty_allowance", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "pow_difficulty_grace_period", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_username_size", 34, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_topic_size", 35, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_username_size", 36, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_topic_size", 37, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_dynamic_credit_cap", 38, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "mint_dynamic_split", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "mint_dynamic_fraction", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "subscription_period", 40, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     # tiers is a repeated TierConfig (field 41)
     f_tiers = msg4.field.add()
@@ -411,7 +411,7 @@ def _build_pool():
     f_tiers.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_tiers.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_tiers.type_name = ".mirage.core.v1.TierConfig"
-    add_f(msg4, "subscription_reserve_percent", 42, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "subscription_reserve_fraction", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_envelope_age", 45, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -422,8 +422,8 @@ def _build_pool():
     f_bridge.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_bridge.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_bridge.type_name = ".mirage.core.v1.BridgeChainConfig"
-    add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "bridge_fee", 52, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "pow_factor", 52, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
 
     # MsgUpdateParams (authority + Params)
     msg5 = file_proto.message_type.add()
@@ -459,6 +459,7 @@ def _build_pool():
     add_f(msg_diff, "consecutive_low_usage", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_diff, "latest_block_hash", 6, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_diff, "current_height", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_diff, "pow_base_bits", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # BridgeChainStatus
     msg_bridge_chain_status = file_proto.message_type.add()

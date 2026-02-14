@@ -19,11 +19,20 @@ function hexToBytes(hex) {
     return bytes;
 }
 
+function bytesToHex(bytes) {
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) {
+        hex += bytes[i].toString(16).padStart(2, '0');
+    }
+    return hex;
+}
+
 function uvarint(n) {
     const out = [];
-    let v = (n >>> 0);
-    while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-    out.push(v);
+    // Support both Number and BigInt
+    let v = typeof n === 'bigint' ? n : BigInt(n >>> 0);
+    while (v >= 0x80n) { out.push(Number((v & 0x7Fn) | 0x80n)); v >>= 7n; }
+    out.push(Number(v));
     return Uint8Array.from(out);
 }
 
@@ -35,21 +44,36 @@ function concatBytes(a, b, c) {
     return out;
 }
 
-function leadingZeroBits(bytes) {
-    let count = 0;
-    for (let i = 0; i < bytes.length; i++) {
-        const byte = bytes[i];
-        if (byte === 0) { count += 8; continue; }
-        let n = 0;
-        for (let mask = 0x80; mask !== 0; mask >>= 1) {
-            if ((byte & mask) === 0) n++; else break;
-        }
-        return count + n;
-    }
-    return count;
+/**
+ * Target-based PoW check using BigInt.
+ * base_target = 2^(256 - powBaseBits)
+ * eff_target  = base_target * 1000 / (1000 * (1 + step)^difficulty)
+ * Pass if hash_int <= eff_target
+ */
+const BASE_DIFFICULTY_FACTOR = 1000;
+const MAX_SAFE_DIFFICULTY_FACTOR = Number.MAX_SAFE_INTEGER;
+
+function difficultyFactor(difficultySteps, powFactor) {
+    if (!Number.isFinite(powFactor) || powFactor <= 0 || powFactor > 1) return null;
+    if (!Number.isFinite(difficultySteps) || !Number.isInteger(difficultySteps) || difficultySteps < 0) return null;
+    if (difficultySteps === 0) return BASE_DIFFICULTY_FACTOR;
+    const factorFloat = BASE_DIFFICULTY_FACTOR * Math.pow(1 + powFactor, difficultySteps);
+    if (!Number.isFinite(factorFloat) || factorFloat > MAX_SAFE_DIFFICULTY_FACTOR) return MAX_SAFE_DIFFICULTY_FACTOR;
+    const rounded = Math.round(factorFloat);
+    return Math.max(BASE_DIFFICULTY_FACTOR, rounded);
 }
 
-async function isValidProofArgon2id(baseBytes, saltBytes, proof, requiredBits) {
+function checkPowTarget(hashBytes, difficultySteps, powBaseBits, powFactor) {
+    const hashHex = bytesToHex(hashBytes);
+    const hashInt = BigInt('0x' + hashHex);
+    const baseTarget = 1n << BigInt(256 - powBaseBits);
+    const factor = difficultyFactor(difficultySteps, powFactor);
+    if (factor === null) return false;
+    const effTarget = baseTarget * 1000n / BigInt(factor);
+    return hashInt <= effTarget;
+}
+
+async function isValidProofArgon2id(baseBytes, saltBytes, proof, difficultySteps, powBaseBits, powFactor) {
     const proofBytes = uvarint(proof >>> 0);
     const colon = new Uint8Array([":".charCodeAt(0)]);
     const password = concatBytes(baseBytes, colon, proofBytes);
@@ -65,16 +89,16 @@ async function isValidProofArgon2id(baseBytes, saltBytes, proof, requiredBits) {
     const digest = res && (res.hash || res.hashBytes || null);
     const bytes = digest instanceof Uint8Array ? digest : (res.hashHex ? hexToBytes(res.hashHex) : null);
     if (!bytes) return false;
-    return leadingZeroBits(bytes) >= requiredBits;
+    return checkPowTarget(bytes, difficultySteps, powBaseBits, powFactor);
 }
 
-async function performPow(baseHex, saltHex, difficulty, start) {
+async function performPow(baseHex, saltHex, difficultySteps, powBaseBits, powFactor, start) {
     const baseBytes = hexToBytes(baseHex);
     const saltBytes = hexToBytes((saltHex || '').trim());
     let proof = (start >>> 0) || 0;
     while (true) {
         // eslint-disable-next-line no-await-in-loop
-        const ok = await isValidProofArgon2id(baseBytes, saltBytes, proof, difficulty);
+        const ok = await isValidProofArgon2id(baseBytes, saltBytes, proof, difficultySteps, powBaseBits, powFactor);
         if (ok) break;
         proof++;
     }
@@ -86,12 +110,28 @@ self.onmessage = function (e) {
     const baseHex = data && typeof data.baseHex === 'string' ? data.baseHex : undefined;
     const saltHex = data && typeof data.saltHex === 'string' ? data.saltHex : undefined;
     const diff = (data && typeof data.difficulty === 'number') ? data.difficulty : NaN;
+    const baseBits = (data && typeof data.powBaseBits === 'number') ? data.powBaseBits : NaN;
+    const powFactor = (data && typeof data.powFactor === 'number') ? data.powFactor : NaN;
     const start = (data && typeof data.start === 'number') ? (data.start >>> 0) : 0;
-    // const diff = 1;
 
-    if (!baseHex || !saltHex || !Number.isFinite(diff) || diff <= 0 || diff > 256) {
-        self.postMessage(0);
+    if (
+        !baseHex ||
+        !saltHex ||
+        !Number.isFinite(diff) ||
+        !Number.isInteger(diff) ||
+        diff < 0 ||
+        !Number.isFinite(baseBits) ||
+        !Number.isInteger(baseBits) ||
+        baseBits <= 0 ||
+        baseBits > 256 ||
+        !Number.isFinite(powFactor) ||
+        powFactor <= 0 ||
+        powFactor > 1
+    ) {
+        self.postMessage({ error: 'invalid_params' });
         return;
     }
-    performPow(baseHex, saltHex, diff, start).then((pow) => self.postMessage(pow)).catch(() => self.postMessage(0));
+    performPow(baseHex, saltHex, diff, baseBits, powFactor, start)
+        .then((pow) => self.postMessage(pow))
+        .catch(() => self.postMessage({ error: 'pow_failed' }));
 };

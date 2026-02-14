@@ -249,8 +249,8 @@ def bridge_config():
                 entry["solana_token_address"] = solana_token_address
             chains.append(entry)
 
-        attestation_threshold = int(p["bridge_attestation_threshold"])
-        return jsonify({"chains": chains, "attestation_threshold_bps": attestation_threshold})
+        attestation_threshold = float(p["bridge_attestation_threshold"])
+        return jsonify({"chains": chains, "attestation_threshold": attestation_threshold})
     except Exception as e:
         log_event(rid, "bridge_config.err", error=str(e))
         return safe_error(e)

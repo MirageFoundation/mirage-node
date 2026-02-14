@@ -18,6 +18,47 @@ async function ensureCosmCrypto() {
     }
 }
 
+function requirePowBaseBits(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num <= 0) {
+        try { console.error('[PoW] invalid pow_base_bits', { value }); } catch (_) { }
+        throw new Error('pow_base_bits missing or invalid');
+    }
+    return num;
+}
+
+function requirePowDifficulty(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
+        try { console.error('[PoW] invalid pow_difficulty', { value }); } catch (_) { }
+        throw new Error('pow_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function requirePowFactor(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0 || num > 1) {
+        try { console.error('[PoW] invalid pow_factor', { value }); } catch (_) { }
+        throw new Error('pow_factor missing or invalid');
+    }
+    return num;
+}
+
+function requireTxDifficulty(value) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0) {
+        throw new Error('pow_difficulty missing or invalid');
+    }
+    return num;
+}
+
+function resolveTxDifficulty(tx) {
+    if (typeof tx?.pow_difficulty !== 'undefined') return requireTxDifficulty(tx.pow_difficulty);
+    if (typeof tx?.difficulty !== 'undefined') return requireTxDifficulty(tx.difficulty);
+    throw new Error('pow_difficulty missing or invalid');
+}
+
 
 class TransactionHandler {
     constructor() {
@@ -321,11 +362,15 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Fetching transaction parameters");
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash;
-                pow_difficulty = Number(statusData.pow_difficulty) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
 
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
@@ -337,7 +382,9 @@ class TransactionHandler {
                 action: 'set_username',
                 username,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 // Use a slightly past timestamp to avoid envelope_timestamp-in-future due to clock skew
                 timestamp: Math.max(0, Date.now() - 15000),
                 // Include invite code if provided (backend marks it as used)
@@ -363,16 +410,20 @@ class TransactionHandler {
             if (!username) return { success: false, error: "empty username" };
 
             // Subscribers do not need parameters; free users do
-            let last_block_hash2 = "";
-            let pow_difficulty2 = 0;
-            const userLevel2 = Number(Storage.load('user_level', '0')) || 0;
-            if (userLevel2 === 0) {
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            if (userLevel === 0) {
                 updateNotification("Preparing username change");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
-                last_block_hash2 = statusData.last_block_hash || "";
-                pow_difficulty2 = Number(statusData.pow_difficulty || 0) >>> 0;
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -382,14 +433,16 @@ class TransactionHandler {
             const tx = {
                 action: 'set_username',
                 username,
-                last_block_hash: userLevel2 >= 1 ? "" : last_block_hash2,
-                pow_difficulty: userLevel2 >= 1 ? 0 : pow_difficulty2,
+                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
+                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${userLevel2 >= 1 ? "" : last_block_hash2}:0`; // Challenge format required
+            const challenge = `${derivedAddress}:${userLevel >= 1 ? "" : last_block_hash}:0`; // Challenge format required
 
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
@@ -423,13 +476,17 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Blocking post");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -440,7 +497,9 @@ class TransactionHandler {
                 action: 'block_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -465,20 +524,26 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Unblocking post");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
                 action: 'unblock_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -509,29 +574,35 @@ class TransactionHandler {
                 }
             } catch (_) { }
 
-            const userLevelB = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash_b = "";
-            let pow_difficulty_b = 0;
-            if (userLevelB === 0) {
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            if (userLevel === 0) {
                 updateNotification("Blocking user");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
-                last_block_hash_b = statusData.last_block_hash || "";
-                pow_difficulty_b = Number(statusData.pow_difficulty || 0) >>> 0;
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
                 action: 'block_user',
                 target: addressTrimmed,
-                last_block_hash: last_block_hash_b,
-                pow_difficulty: pow_difficulty_b >>> 0,
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash_b}:${pow_difficulty_b}`;
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
 
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
@@ -547,29 +618,35 @@ class TransactionHandler {
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
 
-            const userLevelB = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash_b = "";
-            let pow_difficulty_b = 0;
-            if (userLevelB === 0) {
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            if (userLevel === 0) {
                 updateNotification("Unblocking user");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
-                last_block_hash_b = statusData.last_block_hash || "";
-                pow_difficulty_b = Number(statusData.pow_difficulty || 0) >>> 0;
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
                 action: 'unblock_user',
                 target: addressTrimmed,
-                last_block_hash: last_block_hash_b,
-                pow_difficulty: pow_difficulty_b >>> 0,
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
             const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash_b}:${pow_difficulty_b}`;
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
 
             const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
             return result;
@@ -762,7 +839,9 @@ class TransactionHandler {
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
             ]);
             const last_block_hash = statusData.last_block_hash;
-            let pow_difficulty = Number(statusData.pow_difficulty);
+            let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+            const pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+            const pow_factor = requirePowFactor(statusData.pow_factor);
             // Level >= 1 users don't need PoW
             const userLevel = Number(statusData.user_level !== undefined ? statusData.user_level : Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -774,7 +853,9 @@ class TransactionHandler {
                 target: txhashTrimmed,
                 reason: why,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -822,7 +903,9 @@ class TransactionHandler {
                 Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
             ]);
             let last_block_hash = statusData?.last_block_hash || "";
-            let pow_difficulty = statusData?.pow_difficulty || 0;
+            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
+            const pow_base_bits = requirePowBaseBits(statusData?.pow_base_bits);
+            const pow_factor = requirePowFactor(statusData?.pow_factor);
             const balance = statusData?.balance || 0;
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             if (userLevel >= 1) {
@@ -844,7 +927,9 @@ class TransactionHandler {
                 target: targetTrimmed,
                 amount: amountUmirage,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -985,13 +1070,17 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Deleting post");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
                 try {
                     const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
                     this._persistUserBalance(onChainBalance, { normalizeStorage: true });
@@ -1002,7 +1091,9 @@ class TransactionHandler {
                 action: 'delete_post',
                 target: txhashTrimmed,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1039,13 +1130,17 @@ class TransactionHandler {
             const userLevelE = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash_e = "";
             let pow_difficulty_e = 0;
+            let pow_base_bits_e = 0;
+            let pow_factor_e = 0;
             if (userLevelE === 0) {
                 updateNotification("Preparing edit");
                 const [statusData] = await Promise.all([
                     Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
                 ]);
                 last_block_hash_e = statusData.last_block_hash || "";
-                pow_difficulty_e = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits_e = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor_e = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
@@ -1057,7 +1152,9 @@ class TransactionHandler {
                 content,
                 tag: tagRaw,
                 last_block_hash: last_block_hash_e,
-                pow_difficulty: pow_difficulty_e >>> 0,
+                pow_difficulty: pow_difficulty_e,
+                pow_base_bits: pow_base_bits_e,
+                pow_factor: pow_factor_e,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
             const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
@@ -1253,10 +1350,14 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
@@ -1267,7 +1368,9 @@ class TransactionHandler {
                 content,
                 tag: cleanTag,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1321,10 +1424,14 @@ class TransactionHandler {
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
             if (userLevel === 0) {
                 const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
                 last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = Number(statusData.pow_difficulty || 0) >>> 0;
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
             }
 
             const tx = {
@@ -1334,7 +1441,9 @@ class TransactionHandler {
                 target: parentId,
                 content,
                 last_block_hash,
-                pow_difficulty: pow_difficulty >>> 0,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
                 timestamp: Math.max(0, Date.now() - 15000),
             };
 
@@ -1378,6 +1487,8 @@ class TransactionHandler {
 
             let last_block_hash = "";
             let pow_difficulty = 0;
+            let pow_base_bits_relay = 0;
+            let pow_factor_relay = 0;
             const userLevelNow = Number(Storage.load('user_level', '0')) || 0;
             if (userLevelNow === 0) {
                 // Free tier: must fetch real block hash for PoW validation
@@ -1386,7 +1497,9 @@ class TransactionHandler {
                     const addrNow = Storage.load('publicKey', '');
                     const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
                     last_block_hash = status.last_block_hash || "";
-                    pow_difficulty = Number(status.pow_difficulty || 0);
+                    pow_difficulty = requirePowDifficulty(status.pow_difficulty);
+                    pow_base_bits_relay = requirePowBaseBits(status.pow_base_bits);
+                    pow_factor_relay = requirePowFactor(status.pow_factor);
                     const onChainBalance = Math.max(0, Math.trunc(Number(typeof status.balance !== 'undefined' ? status.balance : Storage.load('user_balance', '0'))));
                     const prevOnChain = this.lastOnchainBalanceUmirage;
                     this.lastOnchainBalanceUmirage = onChainBalance;
@@ -1427,6 +1540,8 @@ class TransactionHandler {
                     username: transaction.username,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1438,6 +1553,8 @@ class TransactionHandler {
                     direction: Number(transaction.direction),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1451,6 +1568,8 @@ class TransactionHandler {
                     content: transaction.content,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1463,6 +1582,8 @@ class TransactionHandler {
                     content: transaction.content,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1473,6 +1594,8 @@ class TransactionHandler {
                     user: transaction.user,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1483,6 +1606,8 @@ class TransactionHandler {
                     user: transaction.user,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1493,6 +1618,8 @@ class TransactionHandler {
                     topic: transaction.topic,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
@@ -1503,17 +1630,80 @@ class TransactionHandler {
                     topic: transaction.topic,
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
                     timestamp: txTimestamp,
                 };
             }
 
             const privateKey = derivePrivateKeyFromSeed(seedPhrase);
+
+            // Retry loop: PoW-related failures (difficulty changed between compute and submit)
+            // warrant re-fetching params and recomputing PoW, up to 3 times.
+            const MAX_POW_RETRIES = 3;
+            const POW_RETRY_DELAY_MS = 3000;
             let result;
-            try {
-                result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress);
-            } catch (error) {
-                // If performTransaction throws, treat as failure
-                const errMsg = String(error && error.message ? error.message : error);
+            let lastError = null;
+
+            for (let attempt = 0; attempt <= MAX_POW_RETRIES; attempt++) {
+                if (attempt > 0) {
+                    // Re-fetch params and rebuild transaction for retry
+                    updateNotification(`PoW stale — retrying (${attempt}/${MAX_POW_RETRIES})...`);
+                    await new Promise(r => setTimeout(r, POW_RETRY_DELAY_MS));
+
+                    if (userLevelNow === 0) {
+                        try {
+                            const addrRetry = Storage.load('publicKey', '');
+                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined, { timeoutMs: 10000 });
+                            last_block_hash = statusRetry.last_block_hash || "";
+                            pow_difficulty = requirePowDifficulty(statusRetry.pow_difficulty);
+                            pow_base_bits_relay = requirePowBaseBits(statusRetry.pow_base_bits);
+                            pow_factor_relay = requirePowFactor(statusRetry.pow_factor);
+                        } catch (retryErr) {
+                            continue; // param fetch failed, try again next iteration
+                        }
+                    }
+
+                    // Rebuild the transaction with fresh params + timestamp
+                    const retryTimestamp = Math.max(0, Date.now() - 15000);
+                    if (final_transaction) {
+                        final_transaction.last_block_hash = last_block_hash;
+                        final_transaction.pow_difficulty = Number(pow_difficulty);
+                        final_transaction.pow_base_bits = pow_base_bits_relay;
+                        final_transaction.pow_factor = pow_factor_relay;
+                        final_transaction.timestamp = retryTimestamp;
+                    }
+                    challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                }
+
+                try {
+                    result = await this.performTransaction(final_transaction, challenge, privateKey, derivedAddress);
+                } catch (error) {
+                    lastError = error;
+                    const errMsg = String(error && error.message ? error.message : error);
+                    // Retry on PoW-related failures (difficulty may have changed)
+                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
+                        if (attempt < MAX_POW_RETRIES) continue;
+                    }
+                    // Non-retryable throw — handle below
+                    break;
+                }
+
+                if (result && !result.success) {
+                    const errMsg = String(result.error || '');
+                    // Retry on PoW-related failures
+                    if (/insufficient pow/i.test(errMsg) || /precheck/i.test(errMsg) || /invalid last_block_hash/i.test(errMsg)) {
+                        if (attempt < MAX_POW_RETRIES) continue;
+                    }
+                }
+
+                // Success or non-retryable failure — stop retrying
+                break;
+            }
+
+            // Handle final failure (after all retries exhausted)
+            if (lastError && (!result || !result.success)) {
+                const errMsg = String(lastError && lastError.message ? lastError.message : lastError);
                 if (/insufficient reserve/i.test(errMsg) || /subscription terminated/i.test(errMsg)) {
                     const grpcMatch = errMsg.match(/details\s*=\s*"([^"]+)"/);
                     const cleanMsg = grpcMatch && grpcMatch[1] ? grpcMatch[1] : 'Your subscription reserve is empty. Please top up your reserve funds or use PoW (free tier).';
@@ -2517,7 +2707,7 @@ class TransactionHandler {
             let endpoint = '';
             if (msgName === 'MsgSetUsername') {
                 // Sign relay for set username (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalSetUsername({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2558,7 +2748,7 @@ class TransactionHandler {
                 endpoint = 'core/set_username';
             } else if (msgName === 'MsgSetModerators') {
                 // Sign relay for set moderators (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalSetModerators({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2583,7 +2773,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/set_moderators';
             } else if (msgName === 'MsgFollowModerator') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const modLower = (transaction.moderator || "").toLowerCase();
                 const canon = this.canonicalFollowModerator({
@@ -2610,7 +2800,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_moderator';
             } else if (msgName === 'MsgUnfollowModerator') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const modLower = (transaction.moderator || "").toLowerCase();
                 const canon = this.canonicalUnfollowModerator({
@@ -2637,7 +2827,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_moderator';
             } else if (msgName === 'MsgFollowUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const userLower = (transaction.user || "").toLowerCase();
                 const canon = this.canonicalFollowUser({
@@ -2665,7 +2855,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_user';
             } else if (msgName === 'MsgUnfollowUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const userLower = (transaction.user || "").toLowerCase();
                 const canon = this.canonicalUnfollowUser({
@@ -2693,7 +2883,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_user';
             } else if (msgName === 'MsgFollowTopic') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const topicLower = (transaction.topic || "").toLowerCase();
                 const canon = this.canonicalFollowTopic({
@@ -2721,7 +2911,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/follow_topic';
             } else if (msgName === 'MsgUnfollowTopic') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
                 const topicLower = (transaction.topic || "").toLowerCase();
                 const canon = this.canonicalUnfollowTopic({
@@ -2749,7 +2939,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unfollow_topic';
             } else if (msgName === 'MsgBlockPost') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalBlockPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2773,7 +2963,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/block_post';
             } else if (msgName === 'MsgUnblockPost') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalUnblockPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2797,7 +2987,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/unblock_post';
             } else if (msgName === 'MsgBlockUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalBlockUser({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2821,7 +3011,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/block_user';
             } else if (msgName === 'MsgUnblockUser') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalUnblockUser({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2846,7 +3036,7 @@ class TransactionHandler {
                 endpoint = 'core/unblock_user';
             } else if (msgName === 'MsgDelete') {
                 // Sign relay for delete post (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const canon = this.canonicalDelete({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -2871,7 +3061,7 @@ class TransactionHandler {
                 endpoint = 'core/delete_post';
             } else if (msgName === 'MsgSendTokens') {
                 // Sign relay for send tokens (must match chain ante)
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 // Ensure addresses are lowercase for consistency with backend
                 const senderLower = (signerAddress || "").toLowerCase();
                 const targetLower = (transaction.target || "").toLowerCase();
@@ -2902,7 +3092,7 @@ class TransactionHandler {
                 };
                 endpoint = 'core/send_tokens';
             } else if (msgName === 'MsgReport') {
-                const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const uvarint = (n) => {
                     const out = [];
                     let v = (n >>> 0);
@@ -2974,7 +3164,7 @@ class TransactionHandler {
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
-                    difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3000,7 +3190,7 @@ class TransactionHandler {
                 const canon = this.canonicalEdit({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
-                    difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3070,7 +3260,7 @@ class TransactionHandler {
                     : (Number(transaction.direction) >>> 0);
                 const voteSignData = {
                     last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: Number(transaction.pow_difficulty || transaction.difficulty),
+                    pow_difficulty: resolveTxDifficulty(transaction),
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
@@ -3091,9 +3281,19 @@ class TransactionHandler {
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
                 const sigFixed = sigCompact.toFixedLength();
                 const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                // Only send fields the backend actually reads — omit noise like
+                // pow_base_bits, pow_factor, difficulty, action.
+                // NOTE: direction must be the original signed value (-1/0/1), NOT
+                // signDirUnsigned which is the unsigned encoding for canonical signing.
                 toRelay = {
-                    ...toRelay,
+                    pubkey: toRelay.pubkey,
                     signature: sigB64,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: resolveTxDifficulty(transaction),
+                    pow: Number(proof),
+                    target: transaction.target || "",
+                    direction: Number(transaction.direction),
+                    timestamp: transaction.timestamp,
                 };
                 endpoint = 'core/vote';
             } else if (msgName === 'MsgUpgradeLevel') {
@@ -3218,7 +3418,7 @@ class TransactionHandler {
                 endpoint = 'core/set_auto_renewal';
             } else if (msgName === 'MsgBridgeBurn') {
                 // Sign relay for bridge burn (e.g., Solana)
-                const difficulty = Number(transaction.pow_difficulty || 0);
+                const difficulty = resolveTxDifficulty(transaction);
                 const uvarint = (n) => {
                     const out = [];
                     let v = (n >>> 0);
@@ -3563,11 +3763,13 @@ class TransactionHandler {
                 transaction.timestamp = Date.now();
             }
 
-            // Level >= 1 users skip PoW (chain trusts them)
-            // Also skip PoW entirely when difficulty is 0 (e.g., fee-only tx like set_auto_renewal).
+            // Subscribers (level >= 1) skip PoW — chain trusts them.
+            // Fee-only actions (upgrade_level, set_auto_renewal) never use PoW regardless of level.
+            // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
+            // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const powDifficulty = Number(transaction?.pow_difficulty || transaction?.difficulty || 0) || 0;
-            const canSkipPow = !forcePow && (userLevel >= 1 || powDifficulty <= 0);
+            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal']);
+            const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
             this._setStatus("preparing");
@@ -3628,7 +3830,11 @@ class TransactionHandler {
             };
             const privBytes = new Uint8Array(privateKeyHex.match(/.{1,2}/g).map((b) => parseInt(b, 16)));
             const pubBytes = secp256k1GetPublicKey(privBytes, true);
-            const difficulty = Number(transaction.pow_difficulty || transaction.difficulty || 0) >>> 0;
+            const difficulty = requirePowDifficulty(
+                typeof transaction.pow_difficulty !== 'undefined' ? transaction.pow_difficulty : transaction.difficulty
+            );
+            const powBaseBits = requirePowBaseBits(transaction.pow_base_bits);
+            const powFactor = requirePowFactor(transaction.pow_factor);
 
             let baseBytes;
             const action = transaction.action;
@@ -3975,7 +4181,7 @@ class TransactionHandler {
             // Use a random starting nonce so repeated clicks in the same block
             // produce different valid PoW solutions (and thus different tx hashes).
             const start = Math.floor(Math.random() * 0xffffffff) >>> 0;
-            worker.postMessage({ baseHex, difficulty, saltHex, start });
+            worker.postMessage({ baseHex, difficulty, powBaseBits, powFactor, saltHex, start });
 
             let taken = 0;
             let powTimedOut = false;
@@ -4019,12 +4225,26 @@ class TransactionHandler {
 
                 updateNotification("Preparing and broadcasting tx");
 
+                const workerData = e ? e.data : null;
+                if (workerData && typeof workerData === 'object' && workerData.error) {
+                    try { console.error('[PoW] worker error', workerData); } catch (_) { }
+                    updateNotification("PoW failed. Please try again.", 5.0, true);
+                    wrapResolve({ success: false, error: `Proof of work failed: ${workerData.error}` });
+                    return;
+                }
+                if (typeof workerData !== 'number' || !Number.isFinite(workerData)) {
+                    try { console.error('[PoW] invalid worker response', workerData); } catch (_) { }
+                    updateNotification("PoW failed. Please try again.", 5.0, true);
+                    wrapResolve({ success: false, error: "Proof of work failed: invalid worker response." });
+                    return;
+                }
+
                 // IMPORTANT: PoW worker uses uint32 varint encoding (>>> 0). If the random start nonce is
                 // near 0xffffffff, the worker can increment past 2^32 and still validate using uint32 wrap.
                 // We MUST normalize to uint32 here so:
                 // - the signature canonical bytes match backend verification
                 // - the backend PoW digest uses the same uvarint(proof) encoding as the worker
-                const rawProof = Number(e.data);
+                const rawProof = Number(workerData);
                 const proof = rawProof >>> 0;
 
                 // Log PoW completion stats

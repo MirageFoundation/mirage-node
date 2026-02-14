@@ -27,12 +27,12 @@ _LOCK = threading.Lock()
 # If any of these are missing, the backend WILL NOT START
 _REQUIRED_INT_PARAMS = [
     # PoW params
-    "min_difficulty",
+    "pow_base_bits",
     "pow_message_window",
-    "pow_message_limit",
+    "pow_increase_threshold",
     "pow_calm_period_definition",
     "pow_calm_sequence_threshold",
-    "pow_difficulty_allowance",
+    "pow_difficulty_grace_period",
     "block_hash_window",
     # Minting params
     "mint_interval",
@@ -45,17 +45,19 @@ _REQUIRED_INT_PARAMS = [
     "min_topic_size",
     # Subscription params
     "subscription_period",
-    "subscription_reserve_percent",
     # Relay fee params
     "relay_min_gas_price",
     "relay_max_gas_fee",
-    # Bridge params
-    "bridge_attestation_threshold",
+    # Envelope replay protection
+    "max_envelope_age",
 ]
 
 # Required float params
 _REQUIRED_FLOAT_PARAMS = [
-    "mint_dynamic_split",
+    "mint_dynamic_fraction",
+    "pow_factor",
+    "subscription_reserve_fraction",
+    "bridge_attestation_threshold",
 ]
 
 

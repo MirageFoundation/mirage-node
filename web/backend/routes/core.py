@@ -70,15 +70,15 @@ from pow import (
     canon_base_send_tokens,
     canon_base_upgrade_level,
     canon_base_set_auto_renewal,
-    count_leading_zero_bits,
+    check_pow_target,
     decode_b64,
 )
 from shared.canon import canon_signed_with_pow
 from tx import estimate_total_gas_limit, build_tx_bytes, simulate_gas, broadcast_tx
 from chain import (
     classify_reject,
-    get_current_pow_difficulty,
     get_difficulty_info,
+    get_pow_base_bits,
     is_node_catching_up,
     is_valid_recent_block_hash,
 )
@@ -232,48 +232,44 @@ def _hex_to_bytes(s: str) -> bytes:
         return b""
 
 
-def _effective_pow_bits(declared: int) -> int:
+
+def _min_required_difficulty() -> int:
+    """Return the minimum required difficulty steps, honouring the chain's
+    PowDifficultyGracePeriod window.
+
+    During the grace period after a difficulty change the chain accepts the
+    *previous* (possibly lower) difficulty.  The backend precheck must
+    mirror this so we don't reject transactions that the chain itself would
+    accept.
     """
-    Mirror chain's validatePoWBytesArgon2 threshold logic.
+    info = get_difficulty_info()
+    current = int(info["current_difficulty"])
+    prev = int(info.get("previous_difficulty", current))
+    last_change = int(info.get("last_change_height", 0))
+    height = int(info.get("current_height", 0))
 
-    Uses current/previous difficulty and pow_difficulty_allowance so backend
-    precheck never rejects a solution the chain would accept.
-    """
-    try:
-        info = get_difficulty_info()
-        current = int(info.get("current_difficulty", 10))
-        prev = int(info.get("previous_difficulty", current))
-        last_change = int(info.get("last_change_height", 0))
-        height = int(info.get("current_height", 0))
+    p = expect_params()
+    grace_period = int(p.get("pow_difficulty_grace_period", 0))
 
-        try:
-            p = expect_params()
-            allowance = int(p.get("pow_difficulty_allowance", 0))
-        except Exception:
-            allowance = 0
+    min_required = current
+    if grace_period > 0 and last_change > 0 and height - last_change <= int(grace_period):
+        if prev < min_required:
+            min_required = prev
+    return min_required
 
-        min_required = current
-        if allowance > 0 and last_change > 0 and height - last_change <= allowance:
-            if prev < min_required:
-                min_required = prev
 
-        eff = int(declared)
-        if eff < min_required:
-            eff = min_required
-        if eff < 1:
-            eff = 1
-        if eff > 256:
-            eff = 256
-        return eff
-    except Exception:
-        # Fallback: preserve previous behaviour if difficulty query fails
-        required = get_current_pow_difficulty()
-        eff = max(int(declared), int(required))
-        if eff < 1:
-            eff = 1
-        if eff > 256:
-            eff = 256
-        return eff
+def _effective_difficulty(declared: int) -> int:
+    """Mirror chain's PoW threshold logic for difficulty steps."""
+    min_required = _min_required_difficulty()
+    eff = int(declared)
+    if eff < min_required:
+        eff = min_required
+    return eff
+
+
+def _pow_factor() -> float:
+    p = expect_params()
+    return float(p["pow_factor"])
 
 
 def _tx_error(
@@ -464,6 +460,8 @@ def core_set_username():
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -527,7 +525,7 @@ def core_set_username():
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
-            if not (last_block_hash and int(difficulty) > 0 and int(proof) > 0):
+            if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             try:
                 base = canon_base_set_username(
@@ -540,8 +538,8 @@ def core_set_username():
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -740,6 +738,8 @@ def core_follow_moderator():
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -783,8 +783,8 @@ def core_follow_moderator():
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -869,7 +869,7 @@ def core_unfollow_moderator():
         validator_addr = require_runtime().validator_payer_addr
 
         if not is_subscriber(user_addr):
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -881,7 +881,9 @@ def core_unfollow_moderator():
                     pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, moderator
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None and count_leading_zero_bits(digest) < int(difficulty):
+                if digest is not None and not check_pow_target(
+                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1002,8 +1004,8 @@ def core_block_post():
                 base = canon_base_block_post(pub_dec, last_block_hash, int(difficulty), timestamp, target)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1122,8 +1124,8 @@ def core_block_user():
                 base = canon_base_block_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1210,8 +1212,8 @@ def core_unblock_post():
                 base = canon_base_unblock_post(pub_dec, last_block_hash, int(difficulty), timestamp, target)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1298,8 +1300,8 @@ def core_unblock_user():
                 base = canon_base_unblock_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1398,8 +1400,8 @@ def core_follow_user():
                 base = canon_base_follow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1485,8 +1487,8 @@ def core_unfollow_user():
                 base = canon_base_unfollow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1578,8 +1580,8 @@ def core_follow_topic():
                 base = canon_base_follow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1662,8 +1664,8 @@ def core_unfollow_topic():
                 base = canon_base_unfollow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1771,7 +1773,7 @@ def core_delete_post():
         validator_addr = require_runtime().validator_payer_addr
 
         if not is_subscriber(user_addr):
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -1781,7 +1783,9 @@ def core_delete_post():
             try:
                 base = canon_base_delete(pub_dec, last_block_hash, int(difficulty), timestamp, target)
                 digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None and count_leading_zero_bits(digest) < int(difficulty):
+                if digest is not None and not check_pow_target(
+                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                ):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -1863,6 +1867,8 @@ def core_report():
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         target = str(data.get("target", "").strip()).lower()
         reason_raw = str(data.get("reason", "").strip())
 
@@ -1876,7 +1882,7 @@ def core_report():
         reason = "".join(c for c in reason_raw if ord(c) >= 32 and ord(c) < 127 or ord(c) >= 160)
         reason = reason.strip()
 
-        if not (pub_b64 and sig_b64 and last_block_hash and difficulty > 0 and proof and target and reason):
+        if not (pub_b64 and sig_b64 and last_block_hash and has_difficulty and has_pow and target and reason):
             log_event(rid, "report.missing_fields", has_reason=bool(reason), reason_len=len(reason))
             return jsonify({"error": "missing required fields"}), 400
 
@@ -1896,8 +1902,8 @@ def core_report():
             base = canon_base_report(pub_dec, last_block_hash, int(difficulty), timestamp, target, reason)
             digest = argon2_digest(base, last_block_hash, proof)
             if digest is not None:
-                effective_required = _effective_pow_bits(int(difficulty))
-                if count_leading_zero_bits(digest) < effective_required:
+                effective_required = _effective_difficulty(int(difficulty))
+                if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                     return jsonify({"error": "insufficient pow (precheck)"}), 400
         except Exception:
             pass
@@ -2013,6 +2019,8 @@ def core_edit():
         last_block_hash = str(data.get("last_block_hash", "")).strip()
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -2091,7 +2099,7 @@ def core_edit():
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
-            if not (last_block_hash and int(difficulty) > 0 and int(proof) > 0):
+            if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             topic_for_canon = topic if (topic and not is_comment) else ""
             try:
@@ -2109,8 +2117,8 @@ def core_edit():
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -2205,6 +2213,8 @@ def core_post():
         last_block_hash = str(data.get("last_block_hash", "")).strip()
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         if "timestamp" not in data:
             return jsonify({"error": "timestamp required"}), 400
         try:
@@ -2306,9 +2316,9 @@ def core_post():
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
-            if not (int(difficulty) > 0 and proof):
+            if not (has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
-            required = get_current_pow_difficulty()
+            required = _min_required_difficulty()
             if int(difficulty) < int(required):
                 return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
@@ -2329,7 +2339,7 @@ def core_post():
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    if count_leading_zero_bits(digest) < int(difficulty):
+                    if not check_pow_target(digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -2417,6 +2427,8 @@ def core_vote():
         last_block_hash = str(data.get("last_block_hash", "")).strip()
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         target = str(data.get("target", ""))
         direction = int(data.get("direction", 0))
         if "timestamp" not in data:
@@ -2466,7 +2478,7 @@ def core_vote():
             rid, "vote.subscriber_check", user_addr=user_addr, is_subscriber=user_is_sub, pow_difficulty=difficulty
         )
         if not user_is_sub:
-            if not (int(difficulty) > 0 and proof):
+            if not (has_difficulty and has_pow):
                 log_event(rid, "vote.pow_required", user_addr=user_addr, difficulty=difficulty, proof=proof)
                 return (
                     jsonify(
@@ -2477,17 +2489,20 @@ def core_vote():
                     ),
                     400,
                 )
+            required = _min_required_difficulty()
+            if int(difficulty) < int(required):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
             if not _is_hex64(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
-            # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
+                # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
             try:
                 base = canon_base_vote(pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction))
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 # If PoW precheck fails unexpectedly, let chain ante decide
@@ -2604,6 +2619,8 @@ def core_send_tokens():
         last_block_hash = str(data.get("last_block_hash", "")).strip()
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
         target = str(data.get("target", "")).strip().lower()
         amount = int(data.get("amount", 0))
         if "timestamp" not in data:
@@ -2649,7 +2666,7 @@ def core_send_tokens():
 
         # Free users require PoW; subscribers must NOT use PoW
         if not is_subscriber(user_addr):
-            if not (last_block_hash and int(difficulty) > 0 and int(proof) > 0):
+            if not (last_block_hash and has_difficulty and has_pow):
                 return jsonify({"error": "missing required fields"}), 400
             try:
                 base = canon_base_send_tokens(
@@ -2663,8 +2680,8 @@ def core_send_tokens():
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    effective_required = _effective_pow_bits(int(difficulty))
-                    if count_leading_zero_bits(digest) < effective_required:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass

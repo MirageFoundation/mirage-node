@@ -1,0 +1,18 @@
+{
+    "messages": [
+        {
+            "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "plan": {
+                "name": "v1.11.0",
+                "height": "T+60",
+                "info": "Target-based PoW difficulty (gradual scaling) and parameter type migration"
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Upgrade: v1.11.0",
+    "summary": "Overhauls PoW difficulty to use a step-based exponential system (1.25x per step) for gradual adjustment. Migrates subscription_reserve_percent and bridge_attestation_threshold to double precision.\n\nBINARY REQUIREMENT: All validators must update to v1.11.0 binary BEFORE the upgrade height.",
+    "expedited": true
+}

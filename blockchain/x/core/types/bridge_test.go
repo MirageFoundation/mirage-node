@@ -361,42 +361,42 @@ func TestBridgeAttestationMeetsThreshold(t *testing.T) {
 		name          string
 		attestedPower int64
 		totalPower    int64
-		threshold     uint64 // basis points
+		threshold     float64 // fraction [0,1]
 		expected      bool
 	}{
 		{
 			name:          "exactly at threshold",
 			attestedPower: 6667,
 			totalPower:    10000,
-			threshold:     6667,
+			threshold:     0.6667,
 			expected:      true,
 		},
 		{
 			name:          "above threshold",
 			attestedPower: 7000,
 			totalPower:    10000,
-			threshold:     6667,
+			threshold:     0.6667,
 			expected:      true,
 		},
 		{
 			name:          "below threshold",
 			attestedPower: 6000,
 			totalPower:    10000,
-			threshold:     6667,
+			threshold:     0.6667,
 			expected:      false,
 		},
 		{
 			name:          "zero total power",
 			attestedPower: 100,
 			totalPower:    0,
-			threshold:     6667,
+			threshold:     0.6667,
 			expected:      false,
 		},
 		{
 			name:          "negative total power",
 			attestedPower: 100,
 			totalPower:    -100,
-			threshold:     6667,
+			threshold:     0.6667,
 			expected:      false,
 		},
 	}
@@ -406,7 +406,7 @@ func TestBridgeAttestationMeetsThreshold(t *testing.T) {
 			a := &BridgeAttestation{AttestedPower: tc.attestedPower}
 			result := a.MeetsThreshold(tc.totalPower, tc.threshold)
 			if result != tc.expected {
-				t.Errorf("MeetsThreshold(%d, %d) = %v, want %v",
+				t.Errorf("MeetsThreshold(%d, %f) = %v, want %v",
 					tc.totalPower, tc.threshold, result, tc.expected)
 			}
 		})
@@ -417,31 +417,31 @@ func TestRequiredPower(t *testing.T) {
 	tests := []struct {
 		name       string
 		totalPower int64
-		threshold  uint64
+		threshold  float64
 		expected   int64
 	}{
 		{
 			name:       "standard case",
 			totalPower: 10000,
-			threshold:  6667,
+			threshold:  0.6667,
 			expected:   6667,
 		},
 		{
 			name:       "50% threshold",
 			totalPower: 10000,
-			threshold:  5000,
+			threshold:  0.5,
 			expected:   5000,
 		},
 		{
 			name:       "zero total power",
 			totalPower: 0,
-			threshold:  6667,
+			threshold:  0.6667,
 			expected:   0,
 		},
 		{
 			name:       "negative total power",
 			totalPower: -100,
-			threshold:  6667,
+			threshold:  0.6667,
 			expected:   0,
 		},
 	}
@@ -450,7 +450,7 @@ func TestRequiredPower(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := RequiredPower(tc.totalPower, tc.threshold)
 			if result != tc.expected {
-				t.Errorf("RequiredPower(%d, %d) = %d, want %d",
+				t.Errorf("RequiredPower(%d, %f) = %d, want %d",
 					tc.totalPower, tc.threshold, result, tc.expected)
 			}
 		})
