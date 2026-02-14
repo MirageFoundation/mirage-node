@@ -1019,19 +1019,71 @@ def write_working_genesis(genesis_json: str):
 
     status("Creating tmux session ...")
     run(["bash", "-lc", "docker exec mirage tmux kill-server 2>/dev/null || true"])
-    run(["bash", "-lc", "docker exec mirage tmux new-session -d -s mirage -n node -c /opt/mirage"])
+    run(["bash", "-lc", "docker exec mirage tmux new-session -d -s mirage -n caddy -c /opt/mirage"])
 
     # Disable tmux automatic-rename so windows created with -n keep their names
     # (otherwise tmux renames them to the running process, breaking send-keys by name)
     run(["bash", "-lc", "docker exec mirage tmux set-option -g automatic-rename off"])
     run(["bash", "-lc", "docker exec mirage tmux set-option -g allow-rename off"])
 
-    def ensure_tmux_window(window_name: str):
-        """Create a tmux window. The 'node' window already exists from new-session."""
-        if window_name == "node":
-            return  # Created by new-session above
-        run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
+    _created_windows: set[str] = {"caddy"}  # caddy created by new-session
 
+    def ensure_tmux_window(window_name: str):
+        """Create a tmux window if it doesn't already exist."""
+        if window_name in _created_windows:
+            return
+        run(["bash", "-lc", f"docker exec mirage tmux new-window -t mirage -n {window_name} -c /opt/mirage"])
+        _created_windows.add(window_name)
+
+    # --- 1. Run init.sh (renders Caddyfile, copies maintenance page, etc.) ---
+    status("Running init.sh inside container...")
+    run(
+        [
+            "bash",
+            "-lc",
+            "docker exec -e MONIKER=local-testnet -e CHAIN_ID=mirage-1 mirage bash /opt/mirage/deploy/init.sh",
+        ]
+    )
+
+    # Enable maintenance mode until all services are up
+    run(["bash", "-lc", "docker exec mirage touch /etc/caddy/.maintenance"])
+
+    # --- 2. Start Caddy ---
+    status("Starting Caddy ...")
+    run(["bash", "-lc", "docker exec mirage mkdir -p /root/.mirage/logs/caddy"])
+    run(
+        [
+            "bash",
+            "-lc",
+            "docker exec mirage tmux send-keys -t mirage:caddy "
+            "'caddy run --config /etc/caddy/Caddyfile --adapter caddyfile "
+            '2>&1 | tee >(cronolog "/root/.mirage/logs/caddy/caddy-%Y-%m-%d.log")\' C-m',
+        ]
+    )
+
+    # --- 3. Start PostgreSQL (ensure running + tmux window for logs) ---
+    status("Ensuring PostgreSQL is running...")
+    run(
+        [
+            "bash",
+            "-lc",
+            "docker exec mirage bash -c '"
+            "pg_ctlcluster 16 main start 2>/dev/null || true; "
+            "for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1 && break || sleep 1; done'",
+        ]
+    )
+    ensure_tmux_window("postgres")
+    run(
+        [
+            "bash",
+            "-lc",
+            "docker exec mirage tmux send-keys -t mirage:postgres "
+            "'pg_ctlcluster 16 main start 2>/dev/null; "
+            "tail -f /root/.mirage/logs/postgres/postgres-$(date -u +%Y-%m-%d).log' C-m",
+        ]
+    )
+
+    # --- 4. Start node ---
     status("Starting node in tmux ...")
     ensure_tmux_window("node")
     miraged = get_container_miraged_path()
@@ -1056,17 +1108,7 @@ def write_working_genesis(genesis_json: str):
         status("WARNING: RPC not available after 30s")
         return
 
-    status("Ensuring PostgreSQL is running...")
-    run(
-        [
-            "bash",
-            "-lc",
-            "docker exec mirage bash -c '"
-            "pg_ctlcluster 16 main start 2>/dev/null || true; "
-            "for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1 && break || sleep 1; done'",
-        ]
-    )
-
+    # --- 5. Start indexer ---
     status("Starting indexer ...")
     ensure_tmux_window("indexer")
     initial_height = run(
@@ -1081,6 +1123,7 @@ def write_working_genesis(genesis_json: str):
         ]
     )
 
+    # --- 6. Start backend ---
     status("Starting backend ...")
     ensure_tmux_window("backend")
     run(
@@ -1091,9 +1134,7 @@ def write_working_genesis(genesis_json: str):
         ]
     )
 
-    # Start orchestrator (optional - may not exist in older builds)
-    # Note: The entrypoint.sh can't create the orchestrator window because we killed the node
-    # earlier (it waits for RPC before creating orchestrator window), so we create it here.
+    # --- 7. Start orchestrator (optional) ---
     orchestrator_exists = run(
         ["bash", "-lc", "docker exec mirage test -f /opt/mirage/blockchain/orchestrator && echo yes || echo no"],
         capture=True,
@@ -1113,11 +1154,56 @@ def write_working_genesis(genesis_json: str):
                 [
                     "bash",
                     "-lc",
-                    "docker exec mirage tmux send-keys -t mirage:orchestrator '/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog \"/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log\")' C-m",
+                    "docker exec mirage tmux send-keys -t mirage:orchestrator "
+                    "'/opt/mirage/blockchain/orchestrator 2>&1 | tee >(cronolog "
+                    '"/root/.mirage/logs/orchestrator/orchestrator-%Y-%m-%d.log")\' C-m',
                 ]
             )
         except Exception as e:
             status(f"WARNING: Orchestrator startup failed (optional): {e}")
+
+    # --- 8. Start status dashboard ---
+    status("Starting status dashboard ...")
+    ensure_tmux_window("status")
+    run(
+        [
+            "bash",
+            "-lc",
+            "docker exec mirage tmux send-keys -t mirage:status "
+            "'PYTHONPATH=/opt/mirage python3 /opt/mirage/scripts/status_dashboard.py' C-m",
+        ]
+    )
+
+    # --- 9. Disable maintenance mode ---
+    run(["bash", "-lc", "docker exec mirage rm -f /etc/caddy/.maintenance"])
+
+    # --- 10. Verify all services are running ---
+    status("Verifying services ...")
+    time.sleep(3)  # give services a moment to start/crash
+
+    checks = {
+        "node (miraged)": "pgrep -f 'miraged start' >/dev/null 2>&1",
+        "caddy": "pgrep -f 'caddy run' >/dev/null 2>&1",
+        "postgres": "pg_isready -h 127.0.0.1 -p 5432 -U postgres -t 1 >/dev/null 2>&1",
+        "backend (gunicorn)": "pgrep -f gunicorn >/dev/null 2>&1",
+        "indexer": "pgrep -f 'indexer/main.py' >/dev/null 2>&1",
+    }
+    all_ok = True
+    for name, cmd in checks.items():
+        result = run(
+            ["bash", "-lc", f"docker exec mirage bash -c '{cmd}' && echo ok || echo fail"],
+            capture=True,
+        ).strip()
+        if result == "ok":
+            print(f"  ✓ {name}")
+        else:
+            print(f"  ✗ {name} NOT RUNNING")
+            all_ok = False
+
+    if not all_ok:
+        status("WARNING: Some services failed to start! Check tmux: docker exec -it mirage tmux attach -t mirage")
+    else:
+        status("All services running")
 
 
 def find_latest_backup_tarball(source_host: str) -> Path:
