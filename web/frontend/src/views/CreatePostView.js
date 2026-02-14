@@ -272,7 +272,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const MAX_MEDIA = 10;
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(null);
-    const [thumbsLoading, setThumbsLoading] = useState(new Set());
+    const [thumbsLoading, setThumbsLoading] = useState(new Set()); // Set<string> of URLs still loading their thumbnail
     const [tagValue, setTagValue] = useState('');
     const [tagEnabled, setTagEnabled] = useState(false);
     const [tagManuallySet, setTagManuallySet] = useState(false);
@@ -330,6 +330,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             return { type, url };
                         });
                         setAttachedMedia(items);
+                        setThumbsLoading(new Set(items.map(m => m.url)));
                         setContentValue(content);
                     } else {
                         // Legacy: extract first-line media from content
@@ -340,6 +341,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                             const isVideo = isSafeVideoUrl(firstLine);
                             if (isImage || isVideo) {
                                 setAttachedMedia([{ type: isImage ? 'image' : 'video', url: firstLine }]);
+                                setThumbsLoading(new Set([firstLine]));
                                 const restLines = lines.slice(1);
                                 while (restLines.length > 0 && restLines[0].trim() === '') {
                                     restLines.shift();
@@ -513,13 +515,14 @@ function CreatePostView({ state, setPosts, updatePost }) {
         }
     };
 
-    useEffect(() => {
-        if (attachedMedia.length > 0) {
-            setThumbsLoading(new Set(attachedMedia.map((_, i) => i)));
-        } else {
-            setThumbsLoading(new Set());
-        }
-    }, [attachedMedia.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Helper: add a media item and mark its URL as loading a thumbnail
+    const addMediaItem = (type, url) => {
+        setAttachedMedia(prev => {
+            if (prev.length >= MAX_MEDIA) return prev;
+            return [...prev, { type, url }];
+        });
+        setThumbsLoading(prev => { const n = new Set(prev); n.add(url); return n; });
+    };
 
     const handleTitlePaste = async (e) => {
         try {
@@ -921,14 +924,14 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                         <StickerPicker
                                             onSelect={(stickerUrl) => {
                                                 if (attachedMedia.length >= MAX_MEDIA) return;
-                                                setAttachedMedia(prev => [...prev, { type: 'image', url: stickerUrl }]);
+                                                addMediaItem('image', stickerUrl);
                                             }}
                                             disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
                                         />
                                         <GifPicker
                                             onSelect={(gifUrl) => {
                                                 if (attachedMedia.length >= MAX_MEDIA) return;
-                                                setAttachedMedia(prev => [...prev, { type: 'image', url: gifUrl }]);
+                                                addMediaItem('image', gifUrl);
                                             }}
                                             disabled={isSubmitting || isUploading || attachedMedia.length >= MAX_MEDIA}
                                         />
@@ -957,13 +960,13 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                     src={item.type === 'image' ? item.url : (getVideoThumbnailUrl(item.url) || item.url)}
                                                     alt=""
                                                     onLoad={() => {
-                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(item.url); return n; });
                                                     }}
                                                     onError={() => {
-                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(idx); return n; });
+                                                        setThumbsLoading(prev => { const n = new Set(prev); n.delete(item.url); return n; });
                                                     }}
                                                 />
-                                                {thumbsLoading.has(idx) && (
+                                                {thumbsLoading.has(item.url) && (
                                                     <MediaSpinner />
                                                 )}
                                                 <MediaRemoveButton
@@ -1061,10 +1064,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                         errorClearTimeoutRef.current = null;
                                                     }, 5000);
                                                 } else {
-                                                    setAttachedMedia(prev => {
-                                                        if (prev.length >= MAX_MEDIA) return prev;
-                                                        return [...prev, { type, url }];
-                                                    });
+                                                    addMediaItem(type, url);
                                                 }
                                             }}
                                             onUploadStateChange={(uploading) => {
