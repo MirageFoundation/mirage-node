@@ -27,7 +27,7 @@ from typing import Any
 
 
 UPGRADE_NAME = "v1.11.0"
-EXPECTED_VERSION = "v1.11.0"
+EXPECTED_VERSION = "v1.11.1"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
