@@ -83,9 +83,25 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
         if (index >= urls.length) setIndex(0);
     }, [urls.length, index]);
 
-    // Restore scroll position after index change to prevent viewport jump
+    // Restore scroll position after index change to prevent viewport jump.
+    // A single restore isn't enough for new images: InlineMedia re-renders
+    // when onLoad fires and dimensions are computed, shifting layout again.
+    // A short-lived ResizeObserver catches every resize and keeps restoring.
+    const containerRef = React.useRef(null);
+
     React.useLayoutEffect(() => {
         window.scrollTo(0, scrollYRef.current);
+
+        const el = containerRef.current;
+        if (!el) return;
+        const savedY = scrollYRef.current;
+        const ro = new ResizeObserver(() => {
+            window.scrollTo(0, savedY);
+        });
+        ro.observe(el);
+
+        const timer = setTimeout(() => ro.disconnect(), 600);
+        return () => { clearTimeout(timer); ro.disconnect(); };
     }, [index]);
 
     if (!urls.length) return null;
@@ -122,7 +138,7 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
     };
 
     return (
-        <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <NavBar>
                 <span>Gallery:</span>
                 <ArrowBtn type="button" onClick={goPrev} aria-label="Previous media">&#8592;</ArrowBtn>
