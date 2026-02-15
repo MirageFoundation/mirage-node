@@ -695,7 +695,7 @@ export default function NetworkView({ state }) {
         let cancelled = false;
         const fetchNetworkStats = async () => {
             try {
-                const data = await Api.get('get_network_stats', undefined, { timeoutMs: 10000 });
+                const data = await Api.get('get_network_stats', undefined);
                 if (!cancelled && data) {
                     const sb = Number(data.server_balance);
                     if (isFinite(sb)) setServerBalance(sb);
@@ -859,11 +859,11 @@ export default function NetworkView({ state }) {
                                     <RowCentered>
                                         <Label>Difficulty:</Label>
                                         <ValueBox>
-                                        <Mono>{
-                                            (typeof cfg.pow_difficulty === 'number')
-                                                ? `${cfg.pow_difficulty}`
-                                                : '(loading...)'
-                                        }</Mono>
+                                            <Mono>{
+                                                (typeof cfg.pow_difficulty === 'number')
+                                                    ? `${cfg.pow_difficulty}`
+                                                    : '(loading...)'
+                                            }</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>

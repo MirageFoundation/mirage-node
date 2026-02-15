@@ -52,6 +52,9 @@ Cleaner separation between "what happened" and "current state"
 - Legacy query params in ProfileView: `?address=`
 Search for "DEPRECATED" comments in code to find all removal points.
 
+TODO - REMOVE AFTER MARCH:
+- the legacy handling of embedding the image/media of a post if the first line is a link. now we have the media field so we don't need that anymore
+
 ----------
 
 
@@ -63,17 +66,12 @@ we need to add the relaying node into the blockchain history. this way we can pr
 
 ----------
 
-we need to allow for galleries / multiple pics and videos
 add blocking keywords (in topics or posts)
 add blocking topics
 
 ----------
 
 full security audit for every module
-
-----------
-
-we need to integrate @ a user for notification (whether its in the topic or body)
 
 ----------
 

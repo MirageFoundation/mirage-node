@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.11.0",
+                "name": "v1.12.0",
                 "height": "T+60",
-                "info": "Target-based PoW difficulty (gradual scaling) and parameter type migration"
+                "info": "Add dedicated media field to MsgPost with on-chain validation"
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.11.0",
-    "summary": "Overhauls PoW difficulty to use a step-based exponential system (1.25x per step) for gradual adjustment. Migrates subscription_reserve_percent and bridge_attestation_threshold to double precision.\n\nBINARY REQUIREMENT: All validators must update to v1.11.0 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.12.0",
+    "summary": "Adds a dedicated media field to MsgPost messages, allowing up to 10 HTTPS URLs per post. Media URLs are validated on-chain (https:// required, max 2048 characters per URL). The field is optional and backward compatible.\n\nBINARY REQUIREMENT: All validators must update to v1.12.0 binary BEFORE the upgrade height.",
     "expedited": true
 }

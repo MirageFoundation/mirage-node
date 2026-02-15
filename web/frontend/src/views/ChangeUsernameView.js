@@ -161,7 +161,7 @@ function ChangeUsernameView({ state }) {
     useEffect(() => {
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() });
                 if (data) {
                     setUserLevel(parseInt(data.user_level || 0));
                 }
@@ -198,7 +198,7 @@ function ChangeUsernameView({ state }) {
         try {
             const base = String(rawName || "").trim();
             if (!base) return { available: false, error: "empty" };
-            const data = await Api.get('get_address_from_username', { username: base }, { timeoutMs: 10000 });
+            const data = await Api.get('get_address_from_username', { username: base });
             const available = !!(data && !data.exists);
             return { available, error: null };
         } catch (e) {

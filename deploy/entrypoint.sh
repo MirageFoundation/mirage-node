@@ -155,6 +155,9 @@ if [ -f "$TMUX_TEMPLATE" ]; then
   tmux source-file /etc/tmux.conf 2>/dev/null
 fi
 
+# Enable maintenance mode while services start up
+touch /etc/caddy/.maintenance
+
 # Caddy (first) - start with HTTP-only config, will be upgraded to HTTPS if domain exists
 tmux send-keys -t "$SESSION:caddy" "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tee >(cronolog \"$LOGS_DIR/caddy/caddy-%Y-%m-%d.log\")" C-m
 
@@ -328,6 +331,10 @@ tmux send-keys -t "$SESSION:indexer" "PYTHONPATH=$ROOT_DIR python3 indexer/main.
 # Backend (fourth)
 tmux new-window -t "$SESSION" -n backend -c "$ROOT_DIR/web/backend"
 tmux send-keys -t "$SESSION:backend" "BACKEND_HOST=127.0.0.1 BACKEND_PORT=5000 PYTHONPATH=$ROOT_DIR python3 -m gunicorn -c gunicorn_config.py 'factory:app'" C-m
+
+# Disable maintenance mode now that backend is running
+rm -f /etc/caddy/.maintenance
+echo "✓ Maintenance mode disabled"
 
 # Referral accrual daemon (fifth) - DISABLED FOR NOW
 # tmux new-window -t "$SESSION" -n referrals -c "$ROOT_DIR"

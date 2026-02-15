@@ -232,7 +232,6 @@ def _hex_to_bytes(s: str) -> bytes:
         return b""
 
 
-
 def _min_required_difficulty() -> int:
     """Return the minimum required difficulty steps, honouring the chain's
     PowDifficultyGracePeriod window.
@@ -2040,6 +2039,19 @@ def core_edit():
         if len(tag) > 50:
             return jsonify({"error": "tag too long"}), 400
 
+        # Validate media field (v1.12.0+ edit support)
+        media_raw = data.get("media", [])
+        if not isinstance(media_raw, list):
+            return jsonify({"error": "media must be a list"}), 400
+        media = [str(m) for m in media_raw]
+        if len(media) > 10:
+            return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+        for i, media_item in enumerate(media):
+            if len(media_item) > 2048:
+                return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+            if not media_item.startswith("https://"):
+                return jsonify({"error": f"media[{i}] must use https://"}), 400
+
         # Require basics: editing requires an override hash and auth fields
         if not (pub_b64 and sig_b64 and override):
             return jsonify({"error": "missing required fields"}), 400
@@ -2114,6 +2126,7 @@ def core_edit():
                     content,
                     tag,
                     override,
+                    media=media,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -2139,6 +2152,7 @@ def core_edit():
                 content,
                 tag,
                 override,
+                media=media,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -2156,19 +2170,22 @@ def core_edit():
         msg.envelope_timestamp = timestamp
         msg.envelope_signature = sig_dec
         msg.target = target
-        log_event(rid, "edit.debug", is_comment=is_comment, topic=topic, target=target)
+        log_event(rid, "edit.debug", is_comment=is_comment, topic=topic, target=target, media_count=len(media))
         msg.topic = topic_for_canon
         msg.title = title
         msg.content = content
         msg.tag = tag
         msg.override = override
+        for m in media:
+            msg.media.append(m)
 
         any_msg = AnyPB()
         any_msg.type_url = "/mirage.core.v1.MsgEdit"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
-        content_len = len(target) + len(topic) + len(title) + len(content) + len(tag)
+        media_len = sum(len(m) for m in media)
+        content_len = len(target) + len(topic) + len(title) + len(content) + len(tag) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
@@ -2185,6 +2202,7 @@ def core_edit():
                 "content": content,
                 "tag": tag,
                 "override": override,
+                "media_count": len(media),
                 "last_block_hash": last_block_hash,
                 "difficulty": int(difficulty),
                 "proof": int(proof),
@@ -2231,6 +2249,19 @@ def core_post():
             return jsonify({"error": f"invalid tag: {tag}"}), 400
         if len(tag) > 50:
             return jsonify({"error": "tag too long"}), 400
+
+        # Validate media field (v1.12.0)
+        media_raw = data.get("media", [])
+        if not isinstance(media_raw, list):
+            return jsonify({"error": "media must be a list"}), 400
+        media = [str(m) for m in media_raw]
+        if len(media) > 10:
+            return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+        for i, media_item in enumerate(media):
+            if len(media_item) > 2048:
+                return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+            if not media_item.startswith("https://"):
+                return jsonify({"error": f"media[{i}] must use https://"}), 400
 
         # Basic fields must be present; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64):
@@ -2336,10 +2367,13 @@ def core_post():
                     title,
                     content,
                     tag,
+                    media=media,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
-                    if not check_pow_target(digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()):
+                    if not check_pow_target(
+                        digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                    ):
                         return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
@@ -2359,6 +2393,7 @@ def core_post():
                 title,
                 content,
                 tag,
+                media=media,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -2380,13 +2415,16 @@ def core_post():
         msg.title = title
         msg.content = content
         msg.tag = tag
+        for m in media:
+            msg.media.append(m)
 
         any_msg = AnyPB()
         any_msg.type_url = "/mirage.core.v1.MsgPost"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
-        content_len = len(target) + len(topic) + len(title) + len(content)
+        media_len = sum(len(m) for m in media)
+        content_len = len(target) + len(topic) + len(title) + len(content) + media_len
         gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))

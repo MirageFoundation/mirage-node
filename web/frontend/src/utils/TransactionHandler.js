@@ -366,7 +366,7 @@ class TransactionHandler {
             let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Fetching transaction parameters");
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash;
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -418,7 +418,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Preparing username change");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -481,7 +481,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Blocking post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -529,7 +529,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Unblocking post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -582,7 +582,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Blocking user");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -626,7 +626,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Unblocking user");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -836,7 +836,7 @@ class TransactionHandler {
 
             updateNotification("Preparing report");
             const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
             const last_block_hash = statusData.last_block_hash;
             let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -900,7 +900,7 @@ class TransactionHandler {
             updateNotification("Sending tokens");
 
             const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
             let last_block_hash = statusData?.last_block_hash || "";
             let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
@@ -1075,7 +1075,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Deleting post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -1111,7 +1111,7 @@ class TransactionHandler {
     /**
      * Edit an existing post/comment
      * @param {string} overrideId - txhash of the post/comment being edited
-     * @param {{target?: string, topic?: string, title?: string, content: string, tag?: string}} changes
+     * @param {{target?: string, topic?: string, title?: string, content: string, tag?: string, media?: string[]}} changes
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
     async editPost(overrideId, changes) {
@@ -1125,6 +1125,7 @@ class TransactionHandler {
             const topic = String(changes?.topic || "").trim();
             const target = String(changes?.target || "").trim();
             const tagRaw = String(changes?.tag || "").trim().toLowerCase();
+            const media = Array.isArray(changes?.media) ? changes.media : [];
             if (!ALLOWED_TAGS.has(tagRaw)) return { success: false, error: "invalid tag" };
 
             const userLevelE = Number(Storage.load('user_level', '0')) || 0;
@@ -1135,7 +1136,7 @@ class TransactionHandler {
             if (userLevelE === 0) {
                 updateNotification("Preparing edit");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash_e = statusData.last_block_hash || "";
                 pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
@@ -1151,6 +1152,7 @@ class TransactionHandler {
                 title,
                 content,
                 tag: tagRaw,
+                media,
                 last_block_hash: last_block_hash_e,
                 pow_difficulty: pow_difficulty_e,
                 pow_base_bits: pow_base_bits_e,
@@ -1296,7 +1298,7 @@ class TransactionHandler {
         });
     }
 
-    createPost(topic, title, content, tag = "") {
+    createPost(topic, title, content, tag = "", media = []) {
         let action = "create_post";
 
         let publicKey = Storage.load("publicKey", "");
@@ -1319,6 +1321,7 @@ class TransactionHandler {
             title: title,
             content: content,
             tag: cleanTag,
+            media: Array.isArray(media) ? media : [],
         };
 
         this.transactions.push(transaction);
@@ -1334,7 +1337,7 @@ class TransactionHandler {
      * @param {string} tag
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string}>}
      */
-    async createPostAsync(topic, title, content, tag = "") {
+    async createPostAsync(topic, title, content, tag = "", media = []) {
         try {
             const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
@@ -1353,7 +1356,7 @@ class TransactionHandler {
             let pow_base_bits = 0;
             let pow_factor = 0;
             if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -1367,6 +1370,7 @@ class TransactionHandler {
                 title,
                 content,
                 tag: cleanTag,
+                media: Array.isArray(media) ? media : [],
                 last_block_hash,
                 pow_difficulty,
                 pow_base_bits,
@@ -1427,7 +1431,7 @@ class TransactionHandler {
             let pow_base_bits = 0;
             let pow_factor = 0;
             if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -1495,7 +1499,7 @@ class TransactionHandler {
                 updateNotification("Fetching transaction parameters");
                 try {
                     const addrNow = Storage.load('publicKey', '');
-                    const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
+                    const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined);
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = requirePowDifficulty(status.pow_difficulty);
                     pow_base_bits_relay = requirePowBaseBits(status.pow_base_bits);
@@ -1566,6 +1570,8 @@ class TransactionHandler {
                     topic: transaction.topic,
                     title: transaction.title,
                     content: transaction.content,
+                    tag: transaction.tag || "",
+                    media: Array.isArray(transaction.media) ? transaction.media : [],
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -1654,7 +1660,7 @@ class TransactionHandler {
                     if (userLevelNow === 0) {
                         try {
                             const addrRetry = Storage.load('publicKey', '');
-                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined, { timeoutMs: 10000 });
+                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined);
                             last_block_hash = statusRetry.last_block_hash || "";
                             pow_difficulty = requirePowDifficulty(statusRetry.pow_difficulty);
                             pow_base_bits_relay = requirePowBaseBits(statusRetry.pow_base_bits);
@@ -1772,7 +1778,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgPost
-    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag }) {
+    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, media }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -1816,8 +1822,9 @@ class TransactionHandler {
         const tag102 = Uint8Array.from([102]);
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
+        const tag105 = Uint8Array.from([105]); // media field (v1.12.0)
 
-        return concat(
+        const parts = [
             prefix,
             tag2, encBytes(pub_bytes || new Uint8Array()),
             tag3, encBytes(hexToBytes(last_block_hash)),
@@ -1829,11 +1836,17 @@ class TransactionHandler {
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
-        );
+        ];
+        // Encode repeated media field (tag 105)
+        for (const m of (media || [])) {
+            parts.push(tag105);
+            parts.push(encStr(m));
+        }
+        return concat(...parts);
     }
 
     // Build canonical bytes for MsgEdit (must match chain ante)
-    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override }) {
+    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override, media }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -1878,6 +1891,12 @@ class TransactionHandler {
         const tag103 = Uint8Array.from([103]);
         const tag104 = Uint8Array.from([104]); // tag field
         const tag105 = Uint8Array.from([105]); // override field
+        const tag106 = Uint8Array.from([106]); // media field (v1.12.0+)
+        const mediaParts = [];
+        for (const m of (media || [])) {
+            mediaParts.push(tag106);
+            mediaParts.push(encStr(m));
+        }
 
         return concat(
             prefix,
@@ -1892,6 +1911,7 @@ class TransactionHandler {
             tag103, encStr(content || ""),
             tag104, encStr(tag || ""),
             tag105, encStr(override || ""),
+            ...mediaParts,
         );
     }
 
@@ -3161,6 +3181,7 @@ class TransactionHandler {
             } else if (msgName === 'MsgPost') {
                 // Sign relay for post
                 const topic = transaction.topic || "";
+                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalPost({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -3172,6 +3193,7 @@ class TransactionHandler {
                     title: transaction.title || "",
                     content: transaction.content || "",
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3182,11 +3204,13 @@ class TransactionHandler {
                     signature: sigB64,
                     topic: topic,
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 };
                 endpoint = 'core/post';
             } else if (msgName === 'MsgEdit') {
                 // Sign relay for edit
                 const topic = transaction.topic || "";
+                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
                 const canon = this.canonicalEdit({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
@@ -3199,6 +3223,7 @@ class TransactionHandler {
                     content: transaction.content || "",
                     tag: transaction.tag || "",
                     override: String(transaction.override || '').toLowerCase(),
+                    media: mediaArr,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3209,6 +3234,7 @@ class TransactionHandler {
                     signature: sigB64,
                     topic: topic,
                     tag: transaction.tag || "",
+                    media: mediaArr,
                 };
                 endpoint = 'core/edit';
             } else if (msgName === 'MsgVote') {
@@ -3488,7 +3514,7 @@ class TransactionHandler {
 
             // Submit transaction
             try {
-                const out = await Api.post(endpoint, toRelay, { timeoutMs: 10000 });
+                const out = await Api.post(endpoint, toRelay);
                 // Reports return {success: true, id: ...} instead of {tx_hash: ...}
                 const txHash = (out && out.tx_hash) ? String(out.tx_hash).toLowerCase() :
                     ((endpoint === 'core/report' && out && out.success && out.id) ? `report-${out.id}` : null);
@@ -3554,7 +3580,7 @@ class TransactionHandler {
                                             if (!parent || !(parent.title && String(parent.title).trim() !== '')) {
                                                 try {
                                                     // Ask backend for the root of the PARENT, which is stable
-                                                    const res = await Api.get('get_root_post_id', { comment_id: parentId }, { timeoutMs: 10000 });
+                                                    const res = await Api.get('get_root_post_id', { comment_id: parentId });
                                                     if (res && res.root_post_id) {
                                                         rootId = String(res.root_post_id).toLowerCase();
                                                     }
@@ -3636,6 +3662,9 @@ class TransactionHandler {
                                 if (isRoot) {
                                     patch.title = transaction.title || '';
                                     patch.topic = transaction.topic || '';
+                                }
+                                if (Array.isArray(transaction.media)) {
+                                    patch.media = transaction.media;
                                 }
                                 this.updatePost(overrideId, patch);
                                 // Clear flash after animation delay
@@ -3887,7 +3916,13 @@ class TransactionHandler {
                 const tag102 = Uint8Array.from([102]);
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
+                const tag105 = Uint8Array.from([105]); // media (v1.12.0)
                 const topic = transaction.topic || "";
+                const mediaParts = [];
+                for (const m of (transaction.media || [])) {
+                    mediaParts.push(tag105);
+                    mediaParts.push(encStr(m));
+                }
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -3899,6 +3934,7 @@ class TransactionHandler {
                     tag102, encStr(transaction.title || ""),
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
+                    ...mediaParts,
                 );
             } else if (action === 'set_moderators') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetModerators\x00");
@@ -4142,7 +4178,13 @@ class TransactionHandler {
                 const tag103 = Uint8Array.from([103]);
                 const tag104 = Uint8Array.from([104]); // tag
                 const tag105 = Uint8Array.from([105]); // override
+                const tag106 = Uint8Array.from([106]); // media
                 const topic = transaction.topic || "";
+                const mediaParts = [];
+                for (const m of (transaction.media || [])) {
+                    mediaParts.push(tag106);
+                    mediaParts.push(encStr(m));
+                }
                 baseBytes = concat(
                     prefix,
                     tag2, encBytes(pubBytes),
@@ -4155,6 +4197,7 @@ class TransactionHandler {
                     tag103, encStr(transaction.content || ""),
                     tag104, encStr(transaction.tag || ""),
                     tag105, encStr(String(transaction.override || "").toLowerCase()),
+                    ...mediaParts,
                 );
             } else if (action === 'upgrade_level') {
                 // upgrade_level should NEVER use PoW - it must be paid with tokens

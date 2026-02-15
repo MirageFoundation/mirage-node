@@ -783,7 +783,7 @@ export default function StatsView() {
                                                     <StatList>
                                                         {mergedStats.most_active_topics.map((item, idx) => (
                                                             <StatItem key={idx}>
-                                                                <Mono>#{item.topic}</Mono>
+                                                                <Link to={`/t/${encodeURIComponent(item.topic)}`} style={{ color: 'inherit', textDecoration: 'none' }}><Mono>#{item.topic}</Mono></Link>
                                                                 <Mono>{formatNumber(item.count)}</Mono>
                                                             </StatItem>
                                                         ))}

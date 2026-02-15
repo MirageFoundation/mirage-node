@@ -107,14 +107,28 @@ function maybeSyncBalance(params, body, data) {
  * persist to localStorage and dispatch an event so TopBar/MobileBottomNav
  * can update the badge (survives component remounts across navigation).
  *
+ * Only updates when the request was for the logged-in user's own address,
+ * preventing another user's inbox count from overwriting the badge when
+ * viewing their profile.
+ *
  * Skips the update if the count was explicitly set client-side within the
  * last 5 seconds (e.g. mark-as-read), so a stale server response from a
  * request that was in-flight before the mark can't flash the old count.
+ * @param {Record<string,any>=} params - GET query params
+ * @param {any=} body - POST body
  * @param {any} data - parsed response
  */
-function maybeSyncInbox(data) {
+function maybeSyncInbox(params, body, data) {
     if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
     try {
+        const myAddr = localStorage.getItem('publicKey') || '';
+        if (!myAddr) return;
+        const reqAddr = String(
+            (params && (params.address || params.owner)) ||
+            (body && (body.address || body.owner)) ||
+            ''
+        );
+        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return;
         const setAt = parseInt(localStorage.getItem('inbox_count_set_at'), 10);
         if (setAt && (Date.now() - setAt) < 5000) return;
         const count = Math.max(0, data.new_inbox_items);
@@ -154,7 +168,7 @@ function withInboxLastViewed(params) {
 async function get(path, params, options) {
     const url = buildUrl(path, withInboxLastViewed(params));
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 10000)));
+    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
         const resp = await fetch(url, { signal: controller.signal, headers: (options && options.headers) || {} });
         if (resp.ok) {
@@ -164,7 +178,7 @@ async function get(path, params, options) {
                 if (ct.includes('application/json')) {
                     const json = await resp.json();
                     maybeSyncBalance(params, undefined, json);
-                    maybeSyncInbox(json);
+                    maybeSyncInbox(params, undefined, json);
                     return json;
                 }
                 return await resp.text();
@@ -186,7 +200,7 @@ async function get(path, params, options) {
 async function post(path, body, options) {
     const url = buildUrl(path);
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 10000)));
+    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
         const resp = await fetch(url, {
             method: 'POST',
@@ -200,7 +214,7 @@ async function post(path, body, options) {
                 if (ct.includes('application/json')) {
                     const json = await resp.json();
                     maybeSyncBalance(undefined, body, json);
-                    maybeSyncInbox(json);
+                    maybeSyncInbox(undefined, body, json);
                     return json;
                 }
                 return await resp.text();

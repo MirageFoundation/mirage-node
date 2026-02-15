@@ -222,9 +222,9 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	currentDifficulty := d.Keeper.GetCurrentDifficulty(ctx)
 	prevDifficulty := d.Keeper.GetPreviousDifficulty(ctx)
 	lastChange := d.Keeper.GetLastDifficultyChangeHeight(ctx)
-	gracePeriod := params.PowDifficultyGracePeriod
-	baseBits := params.PowBaseBits
-	powFactor := params.PowFactor
+	gracePeriod := params.PowDifficultyAllowance
+	baseBits := params.MinDifficulty
+	powFactor := params.PowDifficultyStep
 
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 
@@ -410,11 +410,11 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			if m.Authority == govAuthority {
 				continue
 			}
-		if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
-			ctx.Logger().Error("PoW: MsgBridgeBurn cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
-			return ctx, fmt.Errorf("MsgBridgeBurn cannot use PoW")
-		}
-		ctx.Logger().Debug("PoW: skipped for MsgBridgeBurn", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "dest_chain", m.DestinationChain)
+			if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
+				ctx.Logger().Error("PoW: MsgBridgeBurn cannot use PoW", "pow", m.EnvelopePow, "difficulty", m.EnvelopeDifficulty)
+				return ctx, fmt.Errorf("MsgBridgeBurn cannot use PoW")
+			}
+			ctx.Logger().Debug("PoW: skipped for MsgBridgeBurn", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "dest_chain", m.DestinationChain)
 
 		case *coretypes.MsgFollowModerator:
 			if m.Authority == govAuthority {
@@ -702,6 +702,9 @@ func buildCanonForPost(m *coretypes.MsgPost) []byte {
 	cw.writeString(102, m.Title)
 	cw.writeString(103, m.Content)
 	cw.writeString(104, m.Tag)
+	for _, media := range m.Media {
+		cw.writeString(105, media)
+	}
 	return cw.buf
 }
 
@@ -887,6 +890,9 @@ func buildCanonForEdit(m *coretypes.MsgEdit) []byte {
 	cw.writeString(103, m.Content)
 	cw.writeString(104, m.Tag)
 	cw.writeString(105, m.Override)
+	for _, mediaItem := range m.Media {
+		cw.writeString(106, mediaItem)
+	}
 	return cw.buf
 }
 

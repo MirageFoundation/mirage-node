@@ -137,6 +137,7 @@ message MsgPost {
   string title = 102;
   string content = 103;
   string tag = 104;
+  repeated string media = 105;
 }
 
 message MsgPostResponse {}
@@ -164,6 +165,7 @@ message MsgEdit {
   string content = 103;
   string tag = 104;
   string override = 105;
+  repeated string media = 106;
 }
 
 message MsgEditResponse {}

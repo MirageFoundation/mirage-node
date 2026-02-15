@@ -17,9 +17,9 @@ max_num_inbound_peers = ${MAX_INBOUND_PEERS}
 max_num_outbound_peers = ${MAX_OUTBOUND_PEERS}
 
 [consensus]
-create_empty_blocks = false
-create_empty_blocks_interval = "600s"
-timeout_commit = "3s"
+create_empty_blocks = ${CREATE_EMPTY_BLOCKS:-false}
+create_empty_blocks_interval = "${CREATE_EMPTY_BLOCKS_INTERVAL:-600s}"
+timeout_commit = "${TIMEOUT_COMMIT:-3s}"
 
 [statesync]
 enable = false

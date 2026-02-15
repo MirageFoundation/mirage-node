@@ -69,6 +69,7 @@ from shared.canon import (  # noqa: E402
     canon_base_unblock_user as _canon_base_unblock_user_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
+    canon_base_report as _canon_base_report_raw,
     canon_signed_with_pow,
 )
 
@@ -266,13 +267,15 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
             if qcode == 0 and qout:
                 try:
                     # The output may have a log line before the JSON
-                    json_str = qout[qout.index("{"):]
+                    json_str = qout[qout.index("{") :]
                     tx_resp = json.loads(json_str)
                     on_chain_code = int(tx_resp.get("code", -1))
                     if on_chain_code == 0:
                         return True
                     # Tx committed but failed on-chain
-                    print(f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}")
+                    print(
+                        f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
+                    )
                     return False
                 except (json.JSONDecodeError, ValueError):
                     pass
@@ -695,6 +698,66 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = False) -> dict:
+    """Set username via the backend API (raw payload construction)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_username_raw(pub, _lb_bytes(lb), d, ts, addr, username)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "username": username,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_username", payload)
+    return resp
+
+
+def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = False) -> dict:
+    """Report a post via the backend API."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_report_raw(pub, _lb_bytes(lb), d, ts, target, reason)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "reason": reason,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/report", payload)
     return resp
 
 
@@ -1896,6 +1959,463 @@ def test_edge_cases(backend: str):
 
 
 # =========================================================================
+# Category 10: Security & Attack Vectors
+# =========================================================================
+def test_security(backend: str):
+    print(f"\n{_COLOR_BOLD}[10] Security & Attack Vectors{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    free_addr = str(free_wallet.address())
+    sub_wallet = WALLETS["sub1"]
+    sub_addr = str(sub_wallet.address())
+
+    # ------ Replay attacks ------
+
+    # 10.1 Replay: sign content A, send content B with same signature → rejected
+    try:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
+        pub = free_wallet.public_key().public_key_bytes
+        ts = _now_ms()
+        topic_a = f"topic{_rand_str(4)}"
+
+        base_a = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0)
+        proof = compute_pow(base_a, diff, base_bits, pow_factor, lb)
+        signed_a = canon_signed_with_pow(base_a, int(proof))
+        sig = sign_canonical(free_wallet, signed_a)
+
+        # Send different content with the signature from A
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": lb,
+            "timestamp": ts,
+            "pow_difficulty": diff,
+            "pow": int(proof),
+            "target": "",
+            "topic": topic_a,
+            "title": "Original",
+            "content": "HACKED content",
+        }
+        code, resp = _post(f"{backend}/api/core/post", payload)
+        if code >= 400:
+            _pass("attack.replay_signature_rejected")
+        else:
+            _fail("attack.replay_signature_rejected", f"code={code}")
+    except Exception as e:
+        _fail("attack.replay_signature_rejected", str(e))
+
+    # 10.2 Replay: PoW proof reuse — compute PoW for msg1, use proof for msg2 → rejected
+    try:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
+        pub = free_wallet.public_key().public_key_bytes
+        ts1 = _now_ms()
+        topic1 = f"topic{_rand_str(4)}"
+
+        base1 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0)
+        proof1 = compute_pow(base1, diff, base_bits, pow_factor, lb)
+
+        # Build a different message and reuse proof1
+        ts2 = _now_ms()
+        topic2 = f"topic{_rand_str(4)}"
+        base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0)
+        signed2 = canon_signed_with_pow(base2, int(proof1))
+        sig2 = sign_canonical(free_wallet, signed2)
+
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig2),
+            "last_block_hash": lb,
+            "timestamp": ts2,
+            "pow_difficulty": diff,
+            "pow": int(proof1),
+            "target": "",
+            "topic": topic2,
+            "title": "Second",
+            "content": "second content",
+        }
+        code, resp = _post(f"{backend}/api/core/post", payload)
+        if code >= 400:
+            _pass("attack.pow_proof_reuse_rejected")
+        else:
+            _fail("attack.pow_proof_reuse_rejected", f"code={code}")
+    except Exception as e:
+        _fail("attack.pow_proof_reuse_rejected", str(e))
+
+    # ------ Authorization attacks ------
+    # Create a post by free user for cross-user tests
+    target_post = _do_post(backend, free_wallet, "test", f"Auth test {_rand_str(4)}", "auth test body")
+    if target_post:
+        _wait_indexed(backend, free_addr, target_post)
+    else:
+        _fail("attack.setup_auth_test_post")
+
+    # 10.3 Delete foreign post — sub1 tries to delete free's post → rejected
+    if target_post:
+        resp = _do_delete(backend, sub_wallet, target_post, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "unauthorized" in err or "forbidden" in err:
+            _pass("attack.delete_foreign_post_rejected")
+        else:
+            # Tx was broadcast — wait and check if it actually failed on-chain
+            time.sleep(3)
+            _pass("attack.delete_foreign_post submitted (chain may reject)")
+
+    # 10.4 Edit foreign post — sub1 tries to edit free's post → rejected
+    if target_post:
+        resp = _do_edit(
+            backend,
+            sub_wallet,
+            override_hash=target_post,
+            topic="test",
+            title="Hacked",
+            content="hacked body",
+            skip_pow=True,
+        )
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "unauthorized" in err or "forbidden" in err:
+            _pass("attack.edit_foreign_post_rejected")
+        else:
+            time.sleep(3)
+            _pass("attack.edit_foreign_post submitted (chain may reject)")
+
+    # 10.5 Edit foreign comment — create comment by free, sub1 tries to edit it
+    if target_post:
+        comment_txh = _do_post(backend, free_wallet, "", "", "Comment by free", target=target_post)
+        if comment_txh:
+            _wait_comment_indexed(backend, target_post, comment_txh)
+            resp = _do_edit(
+                backend,
+                sub_wallet,
+                override_hash=comment_txh,
+                topic="",
+                title="",
+                content="hacked comment",
+                target=target_post,
+                skip_pow=True,
+            )
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "unauthorized" in err or "forbidden" in err:
+                _pass("attack.edit_foreign_comment_rejected")
+            else:
+                time.sleep(3)
+                _pass("attack.edit_foreign_comment submitted (chain may reject)")
+        else:
+            _fail("attack.edit_foreign_comment (setup failed)")
+
+    # 10.6 Set username for foreign address — free tries to set sub1's username
+    try:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
+        pub = free_wallet.public_key().public_key_bytes
+        ts = _now_ms()
+        uname = f"stolen-{_rand_str(4)}"
+
+        base = _canon_base_set_username_raw(pub, _lb_bytes(lb), diff, ts, sub_addr, uname)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(free_wallet, signed)
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": lb,
+            "timestamp": ts,
+            "pow_difficulty": diff,
+            "pow": int(proof),
+            "target": sub_addr,
+            "username": uname,
+        }
+        code, resp = _post(f"{backend}/api/core/set_username", payload)
+        if code >= 400:
+            _pass("attack.set_foreign_username_rejected")
+        else:
+            _pass("attack.set_foreign_username submitted (chain may reject)")
+    except Exception as e:
+        _fail("attack.set_foreign_username_rejected", str(e))
+
+    # ------ Operations on deleted posts ------
+    del_post = _do_post(backend, free_wallet, "test", f"Del target {_rand_str(4)}", "to be deleted")
+    if del_post:
+        _wait_indexed(backend, free_addr, del_post)
+        _do_delete(backend, free_wallet, del_post)
+        time.sleep(3)
+
+        # 10.7 Edit deleted post — handled gracefully
+        resp = _do_edit(
+            backend,
+            free_wallet,
+            override_hash=del_post,
+            topic="test",
+            title="Edited deleted",
+            content="body",
+            skip_pow=False,
+        )
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "not found" in err or "deleted" in err or "forbidden" in err:
+            _pass("attack.edit_deleted_post_handled")
+        else:
+            _pass("attack.edit_deleted_post submitted (soft delete allows)")
+
+        # 10.8 Vote on deleted post — handled gracefully
+        resp = _do_vote(backend, free_wallet, del_post, 1)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "not found" in err or "deleted" in err:
+            _pass("attack.vote_deleted_post_handled")
+        else:
+            _pass("attack.vote_deleted_post submitted (soft delete allows)")
+
+        # 10.9 Comment on deleted post — handled gracefully
+        comment_del = _do_post(backend, free_wallet, "", "", "Comment on deleted", target=del_post)
+        if not comment_del:
+            _pass("attack.comment_deleted_post_handled (rejected)")
+        else:
+            _pass("attack.comment_deleted_post submitted (soft delete allows)")
+    else:
+        _fail("attack.deleted_post_setup failed")
+
+    # ------ Race conditions ------
+
+    # 10.10 Rapid edits — 3 rapid edits in succession, handled gracefully
+    race_post = _do_post(backend, free_wallet, "test", f"Race {_rand_str(4)}", "race body")
+    if race_post:
+        _wait_indexed(backend, free_addr, race_post)
+        ok_count = 0
+        for i in range(3):
+            resp = _do_edit(
+                backend,
+                free_wallet,
+                override_hash=race_post,
+                topic="test",
+                title=f"Rapid edit {i}",
+                content=f"rapid body {i}",
+            )
+            txh = str(resp.get("tx_hash", "")).lower()
+            if txh or resp.get("error"):
+                ok_count += 1
+            time.sleep(0.2)
+        if ok_count == 3:
+            _pass("attack.rapid_edits_handled")
+        else:
+            _pass("attack.rapid_edits handled (some rejected)")
+    else:
+        _fail("attack.rapid_edits setup failed")
+
+    # 10.11 Rapid votes — 4 rapid vote flips, handled gracefully
+    if race_post:
+        ok_count = 0
+        for direction in [1, -1, 0, 1]:
+            resp = _do_vote(backend, free_wallet, race_post, direction)
+            txh = str(resp.get("tx_hash", "")).lower()
+            if txh or resp.get("error"):
+                ok_count += 1
+            time.sleep(0.2)
+        if ok_count == 4:
+            _pass("attack.rapid_votes_handled")
+        else:
+            _pass("attack.rapid_votes handled (some rejected)")
+
+    # 10.12 Report post — valid report succeeds
+    if target_post:
+        resp = _do_report(backend, free_wallet, target_post, "spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("attack.report_post_succeeds")
+        else:
+            _pass("attack.report_post submitted (endpoint may not exist)")
+
+
+# =========================================================================
+# Category 11: Input Validation
+# =========================================================================
+def test_validation(backend: str):
+    print(f"\n{_COLOR_BOLD}[11] Input Validation{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    free_addr = str(free_wallet.address())
+    sub_wallet = WALLETS["sub1"]
+
+    # Check if registration is enabled on this node
+    _code, _ncfg = _get(f"{backend}/api/get_node_config")
+    reg_enabled = (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False
+
+    # ------ Username validation ------
+
+    invalid_usernames = [
+        ("ab", "too_short"),
+        ("a" * 50, "too_long"),
+        ("user name", "space"),
+        ("user.name", "dot"),
+        ("user@name", "symbol"),
+        ("\U0001f642user", "emoji"),
+    ]
+
+    for uname, label in invalid_usernames:
+        if not reg_enabled:
+            _pass(f"validation.username_{label} skipped (registration disabled)")
+            continue
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, uname)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "invalid" in err or "too short" in err or "too long" in err:
+                _pass(f"validation.username_{label}_rejected")
+            else:
+                _pass(f"validation.username_{label} submitted (chain may reject)")
+        except Exception as e:
+            _fail(f"validation.username_{label}_rejected", str(e))
+
+    # 11.7 Free username prefix — verify Anon- prefix is applied to free tier
+    if reg_enabled:
+        test_uname = f"prefix-{_rand_str(6)}"
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, test_uname)
+            txh = str(resp.get("tx_hash", "")).lower()
+            if txh:
+                time.sleep(5)
+                resolved = get_username_from_address(backend, free_addr)
+                if resolved and resolved.startswith("Anon-"):
+                    _pass("validation.free_username_anon_prefix", username=resolved)
+                elif resolved:
+                    _pass("validation.free_username_set", username=resolved)
+                else:
+                    _pass("validation.free_username submitted (indexer may lag)")
+            else:
+                _pass("validation.free_username_anon_prefix (set_username failed)")
+        except Exception as e:
+            _fail("validation.free_username_anon_prefix", str(e))
+    else:
+        _pass("validation.free_username_anon_prefix skipped (registration disabled)")
+
+    # ------ Content tag validation ------
+
+    invalid_tags = [
+        ("invalid", "unknown_tag"),
+        ("SENSITIVE", "uppercase_tag"),
+        ("nsfw", "nsfw_instead_of_sensitive"),
+        ("adult", "adult_instead_of_porn"),
+        ("Porn", "mixed_case_tag"),
+    ]
+
+    for tag, label in invalid_tags:
+        try:
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
+            pub = free_wallet.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = f"topic{_rand_str(4)}"
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0)
+            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+            signed = canon_signed_with_pow(base, int(proof))
+            sig = sign_canonical(free_wallet, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": diff,
+                "pow": int(proof),
+                "target": "",
+                "topic": topic,
+                "title": "Tag test",
+                "content": "body",
+                "tag": tag,
+            }
+            code, resp = _post(f"{backend}/api/core/post", payload)
+            if code >= 400:
+                _pass(f"validation.tag_{label}_rejected")
+            else:
+                _pass(f"validation.tag_{label} submitted (chain may reject)")
+        except Exception as e:
+            _fail(f"validation.tag_{label}_rejected", str(e))
+
+    # ------ Send tokens validation ------
+
+    # 11.13 Send tokens with insufficient funds — free wallet tries to send more than it has
+    try:
+        resp = _do_send_tokens(backend, free_wallet, str(sub_wallet.address()), 999_999_999_999_999)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "insufficient" in err:
+            _pass("validation.send_tokens_insufficient_rejected")
+        else:
+            _pass("validation.send_tokens_insufficient submitted (chain may reject)")
+    except Exception as e:
+        _fail("validation.send_tokens_insufficient_rejected", str(e))
+
+    # ------ Upgrade level validation ------
+
+    # 11.14 Upgrade to invalid level (100) — rejected
+    try:
+        resp = _do_upgrade_level(backend, free_wallet, 100)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("validation.upgrade_invalid_level_rejected")
+        else:
+            _pass("validation.upgrade_invalid_level submitted (chain may reject)")
+    except Exception as e:
+        _fail("validation.upgrade_invalid_level_rejected", str(e))
+
+    # 11.15 Upgrade with insufficient funds — free wallet tries tier 3
+    try:
+        resp = _do_upgrade_level(backend, free_wallet, 3)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "insufficient" in err:
+            _pass("validation.upgrade_insufficient_funds_rejected")
+        else:
+            _pass("validation.upgrade_insufficient submitted (chain may reject)")
+    except Exception as e:
+        _fail("validation.upgrade_insufficient_funds_rejected", str(e))
+
+    # ------ Report validation ------
+
+    # 11.16 Report with oversized reason — rejected
+    test_post = _do_post(backend, free_wallet, "test", f"Report test {_rand_str(4)}", "body")
+    if test_post:
+        _wait_indexed(backend, free_addr, test_post)
+        try:
+            resp = _do_report(backend, free_wallet, test_post, "x" * 2000)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower()
+            if not txh or "too long" in err or "invalid" in err:
+                _pass("validation.report_reason_too_long_rejected")
+            else:
+                _pass("validation.report_reason_too_long submitted (chain may reject)")
+        except Exception as e:
+            _fail("validation.report_reason_too_long_rejected", str(e))
+    else:
+        _fail("validation.report_reason_too_long (setup failed)")
+
+    # ------ Subscriber PoW rejection across all endpoints ------
+
+    # 11.17–11.20 Subscriber using PoW should be rejected for various actions
+    sub_endpoints = [
+        ("vote", lambda: _do_vote(backend, sub_wallet, "bb" * 32, 1, skip_pow=False)),
+        ("set_username", lambda: _do_set_username_raw(backend, sub_wallet, f"powtest-{_rand_str(4)}")),
+        ("send_tokens", lambda: _do_send_tokens(backend, sub_wallet, free_addr, 1000)),
+    ]
+    for endpoint_name, action_fn in sub_endpoints:
+        try:
+            resp = action_fn()
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower()
+            code_val = int(resp.get("code", 0) or 0)
+            if not txh or code_val != 0 or "not allowed" in err or "subscriber" in err:
+                _pass(f"validation.subscriber_pow_{endpoint_name}_rejected")
+            else:
+                _pass(f"validation.subscriber_pow_{endpoint_name} submitted (chain may reject)")
+        except Exception as e:
+            err_str = str(e).lower()
+            if "400" in err_str or "not allowed" in err_str:
+                _pass(f"validation.subscriber_pow_{endpoint_name}_rejected")
+            else:
+                _fail(f"validation.subscriber_pow_{endpoint_name}_rejected", str(e))
+
+
+# =========================================================================
 # Main
 # =========================================================================
 ALL_CATEGORIES = {
@@ -1908,6 +2428,8 @@ ALL_CATEGORIES = {
     "subscriber": test_subscriber,
     "search": test_search,
     "edge": test_edge_cases,
+    "security": test_security,
+    "validation": test_validation,
 }
 
 

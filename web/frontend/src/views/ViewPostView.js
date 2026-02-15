@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import ReactDOM from "react-dom";
 import styled, { useTheme } from "styled-components";
 import { Helmet } from 'react-helmet-async';
@@ -518,6 +518,7 @@ const ColumnFlex = styled.div`
 const MainContentWrapper = styled.div`
     width: 100%;
     min-width: 0;
+    min-height: 120vh;
     overflow-x: hidden;
     box-sizing: border-box;
 `;
@@ -900,6 +901,9 @@ function ViewPostView({ state, updatePost }) {
     const [isSuspending, setIsSuspending] = useState(false);
     const [suspendDuration, setSuspendDuration] = useState(7); // days, or 0 for permanent
     const [suspendSuccess, setSuspendSuccess] = useState({}); // { postId: message }
+    const [confirmUnsuspendQuests, setConfirmUnsuspendQuests] = useState(null); // { userId, postId }
+    const [isUnsuspending, setIsUnsuspending] = useState(false);
+    const [userSuspendedMap, setUserSuspendedMap] = useState({}); // { userId: true/false/null }
     const [confirmDonate, setConfirmDonate] = useState(null); // { userId, postId }
     const [donateAmount, setDonateAmount] = useState("1");
     const [isDonating, setIsDonating] = useState(false);
@@ -928,6 +932,22 @@ function ViewPostView({ state, updatePost }) {
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [subToggleTick, setSubToggleTick] = useState(0);
     useEffect(() => { }, [subToggleTick]);
+    const [nodeConfigTick, setNodeConfigTick] = useState(0);
+    useEffect(() => {
+        const handler = () => setNodeConfigTick(prev => prev + 1);
+        window.addEventListener('nodeConfigUpdated', handler);
+        return () => window.removeEventListener('nodeConfigUpdated', handler);
+    }, []);
+    const nodeConfig = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('nodeConfig');
+            return raw ? JSON.parse(raw) : null;
+        } catch (_) {
+            return null;
+        }
+    }, [nodeConfigTick]);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
 
     // Capture "opened from feed" info synchronously (before effects) so the Back button can
     // reliably return to the originating feed route (including /t/:topic).
@@ -1224,7 +1244,7 @@ function ViewPostView({ state, updatePost }) {
 
         // Fetch chain config if not cached (e.g. first visit after login)
         if (!localStorage.getItem('chainConfig')) {
-            Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+            Api.get('get_chain_config', undefined)
                 .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
                 .catch(() => { });
         }
@@ -1598,6 +1618,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
         setConfirmDonate(null);
+        setConfirmUnsuspendQuests(null);
         setConfirmSuspendQuests({ userId, postId });
     };
 
@@ -1619,6 +1640,7 @@ function ViewPostView({ state, updatePost }) {
             if (response.success) {
                 const durationText = suspendDuration > 0 ? `for ${suspendDuration} day${suspendDuration > 1 ? 's' : ''}` : 'permanently';
                 setConfirmSuspendQuests(null);
+                setUserSuspendedMap(prev => ({ ...prev, [userId]: true }));
                 if (postId) {
                     setSuspendSuccess(prev => ({ ...prev, [postId]: `User suspended from quests ${durationText}` }));
                 }
@@ -1645,6 +1667,68 @@ function ViewPostView({ state, updatePost }) {
         setConfirmSuspendQuests(null);
     };
 
+    const fetchUserSuspensionStatus = async (userId) => {
+        if (!userId || !questsEnabled) return;
+        try {
+            const response = await Api.get(`/rewards/summary?owner=${encodeURIComponent(userId)}`);
+            setUserSuspendedMap(prev => ({ ...prev, [userId]: response.suspended === true }));
+        } catch (err) {
+            console.error('Error fetching suspension status:', err);
+        }
+    };
+
+    const handleUnsuspendFromQuests = (userId, postId) => {
+        if (!userId) return;
+        clearBlockMessages();
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmDeletePost(null);
+        setConfirmReportPost(null);
+        setConfirmSuspendQuests(null);
+        setConfirmUnsuspendQuests({ userId, postId });
+    };
+
+    const confirmUnsuspendFromQuests = async () => {
+        const userId = confirmUnsuspendQuests?.userId;
+        const postId = confirmUnsuspendQuests?.postId;
+        if (!userId) return;
+        const adminAddress = state.publicKey;
+        if (!adminAddress) return;
+
+        setIsUnsuspending(true);
+        try {
+            const response = await Api.post('/admin/rewards/unsuspend', {
+                admin: adminAddress,
+                target: userId,
+            });
+            if (response.success) {
+                setConfirmUnsuspendQuests(null);
+                setUserSuspendedMap(prev => ({ ...prev, [userId]: false }));
+                if (postId) {
+                    setSuspendSuccess(prev => ({ ...prev, [postId]: 'User unsuspended from quests' }));
+                }
+                setTimeout(() => {
+                    setSuspendSuccess(prev => {
+                        const updated = { ...prev };
+                        if (postId) delete updated[postId];
+                        return updated;
+                    });
+                }, 4000);
+            } else {
+                alert(`Failed to unsuspend: ${response.error || response.message || 'Unknown error'}`);
+                setConfirmUnsuspendQuests(null);
+            }
+        } catch (err) {
+            alert(`Error unsuspending user: ${err.message || 'Unknown error'}`);
+            setConfirmUnsuspendQuests(null);
+        }
+        setIsUnsuspending(false);
+    };
+
+    const cancelUnsuspendFromQuests = () => {
+        setConfirmUnsuspendQuests(null);
+    };
+
     const handleDonate = (userAddress, postId) => {
         if (!userAddress) {
             return;
@@ -1654,6 +1738,7 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDeletePost(null);
         setConfirmReportPost(null);
         setConfirmSuspendQuests(null);
+        setConfirmUnsuspendQuests(null);
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
         setDonateAmount("1"); // Reset to default
@@ -1691,6 +1776,8 @@ function ViewPostView({ state, updatePost }) {
                 topic: isRoot ? (post.topic || '') : '',
                 title: isRoot ? newTitle : '',
                 content: newContent,
+                tag: (post && typeof post.tag === 'string') ? post.tag : '',
+                media: Array.isArray(post && post.media) ? post.media : [],
             };
             // Disable controls while PoW/broadcast happens
             try { updatePost(post.post_id, { editBusy: true }); } catch (_) { }
@@ -2056,7 +2143,7 @@ function ViewPostView({ state, updatePost }) {
                         try {
                             const result = await tx.pollTxStatus(txHash);
                             if (result && result.success && result.indexed) {
-                                const data = await Api.get('get_comments', { post_id: postId, address: viewerAddress }, { timeoutMs: 10000 });
+                                const data = await Api.get('get_comments', { post_id: postId, address: viewerAddress });
                                 if (data) {
                                     setRoot(data.root);
                                     setChildren(data.children);
@@ -2252,7 +2339,7 @@ function ViewPostView({ state, updatePost }) {
 
         if (post_id) {
             const viewerAddress = Storage.load("publicKey", "");
-            Api.get('get_comments', { post_id, address: viewerAddress }, { timeoutMs: 10000 })
+            Api.get('get_comments', { post_id, address: viewerAddress })
                 .then((data) => {
                     setLoading(false);
                     setRoot(data.root);
@@ -2333,7 +2420,7 @@ function ViewPostView({ state, updatePost }) {
         if (!focusedCommentId || !root) return;
 
         const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', { post_id: focusedCommentId, address: viewerAddress }, { timeoutMs: 10000 })
+        Api.get('get_comments', { post_id: focusedCommentId, address: viewerAddress })
             .then((data) => {
                 if (data && data.root && data.children) {
                     // Store the focused comment's children in state so they can be merged
@@ -2359,7 +2446,7 @@ function ViewPostView({ state, updatePost }) {
             return;
         }
         const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', { post_id: actualRootPostId, address: viewerAddress }, { timeoutMs: 10000 })
+        Api.get('get_comments', { post_id: actualRootPostId, address: viewerAddress })
             .then((data) => {
                 if (data && data.root) {
                     setActualRootPost(data.root);
@@ -2548,7 +2635,7 @@ function ViewPostView({ state, updatePost }) {
         try {
             const params = { comment_id: targetCommentId, max_depth: Math.min(maxDepth, 5) };
             if (state.publicKey) params.address = state.publicKey;
-            const res = await Api.get('get_comment_context', params, { timeoutMs: 10000 });
+            const res = await Api.get('get_comment_context', params);
             if (res && Array.isArray(res.context)) {
                 setContextComments(res.context.reverse());
                 setShowContext(true);
@@ -2814,6 +2901,22 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        if (confirmUnsuspendQuests?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🛡️ Unsuspend this user from quests?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmUnsuspendFromQuests} disabled={isUnsuspending}>
+                                {isUnsuspending ? 'Unsuspending...' : 'Unsuspend'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelUnsuspendFromQuests}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
         if (suspendSuccess[post.post_id]) {
             return (
                 <div style={{
@@ -3007,6 +3110,8 @@ function ViewPostView({ state, updatePost }) {
         const authorAddr = String(post.user_id || '').trim().toLowerCase();
         const isFollowingThisAuthor = isFollowingAuthor(authorAddr);
 
+        const userSuspendedStatus = post.user_id ? userSuspendedMap[post.user_id] : undefined;
+
         const handleMenuClick = (e) => {
             e.stopPropagation();
             if (!isOpen) {
@@ -3017,6 +3122,9 @@ function ViewPostView({ state, updatePost }) {
                         top: rect.bottom + 4,
                         left: Math.max(10, rect.right - 180)
                     });
+                }
+                if (isAdmin && post.user_id && questsEnabled) {
+                    fetchUserSuspensionStatus(post.user_id);
                 }
             }
             setOpenMenuId(isOpen ? null : post.post_id);
@@ -3074,7 +3182,12 @@ function ViewPostView({ state, updatePost }) {
                                 {isAdmin && (
                                     <>
                                         <MenuItem onClick={() => { setOpenMenuId(null); handleDeletePost(post.post_id); }} data-danger="true">🛡️ Mark post deleted</MenuItem>
-                                        <MenuItem onClick={() => { setOpenMenuId(null); handleSuspendFromQuests(post.user_id, post.post_id); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                        {questsEnabled && userSuspendedStatus !== true && (
+                                            <MenuItem onClick={() => { setOpenMenuId(null); handleSuspendFromQuests(post.user_id, post.post_id); }} data-danger="true">🛡️ Suspend from quests</MenuItem>
+                                        )}
+                                        {questsEnabled && userSuspendedStatus === true && (
+                                            <MenuItem onClick={() => { setOpenMenuId(null); handleUnsuspendFromQuests(post.user_id, post.post_id); }}>🛡️ Unsuspend from quests</MenuItem>
+                                        )}
                                     </>
                                 )}
                             </>
@@ -3453,6 +3566,7 @@ function ViewPostView({ state, updatePost }) {
             if (sp.root_topic !== undefined) out.root_topic = sp.root_topic;
             if (sp.tag !== undefined) out.tag = sp.tag;
             if (sp.content !== undefined) out.content = sp.content;
+            if (sp.media !== undefined) out.media = sp.media;
             if (sp.edited !== undefined) out.edited = sp.edited;
             if (sp.edited_ts !== undefined) out.edited_ts = sp.edited_ts;
             return out;
@@ -3779,30 +3893,60 @@ function ViewPostView({ state, updatePost }) {
                                                 </>
                                             )}
 
-                                            {/* Content */}
-                                            {!isCollapsed && post.content && !(state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') && (
-                                                <StyledContentArea>
-                                                    {(() => {
-                                                        const raw = String(post.content || '');
-                                                        const idx = raw.indexOf('\n');
-                                                        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
-                                                        const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
-                                                        const isUrl = /^https?:\/\//i.test(first);
-                                                        if (isUrl) {
-                                                            return (
-                                                                <>
-                                                                    {require("../components/InlineMedia").default
-                                                                        ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined })
-                                                                        : null}
-                                                                    {restRaw ? <div style={{ height: '0.5rem' }} /> : null}
-                                                                    {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
-                                                                </>
-                                                            );
-                                                        }
-                                                        return <MarkdownRenderer text={raw} />;
-                                                    })()}
-                                                </StyledContentArea>
-                                            )}
+                                            {/* Content — for root post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
+                                            {(() => {
+                                                const displayPost = isRoot && mergedRoot ? mergedRoot : post;
+                                                const displayContent = displayPost.content || '';
+                                                const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
+                                                const hasContent = !!(displayContent || displayMedia.length > 0);
+                                                if (isCollapsed || !hasContent) return null;
+                                                if (state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') return null;
+                                                return (
+                                                    <StyledContentArea>
+                                                        {(() => {
+                                                            const raw = String(displayContent || '');
+                                                            const mediaArr = displayMedia;
+
+                                                            // v1.12.0: Render from dedicated media array if available
+                                                            if (mediaArr.length > 0) {
+                                                                const Inline = require("../components/InlineMedia").default;
+                                                                const Gallery = require("../components/MediaGallery").default;
+                                                                const mediaNode = (mediaArr.length > 1 && Gallery)
+                                                                    ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined })
+                                                                    : (Inline
+                                                                        ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined })
+                                                                        : null);
+                                                                return (
+                                                                    <>
+                                                                        {mediaNode}
+                                                                        {raw ? <div style={{ height: '0.5rem' }} /> : null}
+                                                                        {raw ? <MarkdownRenderer text={raw} /> : null}
+                                                                    </>
+                                                                );
+                                                            }
+
+                                                            // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                                                            // Remove after March 2026 when all old posts have been migrated or expired.
+                                                            const idx = raw.indexOf('\n');
+                                                            const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+                                                            const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+                                                            const isUrl = /^https?:\/\//i.test(first);
+                                                            if (isUrl) {
+                                                                return (
+                                                                    <>
+                                                                        {require("../components/InlineMedia").default
+                                                                            ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined })
+                                                                            : null}
+                                                                        {restRaw ? <div style={{ height: '0.5rem' }} /> : null}
+                                                                        {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
+                                                                    </>
+                                                                );
+                                                            }
+                                                            return <MarkdownRenderer text={raw} />;
+                                                        })()}
+                                                    </StyledContentArea>
+                                                );
+                                            })()}
 
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (

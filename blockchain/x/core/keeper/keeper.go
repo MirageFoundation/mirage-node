@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 
+	"mirage/x/core/types"
+
 	corestore "cosmossdk.io/core/store"
 	sdkmath "cosmossdk.io/math"
 	storetypes "cosmossdk.io/store/types"
@@ -19,7 +21,6 @@ import (
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
 	stakingkeeper "github.com/cosmos/cosmos-sdk/x/staking/keeper"
 	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
-	"mirage/x/core/types"
 )
 
 type Keeper struct {
@@ -562,7 +563,7 @@ func (k Keeper) GetParams(ctx sdk.Context) (p types.Params) {
 	if err == nil && len(bz) > 0 {
 		_ = k.cdc.Unmarshal(bz, &p)
 	}
-	if p.PowBaseBits == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
+	if p.MinDifficulty == 0 || p.PowMessageWindow == 0 || p.MintInterval == 0 || p.MintQuantity == 0 || p.BlockHashWindow == 0 ||
 		p.MaxUsernameSize == 0 || p.MaxTopicSize == 0 || p.MinUsernameSize == 0 || p.MinTopicSize == 0 || len(p.Tiers) == 0 {
 		p = types.DefaultParams()
 	}
@@ -704,8 +705,8 @@ func (k Keeper) MintIfNeeded(ctx sdk.Context) error {
 		return vals[i].OperatorAddress < vals[j].OperatorAddress
 	})
 
-	// Split pools based on param MintDynamicFraction [0,1]
-	split := params.MintDynamicFraction
+	// Split pools based on param MintDynamicSplit [0,1]
+	split := params.MintDynamicSplit
 	if split < 0 {
 		split = 0
 	}
@@ -1687,8 +1688,6 @@ func (k Keeper) MigrateBridgeMintAttestors(ctx sdk.Context) error {
 	}
 	return migrateErr
 }
-
-
 
 // GetOrCreateBridgeMintAttestation retrieves or creates a new bridge mint attestation
 func (k Keeper) GetOrCreateBridgeMintAttestation(ctx sdk.Context, burnID, destChain, destTx string) (*types.BridgeMintAttestation, error) {

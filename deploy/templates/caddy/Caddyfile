@@ -15,6 +15,31 @@ ${DOMAIN:-:80} {
 		}
 	}
 
+	# Maintenance mode: when /etc/caddy/.maintenance exists, serve upgrade page for ALL routes.
+	# Created by entrypoint at startup, removed when backend is ready.
+	@maintenance file {
+		root /etc/caddy
+		try_files .maintenance
+	}
+	handle @maintenance {
+		# API and chain endpoints get JSON 503 during maintenance
+		handle /api/* {
+			header Content-Type "application/json"
+			respond `{"error":"maintenance","message":"Upgrade in progress"}` 503
+		}
+		handle /chain/* {
+			header Content-Type "application/json"
+			respond `{"error":"maintenance","message":"Upgrade in progress"}` 503
+		}
+		# Everything else gets the HTML maintenance page
+		handle {
+			root * /etc/caddy
+			rewrite * /maintenance.html
+			header Content-Type "text/html; charset=utf-8"
+			file_server
+		}
+	}
+
 	@api {
 		path /api/*
 	}
@@ -42,11 +67,24 @@ ${DOMAIN:-:80} {
 
 	# Show maintenance page when backends are down (502/503)
 	handle_errors {
-		@maintenance expression {err.status_code} in [502, 503]
-		handle @maintenance {
-			root * /etc/caddy
-			rewrite * /maintenance.html
-			file_server
+		@maintenance_err expression {err.status_code} in [502, 503]
+		handle @maintenance_err {
+			# API and chain endpoints get JSON error
+			handle /api/* {
+				header Content-Type "application/json"
+				respond `{"error":"unavailable","message":"Service temporarily unavailable"}` 503
+			}
+			handle /chain/* {
+				header Content-Type "application/json"
+				respond `{"error":"unavailable","message":"Service temporarily unavailable"}` 503
+			}
+			# Everything else gets the HTML maintenance page
+			handle {
+				root * /etc/caddy
+				rewrite * /maintenance.html
+				header Content-Type "text/html; charset=utf-8"
+				file_server
+			}
 		}
 	}
 }

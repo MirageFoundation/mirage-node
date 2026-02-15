@@ -62,6 +62,9 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeString(102, m.Title)
 				w.writeString(103, m.Content)
 				w.writeString(104, m.Tag)
+				for _, media := range m.Media {
+					w.writeString(105, media)
+				}
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgPost", "err", err.Error())
 				return ctx, err
@@ -362,6 +365,9 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				w.writeString(103, m.Content)
 				w.writeString(104, m.Tag)
 				w.writeString(105, m.Override)
+				for _, mediaItem := range m.Media {
+					w.writeString(106, mediaItem)
+				}
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err

@@ -199,8 +199,9 @@ def submit(
 
 
 # ── Actions ─────────────────────────────────────────────────────────
-def make_post(topic: str, title: str, content: str, tag: str = ""):
-    block_hash, diff, min_diff, pow_step = get_params()
+def make_post(topic: str, title: str, content: str, tag: str = "",
+              media: list[str] | None = None):
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     base = (canon_prefix("MsgPost")
@@ -210,40 +211,44 @@ def make_post(topic: str, title: str, content: str, tag: str = ""):
           + enc_str(102, title)
           + enc_str(103, content)
           + enc_str(104, tag))
-    return submit("/core/post", base, {
-        "target": "", "topic": topic, "title": title,
-        "content": content, "tag": tag,
-    }, block_hash, diff, min_diff, pow_step, ts)
+    for m in (media or []):
+        base += enc_str(105, m)         # media URLs (repeated tag 105)
+    fields = {"target": "", "topic": topic, "title": title,
+              "content": content, "tag": tag}
+    if media:
+        fields["media"] = media
+    return submit("/core/post", base, fields,
+                  block_hash, diff, pow_base_bits, pow_factor, ts)
 
-def make_comment(parent_txhash: str, content: str):
-    block_hash, diff, min_diff, pow_step = get_params()
+def make_comment(parent_post_id: str, content: str):
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     base = (canon_prefix("MsgPost")
           + envelope(bh, diff, ts)
-          + enc_str(100, parent_txhash)  # target = parent
-          + enc_str(101, "")             # topic (empty for comments)
-          + enc_str(102, "")             # title (empty for comments)
+          + enc_str(100, parent_post_id)  # target = parent
+          + enc_str(101, "")              # topic (empty for comments)
+          + enc_str(102, "")              # title (empty for comments)
           + enc_str(103, content)
-          + enc_str(104, ""))            # tag
+          + enc_str(104, ""))             # tag
     return submit("/core/post", base, {
-        "target": parent_txhash, "topic": "", "title": "",
+        "target": parent_post_id, "topic": "", "title": "",
         "content": content, "tag": "",
-    }, block_hash, diff, min_diff, pow_step, ts)
+    }, block_hash, diff, pow_base_bits, pow_factor, ts)
 
-def vote(target_txhash: str, direction: int):
+def vote(target_post_id: str, direction: int):
     """direction: 1=upvote, -1=downvote, 0=remove"""
-    block_hash, diff, min_diff, pow_step = get_params()
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
     bh = bytes.fromhex(block_hash)
     ts = int(time.time() * 1000)
     dir_val = direction if direction >= 0 else (direction & 0xFFFFFFFF)
     base = (canon_prefix("MsgVote")
           + envelope(bh, diff, ts)
-          + enc_str(100, target_txhash)
+          + enc_str(100, target_post_id)
           + enc_u64(101, dir_val))
     return submit("/core/vote", base, {
-        "target": target_txhash, "direction": direction,
-    }, block_hash, diff, min_diff, pow_step, ts)
+        "target": target_post_id, "direction": direction,
+    }, block_hash, diff, pow_base_bits, pow_factor, ts)
 
 def read_posts(topic: str = "", limit: int = 10) -> list:
     params = {"limit": limit}
@@ -258,21 +263,21 @@ if __name__ == "__main__":
     # Read latest posts
     posts = read_posts(topic="general", limit=5)
     for p in posts:
-        print(f"  [{p['txhash'][:8]}] {p.get('title', '(no title)')}")
+        print(f"  [{p['post_id'][:8]}] {p.get('title', '(no title)')}")
 
     # Create a post
     make_post("general", "Hello from bot", "This is an automated post.")
 
     # Vote on the first post (if any)
     if posts:
-        vote(posts[0]["txhash"], direction=1)
+        vote(posts[0]["post_id"], direction=1)
 ```
 
 ## How It Works
 
 1. **Wallet** — `cosmpy` derives a secp256k1 keypair + `mirage1...` address from a BIP39 mnemonic.
 
-2. **Parameters** — `GET /api/get_parameters` returns `last_block_hash`, `pow_difficulty` (step count), `pow_factor`, and `pow_base_bits`. These anchor every request to a recent block.
+2. **Parameters** — `GET /api/get_parameters?address=<addr>` returns `last_block_hash`, `pow_difficulty` (step count), `pow_factor`, `pow_base_bits`, and optionally `balance`. These anchor every request to a recent block. A separate `GET /api/get_node_config` provides static node info (validator addresses, feature flags).
 
 3. **Canonical bytes** — Each message type has a deterministic byte encoding:
 
@@ -297,9 +302,9 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
 
 | Action | Prefix | Endpoint | Payload tags |
 |---|---|---|---|
-| Post | `MsgPost` | `/core/post` | 100=target, 101=topic, 102=title, 103=content, 104=tag |
+| Post | `MsgPost` | `/core/post` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=media (repeated) |
 | Vote | `MsgVote` | `/core/vote` | 100=target, 101=direction |
-| Comment | `MsgPost` | `/core/post` | Same as Post (target=parent txhash, topic/title empty) |
+| Comment | `MsgPost` | `/core/post` | Same as Post (target=parent post_id, topic/title empty) |
 | Edit | `MsgEdit` | `/core/edit` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=override |
 | Delete | `MsgDelete` | `/core/delete_post` | 100=target |
 | Set Username | `MsgSetUsername` | `/core/set_username` | 100=target (own addr), 101=username |
@@ -307,7 +312,17 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
 | Unfollow User | `MsgUnfollowUser` | `/core/unfollow_user` | 100=target (own addr), 101=user |
 | Follow Topic | `MsgFollowTopic` | `/core/follow_topic` | 100=target (own addr), 101=topic |
 | Unfollow Topic | `MsgUnfollowTopic` | `/core/unfollow_topic` | 100=target (own addr), 101=topic |
+| Follow Moderator | `MsgFollowModerator` | `/core/follow_moderator` | 100=target (own addr), 101=moderator |
+| Unfollow Moderator | `MsgUnfollowModerator` | `/core/unfollow_moderator` | 100=target (own addr), 101=moderator |
+| Block Post | `MsgBlockPost` | `/core/block_post` | 100=target (post_id) |
+| Unblock Post | `MsgUnblockPost` | `/core/unblock_post` | 100=target (post_id) |
+| Block User | `MsgBlockUser` | `/core/block_user` | 100=target (address) |
+| Unblock User | `MsgUnblockUser` | `/core/unblock_user` | 100=target (address) |
+| Report | `MsgReport` | `/core/report` | 100=target (post_id), 101=reason |
 | Send Tokens | `MsgSendTokens` | `/core/send_tokens` | 100=sender (own addr), 101=target, 102=amount (varint) |
+| Upgrade Level | `MsgUpgradeLevel` | `/core/upgrade_level` | 100=level (1/2/3) |
+| Set Auto Renewal | `MsgSetAutoRenewal` | `/core/set_auto_renewal` | 100=auto_renew (1=on, 0=off) |
+| Bridge Burn | `MsgBridgeBurn` | `/core/bridge_burn` | 100=destination_chain, 101=destination_address, 102=amount |
 
 ## Notes
 
@@ -315,4 +330,8 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
 - **Direction** for votes: Go encodes `int32(-1)` as `uint32(4294967295)` in the canonical bytes.
 - **Amounts** are in `umirage` (1 MIRAGE = 1,000,000 umirage).
 - **Timestamps** are milliseconds since epoch.
-- **Transaction hashes** are 64-char lowercase hex.
+- **Post IDs** are 64-char lowercase hex (the transaction hash of the post).
+- **Write responses** return `{"tx_hash", "code", "height", "raw_log"}`. `code=0` means success.
+- **`GET /api/get_node_config`** returns static per-node settings (validator info, feature flags, giphy API key, registration settings). Cached 24h server-side. Not needed for posting.
+- **Registration gating**: If the node requires invite codes, pass `invite_code` (format `XXXX-XXXX`) in the `set_username` POST body. This is not part of canonical bytes.
+- **Media**: MsgPost accepts up to 10 HTTPS URLs in the `media` field (tag 105, repeated). Each URL max 2048 chars.

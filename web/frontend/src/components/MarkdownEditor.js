@@ -548,6 +548,7 @@ export default function MarkdownEditor({
     showUploadButton = false, // optional: show "Upload media" control in the toolbar
     uploadButtonLabel = "Upload media", // optional: label for the upload button
     uploadButtonDisabled = false, // optional: externally disable upload when busy
+    uploadBlocked = false, // optional: when true, ALL upload paths are blocked (paste, drop, file picker)
     toolbarExtra = null, // optional: React node rendered at end of toolbar (next to upload)
     renderHelperRow = true, // optional: when false, don't render empty helper row (removes bottom gap)
     autoFocus = false, // optional: focus textarea on mount
@@ -878,6 +879,7 @@ export default function MarkdownEditor({
 
     const performUploadFile = async (file) => {
         if (!file) return;
+        if (uploadBlocked) return;
         const isImg = file.type.startsWith("image/");
         const isVid = file.type.startsWith("video/");
         if (!isImg && !isVid) return;
@@ -952,6 +954,7 @@ export default function MarkdownEditor({
     const handlePaste = async (e) => {
         try {
             if (disabled) return;
+            if (uploadBlocked) return;
             if (uploadPct !== null) return; // Disable paste upload during upload
             const cd = e.clipboardData || window.clipboardData;
             if (!cd) return;

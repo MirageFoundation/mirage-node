@@ -953,7 +953,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     }, [nodeConfigTick]);
 
-    const questsEnabled = Boolean(nodeConfig?.quests_enabled);
+    const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
     const [blurSensitiveMedia, setBlurSensitiveMedia] = useState(() => {
         try {
             const val = Storage.load('blur_sensitive_media', true);
@@ -1461,6 +1461,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [thumbOriginal, setThumbOriginal] = useState(null); // Original URL for fallback
     const [thumbProxy, setThumbProxy] = useState('photon'); // 'photon' | 'wsrv' | 'none'
 
+    // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+    // Remove after March 2026 when all old posts have been migrated or expired.
     const extractFirstUrl = (text) => {
         try {
             if (!text || typeof text !== 'string') return '';
@@ -1483,7 +1485,15 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         }
     };
 
+    // v1.12.0: Prefer media array if available
+    const mediaArr = (post && Array.isArray(post.media) && post.media.length > 0) ? post.media : null;
     const firstLinkInContent = (() => {
+        // v1.12.0: Use media[0] if available
+        if (mediaArr) {
+            try { return sanitizeUrlForLink(mediaArr[0]) || ''; } catch (_) { return ''; }
+        }
+        // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+        // Remove after March 2026 when all old posts have been migrated or expired.
         try {
             if (!post || !post.content) return '';
             const first = sanitizeUrlForLink(extractFirstUrl(post.content));

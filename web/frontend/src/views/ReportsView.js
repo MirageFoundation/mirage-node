@@ -137,7 +137,7 @@ export default function ReportsView({ state }) {
         }
         try {
             setLoading(true);
-            const res = await Api.get('get_reports', { address: publicKey, limit: 200 }, { timeoutMs: 10000 });
+            const res = await Api.get('get_reports', { address: publicKey, limit: 200 });
             const list = (res && Array.isArray(res.reports)) ? res.reports : [];
             setReports(list);
             setError('');
@@ -153,7 +153,7 @@ export default function ReportsView({ state }) {
 
     const resolveReport = async (id) => {
         try {
-            await Api.post('core/resolve_report', { address: publicKey, id: id >>> 0 }, { timeoutMs: 10000 });
+            await Api.post('core/resolve_report', { address: publicKey, id: id >>> 0 });
             setReports((prev) => prev.filter((r) => (r && Number(r.id) !== Number(id))));
         } catch (e) {
             setError(String(e && e.message ? e.message : 'Failed to resolve report'));

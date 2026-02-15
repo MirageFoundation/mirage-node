@@ -92,7 +92,7 @@ function LoginView({ state, setCredentials }) {
 
     const fetchUsernameFromAddress = async (address) => {
         try {
-            const data = await Api.get('get_username_from_address', { address }, { timeoutMs: 10000 });
+            const data = await Api.get('get_username_from_address', { address });
             return data?.username || null;
         } catch (e) {
             return null;

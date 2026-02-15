@@ -73,9 +73,19 @@ def canon_base_post(
     title: str,
     content: str,
     tag: str = "",
+    media: list[str] | None = None,
 ) -> bytes:
     return canon_shared.canon_base_post(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic, title, content, tag
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        target,
+        topic,
+        title,
+        content,
+        tag,
+        media=media,
     )
 
 
@@ -90,6 +100,7 @@ def canon_base_edit(
     content: str,
     tag: str,
     override: str,
+    media: list[str] | None = None,
 ) -> bytes:
     return canon_shared.canon_base_edit(
         pub_dec,
@@ -102,6 +113,7 @@ def canon_base_edit(
         content,
         tag,
         override,
+        media=media,
     )
 
 

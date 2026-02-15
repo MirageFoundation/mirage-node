@@ -53,6 +53,7 @@ def _build_pool():
     add_f(msg, "title", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg, "media", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
 
     # MsgEdit
     msg_edit = file_proto.message_type.add()
@@ -70,6 +71,7 @@ def _build_pool():
     add_f(msg_edit, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "override", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_edit, "media", 106, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
 
     # MsgVote
     msg2 = file_proto.message_type.add()

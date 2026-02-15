@@ -1,5 +1,5 @@
 """
-User similarity engine for home feed v2.
+User similarity engine for home feed.
 
 Uses Pearson correlation with confidence scaling and author preference factors
 to compute meaningful taste similarity between users. On-demand computation
@@ -294,14 +294,17 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
             # User still active, use stale cache
             logger.debug(
                 "similarity.cache_stale_but_active: %s, idle=%ds (need %ds)",
-                viewer_lower[:12], idle_time, IDLE_THRESHOLD_SECONDS,
+                viewer_lower[:12],
+                idle_time,
+                IDLE_THRESHOLD_SECONDS,
             )
             return [(r[0], r[1], r[2]) for r in cached]
 
         # User idle for 30+ mins and prefs changed, recompute
         logger.debug(
             "similarity.cache_stale_and_idle: %s, idle=%ds, recomputing",
-            viewer_lower[:12], idle_time,
+            viewer_lower[:12],
+            idle_time,
         )
 
     # Cache miss or stale+idle: compute fresh

@@ -81,7 +81,7 @@ export async function fetchProfile(viewerAddress, force = false) {
     }
 
     // Make the request
-    pendingRequest = Api.get('get_user_followed', { address: addr }, { timeoutMs: 10000 })
+    pendingRequest = Api.get('get_user_followed', { address: addr })
         .then(data => {
             // Only save to cache if we're outside the no-cache window
             if (!isInNoCacheWindow()) {

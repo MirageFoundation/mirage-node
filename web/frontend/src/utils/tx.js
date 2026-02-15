@@ -112,14 +112,14 @@ export async function setUsername(username) {
     return h.setUsername(username);
 }
 
-export async function createPost(topic, title, content, tag = "") {
+export async function createPost(topic, title, content, tag = "", media = []) {
     const h = await getHandler();
-    return h.createPost(topic, title, content, tag);
+    return h.createPost(topic, title, content, tag, media);
 }
 
-export async function createPostAsync(topic, title, content, tag = "") {
+export async function createPostAsync(topic, title, content, tag = "", media = []) {
     const h = await getHandler();
-    return h.createPostAsync(topic, title, content, tag);
+    return h.createPostAsync(topic, title, content, tag, media);
 }
 
 export async function createComment(parentId, content) {

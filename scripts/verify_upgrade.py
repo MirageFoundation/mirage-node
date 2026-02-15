@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """
-Verify v1.11.0 chain upgrade — checks ONLY what changed in this release.
+Verify v1.12.0 chain upgrade — checks ONLY what changed in this release.
 
-What v1.11.0 changed:
-- PoW difficulty: bit-count/factor → step-based (0 = base)
-- Effective factor: 1000 * (1 + pow_factor)^difficulty
-- pow_factor: new governable double param (default 0.25)
-- subscription_reserve_fraction: integer percent → double fraction [0,1]
-- bridge_attestation_threshold: basis points → double fraction [0,1]
-- Upgrade handler migrates old difficulty values to step counts
+What v1.12.0 changed:
+- MsgPost: new repeated string `media` field (field 105)
+- On-chain validation: max 10 items, each max 2048 chars, https:// required
+- Indexer: stores media as JSON column
+- Backend: serves media in API responses
+- Backward compatible: no upgrade handler needed, existing posts unaffected
 
-General node health (bridge CLI, gov params, tiers, etc.) is covered by tests.
 This script does NOT submit transactions or mutate chain state.
 """
 
@@ -26,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 
-UPGRADE_NAME = "v1.11.0"
-EXPECTED_VERSION = "v1.11.0"
+UPGRADE_NAME = "v1.12.0"
+EXPECTED_VERSION = "v1.12.0"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -63,12 +61,12 @@ def _run_json(cmd: list[str]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# v1.11.0 specific checks
+# v1.12.0 specific checks
 # ---------------------------------------------------------------------------
 
 
 def check_binary_version(miraged: str, failures: list[str]) -> None:
-    """Binary version must match v1.11.0 (or v1.11.0-*)."""
+    """Binary version must match v1.12.0 (or v1.12.0-*)."""
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
@@ -83,41 +81,27 @@ def check_binary_version(miraged: str, failures: list[str]) -> None:
         failures.append(f"cannot check binary version: {e}")
 
 
-def check_upgrade_applied(miraged: str, rpc: str, failures: list[str]) -> None:
-    """v1.11.0 upgrade must be applied (height > 0 in upgrade plan)."""
-    print("\n-> Checking v1.11.0 upgrade applied...")
+def check_node_health(miraged: str, rpc: str, failures: list[str]) -> None:
+    """Node is synced and producing blocks."""
+    print("\n-> Checking node health...")
     try:
-        result = _run_json([miraged, "q", "upgrade", "applied", UPGRADE_NAME, "--node", rpc, "-o", "json"])
-        height = int(result.get("height", 0))
-        if height > 0:
-            print(f"   [OK] applied at height {height}")
+        result = _run_json([miraged, "status", "--node", rpc])
+        sync_info = result.get("SyncInfo") or result.get("sync_info", {})
+        catching_up = sync_info.get("catching_up", True)
+        latest_height = int(sync_info.get("latest_block_height", 0))
+        if not catching_up and latest_height > 0:
+            print(f"   [OK] synced at height {latest_height}")
         else:
-            print(f"   [FAIL] not applied (height={height})")
-            failures.append(f"v1.11.0 upgrade not applied")
+            print(f"   [FAIL] catching_up={catching_up}, height={latest_height}")
+            failures.append(f"node not synced: catching_up={catching_up}, height={latest_height}")
     except Exception as e:
         print(f"   [FAIL] {e}")
-        failures.append(f"cannot check upgrade state: {e}")
+        failures.append(f"cannot check node status: {e}")
 
 
-def check_difficulty(miraged: str, rpc: str, failures: list[str]) -> None:
-    """current_difficulty must be >= 0 (step-based, not old factor format)."""
-    print("\n-> Checking difficulty (step format)...")
-    try:
-        d = _run_json([miraged, "q", "core", "difficulty", "--node", rpc, "-o", "json"])
-        cur = int(d.get("current_difficulty", -1))
-        if cur >= 0:
-            print(f"   [OK] current_difficulty = {cur} steps")
-        else:
-            print(f"   [FAIL] current_difficulty = {cur}")
-            failures.append(f"current_difficulty must be >= 0, got {cur}")
-    except Exception as e:
-        print(f"   [FAIL] {e}")
-        failures.append(f"cannot check difficulty: {e}")
-
-
-def check_param_types(miraged: str, rpc: str, failures: list[str]) -> None:
-    """Verify v1.11.0 param type changes: new doubles, new pow_factor."""
-    print("\n-> Checking v1.11.0 param types...")
+def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
+    """Verify core params are queryable and sane (v1.11.0+ params still present)."""
+    print("\n-> Checking core params...")
     try:
         raw = _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
         params = raw.get("params", raw)
@@ -136,51 +120,25 @@ def check_param_types(miraged: str, rpc: str, failures: list[str]) -> None:
             else:
                 print(f"   [FAIL] pow_factor = {fstep} (must be in (0, 1])")
                 failures.append(f"pow_factor out of range: {fstep}")
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError):
             print(f"   [FAIL] pow_factor not a valid float: {step!r}")
             failures.append(f"pow_factor invalid: {step!r}")
     else:
         print("   [FAIL] pow_factor missing from params")
         failures.append("pow_factor missing")
 
-    # subscription_reserve_fraction must be a float in [0, 1]
-    srp = params.get("subscription_reserve_fraction")
-    if srp is not None:
-        try:
-            fsrp = float(srp)
-            if 0 <= fsrp <= 1:
-                print(f"   [OK] subscription_reserve_fraction = {fsrp} (double fraction)")
-            else:
-                print(f"   [FAIL] subscription_reserve_fraction = {fsrp} (expected [0, 1])")
-                failures.append(f"subscription_reserve_fraction out of range: {fsrp}")
-        except (ValueError, TypeError):
-            print(f"   [FAIL] subscription_reserve_fraction not float: {srp!r}")
-            failures.append(f"subscription_reserve_fraction invalid: {srp!r}")
+    # subscription tiers should be present
+    tiers = params.get("subscription_tiers")
+    if tiers and len(tiers) >= 3:
+        print(f"   [OK] subscription_tiers = {len(tiers)} tiers")
     else:
-        print("   [FAIL] subscription_reserve_fraction missing")
-        failures.append("subscription_reserve_fraction missing")
-
-    # bridge_attestation_threshold must be a float in [0, 1]
-    bat = params.get("bridge_attestation_threshold")
-    if bat is not None:
-        try:
-            fbat = float(bat)
-            if 0 <= fbat <= 1:
-                print(f"   [OK] bridge_attestation_threshold = {fbat} (double fraction)")
-            else:
-                print(f"   [FAIL] bridge_attestation_threshold = {fbat} (expected [0, 1])")
-                failures.append(f"bridge_attestation_threshold out of range: {fbat}")
-        except (ValueError, TypeError):
-            print(f"   [FAIL] bridge_attestation_threshold not float: {bat!r}")
-            failures.append(f"bridge_attestation_threshold invalid: {bat!r}")
-    else:
-        print("   [FAIL] bridge_attestation_threshold missing")
-        failures.append("bridge_attestation_threshold missing")
+        print(f"   [FAIL] subscription_tiers missing or incomplete")
+        failures.append("subscription_tiers missing or incomplete")
 
 
 def check_source_level(failures: list[str]) -> None:
-    """Source-level checks — silently skipped when files aren't present."""
-    print("\n-> Checking v1.11.0 source changes...")
+    """Source-level checks for v1.12.0 — silently skipped when files aren't present."""
+    print("\n-> Checking v1.12.0 source changes...")
 
     found_any = False
 
@@ -199,94 +157,93 @@ def check_source_level(failures: list[str]) -> None:
                 print(f"   [OK] {ok_msg}")
             else:
                 print(f"   [FAIL] {fail_msg}")
-                failures.append(f"v1.11.0: {fail_msg}")
+                failures.append(f"v1.12.0: {fail_msg}")
 
-    def _check_absent(path: Path, pattern: str, ok_msg: str, fail_msg: str) -> None:
-        nonlocal found_any
-        if not path.exists():
-            return
-        found_any = True
-        text = path.read_text()
-        hit = bool(re.search(pattern[3:], text, re.DOTALL)) if pattern.startswith("re:") else (pattern in text)
-        if not hit:
-            print(f"   [OK] {ok_msg}")
-        else:
-            print(f"   [FAIL] {fail_msg}")
-            failures.append(f"v1.11.0: {fail_msg}")
-
-    # Go
+    # Go: media validation function
     _check(
-        REPO_ROOT / "blockchain" / "app" / "upgrades.go",
-        [
-            ("v1.11.0", "upgrades.go: v1.11.0 handler", "upgrades.go: v1.11.0 handler missing"),
-        ],
-    )
-    _check(
-        REPO_ROOT / "blockchain" / "app" / "ante_pow.go",
+        REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go",
         [
             (
-                "computeDifficultyFactor",
-                "ante_pow.go: computeDifficultyFactor",
-                "ante_pow.go: computeDifficultyFactor missing",
+                "validateMsgPostMedia",
+                "module.go: validateMsgPostMedia present",
+                "module.go: validateMsgPostMedia missing",
             ),
             (
-                "MaxSafeDifficultyFactor",
-                "ante_pow.go: MaxSafeDifficultyFactor cap",
-                "ante_pow.go: MaxSafeDifficultyFactor missing",
+                "re:media.*2048",
+                "module.go: media URL length limit (2048)",
+                "module.go: media URL length limit missing",
             ),
         ],
     )
-    _check(
-        REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go",
-        [
-            ("BaseDifficultySteps", "keeper.go: BaseDifficultySteps", "keeper.go: BaseDifficultySteps missing"),
-            ("BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor", "keeper.go: BaseDifficultyFactor missing"),
-        ],
-    )
 
-    # Python backend
+    # Proto: media field on MsgPost
     _check(
-        REPO_ROOT / "web" / "backend" / "pow.py",
-        [
-            ("_BASE_DIFFICULTY_FACTOR", "pow.py: step-based factor", "pow.py: step-based factor missing"),
-            ("pow_factor", "pow.py: pow_factor", "pow.py: pow_factor missing"),
-        ],
-    )
-    _check(
-        REPO_ROOT / "web" / "backend" / "params.py",
+        REPO_ROOT / "blockchain" / "proto" / "mirage" / "core" / "v1" / "tx.proto",
         [
             (
-                "re:_REQUIRED_FLOAT_PARAMS.*pow_factor",
-                "params.py: pow_factor as float",
-                "params.py: pow_factor not float",
+                "re:repeated\\s+string\\s+media",
+                "tx.proto: media field on MsgPost",
+                "tx.proto: media field missing from MsgPost",
             ),
         ],
     )
-    _check_absent(
+
+    # Python datatypes: media field
+    _check(
+        REPO_ROOT / "shared" / "datatypes.py",
+        [
+            (
+                "media",
+                "datatypes.py: media field present",
+                "datatypes.py: media field missing",
+            ),
+        ],
+    )
+
+    # Python canon: media in canonical encoding
+    _check(
+        REPO_ROOT / "shared" / "canon.py",
+        [
+            (
+                "media",
+                "canon.py: media in canonical encoding",
+                "canon.py: media missing from canonical encoding",
+            ),
+        ],
+    )
+
+    # Indexer: media column
+    _check(
+        REPO_ROOT / "indexer" / "database.py",
+        [
+            (
+                "media",
+                "database.py: media column in indexer",
+                "database.py: media column missing from indexer",
+            ),
+        ],
+    )
+
+    # Backend: media in API
+    _check(
         REPO_ROOT / "web" / "backend" / "routes" / "core.py",
-        r"re:not\s*\(\s*int\(difficulty\)\s*>\s*0\s+and\s+proof\s*\)",
-        "core.py: old difficulty=0 rejection removed",
-        "core.py: still rejects difficulty=0",
-    )
-
-    # Frontend
-    _check(
-        REPO_ROOT / "web" / "frontend" / "public" / "pow" / "worker.js",
         [
             (
-                "BASE_DIFFICULTY_FACTOR",
-                "worker.js: BASE_DIFFICULTY_FACTOR",
-                "worker.js: BASE_DIFFICULTY_FACTOR missing",
+                "media",
+                "core.py: media in backend API",
+                "core.py: media missing from backend API",
             ),
         ],
     )
+
+    # Frontend: media in TransactionHandler
     _check(
         REPO_ROOT / "web" / "frontend" / "src" / "utils" / "TransactionHandler.js",
         [
             (
-                "pow_factor",
-                "TransactionHandler.js: pow_factor",
-                "TransactionHandler.js: pow_factor missing",
+                "media",
+                "TransactionHandler.js: media support",
+                "TransactionHandler.js: media support missing",
             ),
         ],
     )
@@ -317,9 +274,8 @@ def main() -> int:
     print()
 
     check_binary_version(miraged, failures)
-    check_upgrade_applied(miraged, rpc, failures)
-    check_difficulty(miraged, rpc, failures)
-    check_param_types(miraged, rpc, failures)
+    check_node_health(miraged, rpc, failures)
+    check_params(miraged, rpc, failures)
     check_source_level(failures)
 
     print("\n" + "=" * 60)
@@ -328,7 +284,7 @@ def main() -> int:
         for f in failures:
             print(f"  - {f}")
         return 1
-    print("PASSED — v1.11.0 upgrade verified.")
+    print(f"PASSED — {UPGRADE_NAME} upgrade verified.")
     return 0
 
 

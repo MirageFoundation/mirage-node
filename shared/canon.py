@@ -100,6 +100,7 @@ def canon_base_post(
     content: str,
     tag: str = "",
     pow_val: int = 0,
+    media: list[str] | None = None,
 ) -> bytes:
     out = bytearray(_prefix("MsgPost"))
     out += _enc_bytes(2, pubkey)
@@ -113,6 +114,8 @@ def canon_base_post(
     out += _enc_str(102, title)
     out += _enc_str(103, content)
     out += _enc_str(104, tag)
+    for m in media or []:
+        out += _enc_str(105, m)
     return bytes(out)
 
 
@@ -127,6 +130,7 @@ def canon_base_edit(
     content: str,
     tag: str,
     override: str,
+    media: list[str] | None = None,
 ) -> bytes:
     out = bytearray(_prefix("MsgEdit"))
     out += _enc_bytes(2, pubkey)
@@ -139,6 +143,8 @@ def canon_base_edit(
     out += _enc_str(103, content)
     out += _enc_str(104, tag)
     out += _enc_str(105, override)
+    for m in media or []:
+        out += _enc_str(106, m)
     return bytes(out)
 
 

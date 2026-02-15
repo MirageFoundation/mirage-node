@@ -59,7 +59,8 @@ class DatabaseManager:
                         tag TEXT NOT NULL DEFAULT '',
                         root_topic TEXT,
                         root_post_id TEXT,
-                        comment_count INTEGER NOT NULL DEFAULT 0
+                        comment_count INTEGER NOT NULL DEFAULT 0,
+                        media TEXT NOT NULL DEFAULT '[]'
                     )
                     """
                 )
@@ -67,6 +68,8 @@ class DatabaseManager:
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_topic TEXT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS root_post_id TEXT")
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0")
+                # v1.12.0: dedicated media field (JSON array of URLs)
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media TEXT NOT NULL DEFAULT '[]'")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_owner_lower ON posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_target_lower ON posts(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_txhash_lower ON posts(LOWER(txhash))")
@@ -199,7 +202,7 @@ class DatabaseManager:
                     """
                 )
 
-                # User similarity cache for home feed v2 (similar users recommendations)
+                # User similarity cache for home feed (similar users recommendations)
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS user_similarity_cache (
@@ -731,9 +734,7 @@ class DatabaseManager:
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_mentions_mentioned_at ON mentions(mentioned_address, created_at DESC)"
                 )
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_mentions_post ON mentions(post_txhash)"
-                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_mentions_post ON mentions(post_txhash)")
 
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
@@ -761,11 +762,11 @@ class DatabaseManager:
                 )
 
     def get_post(self, txhash: str):
-        """Get post by txhash. Returns (topic, title, content, target, paid, thumbnail_url, created_at)."""
+        """Get post by txhash. Returns (topic, title, content, target, paid, thumbnail_url, created_at, media)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT topic, title, content, target, paid, COALESCE(thumbnail_url,''), created_at FROM posts WHERE txhash = %s",
+                    "SELECT topic, title, content, target, paid, COALESCE(thumbnail_url,''), created_at, COALESCE(media,'[]') FROM posts WHERE txhash = %s",
                     (txhash,),
                 )
                 return cur.fetchone()
@@ -853,8 +854,12 @@ class DatabaseManager:
         tag: str = "",
         root_topic: Optional[str] = None,
         root_post_id: Optional[str] = None,
+        media: Optional[list[str]] = None,
     ) -> None:
         """Insert or update a post."""
+        import json as _json
+
+        media_json = _json.dumps(media or [])
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -873,9 +878,10 @@ class DatabaseManager:
                         thumbnail_url,
                         tag,
                         root_topic,
-                        root_post_id
+                        root_post_id,
+                        media
                     )
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
                       topic=EXCLUDED.topic,
@@ -889,7 +895,8 @@ class DatabaseManager:
                       thumbnail_url=EXCLUDED.thumbnail_url,
                       tag=EXCLUDED.tag,
                       root_topic=COALESCE(EXCLUDED.root_topic, posts.root_topic),
-                      root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id)
+                      root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id),
+                      media=EXCLUDED.media
                     """,
                     (
                         txhash,
@@ -906,6 +913,7 @@ class DatabaseManager:
                         tag or "",
                         (root_topic or None),
                         (root_post_id or None),
+                        media_json,
                     ),
                 )
 

@@ -180,6 +180,8 @@ def _compute_dominant_flags(cur, topics_lower: list[str]) -> dict[str, dict]:
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif")
 
 
+# LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+# Remove after March 2026 when all old posts have been migrated or expired.
 def _extract_first_url(text: str) -> str:
     try:
         if not text or not isinstance(text, str):
@@ -255,6 +257,8 @@ def _youtube_video_id_from_url(url: str) -> str | None:
     return None
 
 
+# LEGACY (v1.11): Thumbnail backfill from content for posts created before v1.12.0.
+# Remove after March 2026 when all old posts have been migrated or expired.
 def _backfill_thumbnail_if_missing(cur: Any, txhash: str, content: str, existing_thumb: str) -> str:
     try:
         if existing_thumb:
@@ -594,7 +598,7 @@ def _load_candidate_posts(
     blocked_users: set[str],
     allowed_tags: set[str],
 ) -> list[dict]:
-    """Load recent candidate posts for home feed v2."""
+    """Load recent candidate posts for home feed."""
     deleted_clause = _deleted_filter()
 
     cur.execute(
@@ -606,7 +610,8 @@ def _load_candidate_posts(
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
-               COALESCE(pr.level, 0) AS author_level
+               COALESCE(pr.level, 0) AS author_level,
+               COALESCE(p.media, '[]') AS media
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -636,7 +641,11 @@ def _load_candidate_posts(
             edited_at,
             thumbnail,
             author_level,
+            media_raw,
         ) = row
+        media = json.loads(media_raw)
+        if not isinstance(media, list):
+            raise ValueError("invalid media payload in posts table")
 
         pid = (txhash or "").lower()
         author = (owner or "").lower()
@@ -672,6 +681,7 @@ def _load_candidate_posts(
                 "edited": bool(edited_at),
                 "edited_at": int(edited_at or 0),
                 "thumbnail": thumbnail or "",
+                "media": media,
             }
         )
 
@@ -801,7 +811,8 @@ def _load_following_candidates(
                COALESCE(pr.username, '') AS username,
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
-               COALESCE(pr.level, 0) AS author_level
+               COALESCE(pr.level, 0) AS author_level,
+               COALESCE(p.media, '[]') AS media
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -1054,7 +1065,8 @@ def _get_home_feed_newest(
     """
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level"""
+                   COALESCE(pr.level, 0) AS author_level,
+                   COALESCE(p.media, '[]') AS media"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
@@ -1433,7 +1445,8 @@ def _load_home_candidates(
 
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
-                   COALESCE(pr.level, 0) AS author_level"""
+                   COALESCE(pr.level, 0) AS author_level,
+                   COALESCE(p.media, '[]') AS media"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
@@ -1525,21 +1538,43 @@ def _load_home_candidates(
 
 def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict | None:
     """Convert a DB row to a post dict, or None if should be skipped."""
-    (
-        txhash,
-        owner,
-        ts,
-        topic,
-        title,
-        content,
-        tag,
-        root_topic,
-        root_post_id,
-        username,
-        edited_at,
-        thumbnail,
-        author_level,
-    ) = row
+    import json as _json
+
+    # Support both 13-column (legacy) and 14-column (v1.12.0 with media) rows
+    if len(row) >= 14:
+        (
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
+            author_level,
+            media_raw,
+        ) = row[:14]
+    else:
+        (
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
+            author_level,
+        ) = row
+        media_raw = "[]"
 
     pid = (txhash or "").lower()
     author = (owner or "").lower()
@@ -1548,6 +1583,14 @@ def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict 
         return None
     if (tag or "").strip() and (tag or "").lower() not in allowed_tags:
         return None
+
+    # Parse media JSON array
+    try:
+        media = _json.loads(media_raw or "[]")
+        if not isinstance(media, list):
+            media = []
+    except Exception:
+        media = []
 
     seen.add(pid)
     return {
@@ -1566,6 +1609,7 @@ def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict 
         "edited": bool(edited_at),
         "edited_at": int(edited_at or 0),
         "thumbnail": thumbnail or "",
+        "media": media,
     }
 
 
@@ -3298,7 +3342,8 @@ def search():
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
-                           COALESCE(pr.level, 0) as author_level
+                           COALESCE(pr.level, 0) as author_level,
+                           COALESCE(p.media, '[]') as media
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE LOWER(p.owner) = LOWER(%s)
@@ -3478,7 +3523,8 @@ def search():
                            COALESCE(p.target, '') as target,
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
-                           COALESCE(pr.level, 0) as author_level
+                           COALESCE(pr.level, 0) as author_level,
+                           COALESCE(p.media, '[]') as media
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE COALESCE(p.target, '') = ''
@@ -3596,7 +3642,21 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
 
     posts = []
     for row in filtered:
-        txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
+        import json as _json
+
+        if len(row) >= 12:
+            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
+                :12
+            ]
+        else:
+            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
+            media_raw = "[]"
+        try:
+            media_val = _json.loads(media_raw or "[]")
+            if not isinstance(media_val, list):
+                media_val = []
+        except Exception:
+            media_val = []
         pid = (txhash or "").lower()
         posts.append(
             {
@@ -3610,6 +3670,7 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
                 "content": content,
                 "tag": tag or "",
                 "thumbnail": thumbnail or "",
+                "media": media_val,
                 "points": vote_totals.get(pid, 0),
                 "comments": comment_counts.get(pid, 0),
                 "user_vote": user_votes.get(pid, 0),
@@ -3667,7 +3728,7 @@ def get_posts():
             except Exception:
                 pass
 
-            # Home feed uses new similarity-based algorithm (v2)
+            # Home feed uses new similarity-based algorithm
             if feed == "home":
                 resp = _get_home_feed(
                     cur,
@@ -3734,8 +3795,9 @@ def get_posts():
                        COALESCE(p.root_post_id, p.txhash, '') AS root_post_id,
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
-                       COALESCE(p.thumbnail_url, '') as thumbnail,
-                       COALESCE(pr.level, 0) as author_level
+                      COALESCE(p.thumbnail_url, '') as thumbnail,
+                      COALESCE(pr.level, 0) as author_level,
+                      COALESCE(p.media, '[]') as media
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 LEFT JOIN (
@@ -4038,7 +4100,8 @@ def get_user_posts():
                    (p.edited_at IS NOT NULL) as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
                    COALESCE(p.thumbnail_url, '') as thumbnail,
-                   COALESCE(pr.level, 0) as author_level
+                   COALESCE(pr.level, 0) as author_level,
+                   COALESCE(p.media, '[]') as media
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
@@ -4148,7 +4211,26 @@ def get_user_posts():
 
         result = []
         for row in rows:
-            if len(row) >= 12:
+            import json as _json
+
+            media_raw = "[]"
+            if len(row) >= 13:
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                ) = row[:13]
+            elif len(row) >= 12:
                 (
                     txhash,
                     owner_addr,
@@ -4175,6 +4257,12 @@ def get_user_posts():
                 edited, edited_at = 0, 0
                 thumbnail = ""
                 author_level = 0
+            try:
+                media_val = _json.loads(media_raw or "[]")
+                if not isinstance(media_val, list):
+                    media_val = []
+            except Exception:
+                media_val = []
             pid = (txhash or "").lower()
             result.append(
                 {
@@ -4190,6 +4278,7 @@ def get_user_posts():
                     "edited": bool(edited_at),
                     "edited_at": int(edited_at or 0),
                     "thumbnail": thumbnail,
+                    "media": media_val,
                     "points": vote_totals.get(pid, 0),
                     "comments": comment_counts.get(pid, 0),
                     "user_vote": user_votes.get(pid, 0),
@@ -4450,7 +4539,8 @@ def _fetch_comment_tree_batch(
                    COALESCE(p.thumbnail_url, '') as thumbnail,
                    CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
-                   0 as depth
+                   0 as depth,
+                   COALESCE(p.media, '[]') as media
             FROM posts p
             WHERE LOWER(p.txhash) = %s {deleted_clause}
             UNION ALL
@@ -4462,7 +4552,8 @@ def _fetch_comment_tree_batch(
                    COALESCE(p.thumbnail_url, '') as thumbnail,
                    CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
-                   s.depth + 1 as depth
+                   s.depth + 1 as depth,
+                   COALESCE(p.media, '[]') as media
             FROM posts p
             JOIN subtree s ON LOWER(p.target) = LOWER(s.txhash)
             WHERE s.depth < %s {deleted_clause}
@@ -4471,7 +4562,8 @@ def _fetch_comment_tree_batch(
                st.tag, st.root_topic, st.root_post_id, st.target, st.thumbnail,
                st.edited, st.edited_at, st.depth,
                COALESCE(pr.username, '') as username,
-               COALESCE(pr.level, 0) as author_level
+               COALESCE(pr.level, 0) as author_level,
+               st.media
         FROM subtree st
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
         ORDER BY st.depth ASC, st.created_at ASC
@@ -4504,6 +4596,17 @@ def _fetch_comment_tree_batch(
         depth = int(row[13])
         username_val = row[14] or ""
         author_level_val = int(row[15]) if row[15] else 0
+        media_raw_val = row[16] if len(row) > 16 else "[]"
+
+        # Parse media JSON array
+        try:
+            import json as _json
+
+            media_val = _json.loads(media_raw_val or "[]")
+            if not isinstance(media_val, list):
+                media_val = []
+        except Exception:
+            media_val = []
 
         # Skip if this post or its owner is blocked
         if pid in blocked_posts or owner in blocked_users:
@@ -4531,6 +4634,7 @@ def _fetch_comment_tree_batch(
             "edited": edited_flag,
             "edited_at": edited_at_val,
             "thumbnail": thumbnail_val,
+            "media": media_val,
             "points": 0,  # Will be populated later
             "comments": 0,  # Will be computed from tree
             "children": [],
