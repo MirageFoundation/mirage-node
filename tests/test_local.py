@@ -67,6 +67,8 @@ from shared.canon import (  # noqa: E402
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_block_user as _canon_base_block_user_raw,
     canon_base_unblock_user as _canon_base_unblock_user_raw,
+    canon_base_block_topic as _canon_base_block_topic_raw,
+    canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_report as _canon_base_report_raw,
@@ -701,6 +703,38 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     return resp
 
 
+def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
+    """Block or unblock a topic."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_block_topic_raw if block else _canon_base_unblock_topic_raw
+    endpoint = "block_topic" if block else "unblock_topic"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "topic": topic,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    print(f"    [debug] {endpoint} topic={topic} difficulty={d}")
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
 def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = False) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
@@ -777,6 +811,19 @@ def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0)
     return False
 
 
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_topics") or []
+            if any(str(t or "").strip().lower() == topic_lower for t in blocked):
+                return True
+        time.sleep(0.5)
+    return False
+
+
 def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = 15.0) -> bool:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
@@ -831,6 +878,18 @@ def test_params(backend: str):
         _pass("params.pow_difficulty >= 0 (step format)", value=int(pd))
     else:
         _fail("params.pow_difficulty >= 0 (step format)", f"got {pd}")
+
+    # 1.4b tier limits for max_blocked_topics
+    tiers = data.get("tiers") or []
+    expected_blocked = [10, 125, 500, 1000]
+    if len(tiers) >= 4:
+        got_blocked = [int((tiers[i] or {}).get("max_blocked_topics", -1)) for i in range(4)]
+        if got_blocked == expected_blocked:
+            _pass("params.max_blocked_topics tier limits", values=got_blocked)
+        else:
+            _fail("params.max_blocked_topics tier limits", f"got {got_blocked}")
+    else:
+        _fail("params.max_blocked_topics tier limits", f"tiers len={len(tiers)}")
 
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")
@@ -1332,6 +1391,66 @@ def test_social_graph(backend: str):
         _pass("social.unblock_user succeeds")
     else:
         _fail("social.unblock_user succeeds", f"resp={resp}")
+
+    time.sleep(2)
+
+    # 5.11 block_topic
+    block_topic = f"blocktopic{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, block_topic, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic succeeds")
+    else:
+        _fail("social.block_topic succeeds", f"resp={resp}")
+
+    if _wait_blocked_topic(backend, addr, block_topic):
+        _pass("social.block_topic reflected in get_user_blocked")
+    else:
+        _fail("social.block_topic reflected in get_user_blocked", f"topic={block_topic}")
+
+    # 5.12 duplicate block_topic rejected
+    resp_dup = _do_block_topic(backend, wallet, block_topic, block=True)
+    if resp_dup.get("error"):
+        _pass("social.block_topic duplicate rejected", error=resp_dup.get("error"))
+    else:
+        _fail("social.block_topic duplicate rejected", f"resp={resp_dup}")
+
+    # 5.13 blocked topic filtered from get_posts
+    blocked_post = _do_post(backend, sub_wallet, block_topic, f"Blocked {block_topic}", "body")
+    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post):
+        code, feed = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "by": "newest", "address": addr},
+        )
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            if not any(str(p.get("post_id", "")).lower() == blocked_post for p in posts):
+                _pass("social.block_topic filters get_posts")
+            else:
+                _fail("social.block_topic filters get_posts", f"found blocked post {blocked_post}")
+        else:
+            _fail("social.block_topic filters get_posts", f"code={code}")
+    else:
+        _fail("social.block_topic filters get_posts", "post not indexed")
+
+    # 5.14 unblock_topic
+    resp = _do_block_topic(backend, wallet, block_topic, block=False)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.unblock_topic succeeds")
+    else:
+        _fail("social.unblock_topic succeeds", f"resp={resp}")
+
+    time.sleep(2)
+    code, blocked = _get(f"{backend}/api/get_user_blocked", {"address": addr})
+    if code == 200:
+        topics = (blocked or {}).get("blocked_topics") or []
+        if not any(str(t or "").lower() == block_topic.lower() for t in topics):
+            _pass("social.unblock_topic reflected in get_user_blocked")
+        else:
+            _fail("social.unblock_topic reflected in get_user_blocked", f"topics={topics}")
+    else:
+        _fail("social.unblock_topic reflected in get_user_blocked", f"code={code}")
 
 
 # =========================================================================

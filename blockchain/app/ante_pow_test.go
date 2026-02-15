@@ -1,11 +1,14 @@
 package app
 
 import (
+	"bytes"
 	"encoding/hex"
 	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	coretypes "mirage/x/core/types"
 	// "golang.org/x/crypto/argon2"
 )
 
@@ -117,18 +120,18 @@ func TestValidatePoW(t *testing.T) {
 			if nonce > 10000 {
 				t.Fatal("Could not find nonce quickly")
 			}
-			
+
 			// We can't easily replicate the exact byte construction here without duplicating code
 			// So we will rely on the fact that we are testing validatePoWBytesArgon2
 			// We'll just pass nonces to it until one works? No, that's testing the test.
-			
+
 			// Let's use the actual hashing to find a nonce
 			// Replicate byte construction from ante_pow.go
 			// ...
 			// Actually, let's just test the validation logic with a mocked hash check?
 			// No, validatePoWBytesArgon2 does the hashing.
 			// We need to generate a valid input.
-			
+
 			// Let's just try to find one.
 			err := validatePoWBytesArgon2(canonical, lastBlockHash, diff, nonce, "", ring, true, diff, 0, 0, 0, 0, minDiff, step)
 			if err == nil {
@@ -156,12 +159,12 @@ func TestValidatePoW(t *testing.T) {
 	// The ring buffer check is only done if skipHashCheck is false
 	// And currentLastID matches or is in ring.
 	// currentLastID := "0000000000000000000000000000000000000000000000000000000000000000"
-	
+
 	// Note: validatePoWBytesArgon2 doesn't update the ring, the caller does.
 	// It just checks against it.
 	// So we can't test "stateful" replay here, only that it checks the ring.
-	
-	// If we set the ring to have seen the hash, it should pass? 
+
+	// If we set the ring to have seen the hash, it should pass?
 	// No, the ring stores BLOCK HASHES, not PoW nonces.
 	// The replay protection for PoW is actually based on the *block hash* being recent.
 	// If you reuse a PoW, you must use the same block hash.
@@ -180,9 +183,69 @@ func TestValidatePoW(t *testing.T) {
 	// So you can't reuse a PoW for a different message.
 	// And you can't replay the same message due to account sequence.
 	// So explicit nonce tracking isn't needed!
-	
+
 	// Test: Change canonical bytes -> PoW should fail
 	canonical2 := []byte("test_canonical_bytes_2")
 	err = validatePoWBytesArgon2(canonical2, lastBlockHash, 0, nonce0, "", ring, true, 0, 0, 0, 0, 0, minDiff, step)
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
+}
+
+func TestBuildCanonForBlockTopic(t *testing.T) {
+	pub := bytes.Repeat([]byte{0x01}, 33)
+	blockHash := []byte("blockhash")
+	difficulty := uint64(7)
+	timestamp := uint64(1710005556667)
+	target := ""
+	topic := "topicx"
+
+	msg := &coretypes.MsgBlockTopic{
+		EnvelopePubkey:     pub,
+		EnvelopeBlockHash:  blockHash,
+		EnvelopeDifficulty: difficulty,
+		EnvelopeTimestamp:  timestamp,
+		Target:             target,
+		Topic:              topic,
+	}
+
+	expected := newCanonWriter("MsgBlockTopic")
+	expected.writeBytes(2, pub)
+	expected.writeBytes(3, blockHash)
+	expected.writeUvarint(4, difficulty)
+	expected.writeUvarint(6, timestamp)
+	expected.writeString(100, target)
+	expected.writeString(101, topic)
+
+	got := buildCanonForBlockTopic(msg)
+	t.Logf("[debug] block_topic canon len=%d", len(got))
+	require.Equal(t, expected.buf, got)
+}
+
+func TestBuildCanonForUnblockTopic(t *testing.T) {
+	pub := bytes.Repeat([]byte{0x02}, 33)
+	blockHash := []byte("blockhash2")
+	difficulty := uint64(4)
+	timestamp := uint64(1710007778889)
+	target := ""
+	topic := "topicy"
+
+	msg := &coretypes.MsgUnblockTopic{
+		EnvelopePubkey:     pub,
+		EnvelopeBlockHash:  blockHash,
+		EnvelopeDifficulty: difficulty,
+		EnvelopeTimestamp:  timestamp,
+		Target:             target,
+		Topic:              topic,
+	}
+
+	expected := newCanonWriter("MsgUnblockTopic")
+	expected.writeBytes(2, pub)
+	expected.writeBytes(3, blockHash)
+	expected.writeUvarint(4, difficulty)
+	expected.writeUvarint(6, timestamp)
+	expected.writeString(100, target)
+	expected.writeString(101, topic)
+
+	got := buildCanonForUnblockTopic(msg)
+	t.Logf("[debug] unblock_topic canon len=%d", len(got))
+	require.Equal(t, expected.buf, got)
 }
