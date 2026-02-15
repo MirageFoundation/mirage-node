@@ -518,6 +518,7 @@ const ColumnFlex = styled.div`
 const MainContentWrapper = styled.div`
     width: 100%;
     min-width: 0;
+    min-height: 120vh;
     overflow-x: hidden;
     box-sizing: border-box;
 `;
