@@ -8,7 +8,7 @@ Minimal self-contained example. One file, no project imports.
 pip install requests cosmpy cryptography argon2-cffi
 ```
 
-## Full Example
+## Quick Start
 
 ```python
 #!/usr/bin/env python3
@@ -23,7 +23,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 
 # ── Config ──────────────────────────────────────────────────────────
-SEED = "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12 word13 word14 word15 word16 word17 word18 word19 word20 word21 word22 word23 word24"
+SEED = "word1 word2 ... word24"          # BIP39 mnemonic (24 words)
 NODE = "https://mirage.talk"             # base node URL (no trailing slash)
 # ────────────────────────────────────────────────────────────────────
 
@@ -73,10 +73,6 @@ def sign(privkey: bytes, message: bytes) -> bytes:
 
 
 # ── Proof of Work ───────────────────────────────────────────────────
-# difficulty is a step count (0 = base). Effective factor = 1000 * (1 + step)^difficulty.
-# pow_base_bits defines the base target: base_target = 2^(256 - pow_base_bits).
-# A hash passes if int(hash) <= base_target * 1000 // factor.
-
 def _round_half_up(x: float) -> int:
     return int(math.floor(x + 0.5))
 
@@ -109,17 +105,6 @@ def compute_pow(
 
 
 # ── Canonical Bytes ─────────────────────────────────────────────────
-#
-# Every write request is a protobuf-like canonical byte string:
-#   prefix + envelope fields + payload fields
-#
-# Prefix:    b"mirage.core.v1:<MsgName>\x00"
-# Envelope:  tag2=pubkey, tag3=block_hash, tag4=difficulty, tag6=timestamp
-# Payload:   tags 100+ (message-specific)
-#
-# The PoW nonce (tag5) is inserted between tag4 and tag6 AFTER mining,
-# producing the final "signed bytes" that get ECDSA-signed.
-
 def canon_prefix(msg: str) -> bytes:
     return b"mirage.core.v1:" + msg.encode() + b"\x00"
 
@@ -131,8 +116,6 @@ def envelope(block_hash_bytes: bytes, difficulty: int, ts_ms: int) -> bytes:
 
 def insert_pow(base: bytes, pow_val: int) -> bytes:
     """Insert tag5 (pow) between tag4 (difficulty) and tag6 (timestamp)."""
-    # Find the \x06 byte that starts the timestamp field
-    # Walk: prefix...\x00, tag2+data, tag3+data, tag4+data, then tag6
     i = base.index(b"\x00") + 1                   # end of prefix
     for expected_tag in (2, 3):                    # skip tag2 (bytes), tag3 (bytes)
         assert base[i] == expected_tag; i += 1
@@ -236,6 +219,42 @@ def make_comment(parent_post_id: str, content: str):
         "content": content, "tag": "",
     }, block_hash, diff, pow_base_bits, pow_factor, ts)
 
+def edit_post(override: str, topic: str, title: str, content: str,
+              tag: str = "", media: list[str] | None = None):
+    """Edit an existing post. override = the post's tx_hash."""
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
+    bh = bytes.fromhex(block_hash)
+    ts = int(time.time() * 1000)
+    # target is empty for root posts, or the parent post_id for comments
+    target = ""
+    base = (canon_prefix("MsgEdit")
+          + envelope(bh, diff, ts)
+          + enc_str(100, target)
+          + enc_str(101, topic)
+          + enc_str(102, title)
+          + enc_str(103, content)
+          + enc_str(104, tag)
+          + enc_str(105, override))       # override = original post tx_hash
+    for m in (media or []):
+        base += enc_str(106, m)           # media URLs (repeated tag 106)
+    fields = {"target": target, "topic": topic, "title": title,
+              "content": content, "tag": tag, "override": override}
+    if media:
+        fields["media"] = media
+    return submit("/core/edit", base, fields,
+                  block_hash, diff, pow_base_bits, pow_factor, ts)
+
+def delete_post(target_post_id: str):
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
+    bh = bytes.fromhex(block_hash)
+    ts = int(time.time() * 1000)
+    base = (canon_prefix("MsgDelete")
+          + envelope(bh, diff, ts)
+          + enc_str(100, target_post_id))
+    return submit("/core/delete_post", base, {
+        "target": target_post_id,
+    }, block_hash, diff, pow_base_bits, pow_factor, ts)
+
 def vote(target_post_id: str, direction: int):
     """direction: 1=upvote, -1=downvote, 0=remove"""
     block_hash, diff, pow_base_bits, pow_factor = get_params()
@@ -268,18 +287,64 @@ if __name__ == "__main__":
     # Create a post
     make_post("general", "Hello from bot", "This is an automated post.")
 
-    # Vote on the first post (if any)
+    # Create a post with media
+    make_post("general", "Photo post", "Check this out!", media=[
+        "https://imagedelivery.net/abc123/img-uuid/public"
+    ])
+
+    # Comment on the first post
+    if posts:
+        make_comment(posts[0]["post_id"], "Great post!")
+
+    # Edit a post (you must own it)
+    # edit_post("txhash_of_your_post", "general", "Updated title", "Updated content")
+
+    # Delete a post (you must own it)
+    # delete_post("txhash_of_your_post")
+
+    # Vote on the first post
     if posts:
         vote(posts[0]["post_id"], direction=1)
 ```
 
+---
+
 ## How It Works
 
-1. **Wallet** — `cosmpy` derives a secp256k1 keypair + `mirage1...` address from a BIP39 mnemonic.
+### 1. Wallet
 
-2. **Parameters** — `GET /api/get_parameters?address=<addr>` returns `last_block_hash`, `pow_difficulty` (step count), `pow_factor`, `pow_base_bits`, and optionally `balance`. These anchor every request to a recent block. A separate `GET /api/get_node_config` provides static node info (validator addresses, feature flags).
+`cosmpy` derives a secp256k1 keypair + `mirage1...` address from a BIP39 mnemonic. The public key is 33 bytes (compressed), private key is 32 bytes.
 
-3. **Canonical bytes** — Each message type has a deterministic byte encoding:
+### 2. Parameters
+
+Before every write, fetch fresh parameters:
+
+```
+GET /api/get_parameters?address=<addr>
+```
+
+Response:
+
+```json
+{
+  "last_block_hash": "abc123...",
+  "pow_difficulty": 0,
+  "pow_base_bits": 10,
+  "pow_factor": 0.25,
+  "balance": 1000000
+}
+```
+
+- `last_block_hash` — anchors the request to a recent block (hex, 64 chars). Must match one of the last N committed block hashes (default window = 10 blocks).
+- `pow_difficulty` — current difficulty step count (0 = base). Adjusts dynamically based on network message volume.
+- `pow_base_bits` / `pow_factor` — used to compute the PoW target threshold.
+- `balance` — only included if `address` is provided (in umirage; 1 MIRAGE = 1,000,000 umirage).
+
+Cached server-side for 3 seconds.
+
+### 3. Canonical Bytes
+
+Every write request is a protobuf-like canonical byte string that gets PoW'd and signed:
 
 ```
 b"mirage.core.v1:MsgPost\x00"       ← prefix
@@ -292,21 +357,342 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
   ...
 ```
 
-4. **Proof of Work** — Free users must solve Argon2id PoW using a target-based system. The hash (as a 256-bit integer) must be <= `base_target * 1000 / factor`, where `factor = 1000 * (1 + pow_factor)^difficulty`. The nonce is inserted as `tag5` between difficulty and timestamp. Subscribers (level >= 1) skip PoW.
+**Two-phase construction:**
 
-5. **Signature** — ECDSA-SHA256 over the final canonical bytes (with PoW inserted). Low-S normalized, 64-byte compact format.
+1. **Base canonical** (for PoW input) — excludes tag5 (pow) and tag10 (signature)
+2. **Signed canonical** — base + tag5 inserted between tag4 and tag6
 
-6. **Submit** — POST the JSON envelope (`pubkey`, `signature`, `last_block_hash`, `timestamp`, `pow_difficulty`, `pow`) plus message-specific fields.
+Authority (tag1) and signature (tag10) are never included in canonical bytes — authority is set by the backend to the validator address, and the signature is sent separately.
 
-## Message Types Quick Reference
+### 4. Proof of Work
+
+Free users (level 0) must solve Argon2id PoW. Subscribers (level >= 1) skip PoW entirely (send `pow_difficulty=0`, `pow=0`).
+
+**Algorithm:** Argon2id with `time_cost=1`, `memory_cost=4096` (4 MB), `parallelism=1`, `hash_len=32`.
+
+**How it works:**
+
+```python
+password = canonical_base + b":" + uvarint(nonce)
+salt = bytes.fromhex(last_block_hash)
+digest = argon2id(password, salt, ...)
+# Passes if int(digest) <= effective_target
+```
+
+**Target calculation:**
+
+- `base_target = 2^(256 - pow_base_bits)`
+- `factor = round(1000 * (1 + pow_factor)^difficulty)`
+- `effective_target = base_target * 1000 // factor`
+
+Difficulty adjusts dynamically — increases when message volume is high, decreases during calm periods.
+
+### 5. Signature
+
+ECDSA-SHA256 over the final canonical bytes (with PoW inserted). Low-S normalized, 64-byte compact format (r || s, 32 bytes each).
+
+### 6. Submit
+
+POST the JSON envelope plus message-specific fields. Every write request includes:
+
+```json
+{
+  "pubkey": "<base64, 33 bytes>",
+  "signature": "<base64, 64 bytes>",
+  "last_block_hash": "<hex, 64 chars>",
+  "timestamp": 1234567890000,
+  "pow_difficulty": 0,
+  "pow": 0,
+  ...message-specific fields
+}
+```
+
+**Success response:**
+
+```json
+{
+  "tx_hash": "abc123...",
+  "code": 0,
+  "height": 12345,
+  "raw_log": ""
+}
+```
+
+`code=0` means success. Non-zero codes indicate chain-level rejection.
+
+---
+
+## Posting: Complete Reference
+
+### Create a Root Post
+
+**Endpoint:** `POST /api/core/post`
+
+**Fields:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | string | yes | Empty string `""` for root posts |
+| `topic` | string | yes | Lowercase alphanumeric (`[a-z0-9]+`), 3-50 chars |
+| `title` | string | yes | Post title (length limit based on tier) |
+| `content` | string | yes | Post body (length limit based on tier) |
+| `tag` | string | no | Content warning: `""`, `"sensitive"`, `"porn"`, `"gore"`, `"violence"`, `"death"` |
+| `media` | string[] | no | Up to 10 HTTPS URLs, each max 2048 chars |
+
+**Canonical bytes (MsgPost):**
+
+| Tag | Field | Encoding |
+|---|---|---|
+| 100 | target | string (empty `""`) |
+| 101 | topic | string |
+| 102 | title | string |
+| 103 | content | string |
+| 104 | tag | string |
+| 105 | media[0] | string (repeated for each URL) |
+
+### Create a Comment
+
+Same endpoint (`POST /api/core/post`) and same canonical prefix (`MsgPost`), but:
+
+- `target` = parent post's `tx_hash` (64-char hex)
+- `topic` = empty string
+- `title` = empty string
+- `content` = comment body (required, non-empty)
+
+### Edit a Post
+
+**Endpoint:** `POST /api/core/edit`
+
+**Additional field:**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `override` | string | yes | The `tx_hash` of the post being edited (64-char hex). You must own it. |
+
+All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work the same as create. Send the full updated values — this is a full replacement, not a partial update.
+
+**Canonical bytes (MsgEdit) — note different tag numbers for override/media:**
+
+| Tag | Field | Encoding |
+|---|---|---|
+| 100 | target | string |
+| 101 | topic | string |
+| 102 | title | string |
+| 103 | content | string |
+| 104 | tag | string |
+| 105 | override | string |
+| 106 | media[0] | string (repeated for each URL) |
+
+### Delete a Post
+
+**Endpoint:** `POST /api/core/delete_post`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | string | yes | The `tx_hash` of the post to delete. You must own it. |
+
+**Canonical bytes (MsgDelete):**
+
+| Tag | Field | Encoding |
+|---|---|---|
+| 100 | target | string |
+
+### Vote
+
+**Endpoint:** `POST /api/core/vote`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | string | yes | The `tx_hash` of the post to vote on |
+| `direction` | int | yes | `1` = upvote, `-1` = downvote, `0` = remove vote |
+
+**Canonical bytes (MsgVote):**
+
+| Tag | Field | Encoding |
+|---|---|---|
+| 100 | target | string |
+| 101 | direction | uint64 (note: `-1` is encoded as `4294967295`) |
+
+---
+
+## Media: Uploading Images and Videos
+
+Posts accept up to 10 media URLs in the `media` field. You can use any HTTPS URL, or upload files directly to the node's Cloudflare-backed storage.
+
+### Upload Flow
+
+**Step 1:** Get an upload URL.
+
+```
+POST /api/get_upload_url
+{"type": "image"}   // or "video"
+```
+
+**Image response:**
+
+```json
+{
+  "uploadURL": "https://upload.imagedelivery.net/...",
+  "id": "image-uuid",
+  "accountHash": "abc123"
+}
+```
+
+**Video response:**
+
+```json
+{
+  "uploadURL": "https://upload.videodelivery.net/...",
+  "provider": "stream",
+  "streamCustomer": "customer-code",
+  "uid": "video-uuid"
+}
+```
+
+**Step 2:** Upload the file directly to the returned `uploadURL`.
+
+- **Images:** Multipart form upload (`file` field).
+- **Videos:** Multipart or TUS upload. Max duration: 60 seconds.
+
+**Step 3:** Use the final URL in the `media` array when posting.
+
+- **Image URL format:** `https://imagedelivery.net/{accountHash}/{id}/public`
+- **Video URL format:** `https://customer-{streamCustomer}.cloudflarestream.com/{uid}/manifest/video.m3u8`
+
+### Media Validation Rules
+
+| Rule | Limit |
+|---|---|
+| Max items per post | 10 |
+| Max URL length | 2048 characters |
+| URL scheme | Must start with `https://` |
+| Empty array | Valid (no media) |
+
+---
+
+## Reading Data
+
+### Get Posts
+
+```
+GET /api/get_posts?topic=general&limit=25&page=1&by=magic
+```
+
+| Param | Default | Description |
+|---|---|---|
+| `topic` | — | Filter by topic. `"all"` for global feed. |
+| `limit` | 25 | Posts per page (max 100) |
+| `page` | 1 | Page number |
+| `by` | `"magic"` | Sort: `"magic"` (algorithmic) or `"newest"` (chronological) |
+| `address` | — | Viewer address (filters blocked content) |
+| `allowed_tags` | `"sensitive"` | Comma-separated tags to include (default hides porn/violence/gore/death) |
+| `feed` | — | `"home"` or `"following"` for personalized feeds |
+
+**Response:**
+
+```json
+{
+  "posts": [
+    {
+      "post_id": "64char_hex_txhash",
+      "author": "mirage1...",
+      "username": "alice",
+      "author_level": 1,
+      "timestamp": 1700000000,
+      "topic": "general",
+      "title": "Post title",
+      "content": "Post body",
+      "tag": "",
+      "edited": false,
+      "media": ["https://..."],
+      "thumbnail": "https://...",
+      "points": 42.0,
+      "comments": 5,
+      "unique_commenters": 3,
+      "user_vote": 0
+    }
+  ],
+  "total": 100,
+  "page": 1,
+  "limit": 25,
+  "has_more": true
+}
+```
+
+### Get User Status
+
+```
+GET /api/get_user_status?address=mirage1...
+```
+
+```json
+{
+  "username": "alice",
+  "balance": 1000000,
+  "user_level": 0,
+  "subscription_expiry": 0,
+  "auto_renew": false,
+  "recent_votes": [
+    {"target": "txhash", "direction": 1, "timestamp": 1700000000}
+  ]
+}
+```
+
+### Get Chain Config
+
+```
+GET /api/get_chain_config
+```
+
+Returns governance parameters including tier limits:
+
+```json
+{
+  "max_username_size": 20,
+  "min_username_size": 3,
+  "max_topic_size": 50,
+  "min_topic_size": 3,
+  "subscription_period": 2592000,
+  "tiers": [
+    {"max_title_length": 200, "max_content_length": 5000},
+    {"max_title_length": 500, "max_content_length": 20000},
+    {"max_title_length": 500, "max_content_length": 20000}
+  ]
+}
+```
+
+Tiers are indexed by `user_level` (0 = free, 1 = subscriber, etc.). Title/content length limits are enforced per tier.
+
+### Get Node Config
+
+```
+GET /api/get_node_config
+```
+
+```json
+{
+  "validator_account_address": "mirage1...",
+  "validator_operator_address": "miragevaloper1...",
+  "registration_enabled": true,
+  "registration_invite_code_required": false,
+  "giphy_api_key": "...",
+  "quests_enabled": true
+}
+```
+
+Cached 24 hours. Not needed for posting.
+
+---
+
+## All Message Types
 
 | Action | Prefix | Endpoint | Payload tags |
 |---|---|---|---|
 | Post | `MsgPost` | `/core/post` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=media (repeated) |
-| Vote | `MsgVote` | `/core/vote` | 100=target, 101=direction |
 | Comment | `MsgPost` | `/core/post` | Same as Post (target=parent post_id, topic/title empty) |
-| Edit | `MsgEdit` | `/core/edit` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=override |
+| Edit | `MsgEdit` | `/core/edit` | 100=target, 101=topic, 102=title, 103=content, 104=tag, 105=override, 106=media (repeated) |
 | Delete | `MsgDelete` | `/core/delete_post` | 100=target |
+| Vote | `MsgVote` | `/core/vote` | 100=target, 101=direction |
 | Set Username | `MsgSetUsername` | `/core/set_username` | 100=target (own addr), 101=username |
 | Follow User | `MsgFollowUser` | `/core/follow_user` | 100=target (own addr), 101=user |
 | Unfollow User | `MsgUnfollowUser` | `/core/unfollow_user` | 100=target (own addr), 101=user |
@@ -324,14 +710,17 @@ b"mirage.core.v1:MsgPost\x00"       ← prefix
 | Set Auto Renewal | `MsgSetAutoRenewal` | `/core/set_auto_renewal` | 100=auto_renew (1=on, 0=off) |
 | Bridge Burn | `MsgBridgeBurn` | `/core/bridge_burn` | 100=destination_chain, 101=destination_address, 102=amount |
 
-## Notes
+---
+
+## Reference Notes
 
 - **Tag encoding**: `bytes`/`string` fields = `[tag_byte, uvarint(length), data]`. Integer fields = `[tag_byte, uvarint(value)]`.
 - **Direction** for votes: Go encodes `int32(-1)` as `uint32(4294967295)` in the canonical bytes.
 - **Amounts** are in `umirage` (1 MIRAGE = 1,000,000 umirage).
 - **Timestamps** are milliseconds since epoch.
 - **Post IDs** are 64-char lowercase hex (the transaction hash of the post).
-- **Write responses** return `{"tx_hash", "code", "height", "raw_log"}`. `code=0` means success.
-- **`GET /api/get_node_config`** returns static per-node settings (validator info, feature flags, giphy API key, registration settings). Cached 24h server-side. Not needed for posting.
+- **Topic format**: Lowercase alphanumeric only (`[a-z0-9]+`), 3-50 chars (configurable via chain params).
+- **Timestamp freshness**: Rejected if older than 60 seconds or more than 30 seconds in the future.
+- **Block hash window**: Must match one of the last 10 committed block hashes.
 - **Registration gating**: If the node requires invite codes, pass `invite_code` (format `XXXX-XXXX`) in the `set_username` POST body. This is not part of canonical bytes.
-- **Media**: MsgPost accepts up to 10 HTTPS URLs in the `media` field (tag 105, repeated). Each URL max 2048 chars.
+- **Subscribers** (level >= 1) must send `pow_difficulty=0` and `pow=0`. The backend rejects if a subscriber sends PoW.
