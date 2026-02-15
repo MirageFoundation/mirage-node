@@ -3800,17 +3800,6 @@ def get_posts():
                       COALESCE(p.media, '[]') as media
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
-                LEFT JOIN (
-                    SELECT LOWER(target) as target, COALESCE(SUM(user_weight), 0) as vote_sum
-                    FROM votes
-                    GROUP BY LOWER(target)
-                ) v ON v.target = LOWER(p.txhash)
-                LEFT JOIN (
-                    SELECT target, COUNT(*) as comment_count
-                    FROM posts
-                    WHERE COALESCE(target, '') != ''
-                    GROUP BY target
-                ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND p.topic = %s AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
                 LIMIT %s
@@ -3835,17 +3824,6 @@ def get_posts():
                        COALESCE(pr.level, 0) as author_level
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
-                LEFT JOIN (
-                    SELECT LOWER(target) as target, COALESCE(SUM(user_weight), 0) as vote_sum
-                    FROM votes
-                    GROUP BY LOWER(target)
-                ) v ON v.target = LOWER(p.txhash)
-                LEFT JOIN (
-                    SELECT target, COUNT(*) as comment_count
-                    FROM posts
-                    WHERE COALESCE(target, '') != ''
-                    GROUP BY target
-                ) c ON c.target = p.txhash
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
                 LIMIT %s
