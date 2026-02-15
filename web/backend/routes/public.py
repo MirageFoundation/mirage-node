@@ -257,85 +257,6 @@ def _youtube_video_id_from_url(url: str) -> str | None:
     return None
 
 
-# LEGACY (v1.11): Thumbnail backfill from content for posts created before v1.12.0.
-# Remove after March 2026 when all old posts have been migrated or expired.
-def _backfill_thumbnail_if_missing(cur: Any, txhash: str, content: str, existing_thumb: str) -> str:
-    try:
-        if existing_thumb:
-            return existing_thumb
-        first = _extract_first_url(content or "")
-        if not first:
-            return ""
-        if not _is_direct_image_url(first):
-            # Cloudflare Stream: derive thumbnail from UID
-            uid = _stream_uid_from_url(first)
-            if uid:
-                thumb = f"https://videodelivery.net/{uid}/thumbnails/thumbnail.jpg?time=1s"
-                cur.execute("UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)", (thumb, txhash))
-                return thumb
-            # YouTube: derive thumbnail from video ID
-            yt_id = _youtube_video_id_from_url(first)
-            if yt_id:
-                thumb = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
-                cur.execute("UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)", (thumb, txhash))
-                return thumb
-            # As a final fallback, fetch HTML and try to find og:image/twitter:image
-            try:
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                }
-                resp = requests.get(first, headers=headers, timeout=5)
-                if resp.status_code == 200:
-                    html = resp.text[:1500000]
-                    cand = None
-                    # Meta tags
-                    for pattern in (
-                        r'<meta[^>]+property=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
-                        r'<meta[^>]+name=["\']og:image["\'][^>]*content=["\']([^"\']+)["\']',
-                        r'<meta[^>]+name=["\']twitter:image["\'][^>]*content=["\']([^"\']+)["\']',
-                        r'<meta[^>]+property=["\']og:image:url["\'][^>]*content=["\']([^"\']+)["\']',
-                        r'<meta[^>]+property=["\']og:image:secure_url["\'][^>]*content=["\']([^"\']+)["\']',
-                    ):
-                        m = re.search(pattern, html, flags=re.IGNORECASE)
-                        if m:
-                            cand = m.group(1)
-                            break
-                    # link rel=image_src
-                    if not cand:
-                        m = re.search(
-                            r'<link[^>]+rel=["\'](?:image_src|image)["\'][^>]*href=["\']([^"\']+)["\']',
-                            html,
-                            flags=re.IGNORECASE,
-                        )
-                        if m:
-                            cand = m.group(1)
-                    # first <img>
-                    if not cand:
-                        m = re.search(r'<img[^>]+(?:src|data-src)=["\']([^"\']+)["\']', html, flags=re.IGNORECASE)
-                        if m:
-                            cand = m.group(1)
-                    if cand:
-                        # Normalize relative to page URL
-                        try:
-                            cand_abs = urljoin(first, cand)
-                        except Exception:
-                            cand_abs = cand
-                        if cand_abs:
-                            cur.execute(
-                                "UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)",
-                                (cand_abs, txhash),
-                            )
-                            return cand_abs
-            except Exception:
-                pass
-            return ""
-        cur.execute("UPDATE posts SET thumbnail_url = %s WHERE LOWER(txhash) = LOWER(%s)", (first, txhash))
-        return first
-    except Exception:
-        return existing_thumb or ""
-
-
 # Note: thumbnail discovery moved to the indexer. No public endpoint is exposed.
 
 
@@ -3052,36 +2973,6 @@ def get_topics():
             )
             small_topics_count = cur.fetchone()[0] or 0
 
-        # Opportunistic backfill for missing thumbnails
-        try:
-            for i, row in enumerate(rows):
-                if len(row) >= 11:
-                    txhash, _, _, _, _, content, _, _, _, _, thumbnail = row
-                else:
-                    (
-                        txhash,
-                        _,
-                        _,
-                        _,
-                        _,
-                        content,
-                        _,
-                        _,
-                        _,
-                    ) = row
-                    thumbnail = ""
-                if not thumbnail:
-                    new_thumb = _backfill_thumbnail_if_missing(cur, txhash, content or "", thumbnail or "")
-                    if new_thumb and len(row) >= 11:
-                        lst = list(rows[i])
-                        lst[-1] = new_thumb
-                        rows[i] = tuple(lst)
-            try:
-                conn.commit()
-            except Exception:
-                pass
-        except Exception:
-            pass
         topics_dict = {}
         for row in rows:
             if row[0] and row[1] and row[1] > 0:
@@ -3837,26 +3728,6 @@ def get_posts():
             )
         rows = cur.fetchall()
         select_ms = (time.monotonic() - t_select) * 1000
-        # Opportunistic backfill of thumbnails for direct images
-        # Thumbnail is at index 11 (0-indexed), author_level is at index 12
-        try:
-            for i, row in enumerate(rows):
-                txhash = row[0] if len(row) > 0 else ""
-                content = row[5] if len(row) > 5 else ""
-                thumbnail = row[11] if len(row) > 11 else ""
-                if not thumbnail:
-                    new_thumb = _backfill_thumbnail_if_missing(cur, txhash, content or "", thumbnail or "")
-                    if new_thumb:
-                        lst = list(rows[i])
-                        lst[11] = new_thumb
-                        rows[i] = tuple(lst)
-            try:
-                conn.commit()
-            except Exception:
-                pass
-        except Exception:
-            pass
-
         # Filter blocked posts, posts from blocked users, and posts with disallowed tags
         def _tag_allowed(row_tag):
             t = (row_tag or "").strip().lower()
@@ -4471,22 +4342,6 @@ def _fetch_post(
             [pid] + list(all_blocked) + list(all_blocked),
         )
         comments = int(cur.fetchone()[0] or 0)
-    # Opportunistic backfill for a single post if needed
-    try:
-        if row and len(row) > 10:
-            txhash_lc = (row[0] or "").lower()
-            content = content_val or ""
-            thumb = thumbnail_val or ""
-            if not thumb:
-                new_thumb = _backfill_thumbnail_if_missing(cur, txhash_lc, content, thumb)
-                if new_thumb:
-                    row = list(row)
-                    row[11] = new_thumb
-                    row = tuple(row)
-                    thumbnail_val = new_thumb
-    except Exception:
-        pass
-
     return {
         "post_id": pid,
         "target": target_val,
