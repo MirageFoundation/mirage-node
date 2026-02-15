@@ -3683,6 +3683,8 @@ def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, delete
 
 @public_bp.route("/api/get_posts")
 def get_posts():
+    rid = next_request_id()
+    t_start = time.monotonic()
     limit = request.args.get("limit", 25, type=int)
     limit = min(max(1, limit), 100)
     page = request.args.get("page", 1, type=int)
@@ -3757,12 +3759,13 @@ def get_posts():
             return jsonify(resp)
 
         # First, get total count for pagination
+        t_count = time.monotonic()
         if topic and topic != "all":
             cur.execute(
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
-                WHERE COALESCE(p.target, '') = '' AND p.topic = %s AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 """,
                 (topic,),
             )
@@ -3775,12 +3778,14 @@ def get_posts():
                 """,
             )
         total = cur.fetchone()[0] or 0
+        count_ms = (time.monotonic() - t_count) * 1000
 
         # Fetch candidate posts. For magic mode we must rank in Python using the same Magic scorer.
         # (Eligibility comes from the topic filter; ranking is always via `_score_magic`.)
         max_candidates = max(500, limit * page * 3)
         order_clause = "ORDER BY p.created_at DESC"
 
+        t_select = time.monotonic()
         if topic and topic != "all":
             cur.execute(
                 f"""
@@ -3800,7 +3805,7 @@ def get_posts():
                       COALESCE(p.media, '[]') as media
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
-                WHERE COALESCE(p.target, '') = '' AND p.topic = %s AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
                 {order_clause}
                 LIMIT %s
                 """,
@@ -3831,6 +3836,7 @@ def get_posts():
                 (max_candidates,),
             )
         rows = cur.fetchall()
+        select_ms = (time.monotonic() - t_select) * 1000
         # Opportunistic backfill of thumbnails for direct images
         # Thumbnail is at index 11 (0-indexed), author_level is at index 12
         try:
@@ -4035,10 +4041,25 @@ def get_posts():
         has_more = (page * limit) < total
 
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
+        total_ms = (time.monotonic() - t_start) * 1000
+        if max(total_ms, count_ms, select_ms) > 2000:
+            log_event(
+                rid,
+                "get_posts.slow",
+                topic=topic or "all",
+                page=page,
+                limit=limit,
+                count_ms=round(count_ms, 1),
+                select_ms=round(select_ms, 1),
+                total_ms=round(total_ms, 1),
+                candidates=len(rows),
+                sort=sort_mode,
+            )
 
         conn.close()
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
+        log_event(rid, "get_posts.err", error=str(e))
         return safe_error(e)
 
 
