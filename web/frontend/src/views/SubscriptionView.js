@@ -786,11 +786,11 @@ export default function SubscriptionView({ state }) {
             details.push('Cannot block posts.');
         }
 
-        const maxQualityPosts = num('max_quality_posts');
-        if (maxQualityPosts) {
-            details.push(`Mark up to ${maxQualityPosts} posts as high quality.`);
+        const maxBlockedTopics = num('max_blocked_topics');
+        if (maxBlockedTopics) {
+            details.push(`Block up to ${maxBlockedTopics} topics.`);
         } else {
-            details.push('Cannot mark posts as high quality.');
+            details.push('Cannot block topics.');
         }
 
         const maxTitle = num('max_title_length');

@@ -211,6 +211,16 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForUnblockUser(v.(*coretypes.MsgUnblockUser)) },
 		},
 		{
+			name: "MsgBlockTopic",
+			obj:  &coretypes.MsgBlockTopic{},
+			fn:   func(v interface{}) []byte { return buildCanonForBlockTopic(v.(*coretypes.MsgBlockTopic)) },
+		},
+		{
+			name: "MsgUnblockTopic",
+			obj:  &coretypes.MsgUnblockTopic{},
+			fn:   func(v interface{}) []byte { return buildCanonForUnblockTopic(v.(*coretypes.MsgUnblockTopic)) },
+		},
+		{
 			name: "MsgEdit",
 			obj:  &coretypes.MsgEdit{},
 			fn:   func(v interface{}) []byte { return buildCanonForEdit(v.(*coretypes.MsgEdit)) },

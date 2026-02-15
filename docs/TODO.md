@@ -67,7 +67,7 @@ we need to add the relaying node into the blockchain history. this way we can pr
 ----------
 
 add blocking keywords (in topics or posts)
-add blocking topics
+~~add blocking topics~~ — Done in v1.13.0
 
 ----------
 

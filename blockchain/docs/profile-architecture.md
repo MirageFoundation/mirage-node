@@ -34,7 +34,7 @@ For performance, list fields are stored at separate KV prefixes rather than in P
 | `followed_topics/{owner}` | Topics the user follows | `SetProfileFollowedTopics`, `GetProfileFollowedTopics` |
 | `blocked_users/{owner}` | Users the user has blocked | `SetProfileBlockedUsers`, `GetProfileBlockedUsers` |
 | `blocked_posts/{owner}` | Posts the user has blocked | `SetProfileBlockedPosts`, `GetProfileBlockedPosts` |
-| `quality_posts/{owner}` | Posts marked as quality | `SetProfileQualityPosts`, `GetProfileQualityPosts` |
+| `blocked_topics/{owner}` | Topics the user has blocked | `SetProfileBlockedTopics`, `GetProfileBlockedTopics` |
 
 ## Genesis Export/Import
 
@@ -65,7 +65,7 @@ message InitialProfile {
   repeated string followed_topics = 4;
   repeated string blocked_users = 5;
   repeated string blocked_posts = 6;
-  repeated string quality_posts = 7;
+  repeated string blocked_topics = 7;
 }
 ```
 
@@ -85,7 +85,6 @@ The indexer DB (PostgreSQL) stores a subset of profile data for API queries:
 **NOT in indexer DB** (chain-only):
 - `followed_users`
 - `followed_topics`
-- `quality_posts`
 
 When the reset script backfills profiles from the indexer DB, these missing lists will be empty arrays. This is correct behavior since they can be restored from a proper chain export.
 

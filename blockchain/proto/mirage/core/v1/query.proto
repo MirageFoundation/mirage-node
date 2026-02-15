@@ -115,7 +115,7 @@ message QueryProfileResponse {
   repeated string followed_topics = 14;
   repeated string blocked_users = 15;
   repeated string blocked_posts = 16;
-  repeated string quality_posts = 17;
+  repeated string blocked_topics = 17;
 }
 
 // QueryProfilesRequest is the request type for the Query/Profiles RPC method.

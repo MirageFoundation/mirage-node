@@ -256,6 +256,32 @@ def canon_base_unblock_user(
     )
 
 
+def canon_base_block_topic(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    topic: str,
+) -> bytes:
+    return canon_shared.canon_base_block_topic(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+    )
+
+
+def canon_base_unblock_topic(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    topic: str,
+) -> bytes:
+    return canon_shared.canon_base_unblock_topic(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+    )
+
+
 def canon_base_delete(
     pub_dec: bytes,
     last_block_hash: str,
@@ -459,6 +485,8 @@ __all__ = [
     "canon_base_unblock_post",
     "canon_base_block_user",
     "canon_base_unblock_user",
+    "canon_base_block_topic",
+    "canon_base_unblock_topic",
     "canon_base_report",
     "canon_base_delete",
     "canon_base_send_tokens",

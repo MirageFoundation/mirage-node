@@ -341,6 +341,42 @@ def canon_base_unblock_user(
     return bytes(out)
 
 
+def canon_base_block_topic(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    topic: str,
+) -> bytes:
+    out = bytearray(_prefix("MsgBlockTopic"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    out += _enc_str(101, topic)
+    return bytes(out)
+
+
+def canon_base_unblock_topic(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    topic: str,
+) -> bytes:
+    out = bytearray(_prefix("MsgUnblockTopic"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    out += _enc_str(101, topic)
+    return bytes(out)
+
+
 def canon_base_delete(
     pubkey: bytes,
     last_block_hash: bytes,

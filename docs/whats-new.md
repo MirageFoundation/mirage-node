@@ -1,6 +1,14 @@
 # What's New in Mirage
 
-A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.12.0**.
+A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.13.0**.
+
+---
+
+### Topic Blocking
+
+Block entire topics you don't want to see. Pick a topic from any post's menu, confirm the block, and all content tagged with that topic disappears from your feeds, search results, inbox, and comment trees. Blocked topics are stored on-chain and sync across devices — free users can block up to 10 topics, with higher limits at each subscription tier (125 / 500 / 1000).
+
+This replaces the unused `quality_posts` infrastructure. The TierConfig slot it occupied has been repurposed for `max_blocked_topics`.
 
 ---
 
@@ -90,3 +98,4 @@ Across the entire stack, silent fallbacks and recovery paths were stripped out i
 - [v1.10.9](updates/update_v1.10.9.md) — @mention tagging, mention notifications, feed tuning
 - [v1.11.0](updates/update_v1.11.0.md) — PoW difficulty overhaul, governable parameters, test suite
 - [v1.12.0](updates/update_v1.12.0.md) — Multi-media posts, gallery component, API timeout fix
+- [v1.13.0](updates/update_v1.13.0.md) — Topic blocking, quality_posts removal, tier-dependent limits

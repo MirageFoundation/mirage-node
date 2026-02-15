@@ -893,6 +893,7 @@ function ViewPostView({ state, updatePost }) {
     const [isBlocking, setIsBlocking] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(null);
     const [confirmBlockUser, setConfirmBlockUser] = useState(null); // { userId, postId }
+    const [confirmBlockTopic, setConfirmBlockTopic] = useState(null); // { topic, postId }
     const [confirmDeletePost, setConfirmDeletePost] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false);
     const [deleteMessages, setDeleteMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
@@ -1472,6 +1473,46 @@ function ViewPostView({ state, updatePost }) {
 
     const cancelBlockUser = () => {
         setConfirmBlockUser(null);
+        clearBlockMessages();
+    };
+
+    const handleBlockTopic = (topicName, postId) => {
+        const t = (topicName || "").trim().toLowerCase();
+        if (!t) {
+            showBlockError("Invalid topic");
+            return;
+        }
+        clearBlockMessages();
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmReportPost(null);
+        setConfirmDeletePost(null);
+        setConfirmDonate(null);
+        setConfirmBlockTopic({ topic: t, postId });
+    };
+
+    const confirmBlockTopicAction = async () => {
+        const topicName = confirmBlockTopic?.topic;
+        setConfirmBlockTopic(null);
+        setIsBlocking(true);
+
+        try {
+            const result = await tx.blockTopic(topicName);
+            if (result.success) {
+                showBlockSuccess("Topic blocked successfully!");
+            } else {
+                showBlockError(`Failed to block topic: ${result.error}`);
+            }
+        } catch (error) {
+            console.error("Block topic error:", error);
+            showBlockError(`Error: ${error.message || error}`);
+        } finally {
+            setIsBlocking(false);
+        }
+    };
+
+    const cancelBlockTopic = () => {
+        setConfirmBlockTopic(null);
         clearBlockMessages();
     };
 
@@ -2857,6 +2898,21 @@ function ViewPostView({ state, updatePost }) {
                 </BlockConfirmMessage>
             );
         }
+        if (confirmBlockTopic?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                        <span style={{ whiteSpace: 'nowrap' }}>🚫 Block #{confirmBlockTopic.topic}?</span>
+                        <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0, width: 'auto' }}>
+                            <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={isBlocking}>
+                                Block
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={cancelBlockTopic}>Cancel</Button>
+                        </ConfirmButtons>
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
         if (confirmDeletePost === post.post_id) {
             const isComment = post.target && post.target !== '';
             return (
@@ -3176,6 +3232,7 @@ function ViewPostView({ state, updatePost }) {
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>
+                                {post?.topic && <MenuItem onClick={() => { setOpenMenuId(null); handleBlockTopic(post.topic, post.post_id); }} data-danger="true">Block topic</MenuItem>}
                                 {!isAdmin && (
                                     <MenuItem onClick={() => { setOpenMenuId(null); handleReport(post.post_id); }}>Report</MenuItem>
                                 )}

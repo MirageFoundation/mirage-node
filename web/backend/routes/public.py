@@ -325,6 +325,26 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     return blocked_users
 
 
+def _get_blocked_topics(cur, address: str) -> set[str]:
+    """Get all topics blocked by the viewer and their followed moderators."""
+    if not address:
+        return set()
+
+    blocked_topics = set()
+
+    # Get viewer's own blocked topics
+    cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (address.lower(),))
+    blocked_topics.update(row[0].lower() for row in cur.fetchall())
+
+    # Get blocked topics from followed moderators
+    moderators = _get_followed_moderators(cur, address)
+    for mod_address in moderators:
+        cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (mod_address.lower(),))
+        blocked_topics.update(row[0].lower() for row in cur.fetchall())
+
+    return blocked_topics
+
+
 # ---- Inbox count cache (60s TTL per address; stores count + last_viewed_at) ----
 _inbox_cache: dict[str, tuple[int, float, int]] = {}
 _INBOX_CACHE_TTL = 60.0
@@ -451,7 +471,7 @@ def get_profile():
                 "followed_moderators": [],
                 "blocked_users": [],
                 "blocked_posts": [],
-                "quality_posts": [],
+                "blocked_topics": [],
             }
             return jsonify(_inject_balance(resp, address))
 
@@ -474,7 +494,7 @@ def get_profile():
             or [],
             "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
             "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
-            "quality_posts": profile.get("quality_posts", []) or profile.get("qualityPosts", []) or [],
+            "blocked_topics": profile.get("blocked_topics", []) or profile.get("blockedTopics", []) or [],
         }
         return jsonify(_inject_balance(resp, address))
     except Exception as e:
@@ -518,6 +538,7 @@ def _load_candidate_posts(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    blocked_topics: set[str] | None = None,
 ) -> list[dict]:
     """Load recent candidate posts for home feed."""
     deleted_clause = _deleted_filter()
@@ -577,6 +598,8 @@ def _load_candidate_posts(
         root_topic_lower = root_topic_raw.lower()
 
         if pid in blocked_posts or author in blocked_users:
+            continue
+        if blocked_topics and topic_lower in blocked_topics:
             continue
         if tag_lower and tag_lower not in allowed_tags:
             continue
@@ -695,6 +718,7 @@ def _load_following_candidates(
     blocked_users: set[str],
     allowed_tags: set[str],
     max_candidates: int,
+    blocked_topics: set[str] = None,
 ) -> tuple[list[dict], set[str], set[str]]:
     """
     Load candidate posts for the following feed.
@@ -749,7 +773,7 @@ def _load_following_candidates(
     seen: set[str] = set()
     candidates: list[dict] = []
     for row in cur.fetchall():
-        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
         if post:
             post["_source"] = "following"
             candidates.append(post)
@@ -766,6 +790,7 @@ def _get_following_feed(
     blocked_users: set[str],
     allowed_tags: set[str],
     sort_mode: str = "magic",
+    blocked_topics: set[str] = None,
 ) -> dict:
     """
     Following feed:
@@ -777,7 +802,7 @@ def _get_following_feed(
     viewer_lower = viewer.strip().lower() if viewer else ""
 
     if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
 
     sort_mode = (sort_mode or "magic").strip().lower()
     if sort_mode not in ("magic", "newest"):
@@ -785,7 +810,7 @@ def _get_following_feed(
 
     max_candidates = limit * page * 4
     candidates, followed_topics, followed_users = _load_following_candidates(
-        cur, viewer_lower, blocked_posts, blocked_users, allowed_tags, max_candidates
+        cur, viewer_lower, blocked_posts, blocked_users, allowed_tags, max_candidates, blocked_topics=blocked_topics
     )
 
     if not candidates:
@@ -936,6 +961,7 @@ def _get_home_feed(
     allowed_tags: set[str],
     seed: int = 0,
     sort_mode: str = "magic",
+    blocked_topics: set[str] = None,
 ) -> dict:
     """
     Home feed.
@@ -951,11 +977,11 @@ def _get_home_feed(
 
     # Newest: fast chronological path (no scoring overhead)
     if sort_mode == "newest":
-        return _get_home_feed_newest(cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags)
+        return _get_home_feed_newest(cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
 
     # Guest users: magic-style scoring without personalization
     if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags)
+        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
 
     # Logged-in users: Magic (unified score).
     return _get_home_feed_magic(
@@ -966,6 +992,7 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
+        blocked_topics=blocked_topics,
     )
 
 
@@ -977,6 +1004,7 @@ def _get_home_feed_newest(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    blocked_topics: set[str] = None,
 ) -> dict:
     """
     Fast chronological feed — no scoring, no similarity, no preferences.
@@ -1006,7 +1034,7 @@ def _get_home_feed_newest(
     seen: set[str] = set()
     posts = []
     for row in cur.fetchall():
-        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
         if post:
             posts.append(post)
 
@@ -1054,6 +1082,7 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    blocked_topics: set[str] = None,
 ) -> dict:
     """
     Magic feed algorithm.
@@ -1083,7 +1112,7 @@ def _get_home_feed_magic(
     # 3. Load candidate posts (small targeted pool + random exploration)
     per_source = limit * page * 4  # ~60 per source for page 1
     candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, per_source
+        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, per_source, blocked_topics=blocked_topics
     )
 
     if not candidates:
@@ -1353,6 +1382,7 @@ def _load_home_candidates(
     blocked_users: set[str],
     allowed_tags: set[str],
     max_posts: int,
+    blocked_topics: set[str] = None,
 ) -> list[dict]:
     """
     Load candidate posts for home feed from multiple sources:
@@ -1386,7 +1416,7 @@ def _load_home_candidates(
             similar_list + [max_posts],
         )
         for row in cur.fetchall():
-            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
             if post:
                 post["_source"] = "similar_author"
                 results.append(post)
@@ -1409,7 +1439,7 @@ def _load_home_candidates(
             similar_list + [max_posts],
         )
         for row in cur.fetchall():
-            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
             if post:
                 post["_source"] = "similar_upvoted"
                 results.append(post)
@@ -1425,7 +1455,7 @@ def _load_home_candidates(
         [max_posts],
     )
     for row in cur.fetchall():
-        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
         if post:
             post["_source"] = "recent"
             results.append(post)
@@ -1449,7 +1479,7 @@ def _load_home_candidates(
         [explore_limit],
     )
     for row in cur.fetchall():
-        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+        post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
         if post:
             post["_source"] = "explore"
             results.append(post)
@@ -1457,7 +1487,7 @@ def _load_home_candidates(
     return results
 
 
-def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict | None:
+def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics=None) -> dict | None:
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
 
@@ -1501,6 +1531,9 @@ def _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen) -> dict 
     author = (owner or "").lower()
 
     if pid in seen or pid in blocked_posts or author in blocked_users:
+        return None
+    topic_lower = (topic or "").strip().lower()
+    if blocked_topics and topic_lower in blocked_topics:
         return None
     if (tag or "").strip() and (tag or "").lower() not in allowed_tags:
         return None
@@ -1570,10 +1603,11 @@ def _get_guest_feed(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    blocked_topics: set[str] = None,
 ) -> dict:
     """Simple chronological feed for guest users."""
     max_candidates = limit * page * 2
-    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags)
+    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -1617,6 +1651,7 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    blocked_topics: set[str] = None,
 ) -> dict:
     """
     Guest home feed, Magic-style:
@@ -1626,7 +1661,7 @@ def _get_guest_feed_magic(
     import time
 
     max_candidates = limit * page * 4
-    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags)
+    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -2077,7 +2112,7 @@ def get_user_followed():
 
 @public_bp.route("/api/get_user_blocked")
 def get_user_blocked():
-    """Get user's block lists (posts, users)."""
+    """Get user's block lists (posts, users, topics)."""
     rid = next_request_id()
     addr = request.args.get("address", default=None, type=str)
     log_event(rid, "get_user_blocked.begin", address=addr)
@@ -2087,6 +2122,7 @@ def get_user_blocked():
 
         blocked_posts = []
         blocked_users = []
+        blocked_topics = []
 
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
@@ -2097,6 +2133,9 @@ def get_user_blocked():
             # Blocked users
             cur.execute("SELECT target FROM blocked_users WHERE LOWER(owner)=LOWER(%s)", (addr,))
             blocked_users = [row[0] for row in cur.fetchall()]
+            # Blocked topics
+            cur.execute("SELECT target FROM blocked_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
+            blocked_topics = [row[0] for row in cur.fetchall()]
             conn.close()
         except Exception:
             pass
@@ -2104,6 +2143,7 @@ def get_user_blocked():
         resp = {
             "blocked_posts": blocked_posts,
             "blocked_users": blocked_users,
+            "blocked_topics": blocked_topics,
         }
         log_event(rid, "get_user_blocked.ok", posts=len(blocked_posts), users=len(blocked_users))
         return jsonify(_inject_balance(resp, addr))
@@ -2973,9 +3013,15 @@ def get_topics():
             )
             small_topics_count = cur.fetchone()[0] or 0
 
+        # Filter out blocked topics for the viewer
+        viewer_addr = request.args.get("address", default="", type=str)
+        viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
+
         topics_dict = {}
         for row in rows:
             if row[0] and row[1] and row[1] > 0:
+                if viewer_blocked_topics and (row[0] or "").strip().lower() in viewer_blocked_topics:
+                    continue
                 topics_dict[row[0]] = {"topic": row[0], "post_count": row[1], "count": row[1], "comment_count": 0}
 
         if topics_dict:
@@ -3081,14 +3127,21 @@ def search_topics():
         )
 
         rows = cur.fetchall()
+
+        # Filter out blocked topics for the viewer
+        viewer_addr = request.args.get("address", default="", type=str)
+        viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
+
         topics = []
-        topic_list = [row[0] for row in rows]
+        topic_list = [row[0] for row in rows if not (viewer_blocked_topics and (row[0] or "").lower() in viewer_blocked_topics)]
 
         # Compute live dominant flags from posts to avoid stale stats
         stats = _compute_dominant_flags(cur, topic_list)
 
         for row in rows:
             topic = row[0]
+            if viewer_blocked_topics and (topic or "").lower() in viewer_blocked_topics:
+                continue
             post_count = int(row[1] or 0)
             stat = stats.get(topic, {}) if stats else {}
             dominant_tag = str(stat.get("dominant_tag") or "").lower()
@@ -3166,6 +3219,7 @@ def search():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, viewer) if viewer else set()
         blocked_users = _get_blocked_users(cur, viewer) if viewer else set()
+        blocked_topics = _get_blocked_topics(cur, viewer) if viewer else set()
         deleted_clause = _deleted_filter()
         deleted_bare = _deleted_filter_bare()
 
@@ -3246,7 +3300,7 @@ def search():
                     (first_user_addr,),
                 )
                 post_rows = cur.fetchall()
-                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare)
+                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics)
                 result["posts"] = posts
 
         # ========== TOPIC SEARCH (#topic) ==========
@@ -3430,7 +3484,7 @@ def search():
                 has_more_posts = len(post_rows) > limit
                 post_rows = post_rows[:limit]
 
-                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare)
+                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics)
                 result["posts"] = posts
                 result["has_more_posts"] = has_more_posts
 
@@ -3440,14 +3494,17 @@ def search():
         return safe_error(e)
 
 
-def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, deleted_bare):
+def _format_search_posts(cur, rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics=None):
     """Format post rows for search results with vote counts."""
-    # Filter blocked posts and users
+    # Filter blocked posts, users, and topics
     filtered = []
     for r in rows:
         txhash = (r[0] or "").lower()
         owner = (r[1] or "").lower()
+        topic = (r[3] or "").strip().lower() if len(r) > 3 else ""
         if txhash in blocked_posts or owner in blocked_users:
+            continue
+        if blocked_topics and topic in blocked_topics:
             continue
         filtered.append(r)
 
@@ -3594,6 +3651,7 @@ def get_posts():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
+        blocked_topics = _get_blocked_topics(cur, address)
 
         deleted_clause = _deleted_filter()
 
@@ -3633,6 +3691,7 @@ def get_posts():
                     allowed_tags=allowed_tags,
                     seed=int(time.time() // 60),
                     sort_mode=sort_mode,
+                    blocked_topics=blocked_topics,
                 )
             else:
                 resp = _get_following_feed(
@@ -3644,6 +3703,7 @@ def get_posts():
                     blocked_users=blocked_users,
                     allowed_tags=allowed_tags,
                     sort_mode=sort_mode,
+                    blocked_topics=blocked_topics,
                 )
 
             conn.close()
@@ -3738,6 +3798,7 @@ def get_posts():
             for r in rows
             if (r[0] or "").lower() not in blocked_posts
             and (r[1] or "").lower() not in blocked_users
+            and (r[3] or "").strip().lower() not in blocked_topics
             and _tag_allowed(r[6] if len(r) > 6 else "")
         ]
         post_ids = [r[0].lower() for r in rows]
@@ -3821,7 +3882,7 @@ def get_posts():
         seen: set[str] = set()
         candidates: list[dict] = []
         for row in rows:
-            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen)
+            post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
             if not post:
                 continue
             post["_source"] = "topic" if (topic and topic != "all") else "all"
@@ -3953,6 +4014,7 @@ def get_user_posts():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, viewer)
         blocked_users = _get_blocked_users(cur, viewer)
+        blocked_topics = _get_blocked_topics(cur, viewer)
 
         deleted_clause = _deleted_filter()
 
@@ -3984,7 +4046,11 @@ def get_user_posts():
         )
         rows = cur.fetchall()
         rows = [
-            r for r in rows if (r[0] or "").lower() not in blocked_posts and (r[1] or "").lower() not in blocked_users
+            r
+            for r in rows
+            if (r[0] or "").lower() not in blocked_posts
+            and (r[1] or "").lower() not in blocked_users
+            and (r[3] or "").strip().lower() not in blocked_topics
         ]
         post_ids = [r[0].lower() for r in rows]
         vote_totals: Dict[str, int] = {}
@@ -4235,6 +4301,7 @@ def _fetch_post(
     blocked_posts: set[str] = None,
     blocked_users: set[str] = None,
     use_stored_counts: bool = False,
+    blocked_topics: set[str] = None,
 ):
     """Fetch a single post with aggregates.
 
@@ -4304,6 +4371,10 @@ def _fetch_post(
     if owner in blocked_users:
         return None
 
+    # Filter if post topic is blocked
+    if blocked_topics and (topic_val or "").strip().lower() in blocked_topics:
+        return None
+
     # Filter votes from blocked users; use user_weight for points
     if blocked_users:
         blocked_placeholders = ",".join(["%s"] * len(blocked_users))
@@ -4370,6 +4441,7 @@ def _fetch_comment_tree_batch(
     blocked_posts: set[str],
     blocked_users: set[str],
     max_depth: int = 6,
+    blocked_topics: set[str] = None,
 ) -> tuple[dict | None, list[dict]]:
     """
     Fetch root post and entire comment subtree in batch queries.
@@ -4462,8 +4534,9 @@ def _fetch_comment_tree_batch(
         except Exception:
             media_val = []
 
-        # Skip if this post or its owner is blocked
-        if pid in blocked_posts or owner in blocked_users:
+        # Skip if this post or its owner is blocked, or topic is blocked
+        topic_lower = (row[3] or "").strip().lower()
+        if pid in blocked_posts or owner in blocked_users or (blocked_topics and topic_lower in blocked_topics):
             blocked_ids.add(pid)
             continue
 
@@ -4631,10 +4704,11 @@ def get_comments():
         t_blocked = time.time()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
+        blocked_topics = _get_blocked_topics(cur, address)
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
-        root, children = _fetch_comment_tree_batch(cur, post_id, blocked_posts, blocked_users, max_depth=6)
+        root, children = _fetch_comment_tree_batch(cur, post_id, blocked_posts, blocked_users, max_depth=6, blocked_topics=blocked_topics)
         t_tree_ms = (time.time() - t_tree) * 1000
 
         if not root:
@@ -4822,6 +4896,7 @@ def get_comment_context():
         cur = conn.cursor()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
+        blocked_topics_set = _get_blocked_topics(cur, address)
         chain = _fetch_parent_chain(cur, comment_id, max_depth, blocked_posts, blocked_users)
         conn.close()
         resp = {"context": chain, "comment_id": comment_id}
@@ -4858,6 +4933,7 @@ def get_inbox():
         t_blocked = time.time()
         blocked_posts = _get_blocked_posts(cur, address)
         blocked_users = _get_blocked_users(cur, address)
+        blocked_topics = _get_blocked_topics(cur, address)
         logger.info(
             f"[get_inbox] Blocked query: {(time.time() - t_blocked)*1000:.1f}ms, posts={len(blocked_posts)}, users={len(blocked_users)}"
         )
@@ -4893,7 +4969,8 @@ def get_inbox():
                         CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
                     ) as root_post_id,
                     COALESCE(pr.level, 0) as actor_level,
-                    'reply' as item_type
+                    'reply' as item_type,
+                    COALESCE(r.root_topic, r.topic, '') as item_topic
                 FROM posts r
                 INNER JOIN posts p ON p.txhash = r.target
                 LEFT JOIN profiles pr ON pr.owner = r.owner
@@ -4926,7 +5003,8 @@ def get_inbox():
                     COALESCE(mpr.username, '') as actor_username,
                     COALESCE(mp.root_post_id, mp.txhash) as root_post_id,
                     COALESCE(mpr.level, 0) as actor_level,
-                    'mention' as item_type
+                    'mention' as item_type,
+                    COALESCE(mp.root_topic, mp.topic, '') as item_topic
                 FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
@@ -4979,10 +5057,13 @@ def get_inbox():
             root_post_id = (row[10] or "").lower()
             actor_level = int(row[11]) if row[11] else 0
             item_type = row[12] or "reply"
+            item_topic = (row[13] or "").strip().lower() if len(row) > 13 else ""
 
             if item_id in blocked_posts or actor_owner in blocked_users:
                 continue
             if context_id in blocked_posts or context_owner in blocked_users:
+                continue
+            if blocked_topics and item_topic in blocked_topics:
                 continue
             if not root_post_id:
                 continue

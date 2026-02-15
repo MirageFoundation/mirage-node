@@ -320,10 +320,10 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_owner_lower ON blocked_users(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_target_lower ON blocked_users(LOWER(target))")
 
-                # quality_posts (for v1.5)
+                # blocked_topics (with position for order)
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS quality_posts (
+                    CREATE TABLE IF NOT EXISTS blocked_topics (
                         owner TEXT NOT NULL,
                         target TEXT NOT NULL,
                         position INTEGER NOT NULL DEFAULT 0,
@@ -331,8 +331,8 @@ class DatabaseManager:
                     )
                     """
                 )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_quality_posts_owner_lower ON quality_posts(LOWER(owner))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_quality_posts_target_lower ON quality_posts(LOWER(target))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_owner_lower ON blocked_topics(LOWER(owner))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))")
 
                 # reports
                 cur.execute(
@@ -1676,6 +1676,33 @@ class DatabaseManager:
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM blocked_users WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
+                    (owner, target),
+                )
+
+    def block_topic(self, owner: str, target: str) -> None:
+        """Block a topic (add to blocked_topics with next position)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM blocked_topics WHERE LOWER(owner) = LOWER(%s)",
+                    (owner,),
+                )
+                pos = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    INSERT INTO blocked_topics(owner, target, position)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(owner, target) DO NOTHING
+                    """,
+                    (owner, target, pos),
+                )
+
+    def unblock_topic(self, owner: str, target: str) -> None:
+        """Unblock a topic (remove from blocked_topics)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM blocked_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
                     (owner, target),
                 )
 

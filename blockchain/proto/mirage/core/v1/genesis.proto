@@ -32,7 +32,7 @@ message InitialProfile {
   repeated string followed_topics = 4;
   repeated string blocked_users = 5;
   repeated string blocked_posts = 6;
-  repeated string quality_posts = 7;
+  repeated string blocked_topics = 7;
 }
 
 // RawKVPair stores a single key-value pair from the KV store for generic export/import.

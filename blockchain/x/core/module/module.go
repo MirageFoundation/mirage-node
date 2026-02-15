@@ -425,8 +425,8 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		if len(ip.BlockedPosts) > 0 {
 			_ = am.k.SetProfileBlockedPosts(sdkCtx, owner, ip.BlockedPosts)
 		}
-		if len(ip.QualityPosts) > 0 {
-			_ = am.k.SetProfileQualityPosts(sdkCtx, owner, ip.QualityPosts)
+		if len(ip.BlockedTopics) > 0 {
+			_ = am.k.SetProfileBlockedTopics(sdkCtx, owner, ip.BlockedTopics)
 		}
 	}
 }
@@ -824,7 +824,7 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 		FollowedTopics:     profile.FollowedTopics,
 		BlockedUsers:       profile.BlockedUsers,
 		BlockedPosts:       profile.BlockedPosts,
-		QualityPosts:       profile.QualityPosts,
+		BlockedTopics:      profile.BlockedTopics,
 	}, nil
 }
 
@@ -860,7 +860,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, core.Owner)
 		blockedUsers, _ := am.k.GetProfileBlockedUsers(sdkCtx, core.Owner)
 		blockedPosts, _ := am.k.GetProfileBlockedPosts(sdkCtx, core.Owner)
-		qualityPosts, _ := am.k.GetProfileQualityPosts(sdkCtx, core.Owner)
+		blockedTopics, _ := am.k.GetProfileBlockedTopics(sdkCtx, core.Owner)
 
 		profiles = append(profiles, &types.QueryProfileResponse{
 			Owner:              core.Owner,
@@ -879,7 +879,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			FollowedTopics:     topics,
 			BlockedUsers:       blockedUsers,
 			BlockedPosts:       blockedPosts,
-			QualityPosts:       qualityPosts,
+			BlockedTopics:      blockedTopics,
 		})
 	}
 
@@ -1345,8 +1345,8 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	if posts, err := am.k.GetProfileBlockedPosts(sdkCtx, owner); err == nil {
 		prof.BlockedPosts = posts
 	}
-	if quality, err := am.k.GetProfileQualityPosts(sdkCtx, owner); err == nil {
-		prof.QualityPosts = quality
+	if blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner); err == nil {
+		prof.BlockedTopics = blockedTopics
 	}
 
 	return prof, true, nil
@@ -1846,6 +1846,117 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	}
 
 	return &types.MsgUnblockUserResponse{}, nil
+}
+
+// BlockTopic blocks a topic (persisted on-chain, tier-limited)
+func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	var userLevel int
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+			var core types.ProfileCore
+			_ = json.Unmarshal(bz, &core)
+			userLevel = int(core.Level)
+		}
+	}
+
+	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
+	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	tierConfig := params.GetTierConfig(userLevel)
+	maxTopics := uint64(10)
+	if tierConfig != nil {
+		maxTopics = tierConfig.MaxBlockedTopics
+	}
+
+	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	for _, t := range topics {
+		if t == topic {
+			return &types.MsgBlockTopicResponse{}, nil
+		}
+	}
+	topics = append(topics, topic)
+	if uint64(len(topics)) > maxTopics {
+		topics = topics[len(topics)-int(maxTopics):]
+	}
+	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, topics); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info("BlockTopic", "owner", owner, "topic", topic)
+
+	if owner != "" && authority != govAuthority {
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	return &types.MsgBlockTopicResponse{}, nil
+}
+
+// UnblockTopic unblocks a topic (persisted on-chain)
+func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	var userLevel int
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+			var core types.ProfileCore
+			_ = json.Unmarshal(bz, &core)
+			userLevel = int(core.Level)
+		}
+	}
+
+	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
+	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	newTopics := make([]string, 0, len(topics))
+	for _, t := range topics {
+		if t != topic {
+			newTopics = append(newTopics, t)
+		}
+	}
+	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newTopics); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info("UnblockTopic", "owner", owner, "topic", topic)
+
+	if owner != "" && authority != govAuthority {
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	return &types.MsgUnblockTopicResponse{}, nil
 }
 
 // FollowUser follows a user (adds to followed users list, capped deque)

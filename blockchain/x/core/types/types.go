@@ -29,7 +29,7 @@ type Profile struct {
 	FollowedTopics     []string `json:"followed_topics"`
 	BlockedUsers       []string `json:"blocked_users"`
 	BlockedPosts       []string `json:"blocked_posts"`
-	QualityPosts       []string `json:"quality_posts"`
+	BlockedTopics      []string `json:"blocked_topics"`
 
 	// Profile customization
 	Biography string `json:"biography"`
@@ -73,7 +73,7 @@ func (c *ProfileCore) ToProfile() Profile {
 		FollowedTopics:     []string{},
 		BlockedUsers:       []string{},
 		BlockedPosts:       []string{},
-		QualityPosts:       []string{},
+		BlockedTopics:      []string{},
 	}
 }
 

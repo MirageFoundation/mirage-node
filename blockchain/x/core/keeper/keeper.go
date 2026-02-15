@@ -63,8 +63,8 @@ func (k Keeper) profileBlockedUsersKey(addr string) []byte {
 func (k Keeper) profileBlockedPostsKey(addr string) []byte {
 	return []byte(types.ProfileBlockedPostsPrefix + addr)
 }
-func (k Keeper) profileQualityPostsKey(addr string) []byte {
-	return []byte(types.ProfileQualityPostsPrefix + addr)
+func (k Keeper) profileBlockedTopicsKey(addr string) []byte {
+	return []byte(types.ProfileBlockedTopicsPrefix + addr)
 }
 
 // SetProfileCore stores only the core profile data (scalars, no lists)
@@ -238,32 +238,32 @@ func (k Keeper) GetProfileBlockedPosts(ctx sdk.Context, addr string) ([]string, 
 	return posts, nil
 }
 
-func (k Keeper) SetProfileQualityPosts(ctx sdk.Context, addr string, posts []string) error {
+func (k Keeper) SetProfileBlockedTopics(ctx sdk.Context, addr string, topics []string) error {
 	store := k.storeService.OpenKVStore(ctx)
-	if len(posts) == 0 {
-		return store.Delete(k.profileQualityPostsKey(addr))
+	if len(topics) == 0 {
+		return store.Delete(k.profileBlockedTopicsKey(addr))
 	}
-	bz, err := json.Marshal(posts)
+	bz, err := json.Marshal(topics)
 	if err != nil {
 		return err
 	}
-	return store.Set(k.profileQualityPostsKey(addr), bz)
+	return store.Set(k.profileBlockedTopicsKey(addr), bz)
 }
 
-func (k Keeper) GetProfileQualityPosts(ctx sdk.Context, addr string) ([]string, error) {
+func (k Keeper) GetProfileBlockedTopics(ctx sdk.Context, addr string) ([]string, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	bz, err := store.Get(k.profileQualityPostsKey(addr))
+	bz, err := store.Get(k.profileBlockedTopicsKey(addr))
 	if err != nil {
 		return nil, err
 	}
 	if len(bz) == 0 {
 		return []string{}, nil
 	}
-	var posts []string
-	if err := json.Unmarshal(bz, &posts); err != nil {
+	var topics []string
+	if err := json.Unmarshal(bz, &topics); err != nil {
 		return nil, err
 	}
-	return posts, nil
+	return topics, nil
 }
 
 // GetAllProfiles returns all profiles from the store

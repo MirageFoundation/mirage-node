@@ -655,6 +655,109 @@ class TransactionHandler {
         }
     }
 
+    async blockTopic(topic) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const topicTrimmed = String(topic || "").trim().toLowerCase();
+            if (!topicTrimmed) return { success: false, error: "empty topic" };
+
+            // Check if topic is already blocked
+            try {
+                const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
+                const blockedTopics = (blocked?.blocked_topics || []).map(t => String(t).toLowerCase());
+                if (blockedTopics.includes(topicTrimmed)) {
+                    return { success: false, error: "topic is already blocked" };
+                }
+            } catch (_) { }
+
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            if (userLevel === 0) {
+                updateNotification("Blocking topic");
+                const [statusData] = await Promise.all([
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
+                ]);
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
+                try {
+                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
+                } catch (_) { }
+            }
+
+            const tx = {
+                action: 'block_topic',
+                topic: topicTrimmed,
+                target: "",
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
+    async unblockTopic(topic) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const topicTrimmed = String(topic || "").trim().toLowerCase();
+            if (!topicTrimmed) return { success: false, error: "empty topic" };
+
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            if (userLevel === 0) {
+                updateNotification("Unblocking topic");
+                const [statusData] = await Promise.all([
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
+                ]);
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
+            }
+
+            const tx = {
+                action: 'unblock_topic',
+                topic: topicTrimmed,
+                target: "",
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits,
+                pow_factor,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
     followUser(userAddress) {
         const publicKey = Storage.load("publicKey", "");
         const seedPhrase = seedVault.getSeed() || "";
@@ -2566,6 +2669,114 @@ class TransactionHandler {
         );
     }
 
+    // Build canonical bytes for MsgBlockTopic
+    canonicalBlockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]); // topic
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            tag101, encStr(topic || ""),
+        );
+    }
+
+    // Build canonical bytes for MsgUnblockTopic
+    canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]); // topic
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            tag101, encStr(topic || ""),
+        );
+    }
+
     // Build canonical bytes for MsgDelete (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
     canonicalDelete({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
@@ -2714,6 +2925,8 @@ class TransactionHandler {
             else if (action === 'unblock_post') msgName = 'MsgUnblockPost';
             else if (action === 'block_user') msgName = 'MsgBlockUser';
             else if (action === 'unblock_user') msgName = 'MsgUnblockUser';
+            else if (action === 'block_topic') msgName = 'MsgBlockTopic';
+            else if (action === 'unblock_topic') msgName = 'MsgUnblockTopic';
             else if (action === 'delete_post') msgName = 'MsgDelete';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
             else if (action === 'set_username') msgName = 'MsgSetUsername';
@@ -3054,6 +3267,56 @@ class TransactionHandler {
                     pow: Number(proof),
                 };
                 endpoint = 'core/unblock_user';
+            } else if (msgName === 'MsgBlockTopic') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const canon = this.canonicalBlockTopic({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    topic: transaction.topic || "",
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/block_topic';
+            } else if (msgName === 'MsgUnblockTopic') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const canon = this.canonicalUnblockTopic({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    topic: transaction.topic || "",
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/unblock_topic';
             } else if (msgName === 'MsgDelete') {
                 // Sign relay for delete post (must match chain ante)
                 const difficulty = resolveTxDifficulty(transaction);
@@ -4116,6 +4379,38 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     tag100, encStr(transaction.target || ""),
                 );
+            } else if (action === 'block_topic') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.topic || ""),
+                );
+            } else if (action === 'unblock_topic') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.topic || ""),
+                );
             } else if (action === 'delete_post') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgDelete\x00");
                 const tag2 = Uint8Array.from([2]);
@@ -4217,7 +4512,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, delete_post, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

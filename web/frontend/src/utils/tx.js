@@ -157,6 +157,16 @@ export async function blockPost(txhash, block = true) {
     return h.blockPost(txhash, block);
 }
 
+export async function blockTopic(topic) {
+    const h = await getHandler();
+    return h.blockTopic(topic);
+}
+
+export async function unblockTopic(topic) {
+    const h = await getHandler();
+    return h.unblockTopic(topic);
+}
+
 export async function reportPost(txhash, reason) {
     const h = await getHandler();
     return h.reportPost(txhash, reason);

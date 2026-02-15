@@ -924,6 +924,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [shareCopied, setShareCopied] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
+    const [confirmBlockTopic, setConfirmBlockTopic] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
@@ -1345,6 +1346,42 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const cancelBlockUser = () => {
         setConfirmBlockUser(false);
+    };
+
+    const handleBlockTopic = () => {
+        setMenuOpen(false);
+        const topicName = (post?.topic || "").trim().toLowerCase();
+        if (!topicName) return;
+        // Close any open confirmation dialogs
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
+        setConfirmBlockTopic(true);
+    };
+
+    const confirmBlockTopicAction = async () => {
+        const topicName = (post?.topic || "").trim().toLowerCase();
+        if (!topicName) return;
+        setConfirmBlockTopic(false);
+        try {
+            const result = await tx.blockTopic(topicName);
+            if (result.success) {
+                if (updatePost) {
+                    updatePost(post.post_id, { blocked: true });
+                }
+            } else {
+                alert(`Failed to block topic: ${result.error || 'Unknown error'}`);
+            }
+        } catch (err) {
+            alert(`Error blocking topic: ${err.message || 'Unknown error'}`);
+        }
+    };
+
+    const cancelBlockTopic = () => {
+        setConfirmBlockTopic(false);
     };
 
     const handleFollowUser = async () => {
@@ -2047,6 +2084,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
+                                            {post?.topic && <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockTopic(); }} data-danger="true">Block topic</MenuItem>}
                                         </>
                                     )}
                                     {!isOwnPost && isAdmin && (
@@ -2164,6 +2202,19 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         Block
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelBlockUser}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {confirmBlockTopic && (
+                        <BlockConfirmMessage>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block #{(post?.topic || '').trim().toLowerCase()}?</span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction}>
+                                        Block
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelBlockTopic}>Cancel</Button>
                                 </ConfirmButtons>
                             </div>
                         </BlockConfirmMessage>

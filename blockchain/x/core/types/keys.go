@@ -31,7 +31,7 @@ const (
 	ProfileFollowedTopicsPrefix = "plist_topics/"  // address -> JSON array of topic strings
 	ProfileBlockedUsersPrefix   = "plist_blocked/" // address -> JSON array of blocked user addresses
 	ProfileBlockedPostsPrefix   = "plist_bposts/"  // address -> JSON array of blocked post txhashes
-	ProfileQualityPostsPrefix   = "plist_quality/" // address -> JSON array of quality post txhashes
+	ProfileBlockedTopicsPrefix  = "plist_btopics/" // address -> JSON array of blocked topic strings
 
 	// MintDenom is the base denom used for minting and burning
 	MintDenom = "umirage"
