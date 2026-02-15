@@ -2,15 +2,6 @@ import React from "react";
 import styled from "styled-components";
 import InlineMedia from "./InlineMedia";
 
-function isImageUrl(url) {
-    try {
-        const u = new URL(url);
-        const host = u.hostname.toLowerCase();
-        const p = u.pathname.toLowerCase();
-        return host.endsWith('imagedelivery.net') || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(p);
-    } catch (_) { return false; }
-}
-
 /* ── styled ─────────────────────────────────────────────── */
 
 const NavBar = styled.div`
@@ -47,6 +38,11 @@ const ArrowBtn = styled.button`
     }
 `;
 
+// Hidden items: invisible, 0 height (no layout impact), but still
+// laid out horizontally so InlineMedia can measure parent width and
+// the browser fetches <img> src for real preloading.
+const HIDDEN_STYLE = { visibility: 'hidden', height: 0, overflow: 'hidden' };
+
 /* ── component ──────────────────────────────────────────── */
 
 export default function MediaGallery({ items, variant, autoPlay = false }) {
@@ -56,11 +52,6 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
     );
     const [index, setIndex] = React.useState(0);
     const touchStartXRef = React.useRef(null);
-    const scrollYRef = React.useRef(0);
-
-    // Track which items have been visited so we mount them lazily
-    // but never unmount them (preserving resize state).
-    const [mounted, setMounted] = React.useState(() => new Set([0]));
 
     const isMobile = React.useMemo(() => {
         try {
@@ -70,53 +61,18 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
         } catch (_) { return false; }
     }, []);
 
-    // Preload all image URLs so navigation is instant
-    React.useEffect(() => {
-        urls.forEach(url => {
-            if (!isImageUrl(url)) return;
-            const img = new Image();
-            img.src = url;
-        });
-    }, [urls]);
-
     React.useEffect(() => {
         if (index >= urls.length) setIndex(0);
     }, [urls.length, index]);
-
-    // Restore scroll position after index change to prevent viewport jump.
-    // A single restore isn't enough for new images: InlineMedia re-renders
-    // when onLoad fires and dimensions are computed, shifting layout again.
-    // A short-lived ResizeObserver catches every resize and keeps restoring.
-    const containerRef = React.useRef(null);
-
-    React.useLayoutEffect(() => {
-        window.scrollTo(0, scrollYRef.current);
-
-        const el = containerRef.current;
-        if (!el) return;
-        const savedY = scrollYRef.current;
-        const ro = new ResizeObserver(() => {
-            window.scrollTo(0, savedY);
-        });
-        ro.observe(el);
-
-        const timer = setTimeout(() => ro.disconnect(), 600);
-        return () => { clearTimeout(timer); ro.disconnect(); };
-    }, [index]);
 
     if (!urls.length) return null;
     if (urls.length === 1) {
         return <InlineMedia url={urls[0]} variant={variant} autoPlay={autoPlay} />;
     }
 
-    /* ── wrapping navigation (saves scroll before state change) ── */
-    const navigate = (newIndex) => {
-        scrollYRef.current = window.scrollY;
-        setMounted(prev => { const n = new Set(prev); n.add(newIndex); return n; });
-        setIndex(newIndex);
-    };
-    const goPrev = () => navigate(index <= 0 ? urls.length - 1 : index - 1);
-    const goNext = () => navigate(index >= urls.length - 1 ? 0 : index + 1);
+    /* ── navigation ── */
+    const goPrev = () => setIndex(prev => (prev <= 0 ? urls.length - 1 : prev - 1));
+    const goNext = () => setIndex(prev => (prev >= urls.length - 1 ? 0 : prev + 1));
 
     const handleTouchStart = (e) => {
         if (!isMobile) return;
@@ -138,21 +94,18 @@ export default function MediaGallery({ items, variant, autoPlay = false }) {
     };
 
     return (
-        <div ref={containerRef} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+        <div onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <NavBar>
                 <span>Gallery:</span>
                 <ArrowBtn type="button" onClick={goPrev} aria-label="Previous media">&#8592;</ArrowBtn>
                 <span>{index + 1} of {urls.length}</span>
                 <ArrowBtn type="button" onClick={goNext} aria-label="Next media">&#8594;</ArrowBtn>
             </NavBar>
-            {urls.map((url, i) => {
-                if (!mounted.has(i)) return null;
-                return (
-                    <div key={url} style={i === index ? undefined : { display: 'none' }}>
-                        <InlineMedia url={url} variant={variant} autoPlay={i === index && autoPlay} />
-                    </div>
-                );
-            })}
+            {urls.map((url, i) => (
+                <div key={url} style={i === index ? undefined : HIDDEN_STYLE}>
+                    <InlineMedia url={url} variant={variant} autoPlay={i === index && autoPlay} />
+                </div>
+            ))}
         </div>
     );
 }
