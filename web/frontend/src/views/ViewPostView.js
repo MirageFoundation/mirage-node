@@ -3565,6 +3565,7 @@ function ViewPostView({ state, updatePost }) {
             if (sp.root_topic !== undefined) out.root_topic = sp.root_topic;
             if (sp.tag !== undefined) out.tag = sp.tag;
             if (sp.content !== undefined) out.content = sp.content;
+            if (sp.media !== undefined) out.media = sp.media;
             if (sp.edited !== undefined) out.edited = sp.edited;
             if (sp.edited_ts !== undefined) out.edited_ts = sp.edited_ts;
             return out;
