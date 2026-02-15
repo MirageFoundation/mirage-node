@@ -110,30 +110,31 @@ def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
         failures.append(f"cannot fetch core params: {e}")
         return
 
-    # pow_factor must exist and be a float in (0, 1]
-    step = params.get("pow_factor")
+    # pow_difficulty_step must exist and be a float in (0, 1]
+    # (Python datatypes call this pow_factor, but miraged JSON uses the proto name)
+    step = params.get("pow_difficulty_step")
     if step is not None:
         try:
             fstep = float(step)
             if 0 < fstep <= 1:
-                print(f"   [OK] pow_factor = {fstep}")
+                print(f"   [OK] pow_difficulty_step = {fstep}")
             else:
-                print(f"   [FAIL] pow_factor = {fstep} (must be in (0, 1])")
-                failures.append(f"pow_factor out of range: {fstep}")
+                print(f"   [FAIL] pow_difficulty_step = {fstep} (must be in (0, 1])")
+                failures.append(f"pow_difficulty_step out of range: {fstep}")
         except (ValueError, TypeError):
-            print(f"   [FAIL] pow_factor not a valid float: {step!r}")
-            failures.append(f"pow_factor invalid: {step!r}")
+            print(f"   [FAIL] pow_difficulty_step not a valid float: {step!r}")
+            failures.append(f"pow_difficulty_step invalid: {step!r}")
     else:
-        print("   [FAIL] pow_factor missing from params")
-        failures.append("pow_factor missing")
+        print("   [FAIL] pow_difficulty_step missing from params")
+        failures.append("pow_difficulty_step missing")
 
-    # subscription tiers should be present
-    tiers = params.get("subscription_tiers")
+    # tiers should be present (Python datatypes call these subscription_tiers)
+    tiers = params.get("tiers")
     if tiers and len(tiers) >= 3:
-        print(f"   [OK] subscription_tiers = {len(tiers)} tiers")
+        print(f"   [OK] tiers = {len(tiers)} tiers")
     else:
-        print(f"   [FAIL] subscription_tiers missing or incomplete")
-        failures.append("subscription_tiers missing or incomplete")
+        print(f"   [FAIL] tiers missing or incomplete")
+        failures.append("tiers missing or incomplete")
 
 
 def check_source_level(failures: list[str]) -> None:
