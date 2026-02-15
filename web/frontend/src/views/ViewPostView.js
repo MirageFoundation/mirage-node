@@ -1244,7 +1244,7 @@ function ViewPostView({ state, updatePost }) {
 
         // Fetch chain config if not cached (e.g. first visit after login)
         if (!localStorage.getItem('chainConfig')) {
-            Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+            Api.get('get_chain_config', undefined)
                 .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
                 .catch(() => { });
         }
@@ -2143,7 +2143,7 @@ function ViewPostView({ state, updatePost }) {
                         try {
                             const result = await tx.pollTxStatus(txHash);
                             if (result && result.success && result.indexed) {
-                                const data = await Api.get('get_comments', { post_id: postId, address: viewerAddress }, { timeoutMs: 10000 });
+                                const data = await Api.get('get_comments', { post_id: postId, address: viewerAddress });
                                 if (data) {
                                     setRoot(data.root);
                                     setChildren(data.children);
@@ -2339,7 +2339,7 @@ function ViewPostView({ state, updatePost }) {
 
         if (post_id) {
             const viewerAddress = Storage.load("publicKey", "");
-            Api.get('get_comments', { post_id, address: viewerAddress }, { timeoutMs: 10000 })
+            Api.get('get_comments', { post_id, address: viewerAddress })
                 .then((data) => {
                     setLoading(false);
                     setRoot(data.root);
@@ -2420,7 +2420,7 @@ function ViewPostView({ state, updatePost }) {
         if (!focusedCommentId || !root) return;
 
         const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', { post_id: focusedCommentId, address: viewerAddress }, { timeoutMs: 10000 })
+        Api.get('get_comments', { post_id: focusedCommentId, address: viewerAddress })
             .then((data) => {
                 if (data && data.root && data.children) {
                     // Store the focused comment's children in state so they can be merged
@@ -2446,7 +2446,7 @@ function ViewPostView({ state, updatePost }) {
             return;
         }
         const viewerAddress = Storage.load("publicKey", "");
-        Api.get('get_comments', { post_id: actualRootPostId, address: viewerAddress }, { timeoutMs: 10000 })
+        Api.get('get_comments', { post_id: actualRootPostId, address: viewerAddress })
             .then((data) => {
                 if (data && data.root) {
                     setActualRootPost(data.root);
@@ -2635,7 +2635,7 @@ function ViewPostView({ state, updatePost }) {
         try {
             const params = { comment_id: targetCommentId, max_depth: Math.min(maxDepth, 5) };
             if (state.publicKey) params.address = state.publicKey;
-            const res = await Api.get('get_comment_context', params, { timeoutMs: 10000 });
+            const res = await Api.get('get_comment_context', params);
             if (res && Array.isArray(res.context)) {
                 setContextComments(res.context.reverse());
                 setShowContext(true);
@@ -3893,52 +3893,60 @@ function ViewPostView({ state, updatePost }) {
                                                 </>
                                             )}
 
-                                            {/* Content */}
-                                            {!isCollapsed && (post.content || (Array.isArray(post.media) && post.media.length > 0)) && !(state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') && (
-                                                <StyledContentArea>
-                                                    {(() => {
-                                                        const raw = String(post.content || '');
-                                                        const mediaArr = Array.isArray(post.media) ? post.media : [];
+                                            {/* Content — for root post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
+                                            {(() => {
+                                                const displayPost = isRoot && mergedRoot ? mergedRoot : post;
+                                                const displayContent = displayPost.content || '';
+                                                const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
+                                                const hasContent = !!(displayContent || displayMedia.length > 0);
+                                                if (isCollapsed || !hasContent) return null;
+                                                if (state.posts[post.post_id]?.replyOpen && state.posts[post.post_id]?.replyMode === 'edit') return null;
+                                                return (
+                                                    <StyledContentArea>
+                                                        {(() => {
+                                                            const raw = String(displayContent || '');
+                                                            const mediaArr = displayMedia;
 
-                                                        // v1.12.0: Render from dedicated media array if available
-                                                        if (mediaArr.length > 0) {
-                                                            const Inline = require("../components/InlineMedia").default;
-                                                            const Gallery = require("../components/MediaGallery").default;
-                                                            const mediaNode = (mediaArr.length > 1 && Gallery)
-                                                                ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined })
-                                                                : (Inline
-                                                                    ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined })
-                                                                    : null);
-                                                            return (
-                                                                <>
-                                                                    {mediaNode}
-                                                                    {raw ? <div style={{ height: '0.5rem' }} /> : null}
-                                                                    {raw ? <MarkdownRenderer text={raw} /> : null}
-                                                                </>
-                                                            );
-                                                        }
+                                                            // v1.12.0: Render from dedicated media array if available
+                                                            if (mediaArr.length > 0) {
+                                                                const Inline = require("../components/InlineMedia").default;
+                                                                const Gallery = require("../components/MediaGallery").default;
+                                                                const mediaNode = (mediaArr.length > 1 && Gallery)
+                                                                    ? React.createElement(Gallery, { items: mediaArr, variant: isRoot ? 'root_post' : undefined })
+                                                                    : (Inline
+                                                                        ? React.createElement(Inline, { url: mediaArr[0], variant: isRoot ? 'root_post' : undefined })
+                                                                        : null);
+                                                                return (
+                                                                    <>
+                                                                        {mediaNode}
+                                                                        {raw ? <div style={{ height: '0.5rem' }} /> : null}
+                                                                        {raw ? <MarkdownRenderer text={raw} /> : null}
+                                                                    </>
+                                                                );
+                                                            }
 
-                                                        // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
-                                                        // Remove after March 2026 when all old posts have been migrated or expired.
-                                                        const idx = raw.indexOf('\n');
-                                                        const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
-                                                        const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
-                                                        const isUrl = /^https?:\/\//i.test(first);
-                                                        if (isUrl) {
-                                                            return (
-                                                                <>
-                                                                    {require("../components/InlineMedia").default
-                                                                        ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined })
-                                                                        : null}
-                                                                    {restRaw ? <div style={{ height: '0.5rem' }} /> : null}
-                                                                    {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
-                                                                </>
-                                                            );
-                                                        }
-                                                        return <MarkdownRenderer text={raw} />;
-                                                    })()}
-                                                </StyledContentArea>
-                                            )}
+                                                            // LEGACY (v1.11): First-line media URL extraction for posts created before v1.12.0.
+                                                            // Remove after March 2026 when all old posts have been migrated or expired.
+                                                            const idx = raw.indexOf('\n');
+                                                            const first = (idx >= 0 ? raw.slice(0, idx) : raw).trim();
+                                                            const restRaw = (idx >= 0 ? raw.slice(idx + 1) : '').replace(/^\n+/, '');
+                                                            const isUrl = /^https?:\/\//i.test(first);
+                                                            if (isUrl) {
+                                                                return (
+                                                                    <>
+                                                                        {require("../components/InlineMedia").default
+                                                                            ? React.createElement(require("../components/InlineMedia").default, { url: first, variant: isRoot ? 'root_post' : undefined })
+                                                                            : null}
+                                                                        {restRaw ? <div style={{ height: '0.5rem' }} /> : null}
+                                                                        {restRaw ? <MarkdownRenderer text={restRaw} /> : null}
+                                                                    </>
+                                                                );
+                                                            }
+                                                            return <MarkdownRenderer text={raw} />;
+                                                        })()}
+                                                    </StyledContentArea>
+                                                );
+                                            })()}
 
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (

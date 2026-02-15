@@ -213,7 +213,7 @@ function CreateAccountView({ state, setCredentials }) {
         try {
             const base = String(rawName || "").trim();
             if (!base) return { available: false, error: "empty" };
-            const data = await Api.get('get_address_from_username', { username: base }, { timeoutMs: 10000 });
+            const data = await Api.get('get_address_from_username', { username: base });
             const available = !!(data && !data.exists); // exists=true means taken, so available=!exists
             return { available, error: null };
         } catch (e) {
@@ -224,7 +224,7 @@ function CreateAccountView({ state, setCredentials }) {
     // Validate invite code via backend
     const validateInviteCode = async (code) => {
         try {
-            const resp = await Api.post('validate_invite_code', { code }, { timeoutMs: 10000 });
+            const resp = await Api.post('validate_invite_code', { code });
             if (resp && resp.valid) {
                 return { valid: true, owner: resp.owner };
             }

@@ -313,7 +313,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
         const load = async () => {
             try {
                 const viewerAddress = Storage.load('publicKey', '');
-                const data = await Api.get('get_comments', { post_id: overrideId, address: viewerAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_comments', { post_id: overrideId, address: viewerAddress });
                 if (data && data.root) {
                     setTopicValue(data.root.topic || '');
                     setTitleValue(data.root.title || '');
@@ -396,7 +396,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
     // Fetch chain config lazily if not cached (e.g. first visit after login)
     useEffect(() => {
         if (localStorage.getItem('chainConfig')) return;
-        Api.get('get_chain_config', undefined, { timeoutMs: 10000 })
+        Api.get('get_chain_config', undefined)
             .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
             .catch(() => { });
     }, []);

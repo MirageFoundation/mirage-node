@@ -554,7 +554,7 @@ class App extends Component {
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
             const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000;
             if (nodeStale) {
-                Api.get('get_node_config', undefined, { timeoutMs: 10000 })
+                Api.get('get_node_config', undefined)
                     .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })
                     .catch(() => { });
             }
@@ -642,7 +642,7 @@ class App extends Component {
                 // Chain config fetched lazily by views that need it.
 
                 // Fetch user-specific data (cache-bust to ensure fresh balance)
-                Api.get('get_user_status', { address: publicKey, _cb: Date.now() }, { timeoutMs: 10000 })
+                Api.get('get_user_status', { address: publicKey, _cb: Date.now() })
                     .then((userStatus) => {
                         if (!userStatus) {
                             console.warn('[App] No user status returned from API');

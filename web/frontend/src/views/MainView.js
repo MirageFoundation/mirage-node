@@ -1914,14 +1914,14 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const params = { feed: topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
             params.allowed_tags = getAllowedTags().join(',');
-            Api.get('get_posts', params, { timeoutMs: 10000 })
+            Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);
         } else {
             const params = { topic, limit: 15, page: page, address: viewerAddress };
             params.by = mode;
             params.allowed_tags = getAllowedTags().join(',');
-            Api.get('get_posts', params, { timeoutMs: 10000 })
+            Api.get('get_posts', params)
                 .then(handleResponse)
                 .catch(onError);
         }
@@ -2158,7 +2158,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (shouldFetch && !topicsLoadedRef.current) {
             topicsLoadedRef.current = true;
             let cancelled = false;
-            Api.get('get_topics', { limit: 50, min_posts: 1 }, { timeoutMs: 10000 })
+            Api.get('get_topics', { limit: 50, min_posts: 1 })
                 .then((data) => {
                     if (cancelled || !isMountedRef.current) return;
                     if (data && Array.isArray(data.topics)) {

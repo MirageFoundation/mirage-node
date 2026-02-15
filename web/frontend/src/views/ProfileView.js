@@ -351,7 +351,7 @@ export default function ProfileView({ state }) {
         // Otherwise, resolve username to address
         setIsResolvingUsername(true);
         setUsernameResolutionError(null);
-        Api.get('get_address_from_username', { username: routeIdentity }, { timeoutMs: 10000 })
+        Api.get('get_address_from_username', { username: routeIdentity })
             .then((res) => {
                 setIsResolvingUsername(false);
                 if (res && res.exists && res.address) {
@@ -450,7 +450,7 @@ export default function ProfileView({ state }) {
             setListsLoading(true);
             setListsError('');
             try {
-                const data = await Api.get('get_user_followed', { address: profileAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_followed', { address: profileAddress });
                 if (cancelled) return;
                 setFollowedUsers(data?.followed_users || []);
                 setFollowedTopics(data?.followed_topics || []);
@@ -480,7 +480,7 @@ export default function ProfileView({ state }) {
             setListsLoading(true);
             setListsError('');
             try {
-                const data = await Api.get('get_user_blocked', { address: profileAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_blocked', { address: profileAddress });
                 if (cancelled) return;
                 setBlockedUsers(data?.blocked_users || []);
                 setBlockedPosts(data?.blocked_posts || []);
@@ -506,7 +506,7 @@ export default function ProfileView({ state }) {
             setPrefsLoading(true);
             setPrefsError('');
             try {
-                const data = await Api.get('get_preferences', { address: profileAddress }, { timeoutMs: 10000 });
+                const data = await Api.get('get_preferences', { address: profileAddress });
                 if (cancelled) return;
                 setPrefsTopics(Array.isArray(data?.topics) ? data.topics : []);
                 setPrefsAuthors(Array.isArray(data?.authors) ? data.authors : []);
@@ -651,7 +651,7 @@ export default function ProfileView({ state }) {
         let cancelled = false;
         const fetchUserStatus = async () => {
             try {
-                const data = await Api.get('get_user_status', { address: profileAddress, _cb: Date.now() }, { timeoutMs: 10000 });
+                const data = await Api.get('get_user_status', { address: profileAddress, _cb: Date.now() });
                 if (!data || cancelled) return;
 
                 if (isOwnProfile) {
@@ -774,7 +774,7 @@ export default function ProfileView({ state }) {
                 if (recentPostsFilter === 'submissions' || recentPostsFilter === 'comments') {
                     params.type = recentPostsFilter;
                 }
-                const res = await Api.get('get_user_posts', params, { timeoutMs: 10000 });
+                const res = await Api.get('get_user_posts', params);
                 if (cancelled) return;
                 const incoming = Array.isArray(res?.posts) ? res.posts : [];
                 const hasMore = !!res?.has_more;

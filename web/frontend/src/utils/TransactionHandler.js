@@ -366,7 +366,7 @@ class TransactionHandler {
             let pow_factor = 0;
             if (userLevel === 0) {
                 updateNotification("Fetching transaction parameters");
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash;
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -418,7 +418,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Preparing username change");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -481,7 +481,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Blocking post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -529,7 +529,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Unblocking post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -582,7 +582,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Blocking user");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -626,7 +626,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Unblocking user");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -836,7 +836,7 @@ class TransactionHandler {
 
             updateNotification("Preparing report");
             const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
             const last_block_hash = statusData.last_block_hash;
             let pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -900,7 +900,7 @@ class TransactionHandler {
             updateNotification("Sending tokens");
 
             const [statusData] = await Promise.all([
-                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
             ]);
             let last_block_hash = statusData?.last_block_hash || "";
             let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
@@ -1075,7 +1075,7 @@ class TransactionHandler {
             if (userLevel === 0) {
                 updateNotification("Deleting post");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
@@ -1136,7 +1136,7 @@ class TransactionHandler {
             if (userLevelE === 0) {
                 updateNotification("Preparing edit");
                 const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 }),
+                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
                 ]);
                 last_block_hash_e = statusData.last_block_hash || "";
                 pow_difficulty_e = requirePowDifficulty(statusData.pow_difficulty);
@@ -1356,7 +1356,7 @@ class TransactionHandler {
             let pow_base_bits = 0;
             let pow_factor = 0;
             if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -1431,7 +1431,7 @@ class TransactionHandler {
             let pow_base_bits = 0;
             let pow_factor = 0;
             if (userLevel === 0) {
-                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined, { timeoutMs: 10000 });
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
                 last_block_hash = statusData.last_block_hash || "";
                 pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
                 pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
@@ -1499,7 +1499,7 @@ class TransactionHandler {
                 updateNotification("Fetching transaction parameters");
                 try {
                     const addrNow = Storage.load('publicKey', '');
-                    const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined, { timeoutMs: 10000 });
+                    const status = await Api.get('get_parameters', addrNow ? { address: addrNow } : undefined);
                     last_block_hash = status.last_block_hash || "";
                     pow_difficulty = requirePowDifficulty(status.pow_difficulty);
                     pow_base_bits_relay = requirePowBaseBits(status.pow_base_bits);
@@ -1660,7 +1660,7 @@ class TransactionHandler {
                     if (userLevelNow === 0) {
                         try {
                             const addrRetry = Storage.load('publicKey', '');
-                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined, { timeoutMs: 10000 });
+                            const statusRetry = await Api.get('get_parameters', addrRetry ? { address: addrRetry } : undefined);
                             last_block_hash = statusRetry.last_block_hash || "";
                             pow_difficulty = requirePowDifficulty(statusRetry.pow_difficulty);
                             pow_base_bits_relay = requirePowBaseBits(statusRetry.pow_base_bits);
@@ -3514,7 +3514,7 @@ class TransactionHandler {
 
             // Submit transaction
             try {
-                const out = await Api.post(endpoint, toRelay, { timeoutMs: 10000 });
+                const out = await Api.post(endpoint, toRelay);
                 // Reports return {success: true, id: ...} instead of {tx_hash: ...}
                 const txHash = (out && out.tx_hash) ? String(out.tx_hash).toLowerCase() :
                     ((endpoint === 'core/report' && out && out.success && out.id) ? `report-${out.id}` : null);
@@ -3580,7 +3580,7 @@ class TransactionHandler {
                                             if (!parent || !(parent.title && String(parent.title).trim() !== '')) {
                                                 try {
                                                     // Ask backend for the root of the PARENT, which is stable
-                                                    const res = await Api.get('get_root_post_id', { comment_id: parentId }, { timeoutMs: 10000 });
+                                                    const res = await Api.get('get_root_post_id', { comment_id: parentId });
                                                     if (res && res.root_post_id) {
                                                         rootId = String(res.root_post_id).toLowerCase();
                                                     }

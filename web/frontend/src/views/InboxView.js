@@ -221,7 +221,7 @@ export default function InboxView({ state }) {
                 address: viewerAddress,
                 page,
                 limit: 25
-            }, { timeoutMs: 10000 });
+            });
 
             if (res && Array.isArray(res.replies)) {
                 if (append) {

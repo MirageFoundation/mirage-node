@@ -168,7 +168,7 @@ function withInboxLastViewed(params) {
 async function get(path, params, options) {
     const url = buildUrl(path, withInboxLastViewed(params));
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 10000)));
+    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
         const resp = await fetch(url, { signal: controller.signal, headers: (options && options.headers) || {} });
         if (resp.ok) {
@@ -200,7 +200,7 @@ async function get(path, params, options) {
 async function post(path, body, options) {
     const url = buildUrl(path);
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 10000)));
+    const id = setTimeout(() => controller.abort(), Math.max(1, Number((options && options.timeoutMs) || 30000)));
     try {
         const resp = await fetch(url, {
             method: 'POST',

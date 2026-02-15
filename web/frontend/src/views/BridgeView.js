@@ -903,7 +903,6 @@ function SolanaBridgeInFlow({ mirageAddress, theme, chainConfigs, attestationThr
                 'get_user_status',
                 { address: mirageAddress, _cb: Date.now() },
                 {
-                    timeoutMs: 10000,
                     headers: {
                         'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache',
@@ -2000,7 +1999,6 @@ export default function BridgeView({ state }) {
                 'get_user_status',
                 { address, _cb: Date.now() },
                 {
-                    timeoutMs: 10000,
                     headers: {
                         'Cache-Control': 'no-cache',
                         'Pragma': 'no-cache',
