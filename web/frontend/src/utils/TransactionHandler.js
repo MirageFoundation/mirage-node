@@ -4587,8 +4587,8 @@ class TransactionHandler {
 
                 // Log PoW completion stats
                 const iterations = ((rawProof - start) >>> 0) + 1;
-                const hashesPerSec = taken > 0 ? (iterations / taken).toFixed(1) : 'N/A';
-                console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec} H/s`);
+                const hashesPerSec = taken > 0.05 ? (iterations / taken).toFixed(1) : null;
+                console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec || 'instant'} H/s`);
                 if (rawProof !== proof) {
                     try {
                         console.warn('[PoW] proof overflow normalized', { rawProof, proof, start });
@@ -4597,7 +4597,7 @@ class TransactionHandler {
                 this._setStatus("submitting");
                 try {
                     await this.handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
-                    updateNotification(`Transaction submitted (${hashesPerSec} H/s)`);
+                    updateNotification(hashesPerSec ? `Transaction submitted (${hashesPerSec} H/s)` : "Transaction submitted");
                 } finally {
                     this._setStatus("idle");
                 }

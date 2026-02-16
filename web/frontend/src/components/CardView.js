@@ -1370,7 +1370,17 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             const result = await tx.blockTopic(topicName);
             if (result.success) {
                 if (updatePost) {
-                    updatePost(post.post_id, { blocked: true });
+                    // Hide ALL posts with this topic from the current feed
+                    const allPosts = state?.posts || {};
+                    for (const [pid, p] of Object.entries(allPosts)) {
+                        if (p && (p.topic || "").trim().toLowerCase() === topicName) {
+                            updatePost(pid, { blocked: true });
+                        }
+                    }
+                    // Ensure the current post is hidden even if topic didn't match
+                    if (!allPosts[post.post_id] || (allPosts[post.post_id]?.topic || "").trim().toLowerCase() !== topicName) {
+                        updatePost(post.post_id, { blocked: true });
+                    }
                 }
             } else {
                 alert(`Failed to block topic: ${result.error || 'Unknown error'}`);

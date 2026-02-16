@@ -415,6 +415,7 @@ export default function ProfileView({ state }) {
     const [followedTopics, setFollowedTopics] = useState([]);
     const [blockedUsers, setBlockedUsers] = useState([]);
     const [blockedPosts, setBlockedPosts] = useState([]);
+    const [blockedTopics, setBlockedTopics] = useState([]);
     const [listsLoading, setListsLoading] = useState(false);
     const [listsError, setListsError] = useState('');
     const [followedUsernames, setFollowedUsernames] = useState({});
@@ -484,6 +485,7 @@ export default function ProfileView({ state }) {
                 if (cancelled) return;
                 setBlockedUsers(data?.blocked_users || []);
                 setBlockedPosts(data?.blocked_posts || []);
+                setBlockedTopics(data?.blocked_topics || []);
             } catch (err) {
                 if (!cancelled) {
                     setListsError(err?.message || 'Failed to load blocked items');
@@ -1607,7 +1609,24 @@ export default function ProfileView({ state }) {
 
                             {activeTab === 'blocks' && (
                                 <>
-                                    <SectionTitle $first>Blocked Users</SectionTitle>
+                                    <SectionTitle $first>Blocked Topics</SectionTitle>
+                                    <ValueBox>
+                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
+                                        {!listsLoading && !listsError && blockedTopics.length === 0 && (
+                                            <Mono style={{ color: '#888' }}>No blocked topics.</Mono>
+                                        )}
+                                        {!listsLoading && !listsError && blockedTopics.length > 0 && (
+                                            <PostsList>
+                                                {blockedTopics.map((topic) => (
+                                                    <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
+                                                        <PostPreview>#{topic}</PostPreview>
+                                                    </PostItem>
+                                                ))}
+                                            </PostsList>
+                                        )}
+                                    </ValueBox>
+
+                                    <SectionTitle>Blocked Users</SectionTitle>
                                     <ValueBox>
                                         {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
                                         {!listsLoading && !listsError && blockedUsers.length === 0 && (
