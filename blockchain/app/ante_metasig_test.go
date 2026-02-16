@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	sdkmath "cosmossdk.io/math"
 	cosmoslog "cosmossdk.io/log"
+	sdkmath "cosmossdk.io/math"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"

@@ -532,7 +532,7 @@ def check_source_level(failures: list[str]) -> None:
         ],
     )
 
-    # Backend public: blocked_topics in get_user_blocked + mint_quantity in get_network_stats
+    # Backend public: blocked_topics in get_user_blocked + earned_24h in get_network_stats
     _check(
         REPO_ROOT / "web" / "backend" / "routes" / "public.py",
         [
@@ -542,14 +542,9 @@ def check_source_level(failures: list[str]) -> None:
                 "public.py: blocked_topics missing from get_user_blocked",
             ),
             (
-                '"mint_quantity"',
-                "public.py: mint_quantity in get_network_stats response",
-                "public.py: mint_quantity missing from get_network_stats response",
-            ),
-            (
-                '"mint_interval"',
-                "public.py: mint_interval in get_network_stats response",
-                "public.py: mint_interval missing from get_network_stats response",
+                '"earned_24h"',
+                "public.py: earned_24h in get_network_stats response",
+                "public.py: earned_24h missing from get_network_stats response",
             ),
         ],
     )

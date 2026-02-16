@@ -2326,13 +2326,26 @@ def get_network_stats():
         except Exception:
             pass
 
-        # Get mint params for 24h earnings
-        mint_quantity = 0
-        mint_interval = 0
+        # Compute real 24h earned from node_balance changes in supply_history
+        earned_24h = 0
         try:
-            p = load_params(force=False)
-            mint_quantity = int(p["mint_quantity"])
-            mint_interval = int(p["mint_interval"])
+            since_ts = int(time.time()) - 86400
+            conn_sh = connect_db(timeout=5.0, busy_timeout_ms=5000)
+            cur_sh = conn_sh.cursor()
+            cur_sh.execute(
+                """
+                SELECT node_balance FROM supply_history
+                WHERE created_at >= %s AND node_balance IS NOT NULL
+                ORDER BY height ASC
+                """,
+                (since_ts,),
+            )
+            rows_sh = cur_sh.fetchall()
+            conn_sh.close()
+            for i in range(1, len(rows_sh)):
+                diff = rows_sh[i][0] - rows_sh[i - 1][0]
+                if diff > 0:
+                    earned_24h += diff
         except Exception:
             pass
 
@@ -2340,8 +2353,7 @@ def get_network_stats():
             "server_balance": server_balance,
             "staked_balance": staked_balance,
             "block_time": block_time,
-            "mint_quantity": mint_quantity,
-            "mint_interval": mint_interval,
+            "earned_24h": earned_24h,
             "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),

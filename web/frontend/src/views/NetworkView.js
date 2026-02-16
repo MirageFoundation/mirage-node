@@ -711,8 +711,7 @@ export default function NetworkView({ state }) {
                         pow_last_change_height: (typeof data.pow_last_change_height !== 'undefined') ? Number(data.pow_last_change_height) : undefined,
                         current_height: (typeof data.current_height !== 'undefined') ? Number(data.current_height) : undefined,
                         difficulty_history: Array.isArray(data.difficulty_history) ? data.difficulty_history : [],
-                        mint_quantity: (typeof data.mint_quantity !== 'undefined') ? Number(data.mint_quantity) : undefined,
-                        mint_interval: (typeof data.mint_interval !== 'undefined') ? Number(data.mint_interval) : undefined,
+                        earned_24h: (typeof data.earned_24h !== 'undefined') ? Number(data.earned_24h) : undefined,
                     }));
                 }
             } catch (_) { }
@@ -987,16 +986,7 @@ export default function NetworkView({ state }) {
                                     <RowCentered>
                                         <Label>Earned (24h):</Label>
                                         <ValueBox>
-                                            <Mono>{(() => {
-                                                const bt = cfg.block_time;
-                                                const mq = cfg.mint_quantity;
-                                                const mi = cfg.mint_interval;
-                                                if (!bt || !mq || !mi) return '(loading...)';
-                                                const blocksPerDay = 86400 / bt;
-                                                const mintsPerDay = blocksPerDay / mi;
-                                                const earned = mintsPerDay * mq;
-                                                return `${formatMirage(earned)} MIRAGE`;
-                                            })()}</Mono>
+                                            <Mono>{cfg.earned_24h == null ? '(loading...)' : `${formatMirage(cfg.earned_24h)} MIRAGE`}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>

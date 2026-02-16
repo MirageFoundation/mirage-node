@@ -1088,14 +1088,13 @@ def test_params(backend: str):
     else:
         _fail("params.network_stats consistent with get_parameters", f"code={code2}")
 
-    # 1.5b get_network_stats returns mint_quantity and mint_interval
+    # 1.5b get_network_stats returns earned_24h
     if code2 == 200:
-        mq = stats.get("mint_quantity")
-        mi = stats.get("mint_interval")
-        if mq is not None and mi is not None and int(mq) > 0 and int(mi) > 0:
-            _pass("params.network_stats has mint_quantity and mint_interval", mq=mq, mi=mi)
+        earned = stats.get("earned_24h")
+        if earned is not None and int(earned) >= 0:
+            _pass("params.network_stats has earned_24h", earned_24h=earned)
         else:
-            _fail("params.network_stats has mint_quantity and mint_interval", mq=mq, mi=mi)
+            _fail("params.network_stats has earned_24h", earned_24h=earned)
 
     # 1.6 get_chain_config returns valid governance params
     code3, cfg = _get(f"{backend}/api/get_chain_config")
