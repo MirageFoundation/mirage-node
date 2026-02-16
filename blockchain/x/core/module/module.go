@@ -1767,6 +1767,28 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, err
 	}
 
+	followedUsers, err := am.k.GetProfileFollowedUsers(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(followedUsers) > 0 {
+		newFollowedUsers := make([]string, 0, len(followedUsers))
+		removed := false
+		for _, u := range followedUsers {
+			if u == target {
+				removed = true
+				continue
+			}
+			newFollowedUsers = append(newFollowedUsers, u)
+		}
+		if removed {
+			if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newFollowedUsers); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("BlockUser removed follow", "owner", owner, "target", target)
+		}
+	}
+
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(10)
 	if tierConfig != nil {
@@ -1875,6 +1897,28 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
 	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	followedTopics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(followedTopics) > 0 {
+		newFollowedTopics := make([]string, 0, len(followedTopics))
+		removed := false
+		for _, t := range followedTopics {
+			if t == topic {
+				removed = true
+				continue
+			}
+			newFollowedTopics = append(newFollowedTopics, t)
+		}
+		if removed {
+			if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newFollowedTopics); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("BlockTopic removed follow", "owner", owner, "topic", topic)
+		}
 	}
 
 	tierConfig := params.GetTierConfig(userLevel)
@@ -1991,6 +2035,28 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 
 	if _, err := sdk.AccAddressFromBech32(user); err != nil {
 		return nil, fmt.Errorf("invalid user address: %s", user)
+	}
+
+	blockedUsers, err := am.k.GetProfileBlockedUsers(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockedUsers) > 0 {
+		newBlockedUsers := make([]string, 0, len(blockedUsers))
+		removed := false
+		for _, u := range blockedUsers {
+			if u == user {
+				removed = true
+				continue
+			}
+			newBlockedUsers = append(newBlockedUsers, u)
+		}
+		if removed {
+			if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newBlockedUsers); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("FollowUser removed block", "owner", owner, "user", user)
+		}
 	}
 
 	var userLevel int
@@ -2124,6 +2190,28 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 
 	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockedTopics) > 0 {
+		newBlockedTopics := make([]string, 0, len(blockedTopics))
+		removed := false
+		for _, t := range blockedTopics {
+			if t == topic {
+				removed = true
+				continue
+			}
+			newBlockedTopics = append(newBlockedTopics, t)
+		}
+		if removed {
+			if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newBlockedTopics); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("FollowTopic removed block", "owner", owner, "topic", topic)
+		}
 	}
 
 	var userLevel int

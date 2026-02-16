@@ -811,14 +811,85 @@ def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0)
     return False
 
 
-def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+def _wait_blocked_topic_state(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
     while time.perf_counter() < deadline:
         code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
         if code == 200:
             blocked = (data or {}).get("blocked_topics") or []
-            if any(str(t or "").strip().lower() == topic_lower for t in blocked):
+            present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+    return _wait_blocked_topic_state(backend, address, topic, True, timeout)
+
+
+def _wait_followed_topic(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            topics = (data or {}).get("followed_topics") or []
+            present = any(str(t or "").strip().lower() == topic_lower for t in topics)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_followed_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+            present = any(user_lower in json.dumps(u).lower() for u in users)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_users") or []
+            present = any(str(u or "").strip().lower() == user_lower for u in blocked)
+            if present == expect_present:
                 return True
         time.sleep(0.5)
     return False
@@ -1293,6 +1364,10 @@ def test_social_graph(backend: str):
     addr = str(wallet.address())
     sub_wallet = WALLETS["sub1"]
     sub_addr = str(sub_wallet.address())
+    sub2_wallet = WALLETS["sub2"]
+    sub2_addr = str(sub2_wallet.address())
+    sub3_wallet = WALLETS["sub3"]
+    sub3_addr = str(sub3_wallet.address())
     test_topic = f"testtopic{_rand_str(4)}"
 
     # 5.1 follow_user
@@ -1323,6 +1398,60 @@ def test_social_graph(backend: str):
 
     time.sleep(2)
 
+    # 5.3a follow->block user removes follow
+    resp = _do_follow_user(backend, wallet, sub2_addr, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_user for block-removal setup", tx=txh)
+    else:
+        _fail("social.follow_user for block-removal setup", f"resp={resp}")
+    if _wait_followed_user(backend, addr, sub2_addr, True):
+        _pass("social.follow_user reflected before block")
+    else:
+        _fail("social.follow_user reflected before block", f"user={sub2_addr}")
+
+    resp = _do_block(backend, wallet, sub2_addr, "user", block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_user after follow succeeds")
+    else:
+        _fail("social.block_user after follow succeeds", f"resp={resp}")
+    if _wait_followed_user(backend, addr, sub2_addr, False):
+        _pass("social.block_user removes followed user")
+    else:
+        _fail("social.block_user removes followed user", f"user={sub2_addr}")
+    if _wait_blocked_user(backend, addr, sub2_addr, True):
+        _pass("social.block_user reflected in get_user_blocked (mutual)")
+    else:
+        _fail("social.block_user reflected in get_user_blocked (mutual)", f"user={sub2_addr}")
+
+    # 5.3b block->follow user removes block
+    resp = _do_block(backend, wallet, sub3_addr, "user", block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_user for follow-removal setup")
+    else:
+        _fail("social.block_user for follow-removal setup", f"resp={resp}")
+    if _wait_blocked_user(backend, addr, sub3_addr, True):
+        _pass("social.block_user reflected before follow")
+    else:
+        _fail("social.block_user reflected before follow", f"user={sub3_addr}")
+
+    resp = _do_follow_user(backend, wallet, sub3_addr, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_user after block succeeds")
+    else:
+        _fail("social.follow_user after block succeeds", f"resp={resp}")
+    if _wait_blocked_user(backend, addr, sub3_addr, False):
+        _pass("social.follow_user removes blocked user")
+    else:
+        _fail("social.follow_user removes blocked user", f"user={sub3_addr}")
+    if _wait_followed_user(backend, addr, sub3_addr, True):
+        _pass("social.follow_user reflected in get_user_followed (mutual)")
+    else:
+        _fail("social.follow_user reflected in get_user_followed (mutual)", f"user={sub3_addr}")
+
     # 5.4 follow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -1340,6 +1469,62 @@ def test_social_graph(backend: str):
         _pass("social.unfollow_topic succeeds")
     else:
         _fail("social.unfollow_topic succeeds", f"resp={resp}")
+
+    # 5.5a follow->block topic removes follow
+    mutual_topic_fb = f"mutualtopic{_rand_str(4)}"
+    resp = _do_follow_topic(backend, wallet, mutual_topic_fb, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_topic for block-removal setup")
+    else:
+        _fail("social.follow_topic for block-removal setup", f"resp={resp}")
+    if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
+        _pass("social.follow_topic reflected before block")
+    else:
+        _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
+
+    resp = _do_block_topic(backend, wallet, mutual_topic_fb, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic after follow succeeds")
+    else:
+        _fail("social.block_topic after follow succeeds", f"resp={resp}")
+    if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
+        _pass("social.block_topic removes followed topic")
+    else:
+        _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
+        _pass("social.block_topic reflected in get_user_blocked (mutual)")
+    else:
+        _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
+
+    # 5.5b block->follow topic removes block
+    mutual_topic_bf = f"mutualtopic{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, mutual_topic_bf, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic for follow-removal setup")
+    else:
+        _fail("social.block_topic for follow-removal setup", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
+        _pass("social.block_topic reflected before follow")
+    else:
+        _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
+
+    resp = _do_follow_topic(backend, wallet, mutual_topic_bf, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_topic after block succeeds")
+    else:
+        _fail("social.follow_topic after block succeeds", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, False):
+        _pass("social.follow_topic removes blocked topic")
+    else:
+        _fail("social.follow_topic removes blocked topic", f"topic={mutual_topic_bf}")
+    if _wait_followed_topic(backend, addr, mutual_topic_bf, True):
+        _pass("social.follow_topic reflected in get_user_followed (mutual)")
+    else:
+        _fail("social.follow_topic reflected in get_user_followed (mutual)", f"topic={mutual_topic_bf}")
 
     # 5.6 block_post — need a post to block
     test_post = _do_post(backend, wallet, "test", f"Blockable {_rand_str(4)}", "body")

@@ -14,7 +14,8 @@ import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
 import { useTabs } from "../utils/useTabs";
-import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
+import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache, notifyUsersUpdated } from "../utils/FollowUsers";
+import { notifyTopicsUpdated } from "../utils/Subscriptions";
 import { tooltipStyles } from "../components/Tooltip";
 import { useTxStatus } from "../utils/useTxStatus";
 import { usePendingBlocks } from "../utils/usePendingBlocks";
@@ -1253,6 +1254,7 @@ export default function ProfileView({ state, defaultTab = 'profile' }) {
             const result = await tx.unfollowTopic(topicTrimmed);
             if (result && result.success) {
                 setFollowedTopics((prev) => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
+                notifyTopicsUpdated({ removed: topicTrimmed });
             } else {
                 alert(`Failed to unfollow topic: ${result?.error || 'Unknown error'}`);
             }
@@ -1269,6 +1271,7 @@ export default function ProfileView({ state, defaultTab = 'profile' }) {
         try {
             await unfollow(address, userTrimmed);
             setFollowedUsers((prev) => prev.filter(u => String(u || '').trim().toLowerCase() !== userTrimmed));
+            notifyUsersUpdated({ removed: userTrimmed });
         } catch (error) {
             alert(`Error unfollowing user: ${error?.message || error}`);
         }
@@ -1357,12 +1360,16 @@ export default function ProfileView({ state, defaultTab = 'profile' }) {
                             <ClickableTab $active={activeTab === 'posts'} onClick={() => setActiveTab('posts')}>
                                 Posts
                             </ClickableTab>
-                            <ClickableTab $active={activeTab === 'follows'} onClick={() => setActiveTab('follows')}>
-                                Follows
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'blocks'} onClick={() => setActiveTab('blocks')}>
-                                Blocks
-                            </ClickableTab>
+                            {(defaultTab === 'follows') && (
+                                <ClickableTab $active={activeTab === 'follows'} onClick={() => setActiveTab('follows')}>
+                                    Follows
+                                </ClickableTab>
+                            )}
+                            {(defaultTab === 'blocks') && (
+                                <ClickableTab $active={activeTab === 'blocks'} onClick={() => setActiveTab('blocks')}>
+                                    Blocks
+                                </ClickableTab>
+                            )}
                             <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
                                 Algo
                             </ClickableTab>

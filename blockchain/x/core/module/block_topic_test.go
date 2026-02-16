@@ -183,3 +183,155 @@ func TestUnblockTopicRemovesEntry(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha", "gamma"}, topics)
 }
+
+func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha", "beta"}))
+
+	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Topic:          " Alpha ",
+	})
+	require.NoError(t, err)
+
+	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"beta"}, followed)
+
+	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha"}, blocked)
+}
+
+func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha", "beta"}))
+
+	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		Topic:          " Alpha ",
+	})
+	require.NoError(t, err)
+
+	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"beta"}, blocked)
+
+	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha"}, followed)
+}
+
+func TestBlockUserRemovesFollowedUser(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	target := testAccAddressString()
+	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
+
+	_, err := am.BlockUser(ctx, &types.MsgBlockUser{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         target,
+	})
+	require.NoError(t, err)
+
+	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Empty(t, followed)
+
+	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{target}, blocked)
+}
+
+func TestFollowUserRemovesBlockedUser(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	target := testAccAddressString()
+	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
+
+	_, err := am.FollowUser(ctx, &types.MsgFollowUser{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		User:           target,
+	})
+	require.NoError(t, err)
+
+	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Empty(t, blocked)
+
+	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{target}, followed)
+}
+
+func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	target := testAccAddressString()
+	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
+	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
+
+	_, err := am.BlockUser(ctx, &types.MsgBlockUser{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         target,
+	})
+	require.NoError(t, err)
+
+	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Empty(t, followed)
+
+	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{target}, blocked)
+}
+
+func TestFollowTopicAlreadyFollowedStillRemovesBlock(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha"}))
+	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha"}))
+
+	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		Topic:          "Alpha",
+	})
+	require.NoError(t, err)
+
+	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Empty(t, blocked)
+
+	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"alpha"}, followed)
+}

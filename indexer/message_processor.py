@@ -1031,6 +1031,8 @@ class MessageProcessor:
                 return
 
             self.db.follow_user(owner, user)
+            self.db.unblock_user(owner, user)
+            logger.debug("Follow user removed block: owner=%s user=%s", owner, user)
             self.log_yaml(
                 "Follow user",
                 {"owner": owner, "user": user, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1073,6 +1075,8 @@ class MessageProcessor:
                 return
 
             self.db.follow_topic(owner, topic)
+            self.db.unblock_topic(owner, topic)
+            logger.debug("Follow topic removed block: owner=%s topic=%s", owner, topic)
             self.log_yaml(
                 "Follow topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1157,6 +1161,8 @@ class MessageProcessor:
                 return
 
             self.db.block_user(owner, target)
+            self.db.unfollow_user(owner, target)
+            logger.debug("Block user removed follow: owner=%s target=%s", owner, target)
             self.log_yaml(
                 "Block user",
                 {"owner": owner, "target": target, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1199,6 +1205,8 @@ class MessageProcessor:
                 return
 
             self.db.block_topic(owner, topic)
+            self.db.unfollow_topic(owner, topic)
+            logger.debug("Block topic removed follow: owner=%s topic=%s", owner, topic)
             self.log_yaml(
                 "Block topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
