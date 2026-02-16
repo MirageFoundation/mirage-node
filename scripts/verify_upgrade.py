@@ -13,6 +13,7 @@ What v1.13.0 changed:
 - Upgrade handler: updates tier params + cleans up orphaned plist_quality/ data
 - Follow/block mutual exclusion: blocking removes follow and vice versa
 - Relay ante handler: MsgBlockTopic/MsgUnblockTopic routed through relay ante
+- Relay ante handler: CheckTx enforces min-gas-prices for relay txs
 - Indexer: block removes follow / follow removes block in DB
 - Frontend: /follows and /blocks routes, unfollow/unblock UI, tx.js exports
 - MintQuantity: 350 MIRAGE → 125,000 MIRAGE per 10min (~357x increase)
@@ -313,6 +314,11 @@ def check_source_level(failures: list[str]) -> None:
                 "MsgUnblockTopic",
                 "ante_metasig.go: MsgUnblockTopic signature verification",
                 "ante_metasig.go: MsgUnblockTopic signature verification missing",
+            ),
+            (
+                "CheckTx enforces min-gas",
+                "ante_metasig.go: relay CheckTx min-gas enforcement noted",
+                "ante_metasig.go: relay CheckTx min-gas enforcement missing",
             ),
         ],
     )

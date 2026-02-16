@@ -600,7 +600,7 @@ func (d RelayGasFeeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bo
 		return ctx, fmt.Errorf("relay fee: expected FeeTx")
 	}
 
-	// Compute required fees from min gas prices only for Prepare/Process/Finalize; allow CheckTx to rely on node's mempool min-gas-prices
+	// Compute required fees from min gas prices for all execution modes; CheckTx enforces min-gas here.
 	minPrices := ctx.MinGasPrices()
 	if !minPrices.IsZero() {
 		required := sdk.NewCoins()
@@ -612,8 +612,7 @@ func (d RelayGasFeeDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bo
 			}
 		}
 		offered := ftx.GetFee()
-		// In CheckTx, Comet’s mempool enforces min-gas-prices; we don’t need to replicate it here.
-		if ctx.ExecMode() != sdk.ExecModeCheck && !offered.IsAnyGTE(required) {
+		if !offered.IsAnyGTE(required) {
 			ctx.Logger().Warn("relay insufficient fee", "offered", offered.String(), "required", required.String(), "min_gas_prices", minPrices.String(), "gas", gas)
 			return ctx, fmt.Errorf("insufficient fee: got %s required any >= %s (minGasPrices=%s, gas=%d)", offered, required, minPrices, gas)
 		}

@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	sdkmath "cosmossdk.io/math"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
+	protov2 "google.golang.org/protobuf/proto"
 )
 
 func TestVerifyRelaySignatureBlockTopic(t *testing.T) {
@@ -106,3 +108,46 @@ func TestValidateEnvelopeTimestampBoundaries(t *testing.T) {
 	require.Error(t, validateEnvelopeTimestamp(ctx, tooOld, maxAge))
 	require.Error(t, validateEnvelopeTimestamp(ctx, tooFuture, maxAge))
 }
+
+func TestRelayGasFeeDecoratorEnforcesMinGasOnCheckTx(t *testing.T) {
+	minPrices := sdk.NewDecCoins(sdk.NewDecCoinFromDec("umirage", sdkmath.LegacyNewDec(1)))
+	ctx := sdk.Context{}.WithMinGasPrices(minPrices).WithExecMode(sdk.ExecModeCheck)
+
+	tx := testFeeTx{
+		fee: sdk.NewCoins(),
+		gas: 1000,
+	}
+
+	dec := RelayGasFeeDecorator{}
+	nextCalled := false
+	next := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
+		nextCalled = true
+		return ctx, nil
+	}
+
+	t.Logf("[debug] checktx min_gas_prices=%s gas=%d fee=%s", minPrices.String(), tx.gas, tx.fee.String())
+	_, err := dec.AnteHandle(ctx, tx, false, next)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "insufficient fee")
+	require.False(t, nextCalled)
+}
+
+type testFeeTx struct {
+	fee   sdk.Coins
+	gas   uint64
+	payer sdk.AccAddress
+}
+
+func (t testFeeTx) GetGas() uint64 { return t.gas }
+
+func (t testFeeTx) GetFee() sdk.Coins { return t.fee }
+
+func (t testFeeTx) FeePayer() []byte { return t.payer }
+
+func (t testFeeTx) FeeGranter() []byte { return nil }
+
+func (t testFeeTx) GetMsgs() []sdk.Msg { return nil }
+
+func (t testFeeTx) GetMsgsV2() ([]protov2.Message, error) { return nil, nil }
+
+func (t testFeeTx) ValidateBasic() error { return nil }
