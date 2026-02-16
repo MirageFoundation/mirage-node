@@ -363,9 +363,15 @@ def _relay_low_fee_rejected_inside(backend: str) -> tuple[bool, str]:
     if not lb:
         return False, "missing last_block_hash"
 
-    diff = int(st.get("pow_difficulty", 0) or 0)
-    base_bits = int(st.get("pow_base_bits", 0) or 0)
-    pow_factor = float(st.get("pow_factor", 0.25))
+    diff_raw = st.get("pow_difficulty")
+    base_bits_raw = st.get("pow_base_bits")
+    pow_factor_raw = st.get("pow_factor")
+    if diff_raw is None or base_bits_raw is None or pow_factor_raw is None:
+        return False, "missing pow params"
+
+    diff = int(diff_raw)
+    base_bits = int(base_bits_raw)
+    pow_factor = float(pow_factor_raw)
 
     wallet = LocalWallet(PrivateKey(), prefix="mirage")
     pub = wallet.public_key().public_key_bytes
@@ -424,7 +430,7 @@ def _relay_low_fee_rejected(backend: str) -> tuple[bool, str]:
         return _relay_low_fee_rejected_inside(backend)
 
     cmd = (
-        f'BACKEND_URL="{backend}" python3 - <<\'PY\'\n'
+        f"BACKEND_URL=\"{backend}\" python3 - <<'PY'\n"
         "import os\n"
         "import sys\n"
         "sys.path.insert(0, '/opt/mirage')\n"
@@ -2921,9 +2927,7 @@ def main() -> int:
         rc, container_hostname = _docker_exec("hostname", timeout=5)
         ch = container_hostname.strip().lower()
         if rc != 0 or ch != "testnet":
-            print(
-                f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}"
-            )
+            print(f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}")
             print(f"  This suite must NEVER run against prod/UAT.")
             print(f"  Deploy locally with deploy/deploy.sh or scripts/reset_local_testnet.py first.")
             return 1
