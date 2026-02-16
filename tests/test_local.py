@@ -340,6 +340,13 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
 
 def _relay_low_fee_rejected_inside(backend: str) -> tuple[bool, str]:
     try:
+        import sys as _sys
+        _backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "backend")
+        if os.path.isdir(_backend_dir) and _backend_dir not in _sys.path:
+            _sys.path.insert(0, _backend_dir)
+        # Also handle container path
+        if os.path.isdir("/opt/mirage/web/backend") and "/opt/mirage/web/backend" not in _sys.path:
+            _sys.path.insert(0, "/opt/mirage/web/backend")
         from web.backend.node import initialize_runtime, get_grpc_channel, require_runtime
         from web.backend.tx import build_tx_bytes
         from cosmpy.crypto.keypairs import PrivateKey
@@ -434,6 +441,7 @@ def _relay_low_fee_rejected(backend: str) -> tuple[bool, str]:
         "import os\n"
         "import sys\n"
         "sys.path.insert(0, '/opt/mirage')\n"
+        "sys.path.insert(0, '/opt/mirage/web/backend')\n"
         "from tests.test_local import _relay_low_fee_rejected_inside\n"
         "backend = os.environ['BACKEND_URL']\n"
         "ok, err = _relay_low_fee_rejected_inside(backend)\n"
