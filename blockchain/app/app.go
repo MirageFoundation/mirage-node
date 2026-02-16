@@ -252,8 +252,10 @@ func New(
 			base.SetAnteHandler(func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
 				// Detect if this tx contains any relay core messages
 				containsMeta := false
+				msgTypes := make([]string, 0, len(tx.GetMsgs()))
 				govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 				for _, m := range tx.GetMsgs() {
+					msgTypes = append(msgTypes, sdk.MsgTypeURL(m))
 					// Governance messages must NEVER flow through the signature-less relay ante chain.
 					// If any message claims gov authority, force the standard ante handler which enforces tx signatures.
 					if am, ok := m.(interface{ GetAuthority() string }); ok {
@@ -269,6 +271,7 @@ func New(
 						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
 						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
 						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+						*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
 						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
 						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
 						*coretypes.MsgBridgeBurn:
@@ -277,6 +280,7 @@ func New(
 				}
 
 				if !containsMeta {
+					ctx.Logger().Debug("Relay ante: using standard ante", "msg_types", msgTypes)
 					// Use the standard SDK ante chain for normal signed txs (gas + fees + sig checks)
 					ctxStd, err := stdAnte(ctx, tx, simulate)
 					if err != nil {
@@ -286,6 +290,7 @@ func New(
 					return ctxStd, err
 				}
 
+				ctx.Logger().Debug("Relay ante: using relay ante", "msg_types", msgTypes)
 				// Relay flow for core messages
 				// 1. Setup Context (Must be first)
 				ctx1, err := setup.AnteHandle(ctx, tx, simulate, terminator)
