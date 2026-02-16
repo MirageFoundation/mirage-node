@@ -86,6 +86,27 @@ export async function getPendingFollowInfo(type, target) {
     return h.getPendingFollowInfo(type, target);
 }
 
+// Block tracking
+export async function addBlockListener(fn) {
+    const h = await getHandler();
+    return h.addBlockListener(fn);
+}
+
+export async function getPendingBlocks() {
+    const h = await getHandler();
+    return h.getPendingBlocks();
+}
+
+export async function isPendingBlock(type, target) {
+    const h = await getHandler();
+    return h.isPendingBlock(type, target);
+}
+
+export async function getPendingBlockInfo(type, target) {
+    const h = await getHandler();
+    return h.getPendingBlockInfo(type, target);
+}
+
 export async function cacheChainConfig(data) {
     const h = await getHandler();
     return h.cacheChainConfig(data);
@@ -155,6 +176,16 @@ export async function blockUser(address, block = true) {
 export async function blockPost(txhash, block = true) {
     const h = await getHandler();
     return h.blockPost(txhash, block);
+}
+
+export async function unblockUser(address) {
+    const h = await getHandler();
+    return h.unblockUser(address);
+}
+
+export async function unblockPost(txhash) {
+    const h = await getHandler();
+    return h.unblockPost(txhash);
 }
 
 export async function blockTopic(topic) {

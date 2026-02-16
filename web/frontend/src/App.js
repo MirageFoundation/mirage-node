@@ -147,6 +147,8 @@ const restorableRoutePrefixes = [
     '/profile', // DEPRECATED: legacy profile route, remove in future release
     '/u/',      // New clean user profile route
     '/settings',
+    '/follows',
+    '/blocks',
     '/subscription',
     '/network',
     '/server',
@@ -935,6 +937,8 @@ class App extends Component {
                                             {/* DEPRECATED: legacy routes, remove in future release */}
                                             <Route path="/view_post" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/profile" element={<ProfileView state={this.state} />} />
+                                            <Route path="/follows" element={<ProfileView state={this.state} defaultTab="follows" />} />
+                                            <Route path="/blocks" element={<ProfileView state={this.state} defaultTab="blocks" />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
                                             <Route path="/network" element={<NetworkView state={this.state} />} />

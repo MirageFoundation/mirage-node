@@ -274,6 +274,18 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
                 Settings
             </MenuItem>
             <MenuItem
+                to="/follows"
+                onClick={() => handleItemClick('/follows')}
+            >
+                Follows
+            </MenuItem>
+            <MenuItem
+                to="/blocks"
+                onClick={() => handleItemClick('/blocks')}
+            >
+                Blocks
+            </MenuItem>
+            <MenuItem
                 to="/network"
                 onClick={() => handleItemClick('/network')}
             >

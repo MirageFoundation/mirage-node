@@ -17,6 +17,8 @@ import { useTabs } from "../utils/useTabs";
 import { follow, unfollow, isFollowingAsync, invalidateCache as invalidateFollowCache } from "../utils/FollowUsers";
 import { tooltipStyles } from "../components/Tooltip";
 import { useTxStatus } from "../utils/useTxStatus";
+import { usePendingBlocks } from "../utils/usePendingBlocks";
+import { usePendingFollows } from "../utils/useFollowState";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
 import { formatMirage } from "../utils/formatters";
 
@@ -229,6 +231,24 @@ const PostItem = styled.div`
     }
 `;
 
+const BlockItemRow = styled.div`
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+`;
+
+const BlockItemContent = styled.div`
+    min-width: 0;
+    flex: 1;
+`;
+
+const BlockItemActions = styled.div`
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+`;
+
 const PostMeta = styled.div`
     font-size: 0.55rem;
     color: ${({ theme }) => theme?.colors?.subtleText || '#CCCCCC'};
@@ -308,7 +328,7 @@ const isValidMirageAddress = (value) => {
     }
 };
 
-export default function ProfileView({ state }) {
+export default function ProfileView({ state, defaultTab = 'profile' }) {
     const navigate = useNavigate();
     const location = useLocation();
     const routeParams = useParams();
@@ -387,7 +407,7 @@ export default function ProfileView({ state }) {
         : Boolean(normalizedOwn) && !queryAddress && !routeIdentity;
 
     const VALID_TABS = ['profile', 'posts', 'follows', 'blocks', 'algo'];
-    const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
+    const [activeTab, setActiveTab] = useTabs(defaultTab, VALID_TABS);
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
     const [balance, setBalance] = useState(null);
     const [reserveFunds, setReserveFunds] = useState(null);
@@ -427,6 +447,20 @@ export default function ProfileView({ state }) {
     const [followHover, setFollowHover] = useState(false);
     const [myQueuePosition, setMyQueuePosition] = useState(null);
     const { formatStatusForPosition, getMyQueuePosition } = useTxStatus();
+    const {
+        isTopicPending,
+        isUserPending,
+        isPostPending,
+        formatTopicStatus,
+        formatUserStatus,
+        formatPostStatus,
+    } = usePendingBlocks();
+    const {
+        isTopicPending: isFollowTopicPending,
+        isUserPending: isFollowUserPending,
+        formatTopicStatus: formatFollowTopicStatus,
+        formatUserStatus: formatFollowUserStatus,
+    } = usePendingFollows();
     const [prefsTopics, setPrefsTopics] = useState([]);
     const [prefsAuthors, setPrefsAuthors] = useState([]);
     const [prefsLoading, setPrefsLoading] = useState(false);
@@ -1159,6 +1193,87 @@ export default function ProfileView({ state }) {
         }
     };
 
+    const handleUnblockTopic = async (e, topic) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const topicTrimmed = String(topic || '').trim().toLowerCase();
+        if (!topicTrimmed) return;
+        console.debug('[blocks] unblock topic click', { topic: topicTrimmed });
+        try {
+            const result = await tx.unblockTopic(topicTrimmed);
+            if (result && result.success) {
+                setBlockedTopics((prev) => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
+            } else {
+                alert(`Failed to unblock topic: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            alert(`Error unblocking topic: ${error?.message || error}`);
+        }
+    };
+
+    const handleUnblockUser = async (e, userAddr) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const userTrimmed = String(userAddr || '').trim().toLowerCase();
+        if (!userTrimmed) return;
+        console.debug('[blocks] unblock user click', { user: userTrimmed });
+        try {
+            const result = await tx.unblockUser(userTrimmed);
+            if (result && result.success) {
+                setBlockedUsers((prev) => prev.filter(u => String(u || '').trim().toLowerCase() !== userTrimmed));
+            } else {
+                alert(`Failed to unblock user: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            alert(`Error unblocking user: ${error?.message || error}`);
+        }
+    };
+
+    const handleUnblockPost = async (e, postId) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const postTrimmed = String(postId || '').trim().toLowerCase();
+        if (!postTrimmed) return;
+        console.debug('[blocks] unblock post click', { post: postTrimmed });
+        try {
+            const result = await tx.unblockPost(postTrimmed);
+            if (result && result.success) {
+                setBlockedPosts((prev) => prev.filter(p => String(p || '').trim().toLowerCase() !== postTrimmed));
+            } else {
+                alert(`Failed to unblock post: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            alert(`Error unblocking post: ${error?.message || error}`);
+        }
+    };
+
+    const handleUnfollowTopic = async (e, topic) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const topicTrimmed = String(topic || '').trim().toLowerCase();
+        if (!topicTrimmed) return;
+        console.debug('[follows] unfollow topic click', { topic: topicTrimmed });
+        try {
+            const result = await tx.unfollowTopic(topicTrimmed);
+            if (result && result.success) {
+                setFollowedTopics((prev) => prev.filter(t => String(t || '').trim().toLowerCase() !== topicTrimmed));
+            } else {
+                alert(`Failed to unfollow topic: ${result?.error || 'Unknown error'}`);
+            }
+        } catch (error) {
+            alert(`Error unfollowing topic: ${error?.message || error}`);
+        }
+    };
+
+    const handleUnfollowUser = async (e, userAddr) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+        const userTrimmed = String(userAddr || '').trim().toLowerCase();
+        if (!userTrimmed) return;
+        console.debug('[follows] unfollow user click', { user: userTrimmed });
+        try {
+            await unfollow(address, userTrimmed);
+            setFollowedUsers((prev) => prev.filter(u => String(u || '').trim().toLowerCase() !== userTrimmed));
+        } catch (error) {
+            alert(`Error unfollowing user: ${error?.message || error}`);
+        }
+    };
+
     const handleRecentPostClick = async (post) => {
         if (!post || !post.post_id) return;
         setActiveRecentPost(post.post_id);
@@ -1492,11 +1607,32 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!listsLoading && !listsError && followedTopics.length > 0 && (
                                             <PostsList>
-                                                {followedTopics.map((topic) => (
-                                                    <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
-                                                        <PostPreview>#{topic}</PostPreview>
-                                                    </PostItem>
-                                                ))}
+                                                {followedTopics.map((topic) => {
+                                                    const isPending = isFollowTopicPending(topic);
+                                                    const status = formatFollowTopicStatus(topic);
+                                                    return (
+                                                        <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
+                                                            <BlockItemRow>
+                                                                <BlockItemContent>
+                                                                    <PostPreview>#{topic}</PostPreview>
+                                                                </BlockItemContent>
+                                                                {canEditProfile && (
+                                                                    <BlockItemActions>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            disabled={isPending}
+                                                                            loading={isPending}
+                                                                            onClick={(e) => handleUnfollowTopic(e, topic)}
+                                                                        >
+                                                                            {status || 'Unfollow'}
+                                                                        </Button>
+                                                                    </BlockItemActions>
+                                                                )}
+                                                            </BlockItemRow>
+                                                        </PostItem>
+                                                    );
+                                                })}
                                             </PostsList>
                                         )}
                                     </ValueBox>
@@ -1510,19 +1646,40 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!listsLoading && !listsError && followedUsers.length > 0 && (
                                             <PostsList>
-                                                {followedUsers.map((userAddr) => (
-                                                    <PostItem
-                                                        key={userAddr}
-                                                        onClick={() => navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`)}
-                                                    >
-                                                        <PostPreview>
-                                                            {followedUsernames[userAddr] && followedUsernames[userAddr] !== userAddr
-                                                                ? followedUsernames[userAddr]
-                                                                : shortenAddress(userAddr)}
-                                                        </PostPreview>
-                                                        <PostMeta>{userAddr}</PostMeta>
-                                                    </PostItem>
-                                                ))}
+                                                {followedUsers.map((userAddr) => {
+                                                    const isPending = isFollowUserPending(userAddr);
+                                                    const status = formatFollowUserStatus(userAddr);
+                                                    return (
+                                                        <PostItem
+                                                            key={userAddr}
+                                                            onClick={() => navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`)}
+                                                        >
+                                                            <BlockItemRow>
+                                                                <BlockItemContent>
+                                                                    <PostPreview>
+                                                                        {followedUsernames[userAddr] && followedUsernames[userAddr] !== userAddr
+                                                                            ? followedUsernames[userAddr]
+                                                                            : shortenAddress(userAddr)}
+                                                                    </PostPreview>
+                                                                    <PostMeta>{userAddr}</PostMeta>
+                                                                </BlockItemContent>
+                                                                {canEditProfile && (
+                                                                    <BlockItemActions>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            disabled={isPending}
+                                                                            loading={isPending}
+                                                                            onClick={(e) => handleUnfollowUser(e, userAddr)}
+                                                                        >
+                                                                            {status || 'Unfollow'}
+                                                                        </Button>
+                                                                    </BlockItemActions>
+                                                                )}
+                                                            </BlockItemRow>
+                                                        </PostItem>
+                                                    );
+                                                })}
                                             </PostsList>
                                         )}
                                     </ValueBox>
@@ -1617,11 +1774,32 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!listsLoading && !listsError && blockedTopics.length > 0 && (
                                             <PostsList>
-                                                {blockedTopics.map((topic) => (
-                                                    <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
-                                                        <PostPreview>#{topic}</PostPreview>
-                                                    </PostItem>
-                                                ))}
+                                                {blockedTopics.map((topic) => {
+                                                    const isPending = isTopicPending(topic);
+                                                    const status = formatTopicStatus(topic);
+                                                    return (
+                                                        <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
+                                                            <BlockItemRow>
+                                                                <BlockItemContent>
+                                                                    <PostPreview>#{topic}</PostPreview>
+                                                                </BlockItemContent>
+                                                                {canEditProfile && (
+                                                                    <BlockItemActions>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            disabled={isPending}
+                                                                            loading={isPending}
+                                                                            onClick={(e) => handleUnblockTopic(e, topic)}
+                                                                        >
+                                                                            {status || 'Unblock'}
+                                                                        </Button>
+                                                                    </BlockItemActions>
+                                                                )}
+                                                            </BlockItemRow>
+                                                        </PostItem>
+                                                    );
+                                                })}
                                             </PostsList>
                                         )}
                                     </ValueBox>
@@ -1634,16 +1812,37 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!listsLoading && !listsError && blockedUsers.length > 0 && (
                                             <PostsList>
-                                                {blockedUsers.map((userAddr) => (
-                                                    <PostItem key={userAddr} onClick={() => navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`)}>
-                                                        <PostPreview>
-                                                            {blockedUsernames[userAddr] && blockedUsernames[userAddr] !== userAddr
-                                                                ? blockedUsernames[userAddr]
-                                                                : shortenAddress(userAddr)}
-                                                        </PostPreview>
-                                                        <PostMeta>{userAddr}</PostMeta>
-                                                    </PostItem>
-                                                ))}
+                                                {blockedUsers.map((userAddr) => {
+                                                    const isPending = isUserPending(userAddr);
+                                                    const status = formatUserStatus(userAddr);
+                                                    return (
+                                                        <PostItem key={userAddr} onClick={() => navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`)}>
+                                                            <BlockItemRow>
+                                                                <BlockItemContent>
+                                                                    <PostPreview>
+                                                                        {blockedUsernames[userAddr] && blockedUsernames[userAddr] !== userAddr
+                                                                            ? blockedUsernames[userAddr]
+                                                                            : shortenAddress(userAddr)}
+                                                                    </PostPreview>
+                                                                    <PostMeta>{userAddr}</PostMeta>
+                                                                </BlockItemContent>
+                                                                {canEditProfile && (
+                                                                    <BlockItemActions>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            disabled={isPending}
+                                                                            loading={isPending}
+                                                                            onClick={(e) => handleUnblockUser(e, userAddr)}
+                                                                        >
+                                                                            {status || 'Unblock'}
+                                                                        </Button>
+                                                                    </BlockItemActions>
+                                                                )}
+                                                            </BlockItemRow>
+                                                        </PostItem>
+                                                    );
+                                                })}
                                             </PostsList>
                                         )}
                                     </ValueBox>
@@ -1656,12 +1855,33 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!listsLoading && !listsError && blockedPosts.length > 0 && (
                                             <PostsList>
-                                                {blockedPosts.map((postId) => (
-                                                    <PostItem key={postId} onClick={() => navigate(`/p/${encodeURIComponent(postId)}`)}>
-                                                        <PostPreview>{shortenAddress(postId)}</PostPreview>
-                                                        <PostMeta>{postId}</PostMeta>
-                                                    </PostItem>
-                                                ))}
+                                                {blockedPosts.map((postId) => {
+                                                    const isPending = isPostPending(postId);
+                                                    const status = formatPostStatus(postId);
+                                                    return (
+                                                        <PostItem key={postId} onClick={() => navigate(`/p/${encodeURIComponent(postId)}`)}>
+                                                            <BlockItemRow>
+                                                                <BlockItemContent>
+                                                                    <PostPreview>{shortenAddress(postId)}</PostPreview>
+                                                                    <PostMeta>{postId}</PostMeta>
+                                                                </BlockItemContent>
+                                                                {canEditProfile && (
+                                                                    <BlockItemActions>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            disabled={isPending}
+                                                                            loading={isPending}
+                                                                            onClick={(e) => handleUnblockPost(e, postId)}
+                                                                        >
+                                                                            {status || 'Unblock'}
+                                                                        </Button>
+                                                                    </BlockItemActions>
+                                                                )}
+                                                            </BlockItemRow>
+                                                        </PostItem>
+                                                    );
+                                                })}
                                             </PostsList>
                                         )}
                                     </ValueBox>
