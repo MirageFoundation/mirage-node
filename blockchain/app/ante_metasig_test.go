@@ -6,6 +6,7 @@ import (
 	"time"
 
 	sdkmath "cosmossdk.io/math"
+	cosmoslog "cosmossdk.io/log"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
@@ -111,7 +112,7 @@ func TestValidateEnvelopeTimestampBoundaries(t *testing.T) {
 
 func TestRelayGasFeeDecoratorEnforcesMinGasOnCheckTx(t *testing.T) {
 	minPrices := sdk.NewDecCoins(sdk.NewDecCoinFromDec("umirage", sdkmath.LegacyNewDec(1)))
-	ctx := sdk.Context{}.WithMinGasPrices(minPrices).WithExecMode(sdk.ExecModeCheck)
+	ctx := sdk.Context{}.WithMinGasPrices(minPrices).WithExecMode(sdk.ExecModeCheck).WithLogger(cosmoslog.NewNopLogger())
 
 	tx := testFeeTx{
 		fee: sdk.NewCoins(),
