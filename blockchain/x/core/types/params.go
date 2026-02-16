@@ -102,7 +102,7 @@ func DefaultParams() Params {
 	return Params{
 		// Minting
 		MintInterval:         200,         // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
-		MintQuantity:         350_000_000, // 350 MIRAGE per 10min
+		MintQuantity:         125_000_000_000, // 125,000 MIRAGE per 10min
 		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
 		MintDynamicSplit:     0.5,         // 50% dynamic by default
 

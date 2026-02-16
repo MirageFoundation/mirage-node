@@ -15,6 +15,8 @@ What v1.13.0 changed:
 - Relay ante handler: MsgBlockTopic/MsgUnblockTopic routed through relay ante
 - Indexer: block removes follow / follow removes block in DB
 - Frontend: /follows and /blocks routes, unfollow/unblock UI, tx.js exports
+- MintQuantity: 350 MIRAGE → 125,000 MIRAGE per 10min (~357x increase)
+- Server page: 24h minting earnings display
 
 This script does NOT submit transactions or mutate chain state.
 """
@@ -144,6 +146,23 @@ def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
         if "max_quality_posts" in tier:
             print(f"   [FAIL] tier {i} still has max_quality_posts key")
             failures.append(f"tier {i} still has max_quality_posts")
+
+    # Verify MintQuantity is 125,000 MIRAGE (125_000_000_000 umirage)
+    mint_qty = params.get("mint_quantity")
+    if mint_qty is not None:
+        try:
+            mq = int(mint_qty)
+            if mq == 125_000_000_000:
+                print(f"   [OK] mint_quantity = {mq} (125,000 MIRAGE)")
+            else:
+                print(f"   [FAIL] mint_quantity = {mq} (expected 125000000000)")
+                failures.append(f"mint_quantity {mq} != 125000000000")
+        except (ValueError, TypeError):
+            print(f"   [FAIL] mint_quantity not a valid int: {mint_qty!r}")
+            failures.append(f"mint_quantity invalid: {mint_qty!r}")
+    else:
+        print("   [FAIL] mint_quantity missing from params")
+        failures.append("mint_quantity missing")
 
     # pow_difficulty_step should still be present from v1.11.0
     step = params.get("pow_difficulty_step")
@@ -356,6 +375,23 @@ def check_source_level(failures: list[str]) -> None:
                 "upgrades.go: plist_quality cleanup in upgrade handler",
                 "upgrades.go: plist_quality cleanup missing from upgrade handler",
             ),
+            (
+                "125_000_000_000",
+                "upgrades.go: MintQuantity updated to 125,000 MIRAGE in upgrade handler",
+                "upgrades.go: MintQuantity 125,000 MIRAGE migration missing from upgrade handler",
+            ),
+        ],
+    )
+
+    # Params default: MintQuantity should be 125,000 MIRAGE
+    _check(
+        REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.go",
+        [
+            (
+                "125_000_000_000",
+                "params.go: DefaultMintQuantity = 125,000 MIRAGE",
+                "params.go: DefaultMintQuantity not set to 125,000 MIRAGE",
+            ),
         ],
     )
 
@@ -490,7 +526,7 @@ def check_source_level(failures: list[str]) -> None:
         ],
     )
 
-    # Backend public: blocked_topics in get_user_blocked
+    # Backend public: blocked_topics in get_user_blocked + mint_quantity in get_network_stats
     _check(
         REPO_ROOT / "web" / "backend" / "routes" / "public.py",
         [
@@ -498,6 +534,16 @@ def check_source_level(failures: list[str]) -> None:
                 "blocked_topics",
                 "public.py: blocked_topics in get_user_blocked",
                 "public.py: blocked_topics missing from get_user_blocked",
+            ),
+            (
+                '"mint_quantity"',
+                "public.py: mint_quantity in get_network_stats response",
+                "public.py: mint_quantity missing from get_network_stats response",
+            ),
+            (
+                '"mint_interval"',
+                "public.py: mint_interval in get_network_stats response",
+                "public.py: mint_interval missing from get_network_stats response",
             ),
         ],
     )
@@ -549,6 +595,18 @@ def check_source_level(failures: list[str]) -> None:
                 "unblockTopic",
                 "tx.js: unblockTopic export present",
                 "tx.js: unblockTopic export missing",
+            ),
+        ],
+    )
+
+    # NetworkView: 24h minting earnings display
+    _check(
+        REPO_ROOT / "web" / "frontend" / "src" / "views" / "NetworkView.js",
+        [
+            (
+                "Earned (24h)",
+                "NetworkView.js: 24h minting earnings display present",
+                "NetworkView.js: 24h minting earnings display missing",
             ),
         ],
     )

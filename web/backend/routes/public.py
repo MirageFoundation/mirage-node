@@ -2309,10 +2309,22 @@ def get_network_stats():
         except Exception:
             pass
 
+        # Get mint params for 24h earnings
+        mint_quantity = 0
+        mint_interval = 0
+        try:
+            p = load_params(force=False)
+            mint_quantity = int(p["mint_quantity"])
+            mint_interval = int(p["mint_interval"])
+        except Exception:
+            pass
+
         resp = {
             "server_balance": server_balance,
             "staked_balance": staked_balance,
             "block_time": block_time,
+            "mint_quantity": mint_quantity,
+            "mint_interval": mint_interval,
             "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),

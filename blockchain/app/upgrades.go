@@ -1267,7 +1267,18 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 			}
 
-			sdkCtx.Logger().Info("Upgrade to v1.13.0 complete - topic blocking enabled, quality_posts removed")
+			// Increase MintQuantity: 350 MIRAGE → 125,000 MIRAGE per 10min (~357x)
+			if params.MintQuantity != 125_000_000_000 {
+				sdkCtx.Logger().Info("v1.13.0: updating MintQuantity",
+					"old", params.MintQuantity, "new", 125_000_000_000)
+				params.MintQuantity = 125_000_000_000
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.13.0: failed to update MintQuantity", "err", err)
+					return nil, err
+				}
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.13.0 complete - topic blocking, quality_posts removed, minting increased")
 			return toVM, nil
 		},
 	)

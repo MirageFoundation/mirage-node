@@ -63,6 +63,26 @@ The partially implemented `quality_posts` feature has been fully removed.
 
 ---
 
+### Follow/Block Mutual Exclusion
+
+Following and blocking are now mutually exclusive — both on-chain and in the indexer.
+
+- **Blockchain**: Blocking a user/topic automatically removes any existing follow for that user/topic, and vice versa
+- **Indexer**: Mirrors the same mutual exclusion logic in the PostgreSQL database
+- **Frontend**: `/follows` and `/blocks` are now dedicated routes with unfollow/unblock buttons; added to avatar dropdown under settings
+
+---
+
+### Minting Increase
+
+Minting rate increased ~357x to support the growing network.
+
+- **MintQuantity**: `350,000,000` → `125,000,000,000` umirage (350 MIRAGE → 125,000 MIRAGE per 10min)
+- **Daily output**: ~18,000,000 MIRAGE/day (previously ~50,400 MIRAGE/day)
+- **Server page**: Now displays "Earned (24h)" right below the staked balance, showing daily minting earnings
+
+---
+
 ### Upgrade Handler
 
 The v1.13.0 upgrade handler migrates existing chain state:
@@ -70,6 +90,7 @@ The v1.13.0 upgrade handler migrates existing chain state:
 - Clears any leftover `quality_posts` data from all profiles
 - Updates tier parameters to include the new `max_blocked_topics` values
 - Initializes empty `blocked_topics` lists for all existing profiles
+- Updates `MintQuantity` from 350,000,000 to 125,000,000,000
 
 ---
 
