@@ -1612,8 +1612,15 @@ def test_social_graph(backend: str):
 
     # 5.13 blocked topic filtered from get_posts
     time.sleep(2)
-    blocked_post = _do_post(backend, sub_wallet, block_topic, f"Blocked {block_topic}", "body")
-    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post, timeout=20.0):
+    blocked_post = _do_post(
+        backend,
+        sub_wallet,
+        block_topic,
+        f"Blocked {block_topic}",
+        "body",
+        skip_pow=True,  # subscriber should post without PoW
+    )
+    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post, timeout=10.0):
         code, feed = _get(
             f"{backend}/api/get_posts",
             {"limit": 50, "by": "newest", "address": addr},
