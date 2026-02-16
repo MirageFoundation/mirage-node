@@ -223,6 +223,26 @@ export async function bridgeBurn(destinationChain, destinationAddress, amountUmi
     return h.bridgeBurn(destinationChain, destinationAddress, amountUmirage);
 }
 
+export async function followUser(address) {
+    const h = await getHandler();
+    return h.followUser(address);
+}
+
+export async function unfollowUser(address) {
+    const h = await getHandler();
+    return h.unfollowUser(address);
+}
+
+export async function followTopic(topic) {
+    const h = await getHandler();
+    return h.followTopic(topic);
+}
+
+export async function unfollowTopic(topic) {
+    const h = await getHandler();
+    return h.unfollowTopic(topic);
+}
+
 export async function editPost(overrideId, changes) {
     const h = await getHandler();
     return h.editPost(overrideId, changes);
