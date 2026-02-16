@@ -2797,17 +2797,24 @@ def main() -> int:
         print(f"\n{_COLOR_RED}Cannot reach backend at {backend}: {e}{_COLOR_RESET}")
         return 1
 
-    # ── Verify container is the local testnet from reset_local_testnet.py ─
-    # reset_local_testnet.py starts the container with --hostname local-testnet.
-    # Prod/UAT containers use domain-derived hostnames (e.g. mirage-talk).
+    # ── Verify container is NOT a prod/UAT server ──────────────────
+    # Prod/UAT containers get hostnames from DOMAIN, MONIKER, or external IP
+    # (see deploy/entrypoint.sh). Block all known prod/UAT identifiers.
+    _PROD_HOSTNAMES = {
+        "mirage-talk", "mirage-vote",
+        "159-203-114-27", "64-23-136-132", "146-190-108-140", "139-59-9-96",
+    }
     try:
         rc, container_hostname = _docker_exec("hostname", timeout=5)
-        if rc != 0 or container_hostname.strip() != "local-testnet":
+        ch = container_hostname.strip().lower()
+        if rc != 0:
+            print(f"\n{_COLOR_RED}ABORT: Cannot read container hostname.{_COLOR_RESET}")
+            return 1
+        if ch in _PROD_HOSTNAMES:
             print(
-                f"\n{_COLOR_RED}ABORT: Container hostname is '{container_hostname.strip()}', expected 'local-testnet'.{_COLOR_RESET}"
+                f"\n{_COLOR_RED}ABORT: Container hostname '{ch}' matches a known prod/UAT server.{_COLOR_RESET}"
             )
-            print(f"  This suite must never run against prod/UAT.")
-            print(f"  Run scripts/reset_local_testnet.py first.")
+            print(f"  This suite must NEVER run against production.")
             return 1
     except Exception as e:
         print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname: {e}{_COLOR_RESET}")
