@@ -11,6 +11,10 @@ What v1.13.0 changed:
 - Indexer: quality_posts table replaced with blocked_topics table
 - quality_posts feature fully removed
 - Upgrade handler: updates tier params + cleans up orphaned plist_quality/ data
+- Follow/block mutual exclusion: blocking removes follow and vice versa
+- Relay ante handler: MsgBlockTopic/MsgUnblockTopic routed through relay ante
+- Indexer: block removes follow / follow removes block in DB
+- Frontend: /follows and /blocks routes, unfollow/unblock UI, tx.js exports
 
 This script does NOT submit transactions or mutate chain state.
 """
@@ -186,7 +190,7 @@ def check_source_level(failures: list[str]) -> None:
 
     # --- Blockchain (Go) ---
 
-    # Module: BlockTopic / UnblockTopic handlers + topic validation
+    # Module: BlockTopic / UnblockTopic handlers + topic validation + mutual exclusion
     _check(
         REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go",
         [
@@ -204,6 +208,43 @@ def check_source_level(failures: list[str]) -> None:
                 "validateTopic",
                 "module.go: validateTopic function present",
                 "module.go: validateTopic function missing",
+            ),
+            (
+                "BlockUser removed follow",
+                "module.go: BlockUser removes followed user (mutual exclusion)",
+                "module.go: BlockUser->unfollow mutual exclusion missing",
+            ),
+            (
+                "BlockTopic removed follow",
+                "module.go: BlockTopic removes followed topic (mutual exclusion)",
+                "module.go: BlockTopic->unfollow mutual exclusion missing",
+            ),
+            (
+                "FollowUser removed block",
+                "module.go: FollowUser removes blocked user (mutual exclusion)",
+                "module.go: FollowUser->unblock mutual exclusion missing",
+            ),
+            (
+                "FollowTopic removed block",
+                "module.go: FollowTopic removes blocked topic (mutual exclusion)",
+                "module.go: FollowTopic->unblock mutual exclusion missing",
+            ),
+        ],
+    )
+
+    # App: relay ante handler routes BlockTopic/UnblockTopic
+    _check(
+        REPO_ROOT / "blockchain" / "app" / "app.go",
+        [
+            (
+                "*coretypes.MsgBlockTopic",
+                "app.go: MsgBlockTopic in relay ante allowlist",
+                "app.go: MsgBlockTopic missing from relay ante allowlist",
+            ),
+            (
+                "*coretypes.MsgUnblockTopic",
+                "app.go: MsgUnblockTopic in relay ante allowlist",
+                "app.go: MsgUnblockTopic missing from relay ante allowlist",
             ),
         ],
     )
@@ -405,6 +446,33 @@ def check_source_level(failures: list[str]) -> None:
         ],
     )
 
+    # Indexer: mutual exclusion (block removes follow, follow removes block)
+    _check(
+        REPO_ROOT / "indexer" / "message_processor.py",
+        [
+            (
+                "Block user removed follow",
+                "message_processor.py: block_user removes follow in indexer",
+                "message_processor.py: block_user->unfollow missing in indexer",
+            ),
+            (
+                "Block topic removed follow",
+                "message_processor.py: block_topic removes follow in indexer",
+                "message_processor.py: block_topic->unfollow missing in indexer",
+            ),
+            (
+                "Follow user removed block",
+                "message_processor.py: follow_user removes block in indexer",
+                "message_processor.py: follow_user->unblock missing in indexer",
+            ),
+            (
+                "Follow topic removed block",
+                "message_processor.py: follow_topic removes block in indexer",
+                "message_processor.py: follow_topic->unblock missing in indexer",
+            ),
+        ],
+    )
+
     # Backend: block_topic / unblock_topic endpoints
     _check(
         REPO_ROOT / "web" / "backend" / "routes" / "core.py",
@@ -454,6 +522,50 @@ def check_source_level(failures: list[str]) -> None:
                 "MsgBlockTopic",
                 "TransactionHandler.js: MsgBlockTopic canonical signing",
                 "TransactionHandler.js: MsgBlockTopic canonical signing missing",
+            ),
+        ],
+    )
+
+    # tx.js: follow/unfollow/block/unblock exports
+    _check(
+        REPO_ROOT / "web" / "frontend" / "src" / "utils" / "tx.js",
+        [
+            (
+                "unfollowTopic",
+                "tx.js: unfollowTopic export present",
+                "tx.js: unfollowTopic export missing",
+            ),
+            (
+                "unfollowUser",
+                "tx.js: unfollowUser export present",
+                "tx.js: unfollowUser export missing",
+            ),
+            (
+                "unblockUser",
+                "tx.js: unblockUser export present",
+                "tx.js: unblockUser export missing",
+            ),
+            (
+                "unblockTopic",
+                "tx.js: unblockTopic export present",
+                "tx.js: unblockTopic export missing",
+            ),
+        ],
+    )
+
+    # App.js: /follows and /blocks routes
+    _check(
+        REPO_ROOT / "web" / "frontend" / "src" / "App.js",
+        [
+            (
+                "/follows",
+                "App.js: /follows route present",
+                "App.js: /follows route missing",
+            ),
+            (
+                "/blocks",
+                "App.js: /blocks route present",
+                "App.js: /blocks route missing",
             ),
         ],
     )
