@@ -802,7 +802,9 @@ def _get_following_feed(
     viewer_lower = viewer.strip().lower() if viewer else ""
 
     if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed(cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
+        return _get_guest_feed(
+            cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics
+        )
 
     sort_mode = (sort_mode or "magic").strip().lower()
     if sort_mode not in ("magic", "newest"):
@@ -977,11 +979,15 @@ def _get_home_feed(
 
     # Newest: fast chronological path (no scoring overhead)
     if sort_mode == "newest":
-        return _get_home_feed_newest(cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
+        return _get_home_feed_newest(
+            cur, viewer_lower, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics
+        )
 
     # Guest users: magic-style scoring without personalization
     if not viewer_lower or viewer_lower == "guest":
-        return _get_guest_feed_magic(cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
+        return _get_guest_feed_magic(
+            cur, limit, page, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics
+        )
 
     # Logged-in users: Magic (unified score).
     return _get_home_feed_magic(
@@ -1112,7 +1118,14 @@ def _get_home_feed_magic(
     # 3. Load candidate posts (small targeted pool + random exploration)
     per_source = limit * page * 4  # ~60 per source for page 1
     candidates = _load_home_candidates(
-        cur, viewer_lower, similar_addrs, blocked_posts, blocked_users, allowed_tags, per_source, blocked_topics=blocked_topics
+        cur,
+        viewer_lower,
+        similar_addrs,
+        blocked_posts,
+        blocked_users,
+        allowed_tags,
+        per_source,
+        blocked_topics=blocked_topics,
     )
 
     if not candidates:
@@ -1607,7 +1620,9 @@ def _get_guest_feed(
 ) -> dict:
     """Simple chronological feed for guest users."""
     max_candidates = limit * page * 2
-    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
+    candidates = _load_candidate_posts(
+        cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics
+    )
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -1661,7 +1676,9 @@ def _get_guest_feed_magic(
     import time
 
     max_candidates = limit * page * 4
-    candidates = _load_candidate_posts(cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics)
+    candidates = _load_candidate_posts(
+        cur, max_candidates, blocked_posts, blocked_users, allowed_tags, blocked_topics=blocked_topics
+    )
 
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
@@ -3145,7 +3162,9 @@ def search_topics():
         viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
 
         topics = []
-        topic_list = [row[0] for row in rows if not (viewer_blocked_topics and (row[0] or "").lower() in viewer_blocked_topics)]
+        topic_list = [
+            row[0] for row in rows if not (viewer_blocked_topics and (row[0] or "").lower() in viewer_blocked_topics)
+        ]
 
         # Compute live dominant flags from posts to avoid stale stats
         stats = _compute_dominant_flags(cur, topic_list)
@@ -3312,7 +3331,9 @@ def search():
                     (first_user_addr,),
                 )
                 post_rows = cur.fetchall()
-                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics)
+                posts = _format_search_posts(
+                    cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics
+                )
                 result["posts"] = posts
 
         # ========== TOPIC SEARCH (#topic) ==========
@@ -3496,7 +3517,9 @@ def search():
                 has_more_posts = len(post_rows) > limit
                 post_rows = post_rows[:limit]
 
-                posts = _format_search_posts(cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics)
+                posts = _format_search_posts(
+                    cur, post_rows, blocked_posts, blocked_users, viewer, deleted_bare, blocked_topics
+                )
                 result["posts"] = posts
                 result["has_more_posts"] = has_more_posts
 
@@ -3800,6 +3823,7 @@ def get_posts():
             )
         rows = cur.fetchall()
         select_ms = (time.monotonic() - t_select) * 1000
+
         # Filter blocked posts, posts from blocked users, and posts with disallowed tags
         def _tag_allowed(row_tag):
             t = (row_tag or "").strip().lower()
@@ -4720,7 +4744,9 @@ def get_comments():
         t_blocked_ms = (time.time() - t_blocked) * 1000
 
         t_tree = time.time()
-        root, children = _fetch_comment_tree_batch(cur, post_id, blocked_posts, blocked_users, max_depth=6, blocked_topics=blocked_topics)
+        root, children = _fetch_comment_tree_batch(
+            cur, post_id, blocked_posts, blocked_users, max_depth=6, blocked_topics=blocked_topics
+        )
         t_tree_ms = (time.time() - t_tree) * 1000
 
         if not root:

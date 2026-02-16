@@ -2797,6 +2797,22 @@ def main() -> int:
         print(f"\n{_COLOR_RED}Cannot reach backend at {backend}: {e}{_COLOR_RESET}")
         return 1
 
+    # ── Verify container is the local testnet from reset_local_testnet.py ─
+    # reset_local_testnet.py starts the container with --hostname local-testnet.
+    # Prod/UAT containers use domain-derived hostnames (e.g. mirage-talk).
+    try:
+        rc, container_hostname = _docker_exec("hostname", timeout=5)
+        if rc != 0 or container_hostname.strip() != "local-testnet":
+            print(
+                f"\n{_COLOR_RED}ABORT: Container hostname is '{container_hostname.strip()}', expected 'local-testnet'.{_COLOR_RESET}"
+            )
+            print(f"  This suite must never run against prod/UAT.")
+            print(f"  Run scripts/reset_local_testnet.py first.")
+            return 1
+    except Exception as e:
+        print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname: {e}{_COLOR_RESET}")
+        return 1
+
     # ── Setup: generate wallets, faucet, subscribe ────────────────
     if not setup_test_wallets(backend):
         print(f"\n{_COLOR_RED}ABORT: Wallet setup failed.{_COLOR_RESET}")
