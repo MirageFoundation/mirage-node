@@ -167,8 +167,11 @@ def _get_gov_module_address() -> str:
         raise RuntimeError(f"gov module query: no JSON in output: {out[:200]}")
     data = json.loads(out[idx:])
     acc = (data or {}).get("account") or {}
+    addr = ""
     if "base_account" in acc:
         addr = str((acc.get("base_account") or {}).get("address", "")).strip()
+    elif "value" in acc:
+        addr = str((acc.get("value") or {}).get("address", "")).strip()
     else:
         addr = str(acc.get("address", "")).strip()
     if not addr:
