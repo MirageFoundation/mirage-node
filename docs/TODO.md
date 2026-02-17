@@ -77,3 +77,8 @@ full security audit for every module
 
 add all the quotes! from obsidian
 
+
+
+----------
+
+should it remain possible to create msgs, participate, etc, without having a set username?

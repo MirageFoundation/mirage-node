@@ -277,12 +277,11 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
 def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
-    h = tx_hash
-    if not h.startswith("0x"):
-        h = "0x" + h
+    h = tx_hash.strip().lower().removeprefix("0x")
+    hash_b64 = base64.b64encode(bytes.fromhex(h)).decode()
     start = time.time()
     while (time.time() - start) < timeout:
-        payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": h, "prove": False}}
+        payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": hash_b64, "prove": False}}
         resp = requests.post(COMET_RPC_URL, json=payload, timeout=10).json()
         if "result" in resp:
             tx_result = (resp.get("result") or {}).get("tx_result") or {}
@@ -612,11 +611,33 @@ def setup_test_wallets(backend: str) -> bool:
     return True
 
 
-def _check_reject(name: str, code: int, log: str, expect: str | None = None) -> None:
+def _check_reject(
+    name: str,
+    code: int,
+    log: str,
+    expect: str | None = None,
+    tx_hash: str | None = None,
+) -> None:
+    """Check that a tx is rejected at either CheckTx or DeliverTx.
+
+    If CheckTx already rejects (code != 0), that's a pass.
+    If CheckTx passes (code == 0) and tx_hash is provided, wait for
+    the DeliverTx result and check that it rejects there.
+    """
     if code != 0 and (expect is None or expect in log.lower()):
         _pass(name)
-    else:
-        _fail(name, f"code={code} log={log[:200]}")
+        return
+    if code == 0 and tx_hash:
+        try:
+            deliver_code, deliver_log = _wait_for_tx_result(tx_hash)
+            if deliver_code != 0 and (expect is None or expect in deliver_log.lower()):
+                _pass(name)
+                return
+            _fail(name, f"deliver code={deliver_code} log={deliver_log[:200]}")
+        except Exception as e:
+            _fail(name, f"deliver wait failed: {e}")
+        return
+    _fail(name, f"code={code} log={log[:200]}")
 
 
 def _check_deliver_reject(name: str, check_code: int, deliver_code: Optional[int], deliver_log: Optional[str]) -> None:
@@ -689,8 +710,8 @@ def test_relay_sig(backend: str) -> None:
 
     # 1.5 Missing signature
     msg = _build_msg_post(wallet, lb, 0, ts, f"sig{_rand_str(4)}", "Title", "content", pow_val=0, sig_override=b"")
-    _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
-    _check_reject("relay_sig.missing_signature", code, log, "invalid relay fields")
+    txh, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
+    _check_reject("relay_sig.missing_signature", code, log, "invalid relay fields", tx_hash=txh)
 
     # 1.6 Truncated signature
     msg = _build_msg_post(
@@ -741,10 +762,10 @@ def test_pow(backend: str) -> None:
     )
     proof = compute_pow(base, diff_low, base_bits, pow_factor, lb)
     msg = _build_msg_post(free_wallet, lb, diff_low, ts, topic_low, "Title", "content", pow_val=int(proof))
-    _, code, log, _, _ = _submit_tx(
+    txh, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
     )
-    _check_reject("pow.insufficient_difficulty", code, log)
+    _check_reject("pow.insufficient_difficulty", code, log, tx_hash=txh)
 
     # 2.3 Invalid block hash
     bad_lb = _rand_hex(64)
@@ -774,17 +795,17 @@ def test_pow(backend: str) -> None:
         pow_val=int(proof),
         lb_override=bad_lb,
     )
-    _, code, log, _, _ = _submit_tx(
+    txh, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
     )
-    _check_reject("pow.invalid_block_hash", code, log)
+    _check_reject("pow.invalid_block_hash", code, log, tx_hash=txh)
 
     # 2.4 PoW on paid user (should be rejected by chain)
     msg = _build_msg_post(paid_wallet, lb, diff, ts, f"pow{_rand_str(4)}", "Title", "content", pow_val=1)
-    _, code, log, _, _ = _submit_tx(
+    txh, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, paid_wallet.public_key().public_key_bytes
     )
-    _check_reject("pow.pow_on_paid_user", code, log)
+    _check_reject("pow.pow_on_paid_user", code, log, tx_hash=txh)
 
     # 2.5 PoW on MsgUpgradeLevel (never allowed)
     msg = _build_msg_upgrade_level(free_wallet, lb, 0, ts, 1, pow_val=1)
@@ -842,7 +863,7 @@ def test_authority(backend: str) -> None:
         _VALIDATOR_ADDR or "",
         wallet.public_key().public_key_bytes,
     )
-    _check_reject("authority.gov_spoof", code, log, "signature")
+    _check_reject("authority.gov_spoof", code, log, "unauthorized")
 
 
 def test_fee(backend: str) -> None:

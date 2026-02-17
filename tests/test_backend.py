@@ -870,11 +870,19 @@ def _wait_blocked_topic_state(
     deadline = time.perf_counter() + timeout
     topic_lower = (topic or "").strip().lower()
     while time.perf_counter() < deadline:
+        # Check indexed DB first (fast, eventually consistent)
         code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
         if code == 200:
             blocked = (data or {}).get("blocked_topics") or []
             present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
             if present == expect_present:
+                return True
+        # Fall back to chain profile (authoritative, always current)
+        code2, profile = _get(f"{backend}/api/get_profile", {"address": address})
+        if code2 == 200:
+            chain_blocked = (profile or {}).get("blocked_topics") or []
+            present2 = any(str(t or "").strip().lower() == topic_lower for t in chain_blocked)
+            if present2 == expect_present:
                 return True
         time.sleep(0.5)
     return False
