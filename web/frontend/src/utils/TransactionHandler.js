@@ -911,6 +911,10 @@ class TransactionHandler {
             const wrappedResolve = (result) => {
                 this.pendingFollows.delete(key);
                 this._notifyFollowListeners();
+                if (result?.success) {
+                    notifyTopicsUpdated({ removed: topicTrimmed });
+                    invalidateSubCache();
+                }
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };

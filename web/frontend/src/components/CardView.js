@@ -8,7 +8,7 @@ import Button from "./Button";
 import Storage from '../utils/Storage';
 import * as tx from "../utils/tx.js";
 import Api from '../lib/api';
-import { subscribe, unsubscribe, isSubscribed } from '../utils/Subscriptions';
+import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
@@ -1483,6 +1483,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setFollowOverride(null);
         setTopicFollowOverride(null);
     }, [authorAddress, viewerAddress, postTopic]);
+
+    // Async fallback: if sync cache missed, resolve subscription state from API
+    useEffect(() => {
+        if (topicFollowOverride !== null || computedIsSubscribed || !postTopic || !viewerAddress || viewerAddress === 'guest') return;
+        let alive = true;
+        isSubscribedAsync(viewerAddress, postTopic).then(result => {
+            if (alive && result) setTopicFollowOverride(true);
+        }).catch(() => { });
+        return () => { alive = false; };
+    }, [viewerAddress, postTopic, topicFollowOverride, computedIsSubscribed]);
 
     // Robust elapsed formatter: treat missing/invalid timestamps as "0s"
     const ts = Number(post && post.timestamp);
