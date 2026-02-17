@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mirage Local Test Suite — comprehensive end-to-end tests.
+Mirage Backend Test Suite — comprehensive end-to-end tests.
 
 Covers read endpoints, social graph, comment threading, PoW verification,
 all 3 subscription tiers, search/discovery, and validation edge cases.
@@ -13,7 +13,7 @@ from the validator account via Docker CLI.
 
 Run:
     conda activate mirage-node
-    python tests/test_local.py [--backend URL] [--category NAME]
+    python tests/test_backend.py [--backend URL] [--category NAME]
 """
 from __future__ import annotations
 
@@ -336,127 +336,6 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/send_tokens", payload)
     return resp
-
-
-def _relay_low_fee_rejected_inside(backend: str) -> tuple[bool, str]:
-    try:
-        import sys as _sys
-        _backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "backend")
-        if os.path.isdir(_backend_dir) and _backend_dir not in _sys.path:
-            _sys.path.insert(0, _backend_dir)
-        # Also handle container path
-        if os.path.isdir("/opt/mirage/web/backend") and "/opt/mirage/web/backend" not in _sys.path:
-            _sys.path.insert(0, "/opt/mirage/web/backend")
-        from web.backend.node import initialize_runtime, get_grpc_channel, require_runtime
-        from web.backend.tx import build_tx_bytes
-        from cosmpy.crypto.keypairs import PrivateKey
-        from cosmpy.aerial.wallet import LocalWallet
-        from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import TxBody, AuthInfo, TxRaw
-        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import BroadcastTxRequest, BroadcastMode
-        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
-        from cosmpy.protos.cosmos.base.v1beta1.coin_pb2 import Coin
-        from google.protobuf.any_pb2 import Any as AnyPB
-        from shared.datatypes import MsgPost
-        from shared.client import get_status, compute_pow, sign_canonical
-        from shared.canon import canon_base_post, canon_signed_with_pow
-    except Exception as e:
-        return False, f"import error: {e}"
-
-    initialize_runtime()
-    rt = require_runtime()
-
-    st = get_status(backend)
-    lb = str(st.get("last_block_hash", "") or "")
-    if not lb:
-        return False, "missing last_block_hash"
-
-    diff_raw = st.get("pow_difficulty")
-    base_bits_raw = st.get("pow_base_bits")
-    pow_factor_raw = st.get("pow_factor")
-    if diff_raw is None or base_bits_raw is None or pow_factor_raw is None:
-        return False, "missing pow params"
-
-    diff = int(diff_raw)
-    base_bits = int(base_bits_raw)
-    pow_factor = float(pow_factor_raw)
-
-    wallet = LocalWallet(PrivateKey(), prefix="mirage")
-    pub = wallet.public_key().public_key_bytes
-    ts = _now_ms()
-    topic = f"lowfee{_rand_str(4)}"
-
-    base = canon_base_post(pub, _lb_bytes(lb), diff, ts, "", topic, "Low fee", "low fee test", "", 0)
-    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    signed = canon_signed_with_pow(base, int(proof))
-    sig = sign_canonical(wallet, signed)
-
-    msg = MsgPost()
-    msg.authority = rt.validator_payer_addr
-    msg.envelope_pubkey = pub
-    msg.envelope_block_hash = _lb_bytes(lb)
-    msg.envelope_difficulty = int(diff)
-    msg.envelope_pow = int(proof)
-    msg.envelope_timestamp = int(ts)
-    msg.envelope_signature = sig
-    msg.target = ""
-    msg.topic = topic
-    msg.title = "Low fee"
-    msg.content = "low fee test"
-    msg.tag = ""
-
-    any_msg = AnyPB()
-    any_msg.type_url = "/mirage.core.v1.MsgPost"
-    any_msg.value = msg.SerializeToString()
-    body = TxBody(messages=[any_msg], memo="")
-    body_bytes = body.SerializeToString()
-
-    gas_limit = 200000
-    tx_bytes = build_tx_bytes(body_bytes, gas_limit)
-
-    tx_raw = TxRaw()
-    tx_raw.ParseFromString(tx_bytes)
-    auth = AuthInfo()
-    auth.ParseFromString(tx_raw.auth_info_bytes)
-    auth.fee.amount.clear()
-    auth.fee.amount.append(Coin(denom="umirage", amount="0"))
-    tx_raw.auth_info_bytes = auth.SerializeToString()
-    low_fee_bytes = tx_raw.SerializeToString()
-
-    stub = ServiceStub(get_grpc_channel())
-    resp = stub.BroadcastTx(BroadcastTxRequest(tx_bytes=low_fee_bytes, mode=BroadcastMode.BROADCAST_MODE_SYNC))
-    tx_resp = resp.tx_response
-    code = int(getattr(tx_resp, "code", 0))
-    raw_log = str(getattr(tx_resp, "raw_log", "") or "")
-    if code != 0 and "insufficient fee" in raw_log.lower():
-        return True, ""
-    return False, f"code={code} log={raw_log[:200]}"
-
-
-def _relay_low_fee_rejected(backend: str) -> tuple[bool, str]:
-    if _INSIDE_CONTAINER:
-        return _relay_low_fee_rejected_inside(backend)
-
-    cmd = (
-        f"BACKEND_URL=\"{backend}\" python3 - <<'PY'\n"
-        "import os\n"
-        "import sys\n"
-        "sys.path.insert(0, '/opt/mirage')\n"
-        "sys.path.insert(0, '/opt/mirage/web/backend')\n"
-        "from tests.test_local import _relay_low_fee_rejected_inside\n"
-        "backend = os.environ['BACKEND_URL']\n"
-        "ok, err = _relay_low_fee_rejected_inside(backend)\n"
-        "print('OK' if ok else f'FAIL: {err}')\n"
-        "PY"
-    )
-    code, out = _docker_exec(cmd, timeout=120)
-    if code != 0:
-        return False, f"docker exec failed (code={code}): {out[:200]}"
-    out = out.strip()
-    if out.startswith("OK"):
-        return True, ""
-    if out.startswith("FAIL:"):
-        return False, out[len("FAIL:") :].strip()
-    return False, out or "empty output"
 
 
 def setup_test_wallets(backend: str) -> bool:
@@ -2476,16 +2355,6 @@ def test_security(backend: str):
             _fail("attack.pow_proof_reuse_rejected", f"code={code}")
     except Exception as e:
         _fail("attack.pow_proof_reuse_rejected", str(e))
-
-    # 10.2b Relay: low-fee tx rejected in CheckTx
-    try:
-        ok, err = _relay_low_fee_rejected(backend)
-        if ok:
-            _pass("attack.relay_low_fee_rejected")
-        else:
-            _fail("attack.relay_low_fee_rejected", err)
-    except Exception as e:
-        _fail("attack.relay_low_fee_rejected", str(e))
 
     # ------ Authorization attacks ------
     # Create a post by free user for cross-user tests

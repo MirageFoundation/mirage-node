@@ -686,7 +686,7 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     fi
   done
   # Add SKIP_VALIDATOR_CHECK and SKIP_PEERS for local testing
-  # Force --hostname testnet so test_local.py can verify it's a local testnet
+  # Force --hostname testnet so test_backend.py can verify it's a local testnet
   docker run -d $PORTS $ENV_ARGS --name mirage --hostname testnet --restart unless-stopped $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" "$DEPLOY_IMAGE"
 else
   run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy '$DEPLOY_IMAGE'"
