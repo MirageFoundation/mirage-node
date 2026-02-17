@@ -239,14 +239,18 @@ def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
 
     This avoids all bash login-shell issues (profile scripts polluting
     stdout, environment variables being stripped, argument re-parsing).
-    Returns (exit_code, combined_stdout_stderr).
+    Returns (exit_code, stdout).  Stderr is only appended on failure
+    so JSON output on stdout stays clean.
     """
     miraged = _miraged_cmd()
     if _INSIDE_CONTAINER:
         argv = [miraged] + list(args)
         env = {**os.environ, "HOME": "/root"}
         result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
-        return result.returncode, (result.stdout + result.stderr).strip()
+        out = result.stdout.strip()
+        if result.returncode != 0 and not out:
+            out = result.stderr.strip()
+        return result.returncode, out
     else:
         cmd = " ".join([miraged] + list(args))
         return _docker_exec(cmd, timeout=timeout)
@@ -344,7 +348,7 @@ def _resolve_validator_key_addr() -> str:
     )
     if code != 0 or not out:
         raise RuntimeError(f"keys list failed: exit={code} out={out[:200]}")
-    # miraged may print log lines before the JSON array — find the first '['
+    # miraged may print log lines before/after the JSON array.
     idx = out.find("[")
     if idx < 0:
         raise RuntimeError(f"keys list: no JSON array in output: {out[:200]}")
@@ -377,16 +381,27 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     max_retries = 5
     for attempt in range(max_retries):
         send_args = [
-            "tx", "bank", "send",
-            from_addr, address, f"{amount}umirage",
-            "--home", "/root/.mirage/node",
-            "--keyring-backend", kb,
-            "--chain-id", "mirage-1",
+            "tx",
+            "bank",
+            "send",
+            from_addr,
+            address,
+            f"{amount}umirage",
+            "--home",
+            "/root/.mirage/node",
+            "--keyring-backend",
+            kb,
+            "--chain-id",
+            "mirage-1",
             "--yes",
-            "--gas", "auto",
-            "--gas-adjustment", "1.5",
-            "--gas-prices", "5000umirage",
-            "-o", "json",
+            "--gas",
+            "auto",
+            "--gas-adjustment",
+            "1.5",
+            "--gas-prices",
+            "5000umirage",
+            "-o",
+            "json",
         ]
         code, out = _run_miraged(send_args, timeout=30)
         if code != 0:
@@ -418,15 +433,20 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
             for _ in range(15):
                 time.sleep(1)
                 query_args = [
-                    "q", "tx", tx_hash,
-                    "--home", "/root/.mirage/node",
-                    "--node", "tcp://127.0.0.1:26657",
-                    "-o", "json",
+                    "q",
+                    "tx",
+                    tx_hash,
+                    "--home",
+                    "/root/.mirage/node",
+                    "--node",
+                    "tcp://127.0.0.1:26657",
+                    "-o",
+                    "json",
                 ]
                 qcode, qout = _run_miraged(query_args, timeout=10)
                 if qcode == 0 and qout:
                     try:
-                        json_str = qout[qout.index("{"):]
+                        json_str = qout[qout.index("{") :]
                         tx_resp = json.loads(json_str)
                         on_chain_code = int(tx_resp.get("code", -1))
                         if on_chain_code == 0:
