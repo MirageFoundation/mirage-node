@@ -972,15 +972,15 @@ export default function NetworkView({ state }) {
                             {activeTab === 'server' && (
                                 <>
                                     <RowCentered>
-                                        <Label>Balance:</Label>
-                                        <ValueBox>
-                                            <Mono>{serverBalance === null ? '(loading...)' : `${formatMirage(serverBalance)} MIRAGE`}</Mono>
-                                        </ValueBox>
-                                    </RowCentered>
-                                    <RowCentered>
                                         <Label>Staked:</Label>
                                         <ValueBox>
                                             <Mono>{stakedBalance === null ? '(loading...)' : `${formatMirage(stakedBalance)} MIRAGE`}</Mono>
+                                        </ValueBox>
+                                    </RowCentered>
+                                    <RowCentered>
+                                        <Label>Balance:</Label>
+                                        <ValueBox>
+                                            <Mono>{serverBalance === null ? '(loading...)' : `${formatMirage(serverBalance)} MIRAGE`}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
