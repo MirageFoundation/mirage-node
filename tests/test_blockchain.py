@@ -1209,13 +1209,17 @@ def test_direct_bank(backend: str) -> None:
     kb = _keyring_backend()
     key_name = f"directbank{_rand_str(6)}"
 
-    cmd_add = f"{miraged} keys add {key_name} --home /root/.mirage/node --keyring-backend {kb} --output json"
+    cmd_add = f"{miraged} keys add {key_name} --home /root/.mirage/node --keyring-backend {kb} --output json 2>&1"
     code, out = _docker_exec(cmd_add, timeout=10)
     if code != 0 or not out:
         _fail("direct_bank.key_add", f"exit={code} out={out[:200]}")
         return
     try:
-        addr = str(json.loads(out).get("address", "")).strip()
+        # miraged may print log lines before the JSON — find the first '{'
+        idx = out.find("{")
+        if idx < 0:
+            raise ValueError("no JSON object in output")
+        addr = str(json.loads(out[idx:]).get("address", "")).strip()
     except Exception as e:
         _fail("direct_bank.key_add", f"parse error: {e}")
         return
@@ -1239,8 +1243,11 @@ def test_direct_bank(backend: str) -> None:
         _fail("direct_bank.msg_send_blocked", f"exit={code} out={out[:200]}")
         return
     try:
-        lines = out.strip().split("\n")
-        resp = json.loads(lines[-1])
+        # miraged may print log lines before the JSON — find the last '{'
+        json_start = out.rfind("{")
+        if json_start < 0:
+            raise ValueError("no JSON object in output")
+        resp = json.loads(out[json_start:])
         tx_code = int(resp.get("code", 1))
     except Exception as e:
         _fail("direct_bank.msg_send_blocked", f"parse error: {e}")

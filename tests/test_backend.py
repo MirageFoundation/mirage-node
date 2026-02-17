@@ -223,6 +223,34 @@ def _check_local_docker() -> bool:
         return False
 
 
+_VALIDATOR_KEY_ADDR: Optional[str] = None
+
+
+def _resolve_validator_key_addr() -> str:
+    """Resolve the first key address from the node keyring (cached)."""
+    global _VALIDATOR_KEY_ADDR
+    if _VALIDATOR_KEY_ADDR:
+        return _VALIDATOR_KEY_ADDR
+    miraged = _miraged_cmd()
+    kb = _keyring_backend()
+    cmd = f"{miraged} keys list --home /root/.mirage/node --keyring-backend {kb} --output json 2>/dev/null"
+    code, out = _docker_exec(cmd, timeout=10)
+    if code != 0 or not out:
+        raise RuntimeError(f"keys list failed: exit={code} out={out[:200]}")
+    # miraged may print log lines before the JSON array — find the first '['
+    idx = out.find("[")
+    if idx < 0:
+        raise RuntimeError(f"keys list: no JSON array in output: {out[:200]}")
+    keys = json.loads(out[idx:])
+    if not keys:
+        raise RuntimeError("keys list returned empty array")
+    addr = str(keys[0].get("address", "")).strip()
+    if not addr:
+        raise RuntimeError(f"keys list: first key has no address: {keys[0]}")
+    _VALIDATOR_KEY_ADDR = addr
+    return addr
+
+
 def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     """Send tokens from the validator to an address via CLI.
 
@@ -234,13 +262,17 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     miraged = _miraged_cmd()
     kb = _keyring_backend()
 
+    try:
+        from_addr = _resolve_validator_key_addr()
+    except RuntimeError as e:
+        print(f"    [faucet] cannot resolve validator key address: {e}")
+        return False
+
     max_retries = 5
     for attempt in range(max_retries):
         cmd = (
             f"{miraged} tx bank send "
-            f"$({miraged} keys list --home /root/.mirage/node --keyring-backend {kb} "
-            f"--output json 2>/dev/null | python3 -c "
-            f"\"import sys,json; print(json.load(sys.stdin)[0]['address'])\") "
+            f"{from_addr} "
             f"{address} {amount}umirage "
             f"--home /root/.mirage/node --keyring-backend {kb} "
             f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
@@ -251,10 +283,11 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
             return False
         # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
         try:
-            # The JSON response may follow a "gas estimate:" line from --gas auto
-            lines = out.strip().split("\n")
-            json_line = lines[-1]
-            resp = json.loads(json_line)
+            # miraged may print log/gas-estimate lines before the JSON object
+            json_start = out.rfind("{")
+            if json_start < 0:
+                raise ValueError("no JSON object in output")
+            resp = json.loads(out[json_start:])
             tx_code = int(resp.get("code", 1))
             tx_hash = resp.get("txhash", "")
             raw_log = resp.get("raw_log", "") or ""
