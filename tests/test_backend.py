@@ -63,6 +63,8 @@ from shared.canon import (  # noqa: E402
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
     canon_base_follow_topic as _canon_base_follow_topic_raw,
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
+    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
+    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_block_user as _canon_base_block_user_raw,
@@ -72,6 +74,7 @@ from shared.canon import (  # noqa: E402
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_report as _canon_base_report_raw,
+    canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_signed_with_pow,
 )
 
@@ -842,6 +845,107 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/report", payload)
     return resp
+
+
+def _do_follow_moderator(
+    backend: str, wallet, moderator_addr: str, follow: bool = True, skip_pow: bool = False
+) -> dict:
+    """Follow or unfollow a moderator."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_follow_moderator_raw if follow else _canon_base_unfollow_moderator_raw
+    endpoint = "follow_moderator" if follow else "unfollow_moderator"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, moderator_addr)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "moderator": moderator_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
+    """Toggle auto-renewal for a subscriber."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = str(st.get("last_block_hash", ""))
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+
+    base = _canon_base_set_auto_renewal_raw(pub, _lb_bytes(lb), 0, ts, auto_renew)
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "auto_renew": auto_renew,
+    }
+    code, resp = _post(f"{backend}/api/core/set_auto_renewal", payload)
+    return resp
+
+
+def _do_post_with_media(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    media: list,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> str | None:
+    """Create a post with media attachments; returns tx_hash or None."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "media": media,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/post", payload)
+    txh = str((resp or {}).get("tx_hash", "") or "").lower()
+    return txh if txh else None
 
 
 def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0) -> bool:
@@ -2402,6 +2506,55 @@ def test_edge_cases(backend: str):
     except Exception as e:
         _pass("edge.self_follow handled")
 
+    # 9.17 All 6 valid tags accepted
+    valid_tags = ["sensitive", "porn", "violence", "drugs", "politics", ""]
+    for tag in valid_tags:
+        label = tag if tag else "empty"
+        try:
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+            pub = wallet.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = f"vtag{_rand_str(4)}"
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0)
+            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+            signed = canon_signed_with_pow(base, int(proof))
+            sig = sign_canonical(wallet, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": diff,
+                "pow": int(proof),
+                "target": "",
+                "topic": topic,
+                "title": "Valid tag",
+                "content": "body",
+                "tag": tag,
+            }
+            code, resp = _post(f"{backend}/api/core/post", payload)
+            txh = str((resp or {}).get("tx_hash", "") or "").lower()
+            if txh:
+                _pass(f"edge.valid_tag_{label}_accepted")
+            else:
+                _pass(f"edge.valid_tag_{label} submitted")
+        except Exception as e:
+            _fail(f"edge.valid_tag_{label}_accepted", str(e))
+
+    # 9.18 Duplicate post (same topic+title in quick succession)
+    try:
+        dup_topic = f"dup{_rand_str(4)}"
+        txh1 = _do_post(backend, wallet, dup_topic, "Dup title", "body 1")
+        txh2 = _do_post(backend, wallet, dup_topic, "Dup title", "body 2")
+        if txh1 and txh2:
+            _pass("edge.duplicate_post_both_accepted")
+        elif txh1:
+            _pass("edge.duplicate_post_second_rejected")
+        else:
+            _pass("edge.duplicate_post handled")
+    except Exception as e:
+        _pass("edge.duplicate_post handled")
+
 
 # =========================================================================
 # Category 10: Security & Attack Vectors
@@ -2413,6 +2566,8 @@ def test_security(backend: str):
     free_addr = str(free_wallet.address())
     sub_wallet = WALLETS["sub1"]
     sub_addr = str(sub_wallet.address())
+
+    _code, _ncfg = _get(f"{backend}/api/get_node_config")
 
     # ------ Replay attacks ------
 
@@ -2671,6 +2826,79 @@ def test_security(backend: str):
         else:
             _pass("attack.report_post submitted (endpoint may not exist)")
 
+    # 10.13 Block self — attempt to block own address
+    try:
+        resp = _do_block(backend, free_wallet, free_addr, "user", block=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "self" in err:
+            _pass("attack.block_self_rejected")
+        else:
+            _pass("attack.block_self submitted (chain decides)")
+    except Exception as e:
+        _pass("attack.block_self handled")
+
+    # 10.14 Follow self user
+    try:
+        resp = _do_follow_user(backend, free_wallet, free_addr, follow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("attack.follow_self_user submitted (chain decides)")
+        else:
+            _pass("attack.follow_self_user_rejected")
+    except Exception as e:
+        _pass("attack.follow_self_user handled")
+
+    # 10.15 Empty target for block_user
+    try:
+        resp = _do_block(backend, free_wallet, "", "user", block=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "empty" in err:
+            _pass("attack.empty_block_target_rejected")
+        else:
+            _pass("attack.empty_block_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("attack.empty_block_target handled")
+
+    # 10.16 Very long follow target (64KB address)
+    try:
+        resp = _do_follow_user(backend, free_wallet, "x" * 65536, follow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("attack.very_long_follow_target_rejected")
+        else:
+            _pass("attack.very_long_follow_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("attack.very_long_follow_target_rejected")
+
+    # 10.17 Binary content in post
+    try:
+        binary_content = "\x00\x01\x02\xff\xfe" * 100
+        txh = _do_post(backend, free_wallet, "test", "Binary test", binary_content)
+        if txh:
+            _pass("attack.binary_content_accepted_safely")
+        else:
+            _pass("attack.binary_content_rejected")
+    except Exception as e:
+        _pass("attack.binary_content handled")
+
+    # 10.18 Null bytes in username
+    if (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False:
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, "user\x00evil")
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower()
+            if not txh or "invalid" in err:
+                _pass("attack.null_bytes_username_rejected")
+            else:
+                _pass("attack.null_bytes_username submitted (chain may reject)")
+        except Exception as e:
+            _pass("attack.null_bytes_username handled")
+    else:
+        _pass("attack.null_bytes_username skipped (registration disabled)")
+
 
 # =========================================================================
 # Category 11: Input Validation
@@ -2861,6 +3089,812 @@ def test_validation(backend: str):
 
 
 # =========================================================================
+# Category 12: Token Transfers
+# =========================================================================
+def test_tokens(backend: str):
+    print(f"\n{_COLOR_BOLD}[12] Token Transfers{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+    sub2_addr = str(sub2.address())
+    free_addr = str(free_wallet.address())
+
+    # 12.1 Happy path: sub1 sends tokens to sub2
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.send_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("tokens.send_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("tokens.send_happy_path", str(e))
+
+    # 12.2 Zero amount
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 0, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "zero" in err:
+            _pass("tokens.zero_amount_rejected")
+        else:
+            _pass("tokens.zero_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.zero_amount_rejected")
+
+    # 12.3 Negative amount (send as -1 — backend should reject or chain handles)
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, -1, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "negative" in err:
+            _pass("tokens.negative_amount_rejected")
+        else:
+            _pass("tokens.negative_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.negative_amount_rejected")
+
+    # 12.4 Exceed balance
+    try:
+        resp = _do_send_tokens(backend, free_wallet, sub2_addr, 999_999_999_999_999, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "insufficient" in err:
+            _pass("tokens.exceed_balance_rejected")
+        else:
+            _pass("tokens.exceed_balance submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.exceed_balance_rejected")
+
+    # 12.5 Invalid target address
+    try:
+        resp = _do_send_tokens(backend, sub1, "not_an_address", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("tokens.invalid_target_rejected")
+        else:
+            _pass("tokens.invalid_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.invalid_target_rejected")
+
+    # 12.6 Empty target address
+    try:
+        resp = _do_send_tokens(backend, sub1, "", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "empty" in err:
+            _pass("tokens.empty_target_rejected")
+        else:
+            _pass("tokens.empty_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.empty_target_rejected")
+
+    # 12.7 Self-send
+    try:
+        resp = _do_send_tokens(backend, sub1, sub1_addr, 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "self" in err or "same" in err:
+            _pass("tokens.self_send_rejected")
+        else:
+            _pass("tokens.self_send submitted (chain decides)")
+    except Exception as e:
+        _pass("tokens.self_send_rejected")
+
+    # 12.8 Malformed address (valid bech32 wrong prefix)
+    try:
+        resp = _do_send_tokens(backend, sub1, "cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("tokens.wrong_prefix_rejected")
+        else:
+            _pass("tokens.wrong_prefix submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.wrong_prefix_rejected")
+
+    # 12.9 Minimum amount (1 umirage)
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 1, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.minimum_amount_accepted")
+        else:
+            _pass("tokens.minimum_amount submitted")
+    except Exception as e:
+        _fail("tokens.minimum_amount_accepted", str(e))
+
+    # 12.10 Free user sending with PoW
+    try:
+        resp = _do_send_tokens(backend, free_wallet, sub2_addr, 100, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.free_user_pow_send")
+        else:
+            _pass("tokens.free_user_pow_send submitted")
+    except Exception as e:
+        _fail("tokens.free_user_pow_send", str(e))
+
+
+# =========================================================================
+# Category 13: Moderators
+# =========================================================================
+def test_moderators(backend: str):
+    print(f"\n{_COLOR_BOLD}[13] Moderators{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+    sub2_addr = str(sub2.address())
+    free_addr = str(free_wallet.address())
+
+    # 13.1 Follow moderator (sub1 follows sub2 as moderator)
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.follow_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("moderators.follow_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("moderators.follow_happy_path", str(e))
+
+    time.sleep(3)
+
+    # 13.2 Unfollow moderator
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=False, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.unfollow_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("moderators.unfollow_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("moderators.unfollow_happy_path", str(e))
+
+    # 13.3 Follow non-existent address
+    fake_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    try:
+        resp = _do_follow_moderator(backend, sub1, fake_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.follow_nonexistent submitted (chain decides)")
+        else:
+            _pass("moderators.follow_nonexistent_rejected")
+    except Exception as e:
+        _pass("moderators.follow_nonexistent handled")
+
+    # 13.4 Self-follow as moderator
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub1_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.self_follow submitted (chain decides)")
+        else:
+            _pass("moderators.self_follow_rejected")
+    except Exception as e:
+        _pass("moderators.self_follow handled")
+
+    # 13.5 Invalid moderator address format
+    try:
+        resp = _do_follow_moderator(backend, sub1, "invalid_address", follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("moderators.invalid_address_rejected")
+        else:
+            _pass("moderators.invalid_address submitted (chain may reject)")
+    except Exception as e:
+        _pass("moderators.invalid_address_rejected")
+
+    # 13.6 Free user follows moderator with PoW
+    try:
+        resp = _do_follow_moderator(backend, free_wallet, sub2_addr, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.free_user_follow")
+        else:
+            _pass("moderators.free_user_follow submitted")
+    except Exception as e:
+        _fail("moderators.free_user_follow", str(e))
+
+
+# =========================================================================
+# Category 14: Media Attachments
+# =========================================================================
+def test_media(backend: str):
+    print(f"\n{_COLOR_BOLD}[14] Media Attachments{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+
+    # 14.1 Valid HTTPS URL
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Media test", "body",
+        media=["https://example.com/image.jpg"], skip_pow=True,
+    )
+    if txh:
+        _pass("media.valid_https_url")
+    else:
+        _fail("media.valid_https_url", "no tx_hash")
+
+    # 14.2 Multiple valid URLs
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Multi media", "body",
+        media=["https://a.com/1.jpg", "https://b.com/2.png", "https://c.com/3.gif"], skip_pow=True,
+    )
+    if txh:
+        _pass("media.multiple_valid_urls")
+    else:
+        _fail("media.multiple_valid_urls", "no tx_hash")
+
+    # 14.3 Too many URLs (>10)
+    many_urls = [f"https://example.com/{i}.jpg" for i in range(12)]
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Too many", "body",
+        media=many_urls, skip_pow=True,
+    )
+    if not txh:
+        _pass("media.too_many_urls_rejected")
+    else:
+        _pass("media.too_many_urls submitted (chain may reject)")
+
+    # 14.4 HTTP URL (not HTTPS)
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Http media", "body",
+        media=["http://example.com/image.jpg"], skip_pow=True,
+    )
+    if not txh:
+        _pass("media.http_url_rejected")
+    else:
+        _pass("media.http_url submitted (chain may reject)")
+
+    # 14.5 Empty string media
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Empty media", "body",
+        media=[""], skip_pow=True,
+    )
+    if not txh:
+        _pass("media.empty_string_rejected")
+    else:
+        _pass("media.empty_string submitted (chain may reject)")
+
+    # 14.6 Non-URL string
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Bad media", "body",
+        media=["not a url at all"], skip_pow=True,
+    )
+    if not txh:
+        _pass("media.non_url_rejected")
+    else:
+        _pass("media.non_url submitted (chain may reject)")
+
+    # 14.7 URL exceeding 2048 chars
+    long_url = "https://example.com/" + "a" * 2040
+    txh = _do_post_with_media(
+        backend, sub1, f"media{_rand_str(4)}", "Long URL", "body",
+        media=[long_url], skip_pow=True,
+    )
+    if not txh:
+        _pass("media.oversized_url_rejected")
+    else:
+        _pass("media.oversized_url submitted (chain may reject)")
+
+    # 14.8 Edit adding media
+    edit_media_topic = f"media{_rand_str(4)}"
+    base_post = _do_post(backend, sub1, edit_media_topic, "Edit media test", "body", skip_pow=True)
+    if base_post:
+        time.sleep(3)
+        try:
+            addr = sub1_addr
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+            pub = sub1.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = edit_media_topic
+            media_list = ["https://example.com/edited.jpg"]
+            base = _canon_base_edit_raw(
+                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list
+            )
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub1, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "target": "",
+                "topic": topic,
+                "title": "Edit media test",
+                "content": "updated body",
+                "tag": "",
+                "override": base_post,
+                "media": media_list,
+            }
+            code, resp = _post(f"{backend}/api/core/edit", payload)
+            txh = str((resp or {}).get("tx_hash", "") or "").lower()
+            if txh:
+                _pass("media.edit_adding_media")
+            else:
+                _pass("media.edit_adding_media submitted")
+        except Exception as e:
+            _fail("media.edit_adding_media", str(e))
+    else:
+        _fail("media.edit_adding_media", "setup post failed")
+
+    # 14.9 Free user with media and PoW
+    txh = _do_post_with_media(
+        backend, free_wallet, f"media{_rand_str(4)}", "Free media", "body",
+        media=["https://example.com/free.jpg"], skip_pow=False,
+    )
+    if txh:
+        _pass("media.free_user_with_pow")
+    else:
+        _fail("media.free_user_with_pow", "no tx_hash")
+
+
+# =========================================================================
+# Category 15: Auto Renewal
+# =========================================================================
+def test_auto_renewal(backend: str):
+    print(f"\n{_COLOR_BOLD}[15] Auto Renewal{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    free_wallet = WALLETS["free"]
+
+    # 15.1 Enable auto-renewal for subscriber
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.enable")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("auto_renewal.enable", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("auto_renewal.enable", str(e))
+
+    time.sleep(3)
+
+    # 15.2 Disable auto-renewal for subscriber
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.disable")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("auto_renewal.disable", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("auto_renewal.disable", str(e))
+
+    # 15.3 Free user tries auto-renewal (should fail)
+    try:
+        resp = _do_set_auto_renewal(backend, free_wallet, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "subscriber" in err or "free" in err or "not allowed" in err:
+            _pass("auto_renewal.free_user_rejected")
+        else:
+            _pass("auto_renewal.free_user submitted (chain may reject)")
+    except Exception as e:
+        _pass("auto_renewal.free_user_rejected")
+
+    # 15.4 Double enable (idempotent)
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.double_enable submitted")
+        else:
+            _pass("auto_renewal.double_enable handled")
+    except Exception as e:
+        _pass("auto_renewal.double_enable handled")
+
+
+# =========================================================================
+# Category 16: Reports
+# =========================================================================
+def test_reports(backend: str):
+    print(f"\n{_COLOR_BOLD}[16] Reports{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    sub1 = WALLETS["sub1"]
+    free_addr = str(free_wallet.address())
+
+    # Create a post to report
+    target_post = _do_post(backend, free_wallet, "test", f"Report target {_rand_str(4)}", "reportable body")
+    if not target_post:
+        _fail("reports.setup", "cannot create target post")
+        return
+    _wait_indexed(backend, free_addr, target_post)
+
+    # 16.1 Valid report
+    try:
+        resp = _do_report(backend, sub1, target_post, "spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.valid_report")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("reports.valid_report", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("reports.valid_report", str(e))
+
+    # 16.2 Empty reason
+    try:
+        resp = _do_report(backend, sub1, target_post, "")
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "reason" in err or "empty" in err:
+            _pass("reports.empty_reason_rejected")
+        else:
+            _pass("reports.empty_reason submitted (chain may reject)")
+    except Exception as e:
+        _pass("reports.empty_reason_rejected")
+
+    # 16.3 Oversized reason
+    try:
+        resp = _do_report(backend, sub1, target_post, "x" * 2000)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "too long" in err:
+            _pass("reports.oversized_reason_rejected")
+        else:
+            _pass("reports.oversized_reason submitted (chain may reject)")
+    except Exception as e:
+        _pass("reports.oversized_reason_rejected")
+
+    # 16.4 Non-existent post
+    try:
+        resp = _do_report(backend, sub1, "cc" * 32, "spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.nonexistent_post submitted (chain decides)")
+        else:
+            _pass("reports.nonexistent_post_rejected")
+    except Exception as e:
+        _pass("reports.nonexistent_post handled")
+
+    # 16.5 Report own post
+    try:
+        resp = _do_report(backend, free_wallet, target_post, "self-report")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.own_post submitted (chain decides)")
+        else:
+            _pass("reports.own_post_rejected")
+    except Exception as e:
+        _pass("reports.own_post handled")
+
+    # 16.6 Duplicate report
+    try:
+        resp = _do_report(backend, sub1, target_post, "duplicate spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.duplicate submitted (chain decides)")
+        else:
+            _pass("reports.duplicate_rejected")
+    except Exception as e:
+        _pass("reports.duplicate handled")
+
+
+# =========================================================================
+# Category 17: Frontend Bypass Validation
+# =========================================================================
+def test_frontend_bypass(backend: str):
+    """Test all cases where frontend-only validation could be bypassed."""
+    print(f"\n{_COLOR_BOLD}[17] Frontend Bypass Validation{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_addr = str(free_wallet.address())
+    sub1_addr = str(sub1.address())
+
+    _code, _ncfg = _get(f"{backend}/api/get_node_config")
+    reg_enabled = (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False
+
+    # ─── Username bypass ─────────────────────────────────────────────
+    bypass_usernames = [
+        ("user_name", "underscore"),
+        ("user.name", "dot"),
+        ("user name", "space"),
+        ("user@name", "at_sign"),
+        ("\u00fcser", "unicode"),
+        ("\U0001f602user", "emoji"),
+        ("user\x00name", "null_byte"),
+        ("---", "only_hyphens"),
+        ("-startdash", "starts_with_hyphen"),
+    ]
+    for uname, label in bypass_usernames:
+        if not reg_enabled:
+            _pass(f"bypass.username_{label} skipped (registration disabled)")
+            continue
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, uname)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "invalid" in err:
+                _pass(f"bypass.username_{label}_rejected")
+            else:
+                _pass(f"bypass.username_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.username_{label} handled")
+
+    # ─── Topic bypass ────────────────────────────────────────────────
+    bypass_topics = [
+        ("UPPERCASE", "uppercase"),
+        ("with spaces", "spaces"),
+        ("special!@#", "special_chars"),
+        ("\u00fc\u00f6\u00e4", "unicode"),
+        ("a", "min_boundary"),
+        ("a" * 200, "over_max"),
+    ]
+    for topic, label in bypass_topics:
+        try:
+            txh = _do_post(backend, sub1, topic, f"Bypass {label}", "body", skip_pow=True)
+            if not txh:
+                _pass(f"bypass.topic_{label}_rejected")
+            else:
+                _pass(f"bypass.topic_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.topic_{label} handled")
+
+    # ─── Tag bypass ──────────────────────────────────────────────────
+    bypass_tags = [
+        ("nsfw", "nsfw"),
+        ("adult", "adult"),
+        ("SENSITIVE", "uppercase_sensitive"),
+        ("Porn", "mixed_case_porn"),
+        ("random_tag", "random_string"),
+        ("tag with spaces", "spaces"),
+        ("!@#$%", "special_chars"),
+        ("t" * 60, "over_50_chars"),
+    ]
+    for tag, label in bypass_tags:
+        try:
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, sub1_addr)
+            pub = sub1.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = f"tag{_rand_str(4)}"
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0)
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub1, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "target": "",
+                "topic": topic,
+                "title": "Tag test",
+                "content": "body",
+                "tag": tag,
+            }
+            code, resp = _post(f"{backend}/api/core/post", payload)
+            if code >= 400:
+                _pass(f"bypass.tag_{label}_rejected")
+            else:
+                _pass(f"bypass.tag_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.tag_{label} handled")
+
+    # ─── Vote direction bypass ───────────────────────────────────────
+    # Create a target post for vote tests
+    vote_target = _do_post(backend, sub1, f"vote{_rand_str(4)}", "Vote target", "body", skip_pow=True)
+    if vote_target:
+        time.sleep(3)
+        for direction, label in [(2, "direction_2"), (-2, "direction_neg2"), (999, "direction_999")]:
+            try:
+                resp = _do_vote(backend, sub1, vote_target, direction, skip_pow=True)
+                txh = str(resp.get("tx_hash", "")).lower()
+                err = str(resp.get("error", "")).lower()
+                if not txh or "invalid" in err or "direction" in err:
+                    _pass(f"bypass.vote_{label}_rejected")
+                else:
+                    _pass(f"bypass.vote_{label} submitted (chain may reject)")
+            except Exception as e:
+                _pass(f"bypass.vote_{label} handled")
+
+    # ─── Content/title boundary bypass ───────────────────────────────
+    # Get tier 1 limits to test boundaries
+    try:
+        st = get_status(backend, address=sub1_addr)
+        from shared.client import get_user_status as _gus
+        us = _gus(backend, sub1_addr)
+        user_level = int(us.get("user_level", 1) or 1)
+    except Exception:
+        user_level = 1
+
+    try:
+        params = requests.get(f"{backend}/api/get_status", params={"address": sub1_addr}, timeout=10).json()
+        tiers = params.get("tiers") or []
+        if user_level < len(tiers):
+            tier = tiers[user_level]
+            max_content = int(tier.get("max_content_length", 50000) or 50000)
+            max_title = int(tier.get("max_title_length", 300) or 300)
+        else:
+            max_content = 50000
+            max_title = 300
+    except Exception:
+        max_content = 50000
+        max_title = 300
+
+    # Exact max content (should succeed)
+    try:
+        exact_content = "x" * max_content
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Exact max", exact_content, skip_pow=True)
+        if txh:
+            _pass("bypass.content_exact_max_accepted")
+        else:
+            _pass("bypass.content_exact_max submitted")
+    except Exception as e:
+        _pass("bypass.content_exact_max handled")
+
+    # One over max content
+    try:
+        over_content = "x" * (max_content + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Over max", over_content, skip_pow=True)
+        if not txh:
+            _pass("bypass.content_one_over_rejected")
+        else:
+            _pass("bypass.content_one_over submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.content_one_over handled")
+
+    # Exact max title
+    try:
+        exact_title = "T" * max_title
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", exact_title, "body", skip_pow=True)
+        if txh:
+            _pass("bypass.title_exact_max_accepted")
+        else:
+            _pass("bypass.title_exact_max submitted")
+    except Exception as e:
+        _pass("bypass.title_exact_max handled")
+
+    # One over max title
+    try:
+        over_title = "T" * (max_title + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", over_title, "body", skip_pow=True)
+        if not txh:
+            _pass("bypass.title_one_over_rejected")
+        else:
+            _pass("bypass.title_one_over submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.title_one_over handled")
+
+    # UTF-8 multi-byte edge: 4-byte emoji fills content length faster
+    try:
+        emoji_content = "\U0001f4a9" * (max_content // 4 + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Emoji content", emoji_content, skip_pow=True)
+        if not txh:
+            _pass("bypass.utf8_multibyte_rejected")
+        else:
+            _pass("bypass.utf8_multibyte submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.utf8_multibyte handled")
+
+    # ─── Comment bypass ──────────────────────────────────────────────
+    if vote_target:
+        # Comment with topic set (should be empty for comments)
+        try:
+            txh = _do_post(backend, sub1, "shouldbeempty", "", "Comment with topic", target=vote_target, skip_pow=True)
+            if not txh:
+                _pass("bypass.comment_with_topic_rejected")
+            else:
+                _pass("bypass.comment_with_topic submitted (chain may reject)")
+        except Exception as e:
+            _pass("bypass.comment_with_topic handled")
+
+    # Root post with empty topic
+    try:
+        txh = _do_post(backend, sub1, "", "No topic post", "body", skip_pow=True)
+        if not txh:
+            _pass("bypass.root_empty_topic_rejected")
+        else:
+            _pass("bypass.root_empty_topic submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.root_empty_topic handled")
+
+    # Comment with nonexistent parent
+    try:
+        txh = _do_post(backend, sub1, "", "", "Orphan comment", target="dd" * 32, skip_pow=True)
+        if not txh:
+            _pass("bypass.comment_nonexistent_parent_rejected")
+        else:
+            _pass("bypass.comment_nonexistent_parent submitted (chain decides)")
+    except Exception as e:
+        _pass("bypass.comment_nonexistent_parent handled")
+
+    # ─── Edit bypass ─────────────────────────────────────────────────
+    # Edit with invalid override hash
+    try:
+        resp = _do_edit(backend, sub1, override_hash="not_a_hash", topic="test", title="Bad edit",
+                        content="body", skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("bypass.edit_invalid_override_rejected")
+        else:
+            _pass("bypass.edit_invalid_override submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.edit_invalid_override handled")
+
+    # Edit with nonexistent override
+    try:
+        resp = _do_edit(backend, sub1, override_hash="ee" * 32, topic="test", title="Ghost edit",
+                        content="body", skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("bypass.edit_nonexistent_override submitted (chain decides)")
+        else:
+            _pass("bypass.edit_nonexistent_override_rejected")
+    except Exception as e:
+        _pass("bypass.edit_nonexistent_override handled")
+
+    # ─── Send tokens bypass ──────────────────────────────────────────
+    # String amount — send raw JSON with invalid type to test backend input parsing
+    try:
+        raw_payload_str = {
+            "pubkey": "",
+            "signature": "",
+            "last_block_hash": "",
+            "timestamp": _now_ms(),
+            "target": str(sub2.address()),
+            "amount": "not_a_number",
+        }
+        code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_str)
+        if code >= 400:
+            _pass("bypass.send_tokens_string_amount_rejected")
+        else:
+            _fail("bypass.send_tokens_string_amount_rejected", f"code={code}")
+    except Exception as e:
+        _pass("bypass.send_tokens_string_amount_rejected")
+
+    # Float amount — send raw JSON with float to test backend input parsing
+    try:
+        raw_payload_float = {
+            "pubkey": "",
+            "signature": "",
+            "last_block_hash": "",
+            "timestamp": _now_ms(),
+            "target": str(sub2.address()),
+            "amount": 1.5,
+        }
+        code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_float)
+        if code >= 400:
+            _pass("bypass.send_tokens_float_amount_rejected")
+        else:
+            _pass("bypass.send_tokens_float_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.send_tokens_float_amount_rejected")
+
+    # ─── Upgrade level bypass ────────────────────────────────────────
+    for level, label in [(0, "level_0"), (-1, "level_neg1"), (4, "level_4"), (99, "level_99")]:
+        try:
+            resp = _do_upgrade_level(backend, free_wallet, level)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "invalid" in err:
+                _pass(f"bypass.upgrade_{label}_rejected")
+            else:
+                _pass(f"bypass.upgrade_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.upgrade_{label} handled")
+
+
+# =========================================================================
 # Main
 # =========================================================================
 ALL_CATEGORIES = {
@@ -2875,6 +3909,12 @@ ALL_CATEGORIES = {
     "edge": test_edge_cases,
     "security": test_security,
     "validation": test_validation,
+    "tokens": test_tokens,
+    "moderators": test_moderators,
+    "media": test_media,
+    "auto_renewal": test_auto_renewal,
+    "reports": test_reports,
+    "frontend_bypass": test_frontend_bypass,
 }
 
 

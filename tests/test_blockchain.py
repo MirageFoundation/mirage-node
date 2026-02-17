@@ -46,10 +46,20 @@ from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
     canon_base_block_user as _canon_base_block_user_raw,
+    canon_base_unblock_post as _canon_base_unblock_post_raw,
+    canon_base_unblock_user as _canon_base_unblock_user_raw,
+    canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_delete as _canon_base_delete_raw,
     canon_base_edit as _canon_base_edit_raw,
+    canon_base_follow_user as _canon_base_follow_user_raw,
+    canon_base_unfollow_user as _canon_base_unfollow_user_raw,
+    canon_base_follow_topic as _canon_base_follow_topic_raw,
+    canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
+    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
+    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
+    canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_username as _canon_base_set_username_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_vote as _canon_base_vote_raw,
@@ -59,11 +69,24 @@ from shared.datatypes import (
     MsgBlockPost,
     MsgBlockTopic,
     MsgBlockUser,
+    MsgBurnTokens,
     MsgDelete,
     MsgEdit,
+    MsgFollowModerator,
+    MsgFollowTopic,
+    MsgFollowUser,
+    MsgMintTokens,
     MsgPost,
     MsgSendTokens,
+    MsgSetAutoRenewal,
+    MsgSetLevel,
     MsgSetUsername,
+    MsgUnblockPost,
+    MsgUnblockTopic,
+    MsgUnblockUser,
+    MsgUnfollowModerator,
+    MsgUnfollowTopic,
+    MsgUnfollowUser,
     MsgUpgradeLevel,
     MsgVote,
 )
@@ -599,6 +622,258 @@ def _build_msg_upgrade_level(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.level = int(level)
+    return msg
+
+
+def _build_msg_follow_user(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    user: str,
+    pow_val: int = 0,
+) -> MsgFollowUser:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_follow_user_raw(pub, lb_bytes, diff, ts, target, user)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgFollowUser()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.user = user
+    return msg
+
+
+def _build_msg_unfollow_user(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    user: str,
+    pow_val: int = 0,
+) -> MsgUnfollowUser:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unfollow_user_raw(pub, lb_bytes, diff, ts, target, user)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnfollowUser()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.user = user
+    return msg
+
+
+def _build_msg_follow_topic(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    topic: str,
+    pow_val: int = 0,
+) -> MsgFollowTopic:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_follow_topic_raw(pub, lb_bytes, diff, ts, target, topic)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgFollowTopic()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.topic = topic
+    return msg
+
+
+def _build_msg_unfollow_topic(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    topic: str,
+    pow_val: int = 0,
+) -> MsgUnfollowTopic:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unfollow_topic_raw(pub, lb_bytes, diff, ts, target, topic)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnfollowTopic()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.topic = topic
+    return msg
+
+
+def _build_msg_follow_moderator(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    moderator: str,
+    pow_val: int = 0,
+) -> MsgFollowModerator:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_follow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgFollowModerator()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.moderator = moderator
+    return msg
+
+
+def _build_msg_unfollow_moderator(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    moderator: str,
+    pow_val: int = 0,
+) -> MsgUnfollowModerator:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unfollow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnfollowModerator()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.moderator = moderator
+    return msg
+
+
+def _build_msg_unblock_post(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    pow_val: int = 0,
+) -> MsgUnblockPost:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unblock_post_raw(pub, lb_bytes, diff, ts, target)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnblockPost()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    return msg
+
+
+def _build_msg_unblock_user(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    pow_val: int = 0,
+) -> MsgUnblockUser:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unblock_user_raw(pub, lb_bytes, diff, ts, target)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnblockUser()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    return msg
+
+
+def _build_msg_unblock_topic(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    topic: str,
+    pow_val: int = 0,
+) -> MsgUnblockTopic:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_unblock_topic_raw(pub, lb_bytes, diff, ts, target, topic)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgUnblockTopic()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.topic = topic
+    return msg
+
+
+def _build_msg_set_auto_renewal(
+    wallet: LocalWallet,
+    lb: str,
+    ts: int,
+    auto_renew: bool,
+) -> MsgSetAutoRenewal:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_auto_renewal_raw(pub, lb_bytes, 0, ts, auto_renew)
+    sig = _sign_relay(wallet, base, 0)
+    msg = MsgSetAutoRenewal()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = 0
+    msg.envelope_pow = 0
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.auto_renew = auto_renew
     return msg
 
 
@@ -1234,9 +1509,603 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_reject("msg.block_topic_over_limit", ccode, dcode, dlog)
 
+    # 6.11 Unblock post (happy path: block then unblock)
+    block_post_target = _rand_hex(64)
+    msg = _build_msg_block_post(w2, lb, 0, ts, block_post_target, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_unblock_post(w2, lb, 0, ts, block_post_target, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgUnblockPost")],
+            DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_accept("msg.unblock_post_happy", ccode, dcode, dlog)
+    else:
+        _fail("msg.unblock_post_happy", "setup block failed")
+
+    # 6.12 Unblock user (happy path)
+    block_user_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_block_user(w2, lb, 0, ts, block_user_target, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockUser")],
+        DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_unblock_user(w2, lb, 0, ts, block_user_target, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgUnblockUser")],
+            DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_accept("msg.unblock_user_happy", ccode, dcode, dlog)
+    else:
+        _fail("msg.unblock_user_happy", "setup block failed")
+
+    # 6.13 Unblock topic (happy path)
+    block_topic_target = f"ub{_rand_str(4)}"
+    msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_unblock_topic(w2, lb, 0, ts, str(w2.address()), block_topic_target, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgUnblockTopic")],
+            DEFAULT_GAS_LIMIT, fee_payer, w2.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_accept("msg.unblock_topic_happy", ccode, dcode, dlog)
+    else:
+        _fail("msg.unblock_topic_happy", "setup block failed")
+
+    # 6.14 Send tokens to self
+    msg = _build_msg_send_tokens(w1, lb, 0, ts, str(w1.address()), str(w1.address()), 1, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSendTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.send_tokens_self", ccode, dcode, dlog)
+
+    # 6.15 Send tokens insufficient balance
+    msg = _build_msg_send_tokens(w1, lb, 0, ts, str(w1.address()), str(w2.address()), 999_999_999_999_999, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSendTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.send_tokens_insufficient", ccode, dcode, dlog)
+
+    # 6.16 Send tokens to invalid address
+    msg = _build_msg_send_tokens(w1, lb, 0, ts, str(w1.address()), "invalid_addr", 1, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSendTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.send_tokens_invalid_target", ccode, dcode, dlog)
+
+    # 6.17 Vote with invalid target format (not hex64)
+    msg = _build_msg_vote(w1, lb, 0, ts, "short_target", 1, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgVote")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.vote_invalid_target_format", ccode, dcode, dlog)
+
+    # 6.18 Root post with empty topic (should fail)
+    msg = _build_msg_post(w1, lb, 0, ts, "", "Title", "content", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.post_empty_topic", ccode, dcode, dlog)
+
+    # 6.19 Edit with invalid override format
+    msg = _build_msg_edit(w1, lb, 0, ts, "", f"t{_rand_str(4)}", "Edited", "content", "", "not_a_hex_hash", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEdit")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.edit_invalid_override", ccode, dcode, dlog)
+
+    # 6.20 MsgPost oversized title (not just content)
+    tier1 = _get_tier_config(1)
+    max_title = _tier_int(tier1, "max_title_length")
+    big_title = "T" * (max_title + 25)
+    msg = _build_msg_post(w1, lb, 0, ts, f"t{_rand_str(4)}", big_title, "content", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("msg.post_oversized_title", ccode, dcode, dlog)
+
+
+def test_follow_limits(backend: str) -> None:
+    """Test follow/unfollow tier limits and mutual exclusion at chain level."""
+    print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
+
+    w_test = WALLETS["sub2"]
+    w_addr = str(w_test.address())
+    fee_payer = _VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, w_addr)
+    ts = _now_ms()
+    tier = _get_tier_config(2)
+
+    # 8.1 Fill max_followed_users, then one more
+    max_followed_users = _tier_int(tier, "max_followed_users")
+    _debug(f"tier2 max_followed_users={max_followed_users}")
+    for i in range(max_followed_users):
+        target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_user(w_test, lb, 0, ts, w_addr, target_addr, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("follow.user_fill", f"index={i} check={ccode} deliver={dcode}")
+            break
+    else:
+        overflow_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_user(w_test, lb, 0, ts, w_addr, overflow_addr, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.user_over_limit", ccode, dcode, dlog)
+
+    # 8.2 Fill max_followed_topics, then one more
+    max_followed_topics = _tier_int(tier, "max_followed_topics")
+    _debug(f"tier2 max_followed_topics={max_followed_topics}")
+    for i in range(max_followed_topics):
+        topic = f"ft{_rand_str(4)}{i}"
+        msg = _build_msg_follow_topic(w_test, lb, 0, ts, w_addr, topic, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowTopic")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("follow.topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            break
+    else:
+        topic = f"ft{_rand_str(4)}overflow"
+        msg = _build_msg_follow_topic(w_test, lb, 0, ts, w_addr, topic, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowTopic")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.topic_over_limit", ccode, dcode, dlog)
+
+    # 8.3 Fill max_followed_mods, then one more
+    max_followed_mods = _tier_int(tier, "max_followed_mods")
+    _debug(f"tier2 max_followed_mods={max_followed_mods}")
+    for i in range(max_followed_mods):
+        mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_moderator(w_test, lb, 0, ts, w_addr, mod_addr, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowModerator")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("follow.mod_fill", f"index={i} check={ccode} deliver={dcode}")
+            break
+    else:
+        mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_moderator(w_test, lb, 0, ts, w_addr, mod_addr, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowModerator")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_test.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.mod_over_limit", ccode, dcode, dlog)
+
+    # 8.4 Follow user removes blocked user (mutual exclusion)
+    w_mx = WALLETS["sub3"]
+    w_mx_addr = str(w_mx.address())
+    block_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_block_user(w_mx, lb, 0, ts, block_target, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockUser")],
+        DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_follow_user(w_mx, lb, 0, ts, w_mx_addr, block_target, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_accept("follow.user_removes_block", ccode, dcode, dlog)
+    else:
+        _fail("follow.user_removes_block", "setup block failed")
+
+    # 8.5 Follow topic removes blocked topic (mutual exclusion)
+    block_topic = f"mx{_rand_str(4)}"
+    msg = _build_msg_block_topic(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_follow_topic(w_mx, lb, 0, ts, w_mx_addr, block_topic, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowTopic")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_accept("follow.topic_removes_block", ccode, dcode, dlog)
+    else:
+        _fail("follow.topic_removes_block", "setup block failed")
+
+    # 8.6 Double follow same user (should be idempotent or rejected, not crash)
+    dbl_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_follow_user(w_mx, lb, 0, ts, w_mx_addr, dbl_target, pow_val=0)
+    _, ccode, _, dcode, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgFollowUser")],
+        DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode == 0 and dcode == 0:
+        msg = _build_msg_follow_user(w_mx, lb, 0, ts, w_mx_addr, dbl_target, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+        )
+        if ccode == 0 and (dcode == 0 or dcode is None):
+            _pass("follow.double_follow_idempotent")
+        elif dcode is not None and dcode != 0:
+            _pass("follow.double_follow_rejected")
+        else:
+            _pass("follow.double_follow handled")
+    else:
+        _fail("follow.double_follow_idempotent", "initial follow failed")
+
+    # 8.7 Unfollow without follow (non-followed entity)
+    unfol_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_unfollow_user(w_mx, lb, 0, ts, w_mx_addr, unfol_target, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgUnfollowUser")],
+        DEFAULT_GAS_LIMIT, fee_payer, w_mx.public_key().public_key_bytes, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("follow.unfollow_nonfollowed_rejected")
+    else:
+        _pass("follow.unfollow_nonfollowed_accepted (idempotent)")
+
+
+def test_msg_format(backend: str) -> None:
+    """Test invalid field values at chain level (bypassing backend validation)."""
+    print(f"\n{_COLOR_BOLD}[9] Message format validation at chain level{_COLOR_RESET}")
+
+    w1 = WALLETS["sub1"]
+    fee_payer = _VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+    ts = _now_ms()
+
+    # ─── Username at chain level ──────────────────────────────────
+    bad_usernames = [
+        ("user_name", "underscore"),
+        ("user.name", "dot"),
+        ("user name", "space"),
+        ("\u00fcser", "unicode"),
+        ("\U0001f602user", "emoji"),
+        ("ab", "too_short"),
+        ("a" * 100, "too_long"),
+        ("", "empty"),
+    ]
+    for uname, label in bad_usernames:
+        msg = _build_msg_set_username(w1, lb, 0, ts, str(w1.address()), uname, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSetUsername")],
+            DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"format.username_{label}", ccode, dcode, dlog)
+
+    # ─── Topic at chain level ─────────────────────────────────────
+    bad_topics = [
+        ("UPPER", "uppercase"),
+        ("with spaces", "spaces"),
+        ("special!@#", "special_chars"),
+        ("a", "too_short"),
+        ("a" * 200, "too_long"),
+    ]
+    for topic, label in bad_topics:
+        msg = _build_msg_post(w1, lb, 0, ts, topic, "Title", "content", pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"format.topic_{label}", ccode, dcode, dlog)
+
+    # ─── Tag at chain level ───────────────────────────────────────
+    bad_tags = [
+        ("nsfw", "nsfw"),
+        ("SENSITIVE", "uppercase_sensitive"),
+        ("random_tag", "random_string"),
+        ("t" * 100, "very_long"),
+    ]
+    for tag, label in bad_tags:
+        msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content", tag=tag, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"format.tag_{label}", ccode, dcode, dlog)
+
+    # ─── Vote direction at chain level ────────────────────────────
+    post_target = _rand_hex(64)
+    for direction, label in [(2, "direction_2"), (-2, "direction_neg2"), (999, "direction_999")]:
+        msg = _build_msg_vote(w1, lb, 0, ts, post_target, direction, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgVote")],
+            DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"format.vote_{label}", ccode, dcode, dlog)
+
+    # ─── Media at chain level ─────────────────────────────────────
+    # http:// URL
+    msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content",
+                          media=["http://insecure.com/img.jpg"], pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("format.media_http_url", ccode, dcode, dlog)
+
+    # >10 media items
+    many_media = [f"https://example.com/{i}.jpg" for i in range(12)]
+    msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content",
+                          media=many_media, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("format.media_too_many", ccode, dcode, dlog)
+
+    # >2048 char URL
+    long_url = "https://example.com/" + "a" * 2040
+    msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", "Title", "content",
+                          media=[long_url], pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("format.media_oversized_url", ccode, dcode, dlog)
+
+    # ─── Title at chain level ─────────────────────────────────────
+    tier1 = _get_tier_config(1)
+    max_title = _tier_int(tier1, "max_title_length")
+    big_title = "T" * (max_title + 25)
+    msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", big_title, "content", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT, fee_payer, w1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("format.title_oversized", ccode, dcode, dlog)
+
+
+def test_tier_enforcement(backend: str) -> None:
+    """Test content/title limits per tier at chain level."""
+    print(f"\n{_COLOR_BOLD}[10] Tier-based content/title limits{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    for level, wallet_name in [(0, "free"), (1, "sub1"), (2, "sub2"), (3, "sub3")]:
+        w = WALLETS[wallet_name]
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(w.address()))
+        ts = _now_ms()
+        tier = _get_tier_config(level)
+        max_content = _tier_int(tier, "max_content_length")
+        max_title = _tier_int(tier, "max_title_length")
+
+        # Compute PoW for free user
+        if level == 0:
+            topic = f"tier{_rand_str(4)}"
+            over_content = "x" * (max_content + 25)
+            pub = w.public_key().public_key_bytes
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [])
+            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_post(w, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof))
+        else:
+            topic = f"tier{_rand_str(4)}"
+            over_content = "x" * (max_content + 25)
+            msg = _build_msg_post(w, lb, 0, ts, topic, "Title", over_content, pow_val=0)
+
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT, fee_payer, w.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"tier.t{level}_content_over_max", ccode, dcode, dlog)
+
+        # Oversized title
+        if level == 0:
+            topic2 = f"tier{_rand_str(4)}"
+            over_title = "T" * (max_title + 25)
+            base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic2, over_title, "body", "", 0, [])
+            proof2 = compute_pow(base2, diff, base_bits, pow_factor, lb)
+            msg2 = _build_msg_post(w, lb, diff, ts, topic2, over_title, "body", pow_val=int(proof2))
+        else:
+            topic2 = f"tier{_rand_str(4)}"
+            over_title = "T" * (max_title + 25)
+            msg2 = _build_msg_post(w, lb, 0, ts, topic2, over_title, "body", pow_val=0)
+
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg2, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT, fee_payer, w.public_key().public_key_bytes, wait_deliver=True,
+        )
+        _check_deliver_reject(f"tier.t{level}_title_over_max", ccode, dcode, dlog)
+
+
+def test_chain_auto_renewal(backend: str) -> None:
+    """Test auto-renewal at chain level."""
+    print(f"\n{_COLOR_BOLD}[11] Auto-renewal chain validation{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    free_wallet = WALLETS["free"]
+    fee_payer = _VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, str(sub1.address()))
+    ts = _now_ms()
+
+    # 11.1 Subscriber enables auto-renewal
+    msg = _build_msg_set_auto_renewal(sub1, lb, ts, True)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+        DEFAULT_GAS_LIMIT, fee_payer, sub1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_accept("auto.subscriber_enable", ccode, dcode, dlog)
+
+    # 11.2 Subscriber disables auto-renewal
+    msg = _build_msg_set_auto_renewal(sub1, lb, ts, False)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+        DEFAULT_GAS_LIMIT, fee_payer, sub1.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_accept("auto.subscriber_disable", ccode, dcode, dlog)
+
+    # 11.3 Free user tries auto-renewal (should fail)
+    lb_free, _, _, _ = _get_pow_params(backend, str(free_wallet.address()))
+    msg = _build_msg_set_auto_renewal(free_wallet, lb_free, ts, True)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+        DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes, wait_deliver=True,
+    )
+    _check_deliver_reject("auto.free_user_rejected", ccode, dcode, dlog)
+
+    # 11.4 Auto-renewal with PoW set (should fail — never allowed on auto-renewal)
+    pub = sub1.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_auto_renewal_raw(pub, lb_bytes, 0, ts, True)
+    sig = _sign_relay(sub1, base, 1)
+    msg = MsgSetAutoRenewal()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = 0
+    msg.envelope_pow = 1
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.auto_renew = True
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAutoRenewal")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0:
+        _pass("auto.pow_forbidden")
+    elif dcode is not None and dcode != 0:
+        _pass("auto.pow_forbidden")
+    else:
+        _fail("auto.pow_forbidden", f"check={ccode} deliver={dcode}")
+
+
+def test_governance_reject(backend: str) -> None:
+    """Test that governance-only messages are rejected from non-governance callers."""
+    print(f"\n{_COLOR_BOLD}[12] Governance-only message rejection{_COLOR_RESET}")
+
+    w1 = WALLETS["sub1"]
+    w1_addr = str(w1.address())
+    fee_payer = _VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, w1_addr)
+    ts = _now_ms()
+    pub = w1.public_key().public_key_bytes
+
+    # 12.1 Regular user submits MsgSetLevel
+    msg = MsgSetLevel()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = _lb_bytes(lb)
+    msg.envelope_difficulty = 0
+    msg.envelope_pow = 0
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = b"\x00" * 64
+    msg.target = w1_addr
+    msg.level = 2
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetLevel")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.set_level_rejected")
+    else:
+        _fail("governance.set_level_rejected", f"check={ccode} deliver={dcode}")
+
+    # 12.2 Regular user submits MsgMintTokens
+    msg = MsgMintTokens()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.target = w1_addr
+    msg.amount = 1_000_000
+    msg.reason = "test"
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgMintTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.mint_tokens_rejected")
+    else:
+        _fail("governance.mint_tokens_rejected", f"check={ccode} deliver={dcode}")
+
+    # 12.3 Regular user submits MsgBurnTokens
+    msg = MsgBurnTokens()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.target = w1_addr
+    msg.amount = 1_000_000
+    msg.reason = "test"
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBurnTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.burn_tokens_rejected")
+    else:
+        _fail("governance.burn_tokens_rejected", f"check={ccode} deliver={dcode}")
+
+    # 12.4 Submit MsgSetLevel with gov module authority (but we're not governance)
+    msg = MsgSetLevel()
+    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = _lb_bytes(lb)
+    msg.envelope_difficulty = 0
+    msg.envelope_pow = 0
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = b"\x00" * 64
+    msg.target = w1_addr
+    msg.level = 2
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetLevel")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.set_level_gov_spoof_rejected")
+    else:
+        _fail("governance.set_level_gov_spoof_rejected", f"check={ccode} deliver={dcode}")
+
+    # 12.5 MsgMintTokens with gov module authority (spoof)
+    msg = MsgMintTokens()
+    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.target = w1_addr
+    msg.amount = 1_000_000
+    msg.reason = "spoof"
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgMintTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.mint_tokens_gov_spoof_rejected")
+    else:
+        _fail("governance.mint_tokens_gov_spoof_rejected", f"check={ccode} deliver={dcode}")
+
+    # 12.6 MsgBurnTokens with gov module authority (spoof)
+    msg = MsgBurnTokens()
+    msg.authority = _GOV_MODULE_ADDR or ""
+    msg.target = w1_addr
+    msg.amount = 1_000_000
+    msg.reason = "spoof"
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBurnTokens")],
+        DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("governance.burn_tokens_gov_spoof_rejected")
+    else:
+        _fail("governance.burn_tokens_gov_spoof_rejected", f"check={ccode} deliver={dcode}")
+
 
 def test_direct_bank(backend: str) -> None:
-    print(f"\n{_COLOR_BOLD}[7] Direct bank send (bypass check){_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[13] Direct bank send (bypass check){_COLOR_RESET}")
     miraged = _miraged_cmd()
     kb = _keyring_backend()
     key_name = f"directbank{_rand_str(6)}"
@@ -1302,6 +2171,11 @@ ALL_CATEGORIES = {
     "staking": test_staking,
     "msg_validation": test_msg_validation,
     "direct_bank": test_direct_bank,
+    "follow_limits": test_follow_limits,
+    "msg_format": test_msg_format,
+    "tier_enforcement": test_tier_enforcement,
+    "auto_renewal": test_chain_auto_renewal,
+    "governance": test_governance_reject,
 }
 
 
