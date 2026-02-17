@@ -195,7 +195,9 @@ def _miraged_cmd() -> str:
         "echo /opt/mirage/blockchain/miraged; "
         "else echo /opt/mirage/blockchain/bin/miraged; fi"
     )
-    return out.strip() or "/opt/mirage/blockchain/miraged"
+    # bash -lc may print login profile output before our echo — take last line
+    lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
+    return lines[-1] if lines else "/opt/mirage/blockchain/miraged"
 
 
 # Detect keyring backend from client.toml (os vs test).
@@ -209,7 +211,9 @@ def _keyring_backend() -> str:
         code, out = _docker_exec(
             "grep -oP '(?<=keyring-backend = \")\\w+' /root/.mirage/node/config/client.toml 2>/dev/null || echo test"
         )
-        val = out.strip()
+        # bash -lc may print login profile output — take last line
+        lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
+        val = lines[-1] if lines else ""
         _KEYRING_BACKEND = val if val else "test"
     return _KEYRING_BACKEND
 
