@@ -3323,6 +3323,7 @@ def search_topics():
         # Filter out blocked topics for the viewer
         viewer_addr = request.args.get("address", default="", type=str)
         viewer_blocked_topics = _get_blocked_topics(cur, viewer_addr) if viewer_addr else set()
+        blocked_exact, blocked_prefixes = _split_blocked_topics(viewer_blocked_topics)
 
         topics = []
         topic_list = [

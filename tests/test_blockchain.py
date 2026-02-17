@@ -157,28 +157,36 @@ def _get_validator_account_address(backend: str) -> str:
 
 def _get_gov_module_address() -> str:
     miraged = _miraged_cmd()
-    cmd = f"{miraged} q auth module-account gov --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json"
+    cmd = f"{miraged} q auth module-account gov --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
     code, out = _docker_exec(cmd, timeout=10)
     if code != 0 or not out:
         raise RuntimeError(f"failed to query gov module account: {out[:200]}")
-    data = json.loads(out)
+    # miraged may print log lines before the JSON — find the first '{'
+    idx = out.find("{")
+    if idx < 0:
+        raise RuntimeError(f"gov module query: no JSON in output: {out[:200]}")
+    data = json.loads(out[idx:])
     acc = (data or {}).get("account") or {}
     if "base_account" in acc:
         addr = str((acc.get("base_account") or {}).get("address", "")).strip()
     else:
         addr = str(acc.get("address", "")).strip()
     if not addr:
-        raise RuntimeError("gov module address missing in response")
+        raise RuntimeError(f"gov module address missing in response: {json.dumps(data)[:300]}")
     return addr
 
 
 def _get_chain_params() -> dict:
     miraged = _miraged_cmd()
-    cmd = f"{miraged} q core params --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json"
+    cmd = f"{miraged} q core params --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
     code, out = _docker_exec(cmd, timeout=10)
     if code != 0 or not out:
         raise RuntimeError(f"failed to query core params: {out[:200]}")
-    data = json.loads(out)
+    # miraged may print log lines before the JSON — find the first '{'
+    idx = out.find("{")
+    if idx < 0:
+        raise RuntimeError(f"core params query: no JSON in output: {out[:200]}")
+    data = json.loads(out[idx:])
     return data.get("params") or data
 
 

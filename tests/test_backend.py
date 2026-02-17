@@ -120,6 +120,10 @@ def _fail(name: str, error: str = "", **details) -> TestResult:
     return r
 
 
+def _debug(msg: str) -> None:
+    print(f"  {_COLOR_YELLOW}debug{_COLOR_RESET} {msg}")
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
