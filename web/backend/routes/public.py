@@ -2568,15 +2568,8 @@ def get_supply_history():
 
         history = _get_cached_supply_history()
 
-        # Get mint params for calculations
-        p = load_params(force=False)
-        mint_interval = int(p["mint_interval"])
-        mint_quantity = int(p["mint_quantity"])
-
         resp = {
             "history": history,
-            "mint_interval": mint_interval,
-            "mint_quantity": mint_quantity,
         }
         log_event(rid, "get_supply_history.ok", count=len(history))
         return jsonify(resp)

@@ -330,7 +330,7 @@ function DifficultyChart({ history }) {
     );
 }
 
-function BurnMintChart({ history, mintInterval, mintQuantity }) {
+function BurnMintChart({ history }) {
     if (!history || history.length < 2) {
         return (
             <ChartWrapper>
@@ -345,17 +345,15 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
 
     const { width, height, padding, innerW, innerH } = CHART;
 
-    // Cumulative minted/burned (burned derived from cumulative totals, not per-interval)
+    // Cumulative minted/burned from real supply deltas
     const data = [];
     let cumMinted = 0;
-    let cumSupplyChange = 0;
+    let cumBurned = 0;
     for (let i = 1; i < history.length; i++) {
-        const prev = history[i - 1];
-        const curr = history[i];
-        const mintEvents = Math.floor((curr.height - prev.height) / mintInterval);
-        cumMinted += Math.max(0, mintEvents * mintQuantity);
-        cumSupplyChange += curr.total_supply - prev.total_supply;
-        data.push({ timestamp: curr.timestamp, minted: cumMinted, burned: Math.max(0, cumMinted - cumSupplyChange) });
+        const delta = history[i].total_supply - history[i - 1].total_supply;
+        if (delta > 0) cumMinted += delta;
+        else cumBurned += -delta;
+        data.push({ timestamp: history[i].timestamp, minted: cumMinted, burned: cumBurned });
     }
     if (data.length < 1) return null;
 
@@ -559,7 +557,7 @@ function NodeBalanceChart({ history }) {
     );
 }
 
-function NodeMintBurnChart({ history, mintInterval, mintQuantity }) {
+function NodeMintBurnChart({ history }) {
     // Filter to entries that have node_balance recorded
     const raw = (history || []).filter((h) => h.node_balance != null);
     if (raw.length < 2) {
@@ -662,7 +660,7 @@ export default function NetworkView({ state }) {
     const [stakedBalance, setStakedBalance] = useState(null);
     const [copiedAddress, setCopiedAddress] = useState(null);
     const [circulationStats, setCirculationStats] = useState({ total_supply: null, top_accounts: [] });
-    const [supplyHistory, setSupplyHistory] = useState({ history: [], mint_interval: 200, mint_quantity: 100000 });
+    const [supplyHistory, setSupplyHistory] = useState({ history: [] });
 
     // Update tab when URL changes
     useEffect(() => {
@@ -767,8 +765,6 @@ export default function NetworkView({ state }) {
                 if (!cancelled && data) {
                     setSupplyHistory({
                         history: Array.isArray(data.history) ? data.history : [],
-                        mint_interval: data.mint_interval || 200,
-                        mint_quantity: data.mint_quantity || 100000,
                     });
                 }
             } catch (_) { }
@@ -896,8 +892,6 @@ export default function NetworkView({ state }) {
                                         <ValueBox>
                                             <BurnMintChart
                                                 history={supplyHistory.history}
-                                                mintInterval={supplyHistory.mint_interval}
-                                                mintQuantity={supplyHistory.mint_quantity}
                                             />
                                         </ValueBox>
                                     </SectionRow>
@@ -1060,8 +1054,6 @@ export default function NetworkView({ state }) {
                                         <ValueBox>
                                             <NodeMintBurnChart
                                                 history={supplyHistory.history}
-                                                mintInterval={supplyHistory.mint_interval}
-                                                mintQuantity={supplyHistory.mint_quantity}
                                             />
                                         </ValueBox>
                                     </SectionRow>
