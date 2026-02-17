@@ -150,19 +150,65 @@ def _lb_bytes(lb_hex: str) -> bytes:
 
 
 def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
-    r = requests.get(url, params=params or {}, timeout=10)
-    try:
-        return r.status_code, r.json()
-    except Exception:
-        return r.status_code, {}
+    max_retries = 7
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, params=params or {}, timeout=10)
+        except requests.RequestException as e:
+            if attempt >= max_retries:
+                raise
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} err={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
+            except Exception:
+                delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} status={r.status_code} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        try:
+            return r.status_code, r.json()
+        except Exception:
+            return r.status_code, {}
+
+    return 599, {}
 
 
 def _post(url: str, payload: dict) -> Tuple[int, dict]:
-    r = requests.post(url, json=payload, timeout=20)
-    try:
-        return r.status_code, r.json()
-    except Exception:
-        return r.status_code, {}
+    max_retries = 7
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.post(url, json=payload, timeout=20)
+        except requests.RequestException as e:
+            if attempt >= max_retries:
+                raise
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} err={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
+            except Exception:
+                delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} status={r.status_code} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        try:
+            return r.status_code, r.json()
+        except Exception:
+            return r.status_code, {}
+
+    return 599, {}
 
 
 # ---------------------------------------------------------------------------
@@ -188,16 +234,47 @@ def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
     return result.returncode, result.stdout.strip()
 
 
+def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
+    """Run miraged with an explicit argument vector — no shell involved.
+
+    This avoids all bash login-shell issues (profile scripts polluting
+    stdout, environment variables being stripped, argument re-parsing).
+    Returns (exit_code, combined_stdout_stderr).
+    """
+    miraged = _miraged_cmd()
+    if _INSIDE_CONTAINER:
+        argv = [miraged] + list(args)
+        env = {**os.environ, "HOME": "/root"}
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
+        return result.returncode, (result.stdout + result.stderr).strip()
+    else:
+        cmd = " ".join([miraged] + list(args))
+        return _docker_exec(cmd, timeout=timeout)
+
+
 def _miraged_cmd() -> str:
     """Return the miraged binary path inside the container."""
+    preferred = "/opt/mirage/blockchain/miraged"
+    fallback = "/opt/mirage/blockchain/bin/miraged"
+    if _INSIDE_CONTAINER:
+        if os.path.isfile(preferred) and os.access(preferred, os.X_OK):
+            return preferred
+        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
+            return fallback
+        return preferred
+    # Host mode: query inside container and detect known paths robustly
     code, out = _docker_exec(
         "if [ -x /opt/mirage/blockchain/miraged ]; then "
         "echo /opt/mirage/blockchain/miraged; "
-        "else echo /opt/mirage/blockchain/bin/miraged; fi"
+        "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then "
+        "echo /opt/mirage/blockchain/bin/miraged; fi"
     )
-    # bash -lc may print login profile output before our echo — take last line
-    lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
-    return lines[-1] if lines else "/opt/mirage/blockchain/miraged"
+    text = out or ""
+    if preferred in text:
+        return preferred
+    if fallback in text:
+        return fallback
+    return preferred
 
 
 # Detect keyring backend from client.toml (os vs test).
@@ -208,12 +285,30 @@ def _keyring_backend() -> str:
     """Return the keyring-backend configured in client.toml."""
     global _KEYRING_BACKEND
     if _KEYRING_BACKEND is None:
-        code, out = _docker_exec(
-            "grep -oP '(?<=keyring-backend = \")\\w+' /root/.mirage/node/config/client.toml 2>/dev/null || echo test"
-        )
-        # bash -lc may print login profile output — take last line
-        lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
-        val = lines[-1] if lines else ""
+        val = ""
+        client_toml = "/root/.mirage/node/config/client.toml"
+        if _INSIDE_CONTAINER:
+            try:
+                with open(client_toml, "r", encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if s.startswith("keyring-backend"):
+                            parts = s.split("=", 1)
+                            if len(parts) == 2:
+                                val = parts[1].strip().strip('"').strip("'")
+                                break
+            except Exception:
+                val = ""
+        else:
+            code, out = _docker_exec(f"cat {client_toml} 2>/dev/null || true")
+            text = out or ""
+            for line in text.splitlines():
+                s = line.strip()
+                if s.startswith("keyring-backend"):
+                    parts = s.split("=", 1)
+                    if len(parts) == 2:
+                        val = parts[1].strip().strip('"').strip("'")
+                        break
         _KEYRING_BACKEND = val if val else "test"
     return _KEYRING_BACKEND
 
@@ -242,10 +337,11 @@ def _resolve_validator_key_addr() -> str:
     global _VALIDATOR_KEY_ADDR
     if _VALIDATOR_KEY_ADDR:
         return _VALIDATOR_KEY_ADDR
-    miraged = _miraged_cmd()
     kb = _keyring_backend()
-    cmd = f"{miraged} keys list --home /root/.mirage/node --keyring-backend {kb} --output json 2>/dev/null"
-    code, out = _docker_exec(cmd, timeout=10)
+    code, out = _run_miraged(
+        ["keys", "list", "--home", "/root/.mirage/node", "--keyring-backend", kb, "--output", "json"],
+        timeout=10,
+    )
     if code != 0 or not out:
         raise RuntimeError(f"keys list failed: exit={code} out={out[:200]}")
     # miraged may print log lines before the JSON array — find the first '['
@@ -270,7 +366,6 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     Retries on sequence mismatch (code 32) and waits for the tx to be
     committed before returning so the next send gets the right sequence.
     """
-    miraged = _miraged_cmd()
     kb = _keyring_backend()
 
     try:
@@ -281,14 +376,19 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
     max_retries = 5
     for attempt in range(max_retries):
-        cmd = (
-            f"{miraged} tx bank send "
-            f"{from_addr} "
-            f"{address} {amount}umirage "
-            f"--home /root/.mirage/node --keyring-backend {kb} "
-            f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
-        )
-        code, out = _docker_exec(cmd, timeout=30)
+        send_args = [
+            "tx", "bank", "send",
+            from_addr, address, f"{amount}umirage",
+            "--home", "/root/.mirage/node",
+            "--keyring-backend", kb,
+            "--chain-id", "mirage-1",
+            "--yes",
+            "--gas", "auto",
+            "--gas-adjustment", "1.5",
+            "--gas-prices", "5000umirage",
+            "-o", "json",
+        ]
+        code, out = _run_miraged(send_args, timeout=30)
         if code != 0:
             print(f"    [faucet] exit code {code}: {out[:200]}")
             return False
@@ -317,18 +417,20 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
         if tx_hash:
             for _ in range(15):
                 time.sleep(1)
-                qcode, qout = _docker_exec(
-                    f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
-                )
+                query_args = [
+                    "q", "tx", tx_hash,
+                    "--home", "/root/.mirage/node",
+                    "--node", "tcp://127.0.0.1:26657",
+                    "-o", "json",
+                ]
+                qcode, qout = _run_miraged(query_args, timeout=10)
                 if qcode == 0 and qout:
                     try:
-                        # The output may have a log line before the JSON
-                        json_str = qout[qout.index("{") :]
+                        json_str = qout[qout.index("{"):]
                         tx_resp = json.loads(json_str)
                         on_chain_code = int(tx_resp.get("code", -1))
                         if on_chain_code == 0:
                             return True
-                        # Tx committed but failed on-chain
                         print(
                             f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
                         )
@@ -3322,8 +3424,13 @@ def test_media(backend: str):
 
     # 14.1 Valid HTTPS URL
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Media test", "body",
-        media=["https://example.com/image.jpg"], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Media test",
+        "body",
+        media=["https://example.com/image.jpg"],
+        skip_pow=True,
     )
     if txh:
         _pass("media.valid_https_url")
@@ -3332,8 +3439,13 @@ def test_media(backend: str):
 
     # 14.2 Multiple valid URLs
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Multi media", "body",
-        media=["https://a.com/1.jpg", "https://b.com/2.png", "https://c.com/3.gif"], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Multi media",
+        "body",
+        media=["https://a.com/1.jpg", "https://b.com/2.png", "https://c.com/3.gif"],
+        skip_pow=True,
     )
     if txh:
         _pass("media.multiple_valid_urls")
@@ -3343,8 +3455,13 @@ def test_media(backend: str):
     # 14.3 Too many URLs (>10)
     many_urls = [f"https://example.com/{i}.jpg" for i in range(12)]
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Too many", "body",
-        media=many_urls, skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Too many",
+        "body",
+        media=many_urls,
+        skip_pow=True,
     )
     if not txh:
         _pass("media.too_many_urls_rejected")
@@ -3353,8 +3470,13 @@ def test_media(backend: str):
 
     # 14.4 HTTP URL (not HTTPS)
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Http media", "body",
-        media=["http://example.com/image.jpg"], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Http media",
+        "body",
+        media=["http://example.com/image.jpg"],
+        skip_pow=True,
     )
     if not txh:
         _pass("media.http_url_rejected")
@@ -3363,8 +3485,13 @@ def test_media(backend: str):
 
     # 14.5 Empty string media
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Empty media", "body",
-        media=[""], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Empty media",
+        "body",
+        media=[""],
+        skip_pow=True,
     )
     if not txh:
         _pass("media.empty_string_rejected")
@@ -3373,8 +3500,13 @@ def test_media(backend: str):
 
     # 14.6 Non-URL string
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Bad media", "body",
-        media=["not a url at all"], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Bad media",
+        "body",
+        media=["not a url at all"],
+        skip_pow=True,
     )
     if not txh:
         _pass("media.non_url_rejected")
@@ -3384,8 +3516,13 @@ def test_media(backend: str):
     # 14.7 URL exceeding 2048 chars
     long_url = "https://example.com/" + "a" * 2040
     txh = _do_post_with_media(
-        backend, sub1, f"media{_rand_str(4)}", "Long URL", "body",
-        media=[long_url], skip_pow=True,
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Long URL",
+        "body",
+        media=[long_url],
+        skip_pow=True,
     )
     if not txh:
         _pass("media.oversized_url_rejected")
@@ -3436,8 +3573,13 @@ def test_media(backend: str):
 
     # 14.9 Free user with media and PoW
     txh = _do_post_with_media(
-        backend, free_wallet, f"media{_rand_str(4)}", "Free media", "body",
-        media=["https://example.com/free.jpg"], skip_pow=False,
+        backend,
+        free_wallet,
+        f"media{_rand_str(4)}",
+        "Free media",
+        "body",
+        media=["https://example.com/free.jpg"],
+        skip_pow=False,
     )
     if txh:
         _pass("media.free_user_with_pow")
@@ -3715,6 +3857,7 @@ def test_frontend_bypass(backend: str):
     try:
         st = get_status(backend, address=sub1_addr)
         from shared.client import get_user_status as _gus
+
         us = _gus(backend, sub1_addr)
         user_level = int(us.get("user_level", 1) or 1)
     except Exception:
@@ -3824,8 +3967,9 @@ def test_frontend_bypass(backend: str):
     # ─── Edit bypass ─────────────────────────────────────────────────
     # Edit with invalid override hash
     try:
-        resp = _do_edit(backend, sub1, override_hash="not_a_hash", topic="test", title="Bad edit",
-                        content="body", skip_pow=True)
+        resp = _do_edit(
+            backend, sub1, override_hash="not_a_hash", topic="test", title="Bad edit", content="body", skip_pow=True
+        )
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower()
         if not txh or "invalid" in err:
@@ -3837,8 +3981,9 @@ def test_frontend_bypass(backend: str):
 
     # Edit with nonexistent override
     try:
-        resp = _do_edit(backend, sub1, override_hash="ee" * 32, topic="test", title="Ghost edit",
-                        content="body", skip_pow=True)
+        resp = _do_edit(
+            backend, sub1, override_hash="ee" * 32, topic="test", title="Ghost edit", content="body", skip_pow=True
+        )
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
             _pass("bypass.edit_nonexistent_override submitted (chain decides)")

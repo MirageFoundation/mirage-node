@@ -3950,9 +3950,10 @@ function ViewPostView({ state, updatePost }) {
                                                 </>
                                             )}
 
-                                            {/* Content — for root post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
+                                            {/* Content — for the focused post, use mergedRoot so optimistic edits (media etc.) appear immediately */}
                                             {(() => {
-                                                const displayPost = isRoot && mergedRoot ? mergedRoot : post;
+                                                const isFocusedPost = post.post_id === root?.post_id;
+                                                const displayPost = isFocusedPost && mergedRoot ? mergedRoot : post;
                                                 const displayContent = displayPost.content || '';
                                                 const displayMedia = Array.isArray(displayPost.media) ? displayPost.media : [];
                                                 const hasContent = !!(displayContent || displayMedia.length > 0);

@@ -4578,7 +4578,8 @@ def _fetch_post(
                COALESCE(p.edited_at, 0) as edited_at,
                COALESCE(p.thumbnail_url, '') as thumbnail,
                COALESCE(pr.level, 0) as author_level,
-               COALESCE(p.comment_count, 0) as comment_count
+               COALESCE(p.comment_count, 0) as comment_count,
+               COALESCE(p.media, '[]') as media
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -4604,6 +4605,17 @@ def _fetch_post(
     thumbnail_val = (row[13] or "") if len(row) > 13 else ""
     author_level_val = int(row[14]) if len(row) > 14 and row[14] else 0
     stored_comment_count = int(row[15]) if len(row) > 15 and row[15] else 0
+    media_raw_val = row[16] if len(row) > 16 else "[]"
+
+    # Parse media JSON array
+    try:
+        import json as _json
+
+        media_val = _json.loads(media_raw_val or "[]")
+        if not isinstance(media_val, list):
+            media_val = []
+    except Exception:
+        media_val = []
 
     # Filter if post ID is blocked
     if pid in blocked_posts:
@@ -4671,6 +4683,7 @@ def _fetch_post(
         "edited": edited_flag,
         "edited_at": edited_at_val,
         "thumbnail": thumbnail_val,
+        "media": media_val,
         "points": points,
         "comments": comments,
         "children": [],
