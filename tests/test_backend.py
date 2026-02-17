@@ -1647,6 +1647,79 @@ def test_social_graph(backend: str):
     else:
         _fail("social.block_topic filters get_posts", "post not indexed")
 
+    # 5.13a wildcard block_topic filters get_posts
+    wildcard_mid = f"m{_rand_str(4)}"
+    wildcard_pattern = f"*{wildcard_mid}*"
+    _debug(f"block_topic wildcard pattern={wildcard_pattern}")
+    resp = _do_block_topic(backend, wallet, wildcard_pattern, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic wildcard succeeds")
+    else:
+        _fail("social.block_topic wildcard succeeds", f"resp={resp}")
+    if _wait_blocked_topic(backend, addr, wildcard_pattern):
+        _pass("social.block_topic wildcard reflected in get_user_blocked")
+    else:
+        _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+
+    time.sleep(2)
+
+    match_topic = f"{_rand_str(2)}{wildcard_mid}{_rand_str(2)}"
+    nonmatch_topic = f"x{_rand_str(8)}"
+    match_post = _do_post(
+        backend,
+        sub_wallet,
+        match_topic,
+        f"Blocked wildcard {match_topic}",
+        "body",
+        skip_pow=True,
+    )
+    nonmatch_post = _do_post(
+        backend,
+        sub_wallet,
+        nonmatch_topic,
+        f"Unblocked {nonmatch_topic}",
+        "body",
+        skip_pow=True,
+    )
+    if (
+        match_post
+        and nonmatch_post
+        and _wait_indexed(backend, sub_addr, match_post, timeout=10.0)
+        and _wait_indexed(backend, sub_addr, nonmatch_post, timeout=10.0)
+    ):
+        code, feed = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "by": "newest", "address": addr},
+        )
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            has_blocked = any(str(p.get("post_id", "")).lower() == match_post for p in posts)
+            has_unblocked = any(str(p.get("post_id", "")).lower() == nonmatch_post for p in posts)
+            if not has_blocked and has_unblocked:
+                _pass("social.block_topic wildcard filters get_posts")
+            else:
+                _fail(
+                    "social.block_topic wildcard filters get_posts",
+                    f"blocked_present={has_blocked} unblocked_present={has_unblocked}",
+                )
+        else:
+            _fail("social.block_topic wildcard filters get_posts", f"code={code}")
+    else:
+        _fail("social.block_topic wildcard filters get_posts", "post not indexed")
+
+    # cleanup wildcard block
+    resp = _do_block_topic(backend, wallet, wildcard_pattern, block=False)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.unblock_topic wildcard succeeds")
+    else:
+        _fail("social.unblock_topic wildcard succeeds", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, wildcard_pattern, False):
+        _pass("social.unblock_topic wildcard reflected in get_user_blocked")
+    else:
+        _fail("social.unblock_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+
     # 5.14 unblock_topic
     resp = _do_block_topic(backend, wallet, block_topic, block=False)
     txh = str(resp.get("tx_hash", "")).lower()

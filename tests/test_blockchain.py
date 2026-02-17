@@ -969,6 +969,37 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.post_invalid_topic", ccode, dcode, dlog)
 
+    # 6.3a MsgBlockTopic wildcard patterns accepted
+    base = f"t{_rand_str(4)}"
+    _debug(f"block_topic wildcard base={base}")
+    patterns = {
+        "trailing": f"{base}*",
+        "leading": f"*{base}",
+        "middle": f"{base[:2]}*{base[2:]}",
+        "both": f"*{base}*",
+    }
+    for label, pat in patterns.items():
+        msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), pat, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockTopic")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            w2.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(f"msg.block_topic_wildcard_{label}", ccode, dcode, dlog)
+
+    # 6.3b MsgBlockTopic invalid wildcard
+    msg = _build_msg_block_topic(w2, lb, 0, ts, str(w2.address()), "*", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgBlockTopic")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w2.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.block_topic_invalid_wildcard", ccode, dcode, dlog)
+
     # 6.4 MsgPost oversized content
     tier1 = _get_tier_config(1)
     max_content = _tier_int(tier1, "max_content_length")
