@@ -228,60 +228,72 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
     Uses the chain's bank module directly (no relay/PoW needed).
     Default: 500 MIRAGE (500_000_000 umirage).
-    Waits for the tx to be committed before returning (avoids sequence mismatch).
+    Retries on sequence mismatch (code 32) and waits for the tx to be
+    committed before returning so the next send gets the right sequence.
     """
     miraged = _miraged_cmd()
     kb = _keyring_backend()
-    cmd = (
-        f"{miraged} tx bank send "
-        f"$({miraged} keys list --home /root/.mirage/node --keyring-backend {kb} "
-        f"--output json 2>/dev/null | python3 -c "
-        f"\"import sys,json; print(json.load(sys.stdin)[0]['address'])\") "
-        f"{address} {amount}umirage "
-        f"--home /root/.mirage/node --keyring-backend {kb} "
-        f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
-    )
-    code, out = _docker_exec(cmd, timeout=30)
-    if code != 0:
-        print(f"    [faucet] exit code {code}: {out[:200]}")
-        return False
-    # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
-    try:
-        # The JSON response may follow a "gas estimate:" line from --gas auto
-        lines = out.strip().split("\n")
-        json_line = lines[-1]
-        resp = json.loads(json_line)
-        tx_code = int(resp.get("code", 1))
-        tx_hash = resp.get("txhash", "")
-        if tx_code != 0:
-            print(f"    [faucet] tx failed code={tx_code}: {resp.get('raw_log', '')[:200]}")
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        cmd = (
+            f"{miraged} tx bank send "
+            f"$({miraged} keys list --home /root/.mirage/node --keyring-backend {kb} "
+            f"--output json 2>/dev/null | python3 -c "
+            f"\"import sys,json; print(json.load(sys.stdin)[0]['address'])\") "
+            f"{address} {amount}umirage "
+            f"--home /root/.mirage/node --keyring-backend {kb} "
+            f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
+        )
+        code, out = _docker_exec(cmd, timeout=30)
+        if code != 0:
+            print(f"    [faucet] exit code {code}: {out[:200]}")
             return False
-    except Exception as e:
-        print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+        # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
+        try:
+            # The JSON response may follow a "gas estimate:" line from --gas auto
+            lines = out.strip().split("\n")
+            json_line = lines[-1]
+            resp = json.loads(json_line)
+            tx_code = int(resp.get("code", 1))
+            tx_hash = resp.get("txhash", "")
+            raw_log = resp.get("raw_log", "") or ""
+            if tx_code == 32 or "account sequence mismatch" in str(raw_log).lower():
+                wait = 2 * (attempt + 1)
+                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            if tx_code != 0:
+                print(f"    [faucet] tx failed code={tx_code}: {raw_log[:200]}")
+                return False
+        except Exception as e:
+            print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+            return False
+        # Wait for tx to be committed so the next send gets the right sequence number
+        if tx_hash:
+            for _ in range(15):
+                time.sleep(1)
+                qcode, qout = _docker_exec(
+                    f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
+                )
+                if qcode == 0 and qout:
+                    try:
+                        # The output may have a log line before the JSON
+                        json_str = qout[qout.index("{") :]
+                        tx_resp = json.loads(json_str)
+                        on_chain_code = int(tx_resp.get("code", -1))
+                        if on_chain_code == 0:
+                            return True
+                        # Tx committed but failed on-chain
+                        print(
+                            f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
+                        )
+                        return False
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
         return False
-    # Wait for tx to be committed so the next send gets the right sequence number
-    if tx_hash:
-        for _ in range(15):
-            time.sleep(1)
-            qcode, qout = _docker_exec(
-                f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
-            )
-            if qcode == 0 and qout:
-                try:
-                    # The output may have a log line before the JSON
-                    json_str = qout[qout.index("{") :]
-                    tx_resp = json.loads(json_str)
-                    on_chain_code = int(tx_resp.get("code", -1))
-                    if on_chain_code == 0:
-                        return True
-                    # Tx committed but failed on-chain
-                    print(
-                        f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
-                    )
-                    return False
-                except (json.JSONDecodeError, ValueError):
-                    pass
-        print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+    print(f"    [faucet] exhausted {max_retries} retries on sequence mismatch")
     return False
 
 
