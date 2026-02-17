@@ -5,6 +5,7 @@ import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
 import Api from '../lib/api';
+import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
@@ -698,6 +699,12 @@ class TransactionHandler {
                 const wrappedResolve = (result) => {
                     this.pendingBlocks.delete(key);
                     this._notifyBlockListeners();
+                    // Mutual exclusion: blocking a topic unfollows it on-chain.
+                    // Update sidebar immediately so the blocked topic disappears.
+                    if (result?.success) {
+                        notifyTopicsUpdated({ removed: topicTrimmed });
+                        invalidateSubCache();
+                    }
                     console.debug("[blocks] resolved block_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };

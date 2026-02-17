@@ -66,6 +66,8 @@ const DiscoverView = lazyWithRetry(() => import('./views/DiscoverView'));
 const StatsView = lazyWithRetry(() => import('./views/StatsView'));
 const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
 const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
+const FollowsView = lazyWithRetry(() => import('./views/FollowsView'));
+const BlocksView = lazyWithRetry(() => import('./views/BlocksView'));
 const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
@@ -937,8 +939,8 @@ class App extends Component {
                                             {/* DEPRECATED: legacy routes, remove in future release */}
                                             <Route path="/view_post" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/profile" element={<ProfileView state={this.state} />} />
-                                            <Route path="/follows" element={<ProfileView state={this.state} defaultTab="follows" />} />
-                                            <Route path="/blocks" element={<ProfileView state={this.state} defaultTab="blocks" />} />
+                                            <Route path="/follows" element={<FollowsView state={this.state} />} />
+                                            <Route path="/blocks" element={<BlocksView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
                                             <Route path="/network" element={<NetworkView state={this.state} />} />

@@ -345,6 +345,22 @@ def _get_blocked_topics(cur, address: str) -> set[str]:
     return blocked_topics
 
 
+def _blocked_topics_sql(blocked_topics: set[str] | None, topic_col: str = "p.topic") -> tuple[str, list[str]]:
+    """Return (sql_fragment, params) to exclude blocked topics in a WHERE clause.
+
+    Returns an empty string and empty list when there are no blocked topics,
+    so callers can unconditionally splice it into queries:
+
+        f"... WHERE ... {bt_clause} ..."
+        params + bt_params
+    """
+    if not blocked_topics:
+        return "", []
+    bt_list = list(blocked_topics)
+    ph = ",".join(["%s"] * len(bt_list))
+    return f"AND LOWER(TRIM({topic_col})) NOT IN ({ph})", bt_list
+
+
 # ---- Inbox count cache (60s TTL per address; stores count + last_viewed_at) ----
 _inbox_cache: dict[str, tuple[int, float, int]] = {}
 _INBOX_CACHE_TTL = 60.0
@@ -542,6 +558,7 @@ def _load_candidate_posts(
 ) -> list[dict]:
     """Load recent candidate posts for home feed."""
     deleted_clause = _deleted_filter()
+    bt_clause, bt_params = _blocked_topics_sql(blocked_topics)
 
     cur.execute(
         f"""
@@ -558,11 +575,12 @@ def _load_candidate_posts(
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
           AND LENGTH(COALESCE(p.title,'')) > 0
+          {bt_clause}
           {deleted_clause}
         ORDER BY p.created_at DESC
         LIMIT %s
         """,
-        (max_candidates,),
+        bt_params + [max_candidates],
     )
     rows = cur.fetchall()
 
@@ -746,6 +764,7 @@ def _load_following_candidates(
 
     where_clause = " OR ".join(conditions)
     deleted_clause = _deleted_filter()
+    bt_clause, bt_params = _blocked_topics_sql(blocked_topics)
 
     cur.execute(
         f"""
@@ -763,11 +782,12 @@ def _load_following_candidates(
         WHERE COALESCE(p.target,'') = ''
           AND LENGTH(COALESCE(p.title,'')) > 0
           AND ({where_clause})
+          {bt_clause}
           {deleted_clause}
         ORDER BY p.created_at DESC
         LIMIT %s
         """,
-        params + [max_candidates],
+        params + bt_params + [max_candidates],
     )
 
     seen: set[str] = set()
@@ -1026,15 +1046,17 @@ def _get_home_feed_newest(
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
     # Over-fetch to account for blocked/tag filtering, then take the page slice
+    bt_clause, bt_params = _blocked_topics_sql(blocked_topics)
     fetch_limit = limit * page * 2
     cur.execute(
         f"""SELECT {_POST_COLS}
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+        {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
-        [fetch_limit],
+        bt_params + [fetch_limit],
     )
 
     seen: set[str] = set()
@@ -1413,6 +1435,7 @@ def _load_home_candidates(
                    COALESCE(p.media, '[]') AS media"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
+    bt_clause, bt_params = _blocked_topics_sql(blocked_topics)
 
     # Source 1: Posts BY similar users (root posts only)
     if similar_addrs:
@@ -1424,9 +1447,10 @@ def _load_home_candidates(
             LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
             WHERE LOWER(p.owner) IN ({placeholders})
               AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+              {bt_clause}
             ORDER BY p.created_at DESC
             LIMIT %s""",
-            similar_list + [max_posts],
+            similar_list + bt_params + [max_posts],
         )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
@@ -1447,9 +1471,10 @@ def _load_home_candidates(
             WHERE LOWER(v.owner) IN ({placeholders})
               AND v.user_vote > 0
               AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+              {bt_clause}
             ORDER BY p.txhash, p.created_at DESC
             LIMIT %s""",
-            similar_list + [max_posts],
+            similar_list + bt_params + [max_posts],
         )
         for row in cur.fetchall():
             post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
@@ -1463,9 +1488,10 @@ def _load_home_candidates(
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+        {bt_clause}
         ORDER BY p.created_at DESC
         LIMIT %s""",
-        [max_posts],
+        bt_params + [max_posts],
     )
     for row in cur.fetchall():
         post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
@@ -1482,6 +1508,7 @@ def _load_home_candidates(
         FROM posts p
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
         WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          {bt_clause}
           AND p.created_at > EXTRACT(EPOCH FROM NOW()) - 60 * 86400
           AND EXISTS (
               SELECT 1 FROM votes v
@@ -1489,7 +1516,7 @@ def _load_home_candidates(
           )
         ORDER BY RANDOM()
         LIMIT %s""",
-        [explore_limit],
+        bt_params + [explore_limit],
     )
     for row in cur.fetchall():
         post = _row_to_post(row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics)
@@ -3756,6 +3783,9 @@ def get_posts():
             conn.close()
             return jsonify(resp)
 
+        # Blocked-topic SQL clause (only applied for "all" / no topic; explicit topic visits are not filtered)
+        bt_clause, bt_params = ("", []) if (topic and topic != "all") else _blocked_topics_sql(blocked_topics)
+
         # First, get total count for pagination
         t_count = time.monotonic()
         if topic and topic != "all":
@@ -3772,8 +3802,9 @@ def get_posts():
                 f"""
                 SELECT COUNT(1)
                 FROM posts p
-                WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {bt_clause} {deleted_clause}
                 """,
+                bt_params,
             )
         total = cur.fetchone()[0] or 0
         count_ms = (time.monotonic() - t_count) * 1000
@@ -3827,11 +3858,11 @@ def get_posts():
                        COALESCE(pr.level, 0) as author_level
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
-                WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
+                WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {bt_clause} {deleted_clause}
                 {order_clause}
                 LIMIT %s
                 """,
-                (max_candidates,),
+                bt_params + [max_candidates],
             )
         rows = cur.fetchall()
         select_ms = (time.monotonic() - t_select) * 1000
