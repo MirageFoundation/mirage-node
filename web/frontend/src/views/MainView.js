@@ -1296,6 +1296,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     useEffect(() => { hideDownvotedPostsRef.current = hideDownvotedPosts; }, [hideDownvotedPosts]);
 
     const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
+    const [blockedTopicsLocal, setBlockedTopicsLocal] = useState(() => new Set()); // Optimistic blocked topics
     const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
         // Consume any pending highlight on mount
         const pendingId = Storage.consumePendingPostHighlight();
@@ -2283,6 +2284,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
             const topicVal = String(p.topic || '').trim().toLowerCase();
             const isReserved = ['all', 'home', 'following'].includes(topicVal);
+            if (blockedTopicsLocal.size > 0 && blockedTopicsLocal.has(topicVal)) return false;
             return hasTitle && hasTopic && !isReserved;
         };
         const topLevelPosts = postsArray.filter(isTopLevelPost);
@@ -2431,8 +2433,21 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 getPosts(urlTopic, null, 1);
             } catch (_) { /* noop */ }
         };
+        const onTopicBlocked = (e) => {
+            const topic = (e?.detail?.topic || '').trim().toLowerCase();
+            if (topic) setBlockedTopicsLocal(prev => new Set([...prev, topic]));
+            handler();
+        };
         window.addEventListener('mirageRefreshFeed', handler);
-        return () => window.removeEventListener('mirageRefreshFeed', handler);
+        window.addEventListener('followedTopicsUpdated', handler);
+        window.addEventListener('followedUsersUpdated', handler);
+        window.addEventListener('topicBlocked', onTopicBlocked);
+        return () => {
+            window.removeEventListener('mirageRefreshFeed', handler);
+            window.removeEventListener('followedTopicsUpdated', handler);
+            window.removeEventListener('followedUsersUpdated', handler);
+            window.removeEventListener('topicBlocked', onTopicBlocked);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [getPosts, urlTopic]);
 
@@ -2545,7 +2560,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             // Convert the posts object to an array once
             const postsArray = Object.values(state.posts || {});
 
-            // Only include top-level posts (exclude comments or partial objects, and deleted posts)
+            // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked topics)
             const isTopLevelPost = (p) => {
                 if (!p || p.deleted) return false;
                 if (p.hidden_client) return false;
@@ -2553,6 +2568,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();
                 const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                if (blockedTopicsLocal.size > 0 && blockedTopicsLocal.has(topicVal)) return false;
                 return hasTitle && hasTopic && !isReserved;
             };
             const topLevelPosts = postsArray.filter(isTopLevelPost);

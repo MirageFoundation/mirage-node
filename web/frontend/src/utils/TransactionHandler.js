@@ -704,6 +704,7 @@ class TransactionHandler {
                     if (result?.success) {
                         notifyTopicsUpdated({ removed: topicTrimmed });
                         invalidateSubCache();
+                        window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: topicTrimmed } }));
                     }
                     console.debug("[blocks] resolved block_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
                     resolve(result);
