@@ -1373,15 +1373,20 @@ def core_block_topic():
             return jsonify({"error": "invalid timestamp"}), 400
 
         import re
-        if not topic or not re.fullmatch(r"[a-z0-9]+", topic):
+
+        if not topic:
+            return jsonify({"error": "invalid topic format"}), 400
+        # Allow trailing wildcard for blocked topic patterns (e.g. "beer*")
+        _topic_check = topic[:-1] if topic.endswith("*") else topic
+        if not _topic_check or not re.fullmatch(r"[a-z0-9]+", _topic_check):
             return jsonify({"error": "invalid topic format"}), 400
 
         p = expect_params()
         min_topic = int(p.get("min_topic_size", 2))
         max_topic = int(p.get("max_topic_size", 35))
-        if len(topic) < min_topic:
+        if len(_topic_check) < min_topic:
             return jsonify({"error": "topic too short"}), 400
-        if len(topic) > max_topic:
+        if len(_topic_check) > max_topic:
             return jsonify({"error": "topic too long"}), 400
 
         if not (pub_b64 and sig_b64):
