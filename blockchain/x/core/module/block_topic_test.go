@@ -70,6 +70,39 @@ func TestValidateTopic(t *testing.T) {
 	}
 }
 
+func TestValidateBlockedTopicPattern(t *testing.T) {
+	tests := []struct {
+		name    string
+		topic   string
+		minLen  uint64
+		maxLen  uint64
+		wantErr bool
+		errPart string
+	}{
+		{"exact valid", "beer123", 3, 10, false, ""},
+		{"wildcard valid", "beer*", 3, 10, false, ""},
+		{"wildcard too short", "be*", 3, 10, true, "below minimum"},
+		{"wildcard empty prefix", "*", 1, 10, true, "prefix required"},
+		{"wildcard middle", "be*er", 2, 10, true, "wildcard must be trailing"},
+		{"wildcard double", "beer**", 2, 10, true, "wildcard must be trailing"},
+		{"wildcard uppercase", "Beer*", 2, 10, true, "lowercase alphanumeric"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateBlockedTopicPattern(tt.topic, tt.maxLen, tt.minLen)
+			if tt.wantErr {
+				require.Error(t, err)
+				if tt.errPart != "" {
+					require.Contains(t, err.Error(), tt.errPart)
+				}
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestBlockTopicNormalizesAndDedups(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
@@ -208,6 +241,30 @@ func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
 	require.Equal(t, []string{"alpha"}, blocked)
 }
 
+func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"beer", "beerman123", "wine"}))
+
+	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Topic:          "beer*",
+	})
+	require.NoError(t, err)
+
+	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"wine"}, followed)
+
+	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"beer*"}, blocked)
+}
+
 func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext()
@@ -231,6 +288,31 @@ func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
 	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, followed)
+}
+
+func TestFollowTopicRemovesBlockedWildcard(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"beer*", "wine"}))
+
+	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		Topic:          "beerman123",
+	})
+	require.NoError(t, err)
+
+	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"wine"}, blocked)
+
+	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	require.NoError(t, err)
+	require.Equal(t, []string{"beerman123"}, followed)
 }
 
 func TestBlockUserRemovesFollowedUser(t *testing.T) {

@@ -1296,7 +1296,8 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     useEffect(() => { hideDownvotedPostsRef.current = hideDownvotedPosts; }, [hideDownvotedPosts]);
 
     const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
-    const [blockedTopicsLocal, setBlockedTopicsLocal] = useState(() => new Set()); // Optimistic blocked topics
+    const [blockedTopicsLocalExact, setBlockedTopicsLocalExact] = useState(() => new Set()); // Optimistic blocked topics (exact)
+    const [blockedTopicsLocalPrefixes, setBlockedTopicsLocalPrefixes] = useState(() => new Set()); // Optimistic blocked topics (wildcard prefixes)
     const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
         // Consume any pending highlight on mount
         const pendingId = Storage.consumePendingPostHighlight();
@@ -1314,8 +1315,24 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         } catch (_) { }
         return false;
     });
+    const isTopicBlockedLocal = (topicVal) => {
+        const t = String(topicVal || '').trim().toLowerCase();
+        if (!t) return false;
+        if (blockedTopicsLocalExact.size > 0 && blockedTopicsLocalExact.has(t)) return true;
+        if (blockedTopicsLocalPrefixes.size > 0) {
+            for (const prefix of blockedTopicsLocalPrefixes) {
+                if (t.startsWith(prefix)) return true;
+            }
+        }
+        return false;
+    };
     const location = useLocation();  // Call useLocation at the top level of the component
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
+
+    useEffect(() => {
+        setBlockedTopicsLocalExact(new Set());
+        setBlockedTopicsLocalPrefixes(new Set());
+    }, [viewerAddress]);
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);
@@ -2284,7 +2301,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
             const topicVal = String(p.topic || '').trim().toLowerCase();
             const isReserved = ['all', 'home', 'following'].includes(topicVal);
-            if (blockedTopicsLocal.size > 0 && blockedTopicsLocal.has(topicVal)) return false;
+            if (isTopicBlockedLocal(topicVal)) return false;
             return hasTitle && hasTopic && !isReserved;
         };
         const topLevelPosts = postsArray.filter(isTopLevelPost);
@@ -2433,20 +2450,67 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 getPosts(urlTopic, null, 1);
             } catch (_) { /* noop */ }
         };
+        const applyBlockedTopic = (raw) => {
+            const topic = String(raw || '').trim().toLowerCase();
+            if (!topic) return;
+            const starCount = (topic.match(/\*/g) || []).length;
+            if (starCount > 1 || (starCount === 1 && !topic.endsWith('*'))) {
+                throw new Error(`invalid blocked topic wildcard: ${topic}`);
+            }
+            if (topic.endsWith('*')) {
+                const prefix = topic.slice(0, -1);
+                if (!prefix) throw new Error('blocked topic wildcard prefix required');
+                setBlockedTopicsLocalPrefixes(prev => new Set([...prev, prefix]));
+                console.debug('[blocked_topics] optimistic wildcard added', { prefix });
+            } else {
+                setBlockedTopicsLocalExact(prev => new Set([...prev, topic]));
+                console.debug('[blocked_topics] optimistic exact added', { topic });
+            }
+        };
+        const removeBlockedTopic = (raw) => {
+            const topic = String(raw || '').trim().toLowerCase();
+            if (!topic) return;
+            const starCount = (topic.match(/\*/g) || []).length;
+            if (starCount > 1 || (starCount === 1 && !topic.endsWith('*'))) {
+                throw new Error(`invalid blocked topic wildcard: ${topic}`);
+            }
+            if (topic.endsWith('*')) {
+                const prefix = topic.slice(0, -1);
+                if (!prefix) throw new Error('blocked topic wildcard prefix required');
+                setBlockedTopicsLocalPrefixes(prev => {
+                    const next = new Set(prev);
+                    next.delete(prefix);
+                    return next;
+                });
+                console.debug('[blocked_topics] optimistic wildcard removed', { prefix });
+            } else {
+                setBlockedTopicsLocalExact(prev => {
+                    const next = new Set(prev);
+                    next.delete(topic);
+                    return next;
+                });
+                console.debug('[blocked_topics] optimistic exact removed', { topic });
+            }
+        };
         const onTopicBlocked = (e) => {
-            const topic = (e?.detail?.topic || '').trim().toLowerCase();
-            if (topic) setBlockedTopicsLocal(prev => new Set([...prev, topic]));
+            applyBlockedTopic(e?.detail?.topic || '');
+            handler();
+        };
+        const onTopicUnblocked = (e) => {
+            removeBlockedTopic(e?.detail?.topic || '');
             handler();
         };
         window.addEventListener('mirageRefreshFeed', handler);
         window.addEventListener('followedTopicsUpdated', handler);
         window.addEventListener('followedUsersUpdated', handler);
         window.addEventListener('topicBlocked', onTopicBlocked);
+        window.addEventListener('topicUnblocked', onTopicUnblocked);
         return () => {
             window.removeEventListener('mirageRefreshFeed', handler);
             window.removeEventListener('followedTopicsUpdated', handler);
             window.removeEventListener('followedUsersUpdated', handler);
             window.removeEventListener('topicBlocked', onTopicBlocked);
+            window.removeEventListener('topicUnblocked', onTopicUnblocked);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [getPosts, urlTopic]);
@@ -2568,7 +2632,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();
                 const isReserved = ['all', 'home', 'following'].includes(topicVal);
-                if (blockedTopicsLocal.size > 0 && blockedTopicsLocal.has(topicVal)) return false;
+                if (isTopicBlockedLocal(topicVal)) return false;
                 return hasTitle && hasTopic && !isReserved;
             };
             const topLevelPosts = postsArray.filter(isTopLevelPost);

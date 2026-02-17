@@ -332,7 +332,9 @@ class DatabaseManager:
                     """
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_owner_lower ON blocked_topics(LOWER(owner))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))"
+                )
 
                 # reports
                 cur.execute(
@@ -1625,6 +1627,30 @@ class DatabaseManager:
                     (owner, topic),
                 )
 
+    def unfollow_topics_matching(self, owner: str, topic_pattern: str) -> int:
+        """Unfollow topics matching a pattern (exact or trailing wildcard)."""
+        pattern = str(topic_pattern or "").strip().lower()
+        if not pattern:
+            raise ValueError("topic pattern cannot be empty")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if "*" in pattern:
+                    if pattern.count("*") != 1 or not pattern.endswith("*"):
+                        raise ValueError(f"invalid topic wildcard: {pattern}")
+                    prefix = pattern[:-1]
+                    if not prefix:
+                        raise ValueError("topic wildcard prefix required")
+                    cur.execute(
+                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) LIKE %s",
+                        (owner, f"{prefix}%"),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
+                        (owner, pattern),
+                    )
+                return int(cur.rowcount or 0)
+
     def block_post(self, owner: str, target: str) -> None:
         """Block a post (add to blocked_posts with next position)."""
         with self._connect() as conn:
@@ -1705,6 +1731,23 @@ class DatabaseManager:
                     "DELETE FROM blocked_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
                     (owner, target),
                 )
+
+    def unblock_topics_matching(self, owner: str, topic: str) -> int:
+        """Unblock topics whose pattern matches the topic."""
+        t = str(topic or "").strip().lower()
+        if not t:
+            raise ValueError("topic cannot be empty")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM blocked_topics
+                    WHERE LOWER(owner) = LOWER(%s)
+                      AND LOWER(%s) LIKE LOWER(REPLACE(target, '*', '%'))
+                    """,
+                    (owner, t),
+                )
+                return int(cur.rowcount or 0)
 
     def delete_post(self, target: str, owner: str | None = None) -> int:
         """Delete a post. If owner is None, admin delete."""

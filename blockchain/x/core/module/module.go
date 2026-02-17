@@ -94,6 +94,50 @@ func validateTopic(topic string, maxLen, minLen uint64) error {
 	return nil
 }
 
+// splitTopicPattern returns (prefix, isWildcard) for topic patterns.
+// Only a single trailing '*' is allowed for wildcard patterns.
+func splitTopicPattern(topic string) (string, bool, error) {
+	if strings.Contains(topic, "*") {
+		if strings.Count(topic, "*") != 1 || !strings.HasSuffix(topic, "*") {
+			return "", false, fmt.Errorf("wildcard must be trailing")
+		}
+		prefix := strings.TrimSuffix(topic, "*")
+		if prefix == "" {
+			return "", false, fmt.Errorf("wildcard prefix required")
+		}
+		return prefix, true, nil
+	}
+	return topic, false, nil
+}
+
+// validateBlockedTopicPattern allows exact topics or trailing-wildcard prefixes.
+func validateBlockedTopicPattern(topic string, maxLen, minLen uint64) error {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return fmt.Errorf("topic required for blocking")
+	}
+	prefix, isWildcard, err := splitTopicPattern(topic)
+	if err != nil {
+		return err
+	}
+	if isWildcard {
+		return validateTopic(prefix, maxLen, minLen)
+	}
+	return validateTopic(topic, maxLen, minLen)
+}
+
+// topicMatchesPattern returns true if topic matches an exact or wildcard pattern.
+func topicMatchesPattern(topic string, pattern string) bool {
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		if prefix == "" {
+			return false
+		}
+		return strings.HasPrefix(topic, prefix)
+	}
+	return topic == pattern
+}
+
 // allowedTags is the whitelist of valid tag values
 var allowedTags = map[string]bool{
 	"":          true,
@@ -1895,8 +1939,11 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+	if strings.HasSuffix(topic, "*") {
+		sdkCtx.Logger().Debug("BlockTopic wildcard", "owner", owner, "pattern", topic)
 	}
 
 	followedTopics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner)
@@ -1905,19 +1952,19 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	}
 	if len(followedTopics) > 0 {
 		newFollowedTopics := make([]string, 0, len(followedTopics))
-		removed := false
+		removedCount := 0
 		for _, t := range followedTopics {
-			if t == topic {
-				removed = true
+			if topicMatchesPattern(t, topic) {
+				removedCount++
 				continue
 			}
 			newFollowedTopics = append(newFollowedTopics, t)
 		}
-		if removed {
+		if removedCount > 0 {
 			if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newFollowedTopics); err != nil {
 				return nil, err
 			}
-			sdkCtx.Logger().Debug("BlockTopic removed follow", "owner", owner, "topic", topic)
+			sdkCtx.Logger().Debug("BlockTopic removed follows", "owner", owner, "pattern", topic, "count", removedCount)
 		}
 	}
 
@@ -1977,7 +2024,7 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
-	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
@@ -2198,19 +2245,19 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 	}
 	if len(blockedTopics) > 0 {
 		newBlockedTopics := make([]string, 0, len(blockedTopics))
-		removed := false
+		removedCount := 0
 		for _, t := range blockedTopics {
-			if t == topic {
-				removed = true
+			if topicMatchesPattern(topic, t) {
+				removedCount++
 				continue
 			}
 			newBlockedTopics = append(newBlockedTopics, t)
 		}
-		if removed {
+		if removedCount > 0 {
 			if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newBlockedTopics); err != nil {
 				return nil, err
 			}
-			sdkCtx.Logger().Debug("FollowTopic removed block", "owner", owner, "topic", topic)
+			sdkCtx.Logger().Debug("FollowTopic removed blocks", "owner", owner, "topic", topic, "count", removedCount)
 		}
 	}
 

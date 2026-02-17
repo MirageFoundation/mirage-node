@@ -925,6 +925,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
     const [confirmBlockTopic, setConfirmBlockTopic] = useState(false);
+    const [blockTopicInput, setBlockTopicInput] = useState('');
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
@@ -1359,27 +1360,26 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmBlockPost(false);
         setConfirmBlockUser(false);
         setConfirmUnsuspend(false);
+        setBlockTopicInput(topicName);
         setConfirmBlockTopic(true);
     };
 
     const confirmBlockTopicAction = async () => {
-        const topicName = (post?.topic || "").trim().toLowerCase();
+        const topicName = blockTopicInput.trim().toLowerCase();
         if (!topicName) return;
         setConfirmBlockTopic(false);
         try {
             const result = await tx.blockTopic(topicName);
             if (result.success) {
                 if (updatePost) {
-                    // Hide ALL posts with this topic from the current feed
+                    const isWildcard = topicName.endsWith('*');
+                    const prefix = isWildcard ? topicName.slice(0, -1) : null;
                     const allPosts = state?.posts || {};
                     for (const [pid, p] of Object.entries(allPosts)) {
-                        if (p && (p.topic || "").trim().toLowerCase() === topicName) {
+                        const pt = (p?.topic || "").trim().toLowerCase();
+                        if (isWildcard ? pt.startsWith(prefix) : pt === topicName) {
                             updatePost(pid, { blocked: true });
                         }
-                    }
-                    // Ensure the current post is hidden even if topic didn't match
-                    if (!allPosts[post.post_id] || (allPosts[post.post_id]?.topic || "").trim().toLowerCase() !== topicName) {
-                        updatePost(post.post_id, { blocked: true });
                     }
                 }
             } else {
@@ -1392,6 +1392,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const cancelBlockTopic = () => {
         setConfirmBlockTopic(false);
+        setBlockTopicInput('');
     };
 
     const handleFollowUser = async () => {
@@ -2229,9 +2230,31 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     {confirmBlockTopic && (
                         <BlockConfirmMessage>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap' }}>🚫 Block #{(post?.topic || '').trim().toLowerCase()}?</span>
+                                <span style={{ whiteSpace: 'nowrap', marginRight: '-0.5rem' }}>🚫 Block #</span>
+                                <input
+                                    type="text"
+                                    value={blockTopicInput}
+                                    onChange={(e) => setBlockTopicInput(e.target.value.toLowerCase().replace(/[^a-z0-9_*-]/g, ''))}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') confirmBlockTopicAction(); if (e.key === 'Escape') cancelBlockTopic(); }}
+                                    autoFocus
+                                    style={{
+                                        background: 'transparent',
+                                        border: 'none',
+                                        borderBottom: '1px solid var(--color-text-secondary, #888)',
+                                        color: 'inherit',
+                                        font: 'inherit',
+                                        fontSize: 'inherit',
+                                        padding: 0,
+                                        minWidth: '1ch',
+                                        maxWidth: '200px',
+                                        width: `${Math.max(1, blockTopicInput.length - 1)}ch`,
+                                        outline: 'none',
+                                    }}
+                                    placeholder="topic*"
+                                />
+                                <span style={{ whiteSpace: 'nowrap', marginLeft: '-0.5rem' }}>?</span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction}>
+                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={!blockTopicInput.trim()}>
                                         Block
                                     </Button>
                                     <Button variant="ghost" size="sm" onClick={cancelBlockTopic}>Cancel</Button>

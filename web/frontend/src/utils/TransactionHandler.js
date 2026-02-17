@@ -744,6 +744,9 @@ class TransactionHandler {
                 const wrappedResolve = (result) => {
                     this.pendingBlocks.delete(key);
                     this._notifyBlockListeners();
+                    if (result?.success) {
+                        window.dispatchEvent(new CustomEvent('topicUnblocked', { detail: { topic: topicTrimmed } }));
+                    }
                     console.debug("[blocks] resolved unblock_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
                     resolve(result);
                 };
