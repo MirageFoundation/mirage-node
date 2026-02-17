@@ -3683,15 +3683,14 @@ def test_reports(backend: str):
         return
     _wait_indexed(backend, free_addr, target_post)
 
-    # 16.1 Valid report
+    # 16.1 Valid report (reports are stored in DB, not on-chain — response has success/id)
     try:
         resp = _do_report(backend, sub1, target_post, "spam")
-        txh = str(resp.get("tx_hash", "")).lower()
-        if txh:
+        if resp.get("success") or resp.get("id"):
             _pass("reports.valid_report")
         else:
             err = str(resp.get("error", "")).lower()
-            _fail("reports.valid_report", f"no tx_hash: {err[:200]}")
+            _fail("reports.valid_report", f"not accepted: {err[:200]}")
     except Exception as e:
         _fail("reports.valid_report", str(e))
 
