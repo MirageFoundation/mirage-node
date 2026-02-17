@@ -702,9 +702,12 @@ class TransactionHandler {
                     // Mutual exclusion: blocking a topic unfollows it on-chain.
                     // Update sidebar immediately so the blocked topic disappears.
                     if (result?.success) {
-                        notifyTopicsUpdated({ removed: topicTrimmed });
-                        invalidateSubCache();
-                        window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: topicTrimmed } }));
+                        // Delay all feed/sidebar updates so the caller can show success UI first
+                        setTimeout(() => {
+                            notifyTopicsUpdated({ removed: topicTrimmed });
+                            invalidateSubCache();
+                            window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: topicTrimmed } }));
+                        }, 3200);
                     }
                     console.debug("[blocks] resolved block_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
                     resolve(result);

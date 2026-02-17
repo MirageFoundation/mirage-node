@@ -346,43 +346,47 @@ def _get_blocked_topics(cur, address: str) -> set[str]:
 
 
 def _split_blocked_topics(blocked_topics: set[str] | None) -> tuple[set[str], tuple[str, ...]]:
-    """Split blocked topics into exact matches and wildcard prefixes."""
+    """Split blocked topics into exact matches and glob patterns (containing *)."""
     if not blocked_topics:
         return set(), tuple()
     exact: set[str] = set()
-    prefixes: list[str] = []
+    patterns: list[str] = []
     for raw in blocked_topics:
         t = str(raw or "").strip().lower()
         if not t:
             raise ValueError("blocked topic cannot be empty")
         if "*" in t:
-            if t.count("*") != 1 or not t.endswith("*"):
-                raise ValueError(f"invalid blocked topic wildcard: {t}")
-            prefix = t[:-1]
-            if not prefix:
-                raise ValueError("blocked topic wildcard prefix required")
-            prefixes.append(prefix)
+            alpha = t.replace("*", "")
+            if not alpha:
+                raise ValueError("blocked topic pattern must contain letters")
+            patterns.append(t)
         else:
             exact.add(t)
-    if prefixes:
+    if patterns:
         import logging
 
-        logging.getLogger(__name__).debug("blocked_topics wildcards active: %d", len(prefixes))
-    return exact, tuple(prefixes)
+        logging.getLogger(__name__).debug("blocked_topics wildcards active: %d", len(patterns))
+    return exact, tuple(patterns)
 
 
-def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_prefixes: tuple[str, ...]) -> bool:
+def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tuple[str, ...]) -> bool:
     if not topic:
         return False
     if blocked_exact and topic in blocked_exact:
         return True
-    if blocked_prefixes and topic.startswith(blocked_prefixes):
-        return True
+    if blocked_patterns:
+        import re as _re
+
+        for pat in blocked_patterns:
+            # Convert glob * to regex .* (don't use fnmatch — it treats ? and [] as meta)
+            escaped = _re.escape(pat).replace(r"\*", ".*")
+            if _re.fullmatch(escaped, topic):
+                return True
     return False
 
 
 def _blocked_topics_sql(
-    blocked_exact: set[str], blocked_prefixes: tuple[str, ...], topic_col: str = "p.topic"
+    blocked_exact: set[str], blocked_patterns: tuple[str, ...], topic_col: str = "p.topic"
 ) -> tuple[str, list[str]]:
     """Return (sql_fragment, params) to exclude blocked topics in a WHERE clause.
 
@@ -399,10 +403,12 @@ def _blocked_topics_sql(
         ph = ",".join(["%s"] * len(bt_list))
         clauses.append(f"AND LOWER(TRIM({topic_col})) NOT IN ({ph})")
         params.extend(bt_list)
-    if blocked_prefixes:
-        for prefix in blocked_prefixes:
+    if blocked_patterns:
+        for pat in blocked_patterns:
+            # Escape SQL LIKE metacharacters then convert glob * to %
+            like_pat = pat.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
             clauses.append(f"AND LOWER(TRIM({topic_col})) NOT LIKE %s")
-            params.append(f"{prefix}%")
+            params.append(like_pat)
     return " ".join(clauses), params
 
 

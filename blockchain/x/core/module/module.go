@@ -94,48 +94,52 @@ func validateTopic(topic string, maxLen, minLen uint64) error {
 	return nil
 }
 
-// splitTopicPattern returns (prefix, isWildcard) for topic patterns.
-// Only a single trailing '*' is allowed for wildcard patterns.
-func splitTopicPattern(topic string) (string, bool, error) {
-	if strings.Contains(topic, "*") {
-		if strings.Count(topic, "*") != 1 || !strings.HasSuffix(topic, "*") {
-			return "", false, fmt.Errorf("wildcard must be trailing")
-		}
-		prefix := strings.TrimSuffix(topic, "*")
-		if prefix == "" {
-			return "", false, fmt.Errorf("wildcard prefix required")
-		}
-		return prefix, true, nil
-	}
-	return topic, false, nil
-}
-
-// validateBlockedTopicPattern allows exact topics or trailing-wildcard prefixes.
+// validateBlockedTopicPattern allows exact topics or glob patterns with * wildcards.
+// The alphanumeric portion (with * removed) must pass validateTopic rules.
+// Consecutive ** is not allowed.
 func validateBlockedTopicPattern(topic string, maxLen, minLen uint64) error {
 	topic = strings.TrimSpace(topic)
 	if topic == "" {
 		return fmt.Errorf("topic required for blocking")
 	}
-	prefix, isWildcard, err := splitTopicPattern(topic)
-	if err != nil {
-		return err
+	if strings.Contains(topic, "**") {
+		return fmt.Errorf("consecutive wildcards not allowed")
 	}
-	if isWildcard {
-		return validateTopic(prefix, maxLen, minLen)
+	alpha := strings.ReplaceAll(topic, "*", "")
+	if alpha == "" {
+		return fmt.Errorf("pattern must contain alphanumeric characters")
 	}
-	return validateTopic(topic, maxLen, minLen)
+	return validateTopic(alpha, maxLen, minLen)
 }
 
-// topicMatchesPattern returns true if topic matches an exact or wildcard pattern.
+// topicMatchesPattern returns true if topic matches a glob pattern where * matches
+// zero or more characters at any position.
 func topicMatchesPattern(topic string, pattern string) bool {
-	if strings.HasSuffix(pattern, "*") {
-		prefix := strings.TrimSuffix(pattern, "*")
-		if prefix == "" {
+	if !strings.Contains(pattern, "*") {
+		return topic == pattern
+	}
+	parts := strings.Split(pattern, "*")
+	// All parts must appear in order within topic
+	pos := 0
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		idx := strings.Index(topic[pos:], part)
+		if idx < 0 {
 			return false
 		}
-		return strings.HasPrefix(topic, prefix)
+		// First part must match at start if pattern doesn't start with *
+		if i == 0 && idx != 0 {
+			return false
+		}
+		pos += idx + len(part)
 	}
-	return topic == pattern
+	// Last part must match at end if pattern doesn't end with *
+	if len(parts) > 0 && parts[len(parts)-1] != "" {
+		return strings.HasSuffix(topic, parts[len(parts)-1])
+	}
+	return true
 }
 
 // allowedTags is the whitelist of valid tag values

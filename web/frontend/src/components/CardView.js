@@ -926,6 +926,11 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
     const [confirmBlockTopic, setConfirmBlockTopic] = useState(false);
     const [blockTopicInput, setBlockTopicInput] = useState('');
+    const [blockTopicError, setBlockTopicError] = useState('');
+    const [blockTopicSuccess, setBlockTopicSuccess] = useState('');
+    const [blockingTopic, setBlockingTopic] = useState(false);
+    const [blockTopicInputWidth, setBlockTopicInputWidth] = useState(20);
+    const blockTopicMeasureRef = useRef(null);
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
@@ -1367,32 +1372,50 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const confirmBlockTopicAction = async () => {
         const topicName = blockTopicInput.trim().toLowerCase();
         if (!topicName) return;
-        setConfirmBlockTopic(false);
+        setBlockTopicError('');
+        setBlockingTopic(true);
         try {
             const result = await tx.blockTopic(topicName);
+            setBlockingTopic(false);
+            setConfirmBlockTopic(false);
             if (result.success) {
-                if (updatePost) {
-                    const isWildcard = topicName.endsWith('*');
-                    const prefix = isWildcard ? topicName.slice(0, -1) : null;
-                    const allPosts = state?.posts || {};
-                    for (const [pid, p] of Object.entries(allPosts)) {
-                        const pt = (p?.topic || "").trim().toLowerCase();
-                        if (isWildcard ? pt.startsWith(prefix) : pt === topicName) {
-                            updatePost(pid, { blocked: true });
+                setBlockTopicSuccess(`#${topicName} blocked`);
+                setTimeout(() => {
+                    setBlockTopicSuccess('');
+                    if (updatePost) {
+                        const hasWildcard = topicName.includes('*');
+                        const allPosts = state?.posts || {};
+                        if (hasWildcard) {
+                            const re = new RegExp('^' + topicName.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+                            for (const [pid, p] of Object.entries(allPosts)) {
+                                const pt = (p?.topic || "").trim().toLowerCase();
+                                if (re.test(pt)) updatePost(pid, { blocked: true });
+                            }
+                        } else {
+                            for (const [pid, p] of Object.entries(allPosts)) {
+                                const pt = (p?.topic || "").trim().toLowerCase();
+                                if (pt === topicName) updatePost(pid, { blocked: true });
+                            }
                         }
                     }
-                }
+                }, 3000);
             } else {
-                alert(`Failed to block topic: ${result.error || 'Unknown error'}`);
+                setBlockTopicError(result.error || 'Unknown error');
+                setTimeout(() => setBlockTopicError(''), 5000);
             }
         } catch (err) {
-            alert(`Error blocking topic: ${err.message || 'Unknown error'}`);
+            setBlockingTopic(false);
+            setConfirmBlockTopic(false);
+            setBlockTopicError(err.message || 'Unknown error');
+            setTimeout(() => setBlockTopicError(''), 5000);
         }
     };
 
     const cancelBlockTopic = () => {
+        if (blockingTopic) return;
         setConfirmBlockTopic(false);
         setBlockTopicInput('');
+        setBlockTopicError('');
     };
 
     const handleFollowUser = async () => {
@@ -2228,39 +2251,90 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         </BlockConfirmMessage>
                     )}
                     {confirmBlockTopic && (
-                        <BlockConfirmMessage>
+                        <BlockConfirmMessage style={blockingTopic ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
-                                <span style={{ whiteSpace: 'nowrap', marginRight: '-0.5rem' }}>🚫 Block #</span>
-                                <input
-                                    type="text"
-                                    value={blockTopicInput}
-                                    onChange={(e) => setBlockTopicInput(e.target.value.toLowerCase().replace(/[^a-z0-9_*-]/g, ''))}
-                                    onKeyDown={(e) => { if (e.key === 'Enter') confirmBlockTopicAction(); if (e.key === 'Escape') cancelBlockTopic(); }}
-                                    autoFocus
-                                    style={{
-                                        background: 'transparent',
-                                        border: 'none',
-                                        borderBottom: '1px solid var(--color-text-secondary, #888)',
-                                        color: 'inherit',
-                                        font: 'inherit',
-                                        fontSize: 'inherit',
-                                        padding: 0,
-                                        minWidth: '1ch',
-                                        maxWidth: '200px',
-                                        width: `${Math.max(1, blockTopicInput.length - 1)}ch`,
-                                        outline: 'none',
-                                    }}
-                                    placeholder="topic*"
-                                />
-                                <span style={{ whiteSpace: 'nowrap', marginLeft: '-0.5rem' }}>?</span>
+                                <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'baseline' }}>
+                                    {blockingTopic ? '⏳' : '🚫'} Block #<span style={{ position: 'relative', display: 'inline-block' }}>
+                                        <span
+                                            ref={blockTopicMeasureRef}
+                                            aria-hidden="true"
+                                            style={{
+                                                position: 'absolute',
+                                                visibility: 'hidden',
+                                                whiteSpace: 'pre',
+                                                font: 'inherit',
+                                                fontSize: 'inherit',
+                                                pointerEvents: 'none',
+                                            }}
+                                        >{blockTopicInput || ' '}</span>
+                                        <input
+                                            type="text"
+                                            value={blockTopicInput}
+                                            disabled={blockingTopic}
+                                            onChange={(e) => {
+                                                const v = e.target.value.toLowerCase().replace(/[^a-z0-9*]/g, '').replace(/\*{2,}/g, '*');
+                                                setBlockTopicInput(v);
+                                                if (blockTopicError) setBlockTopicError('');
+                                                requestAnimationFrame(() => {
+                                                    if (blockTopicMeasureRef.current) {
+                                                        setBlockTopicInputWidth(blockTopicMeasureRef.current.offsetWidth + 2);
+                                                    }
+                                                });
+                                            }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter' && !blockingTopic) confirmBlockTopicAction(); if (e.key === 'Escape' && !blockingTopic) cancelBlockTopic(); }}
+                                            autoFocus
+                                            ref={(el) => {
+                                                if (el && blockTopicMeasureRef.current) {
+                                                    setBlockTopicInputWidth(blockTopicMeasureRef.current.offsetWidth + 2);
+                                                }
+                                            }}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                borderBottom: '1px solid var(--color-text-secondary, #888)',
+                                                color: 'inherit',
+                                                font: 'inherit',
+                                                fontSize: 'inherit',
+                                                padding: 0,
+                                                width: `${blockTopicInputWidth}px`,
+                                                maxWidth: '200px',
+                                                outline: 'none',
+                                            }}
+                                            placeholder="topic*"
+                                        />
+                                    </span>{blockingTopic ? '…' : '?'}
+                                </span>
                                 <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
-                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={!blockTopicInput.trim()}>
-                                        Block
+                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={!blockTopicInput.trim() || blockingTopic}>
+                                        {blockingTopic ? 'Blocking…' : 'Block'}
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={cancelBlockTopic}>Cancel</Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelBlockTopic} disabled={blockingTopic}>Cancel</Button>
                                 </ConfirmButtons>
                             </div>
                         </BlockConfirmMessage>
+                    )}
+                    {blockTopicSuccess && (
+                        <ShareSuccessMessage>
+                            <span>✓</span>
+                            {blockTopicSuccess}
+                        </ShareSuccessMessage>
+                    )}
+                    {blockTopicError && (
+                        <div style={{
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid #ef4444',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: '#ef4444',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>⚠</span>
+                            {blockTopicError}
+                        </div>
                     )}
                     {confirmDelete && (
                         <BlockConfirmMessage>

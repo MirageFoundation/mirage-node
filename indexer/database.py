@@ -1628,21 +1628,17 @@ class DatabaseManager:
                 )
 
     def unfollow_topics_matching(self, owner: str, topic_pattern: str) -> int:
-        """Unfollow topics matching a pattern (exact or trailing wildcard)."""
+        """Unfollow topics matching a glob pattern (* maps to SQL %)."""
         pattern = str(topic_pattern or "").strip().lower()
         if not pattern:
             raise ValueError("topic pattern cannot be empty")
         with self._connect() as conn:
             with conn.cursor() as cur:
                 if "*" in pattern:
-                    if pattern.count("*") != 1 or not pattern.endswith("*"):
-                        raise ValueError(f"invalid topic wildcard: {pattern}")
-                    prefix = pattern[:-1]
-                    if not prefix:
-                        raise ValueError("topic wildcard prefix required")
+                    like_pat = pattern.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
                     cur.execute(
                         "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) LIKE %s",
-                        (owner, f"{prefix}%"),
+                        (owner, like_pat),
                     )
                 else:
                     cur.execute(

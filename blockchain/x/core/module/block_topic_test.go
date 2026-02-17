@@ -80,11 +80,13 @@ func TestValidateBlockedTopicPattern(t *testing.T) {
 		errPart string
 	}{
 		{"exact valid", "beer123", 3, 10, false, ""},
-		{"wildcard valid", "beer*", 3, 10, false, ""},
+		{"wildcard trailing", "beer*", 3, 10, false, ""},
+		{"wildcard leading", "*beer", 3, 10, false, ""},
+		{"wildcard middle", "be*er", 3, 10, false, ""},
+		{"wildcard both ends", "*beer*", 3, 10, false, ""},
 		{"wildcard too short", "be*", 3, 10, true, "below minimum"},
-		{"wildcard empty prefix", "*", 1, 10, true, "prefix required"},
-		{"wildcard middle", "be*er", 2, 10, true, "wildcard must be trailing"},
-		{"wildcard double", "beer**", 2, 10, true, "wildcard must be trailing"},
+		{"wildcard only star", "*", 1, 10, true, "must contain alphanumeric"},
+		{"wildcard double star", "beer**", 2, 10, true, "consecutive wildcards"},
 		{"wildcard uppercase", "Beer*", 2, 10, true, "lowercase alphanumeric"},
 	}
 
@@ -239,6 +241,33 @@ func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
 	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, blocked)
+}
+
+func TestTopicMatchesPattern(t *testing.T) {
+	tests := []struct {
+		topic   string
+		pattern string
+		want    bool
+	}{
+		{"beer", "beer", true},
+		{"beer", "wine", false},
+		{"beer123", "beer*", true},
+		{"beer", "beer*", true},
+		{"wine", "beer*", false},
+		{"mybeer", "*beer", true},
+		{"mybeer123", "*beer*", true},
+		{"gaming", "gam*g", true},
+		{"gambling", "gam*g", true},
+		{"game", "gam*g", false},
+		{"beer", "*beer*", true},
+		{"test", "*", true},
+	}
+	for _, tt := range tests {
+		got := topicMatchesPattern(tt.topic, tt.pattern)
+		if got != tt.want {
+			t.Errorf("topicMatchesPattern(%q, %q) = %v, want %v", tt.topic, tt.pattern, got, tt.want)
+		}
+	}
 }
 
 func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {

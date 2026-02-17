@@ -1376,17 +1376,19 @@ def core_block_topic():
 
         if not topic:
             return jsonify({"error": "invalid topic format"}), 400
-        # Allow trailing wildcard for blocked topic patterns (e.g. "beer*")
-        _topic_check = topic[:-1] if topic.endswith("*") else topic
-        if not _topic_check or not re.fullmatch(r"[a-z0-9]+", _topic_check):
+        # Allow * as glob wildcard anywhere in blocked topic patterns
+        _topic_alpha = topic.replace("*", "")
+        if not _topic_alpha or not re.fullmatch(r"[a-z0-9]+", _topic_alpha):
+            return jsonify({"error": "invalid topic format"}), 400
+        if "**" in topic:
             return jsonify({"error": "invalid topic format"}), 400
 
         p = expect_params()
         min_topic = int(p.get("min_topic_size", 2))
         max_topic = int(p.get("max_topic_size", 35))
-        if len(_topic_check) < min_topic:
+        if len(_topic_alpha) < min_topic:
             return jsonify({"error": "topic too short"}), 400
-        if len(_topic_check) > max_topic:
+        if len(_topic_alpha) > max_topic:
             return jsonify({"error": "topic too long"}), 400
 
         if not (pub_b64 and sig_b64):
