@@ -119,6 +119,7 @@ The test suite has been split and expanded for better coverage.
 - **Wildcard tests**: Dedicated tests for wildcard block topic patterns across both backend and blockchain suites
 - **Malicious inputs**: Added NUL/control-char rejection tests and media URL validation in both backend and blockchain suites
 - **Unicode edge cases**: Content/title with zero-width, bidi, combining, and emoji are accepted; Unicode topics are rejected
+- **Scale**: Backend suite now spans **520** checks; blockchain suite **146** checks (pass/fail + chain deliver/reject assertions)
 - **Robustness**: All JSON parsing now locates the first `{` or `[` in `miraged` output, skipping log lines that previously broke parsers
 - **Faucet fix**: Faucet sequence mismatch errors handled with retry on code 32
 - **Gov module**: Address parsing now handles the `{type, value: {address}}` response format alongside `{base_account: {address}}`
@@ -133,6 +134,16 @@ Defense-in-depth against malformed text inputs and database-stalling bytes.
 - **Backend**: `_has_unsafe_chars` blocks the same character classes in `core_post`, `core_edit`, `core_set_username`, and media validation
 - **Indexer**: `_strip_nul` safety net applied to posts, profiles, and topic tables to prevent PostgreSQL NUL errors
 - **Behavior**: Unicode content remains fully supported; only unsafe control characters are blocked
+
+---
+
+### Stress & Spam Testing
+
+The spam-attack harness can flood the chain with concurrent transactions for soak testing.
+
+- **Harness**: `tests/test_spam.py` (multi-worker posts/votes/comments, live TPS + latency stats)
+- **Configurable**: worker count, duration, and mode allow 10k+ tx runs when needed
+- **Use**: run against local docker to validate PoW stability and throughput under load
 
 ---
 

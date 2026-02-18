@@ -266,6 +266,23 @@ def _get_pow_params(backend: str, address: str | None = None) -> tuple[str, int,
     return lb, diff, base_bits, pow_factor
 
 
+def _get_profile_full(backend: str, address: str) -> dict:
+    r = requests.get(f"{backend}/api/get_profile", params={"address": address}, timeout=10)
+    r.raise_for_status()
+    return r.json() or {}
+
+
+def _assert_capped_deque(name: str, got: list[str], expected: list[str]) -> None:
+    if got == expected:
+        _pass(name)
+        return
+    _fail(
+        name,
+        f"expected_len={len(expected)} got_len={len(got)} "
+        f"expected_tail={expected[-3:]} got_tail={got[-3:]}",
+    )
+
+
 def _make_pubkey_any(pubkey_bytes: bytes) -> AnyPB:
     if len(pubkey_bytes) != 33:
         raise RuntimeError("pubkey must be 33 bytes")
@@ -1480,12 +1497,14 @@ def test_msg_validation(backend: str) -> None:
     ts = _now_ms()
     _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
     fill_ok = True
+    blocked_post_targets: list[str] = []
     for i in range(max_blocked_posts):
         if i > 0 and i % 10 == 0:
             lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
             print(f"    [{i}/{max_blocked_posts}] blocked posts…")
         target = _rand_hex(64)
+        blocked_post_targets.append(target)
         base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof)
@@ -1517,18 +1536,24 @@ def test_msg_validation(backend: str) -> None:
             bw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("msg.block_post_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, bw_addr)
+        got = [str(v).lower() for v in (profile.get("blocked_posts") or [])]
+        expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
+        _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
 
     # ── blocked users fill + overflow ────────────────────────────
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     _debug(f"free-tier max_blocked_users={max_blocked_users}")
     fill_ok = True
+    blocked_user_targets: list[str] = []
     for i in range(max_blocked_users):
         if i > 0 and i % 10 == 0:
             lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        blocked_user_targets.append(target.lower())
         base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof)
@@ -1560,18 +1585,24 @@ def test_msg_validation(backend: str) -> None:
             bw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("msg.block_user_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, bw_addr)
+        got = [str(v).lower() for v in (profile.get("blocked_users") or [])]
+        expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
+        _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
 
     # ── blocked topics fill + overflow ───────────────────────────
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     _debug(f"free-tier max_blocked_topics={max_blocked_topics}")
     fill_ok = True
+    blocked_topic_targets: list[str] = []
     for i in range(max_blocked_topics):
         if i > 0 and i % 10 == 0:
             lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
         topic = f"t{_rand_str(6)}{i}"
+        blocked_topic_targets.append(topic)
         base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
@@ -1603,7 +1634,11 @@ def test_msg_validation(backend: str) -> None:
             bw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("msg.block_topic_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, bw_addr)
+        got = [str(v).lower() for v in (profile.get("blocked_topics") or [])]
+        expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_topics:]
+        _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
 
     # 6.11 Unblock post (happy path: block then unblock)
     lb, _, _, _ = _get_pow_params(backend, str(w2.address()))
@@ -1783,15 +1818,15 @@ def test_follow_limits(backend: str) -> None:
     # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
     _debug(f"free-tier max_followed_users={max_followed_users}")
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-    ts = _now_ms()
     fill_ok = True
+    followed_user_targets: list[str] = []
     for i in range(max_followed_users):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
         if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-            ts = _now_ms()
             print(f"    [{i}/{max_followed_users}] followed users…")
         target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        followed_user_targets.append(target_addr.lower())
         base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
@@ -1823,20 +1858,24 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("follow.user_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("follow.user_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, fw_addr)
+        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
+        expected = (followed_user_targets + [over_addr.lower()])[-max_followed_users:]
+        _assert_capped_deque("follow.user_overflow_deque", got, expected)
 
     # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
     _debug(f"free-tier max_followed_topics={max_followed_topics}")
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-    ts = _now_ms()
     fill_ok = True
+    followed_topic_targets: list[str] = []
     for i in range(max_followed_topics):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
         if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-            ts = _now_ms()
             print(f"    [{i}/{max_followed_topics}] followed topics…")
         topic = f"ft{_rand_str(4)}{i}"
+        followed_topic_targets.append(topic)
         base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
@@ -1868,19 +1907,22 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("follow.topic_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("follow.topic_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, fw_addr)
+        got = [str(v).lower() for v in (profile.get("followed_topics") or [])]
+        expected = (followed_topic_targets + [over_topic.lower()])[-max_followed_topics:]
+        _assert_capped_deque("follow.topic_overflow_deque", got, expected)
 
     # 8.3 Fill free-tier max_followed_mods + overflow
     max_followed_mods = _tier_int(tier0, "max_followed_mods")
     _debug(f"free-tier max_followed_mods={max_followed_mods}")
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-    ts = _now_ms()
     fill_ok = True
+    followed_mod_targets: list[str] = []
     for i in range(max_followed_mods):
-        if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-            ts = _now_ms()
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
         mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        followed_mod_targets.append(mod_addr.lower())
         base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, mod_addr)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
         msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, mod_addr, pow_val=proof)
@@ -1912,7 +1954,11 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_reject("follow.mod_overflow", ccode, dcode, dlog)
+        _check_deliver_accept("follow.mod_overflow (capped)", ccode, dcode, dlog)
+        profile = _get_profile_full(backend, fw_addr)
+        got = [str(v).lower() for v in (profile.get("followed_moderators") or [])]
+        expected = (followed_mod_targets + [over_mod.lower()])[-max_followed_mods:]
+        _assert_capped_deque("follow.mod_overflow_deque", got, expected)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
     w_mx = WALLETS["sub3"]
