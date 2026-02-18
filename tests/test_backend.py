@@ -82,6 +82,7 @@ from shared.canon import (  # noqa: E402
 # Constants / config
 # ---------------------------------------------------------------------------
 DEFAULT_BACKEND = "http://127.0.0.1:80"
+INDEX_TIMEOUT_SEC = 45.0
 
 # Populated during setup — all wallets are random, non-deterministic
 WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "sub3"
@@ -231,7 +232,10 @@ def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
     else:
         argv = ["docker", "exec", "mirage", "bash", "-lc", cmd]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    return result.returncode, result.stdout.strip()
+    out = result.stdout.strip()
+    if result.returncode != 0 and not out:
+        out = result.stderr.strip()
+    return result.returncode, out
 
 
 def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
@@ -245,7 +249,9 @@ def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
     miraged = _miraged_cmd()
     if _INSIDE_CONTAINER:
         argv = [miraged] + list(args)
-        env = {**os.environ, "HOME": "/root"}
+        # Inherit parent environment; ensure HOME is set for keyring access
+        env = os.environ.copy()
+        env["HOME"] = "/root"
         result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
         out = result.stdout.strip()
         if result.returncode != 0 and not out:
@@ -337,7 +343,7 @@ _VALIDATOR_KEY_ADDR: Optional[str] = None
 
 
 def _resolve_validator_key_addr() -> str:
-    """Resolve the first key address from the node keyring (cached)."""
+    """Resolve the validator key address from the node keyring (cached)."""
     global _VALIDATOR_KEY_ADDR
     if _VALIDATOR_KEY_ADDR:
         return _VALIDATOR_KEY_ADDR
@@ -355,11 +361,42 @@ def _resolve_validator_key_addr() -> str:
     keys = json.loads(out[idx:])
     if not keys:
         raise RuntimeError("keys list returned empty array")
-    addr = str(keys[0].get("address", "")).strip()
-    if not addr:
-        raise RuntimeError(f"keys list: first key has no address: {keys[0]}")
-    _VALIDATOR_KEY_ADDR = addr
-    return addr
+    for key in keys:
+        if key.get("name") == "validator":
+            addr = str(key.get("address", "")).strip()
+            if not addr:
+                raise RuntimeError(f"keys list: validator key has no address: {key}")
+            _debug(f"validator key address: {addr}")
+            _VALIDATOR_KEY_ADDR = addr
+            return addr
+    names = [str(k.get("name", "")) for k in keys]
+    raise RuntimeError(f"keys list: validator key not found (names={names})")
+
+
+def _get_spendable_balance(address: str) -> int:
+    """Return spendable umirage balance for an address via CLI."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "bank",
+            "spendable-balances",
+            address,
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"spendable-balances failed: exit={code} out={out[:200]}")
+    data = json.loads(out[out.index("{") :])
+    for b in data.get("balances", []):
+        if b.get("denom") == "umirage":
+            return int(b.get("amount", 0) or 0)
+    return 0
 
 
 def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
@@ -376,6 +413,10 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
         from_addr = _resolve_validator_key_addr()
     except RuntimeError as e:
         print(f"    [faucet] cannot resolve validator key address: {e}")
+        return False
+
+    if not from_addr or not from_addr.startswith("mirage1"):
+        print(f"    [faucet] bad validator address: {from_addr!r}")
         return False
 
     max_retries = 5
@@ -403,9 +444,27 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
             "-o",
             "json",
         ]
+
         code, out = _run_miraged(send_args, timeout=30)
         if code != 0:
-            print(f"    [faucet] exit code {code}: {out[:200]}")
+            # Show the FATAL/error line (usually at the end), not the Usage block
+            lines = out.strip().splitlines()
+            fatal = next(
+                (l for l in reversed(lines) if "FATAL" in l or "insufficient" in l.lower() or "error" in l.lower()),
+                None,
+            )
+            if fatal:
+                # Replace raw umirage amounts with human-readable MIRAGE
+                import re
+
+                def _umirage_to_mirage(m: re.Match) -> str:
+                    return f"{int(m.group(1)) / 1_000_000:,.0f} MIRAGE"
+
+                msg = re.sub(r"(\d+)umirage", _umirage_to_mirage, fatal.strip())
+                print(f"    [faucet] {msg}")
+            else:
+                last = lines[-1].strip() if lines else out[:200]
+                print(f"    [faucet] exit code {code}: {last}")
             return False
         # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
         try:
@@ -541,6 +600,22 @@ def setup_test_wallets(backend: str) -> bool:
         "sub2": 250_000_000_000,  #   250,000 MIRAGE  (T2 fee = 200,000)
         "sub3": 400_000_000_000,  #   400,000 MIRAGE  (T3 fee = 300,000)
     }
+    try:
+        faucet_addr = _resolve_validator_key_addr()
+        spendable = _get_spendable_balance(faucet_addr)
+        required = sum(FAUCET_AMOUNTS.values())
+        if spendable < required:
+            have_m = spendable / 1_000_000
+            need_m = required / 1_000_000
+            print(
+                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Faucet source balance too low: "
+                f"have {have_m:,.0f} MIRAGE, need {need_m:,.0f} MIRAGE"
+            )
+            print("  Hint: re-init local docker with a funded mnemonic (deploy/deploy.sh --init).")
+            return False
+    except Exception as e:
+        print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Faucet spendable balance check failed: {e}")
+        return False
     for name, w in WALLETS.items():
         addr = str(w.address())
         amount = FAUCET_AMOUNTS[name]
@@ -666,7 +741,15 @@ def _do_post(
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/post", payload)
-    txh = str((resp or {}).get("tx_hash", "") or "").lower()
+    resp = resp or {}
+    if resp.get("error"):
+        _debug(f"post.submit error={resp.get('error')}")
+        return None
+    tx_code = int(resp.get("code", 0) or 0)
+    if tx_code != 0:
+        _debug(f"post.submit failed code={tx_code} log={str(resp.get('raw_log', ''))[:200]}")
+        return None
+    txh = str(resp.get("tx_hash", "") or "").lower()
     return txh if txh else None
 
 
@@ -1074,7 +1157,7 @@ def _do_post_with_media(
     return txh if txh else None
 
 
-def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0) -> bool:
+def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
     while time.perf_counter() < deadline:
@@ -1182,7 +1265,7 @@ def _wait_blocked_user(
     return False
 
 
-def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = 15.0) -> bool:
+def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
     while time.perf_counter() < deadline:
@@ -1446,11 +1529,11 @@ def test_post_lifecycle(backend: str):
     if _wait_indexed(backend, addr, txh):
         _pass("post.appears in get_user_posts")
     else:
-        _fail("post.appears in get_user_posts", "not found after 15s")
+        _fail("post.appears in get_user_posts", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
-    # 3.3 Verify in get_posts feed (poll up to 10s, use newest sort)
+    # 3.3 Verify in get_posts feed (poll up to INDEX_TIMEOUT_SEC, use newest sort)
     found = []
-    for _ in range(10):
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
         code, feed = _get(f"{backend}/api/get_posts", {"limit": 50, "by": "newest"})
         posts = (feed or {}).get("posts") or []
         found = [p for p in posts if str(p.get("post_id", "")).lower() == txh]
@@ -1476,13 +1559,13 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
-    # 3.5 Vote up (poll up to 10s)
+    # 3.5 Vote up (poll up to INDEX_TIMEOUT_SEC)
     vote_resp = _do_vote(backend, wallet, txh, 1)
     if vote_resp and vote_resp.get("error"):
         _fail("post.vote_up reflected", f"vote failed: {vote_resp}")
     else:
         votes_after_up = 0
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             time.sleep(1)
             code, feed2 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
             posts2 = (feed2 or {}).get("posts") or []
@@ -1495,10 +1578,10 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.vote_up reflected", f"votes={votes_after_up}")
 
-    # 3.6 Vote down (poll up to 10s)
+    # 3.6 Vote down (poll up to INDEX_TIMEOUT_SEC)
     _do_vote(backend, wallet, txh, -1)
     votes_after_down = votes_after_up
-    for _ in range(10):
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
         time.sleep(1)
         code, feed3 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
         posts3 = (feed3 or {}).get("posts") or []
@@ -1591,7 +1674,7 @@ def test_comments(backend: str):
     if _wait_comment_indexed(backend, parent_txh, c1_txh):
         _pass("comments.appears in get_comments")
     else:
-        _fail("comments.appears in get_comments", "not found after 15s")
+        _fail("comments.appears in get_comments", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
     # 4.3 Nested comment (reply to comment)
     c2_txh = _do_post(backend, wallet, "", "", "Nested reply", target=c1_txh)
@@ -1600,10 +1683,10 @@ def test_comments(backend: str):
     else:
         _fail("comments.nested_reply succeeds")
 
-    # 4.4 get_root_post_id returns correct root (poll up to 10s for indexing)
+    # 4.4 get_root_post_id returns correct root (poll up to INDEX_TIMEOUT_SEC)
     if c2_txh:
         root_ok = False
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             time.sleep(1)
             code, root_data = _get(f"{backend}/api/get_root_post_id", {"comment_id": c2_txh})
             if code == 200:
@@ -1620,7 +1703,7 @@ def test_comments(backend: str):
     # 4.5 get_comment_context (may need indexing time)
     if c2_txh:
         ctx_ok = False
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             code, ctx = _get(f"{backend}/api/get_comment_context", {"comment_id": c2_txh})
             if code == 200:
                 _pass("comments.get_comment_context returns 200")
