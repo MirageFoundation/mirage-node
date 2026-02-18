@@ -46,6 +46,37 @@ var (
 
 const logDelimiter = "----------------------------------------------------------------------------------------------------"
 
+// validateSafeText checks that s is valid UTF-8 and contains no control
+// characters other than horizontal tab, newline, and carriage return.
+// Rejects: NUL, C0 controls (\x01-\x08, \x0B, \x0C, \x0E-\x1F), DEL (\x7F).
+func validateSafeText(field, s string) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("%s contains invalid UTF-8", field)
+	}
+	for i, r := range s {
+		if r == utf8.RuneError {
+			return fmt.Errorf("%s contains invalid UTF-8 at byte %d", field, i)
+		}
+		if r <= 0x1F && r != '\t' && r != '\n' && r != '\r' {
+			return fmt.Errorf("%s contains control character 0x%02X", field, r)
+		}
+		if r == 0x7F {
+			return fmt.Errorf("%s contains DEL character", field)
+		}
+	}
+	return nil
+}
+
+// rejectUnsafeFields validates all provided name/value pairs are safe text.
+func rejectUnsafeFields(pairs ...string) error {
+	for i := 0; i < len(pairs)-1; i += 2 {
+		if err := validateSafeText(pairs[i], pairs[i+1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validateTxHash validates that a string is exactly 64 hex characters (for post/comment/vote targets)
 func validateTxHash(target string) error {
 	target = strings.ToLower(strings.TrimSpace(target))
@@ -92,6 +123,54 @@ func validateTopic(topic string, maxLen, minLen uint64) error {
 		}
 	}
 	return nil
+}
+
+// validateBlockedTopicPattern allows exact topics or glob patterns with * wildcards.
+// The alphanumeric portion (with * removed) must pass validateTopic rules.
+// Consecutive ** is not allowed.
+func validateBlockedTopicPattern(topic string, maxLen, minLen uint64) error {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return fmt.Errorf("topic required for blocking")
+	}
+	if strings.Contains(topic, "**") {
+		return fmt.Errorf("consecutive wildcards not allowed")
+	}
+	alpha := strings.ReplaceAll(topic, "*", "")
+	if alpha == "" {
+		return fmt.Errorf("pattern must contain alphanumeric characters")
+	}
+	return validateTopic(alpha, maxLen, minLen)
+}
+
+// topicMatchesPattern returns true if topic matches a glob pattern where * matches
+// zero or more characters at any position.
+func topicMatchesPattern(topic string, pattern string) bool {
+	if !strings.Contains(pattern, "*") {
+		return topic == pattern
+	}
+	parts := strings.Split(pattern, "*")
+	// All parts must appear in order within topic
+	pos := 0
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		idx := strings.Index(topic[pos:], part)
+		if idx < 0 {
+			return false
+		}
+		// First part must match at start if pattern doesn't start with *
+		if i == 0 && idx != 0 {
+			return false
+		}
+		pos += idx + len(part)
+	}
+	// Last part must match at end if pattern doesn't end with *
+	if len(parts) > 0 && parts[len(parts)-1] != "" {
+		return strings.HasSuffix(topic, parts[len(parts)-1])
+	}
+	return true
 }
 
 // allowedTags is the whitelist of valid tag values
@@ -425,8 +504,8 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		if len(ip.BlockedPosts) > 0 {
 			_ = am.k.SetProfileBlockedPosts(sdkCtx, owner, ip.BlockedPosts)
 		}
-		if len(ip.QualityPosts) > 0 {
-			_ = am.k.SetProfileQualityPosts(sdkCtx, owner, ip.QualityPosts)
+		if len(ip.BlockedTopics) > 0 {
+			_ = am.k.SetProfileBlockedTopics(sdkCtx, owner, ip.BlockedTopics)
 		}
 	}
 }
@@ -824,7 +903,7 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 		FollowedTopics:     profile.FollowedTopics,
 		BlockedUsers:       profile.BlockedUsers,
 		BlockedPosts:       profile.BlockedPosts,
-		QualityPosts:       profile.QualityPosts,
+		BlockedTopics:      profile.BlockedTopics,
 	}, nil
 }
 
@@ -860,7 +939,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, core.Owner)
 		blockedUsers, _ := am.k.GetProfileBlockedUsers(sdkCtx, core.Owner)
 		blockedPosts, _ := am.k.GetProfileBlockedPosts(sdkCtx, core.Owner)
-		qualityPosts, _ := am.k.GetProfileQualityPosts(sdkCtx, core.Owner)
+		blockedTopics, _ := am.k.GetProfileBlockedTopics(sdkCtx, core.Owner)
 
 		profiles = append(profiles, &types.QueryProfileResponse{
 			Owner:              core.Owner,
@@ -879,7 +958,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			FollowedTopics:     topics,
 			BlockedUsers:       blockedUsers,
 			BlockedPosts:       blockedPosts,
-			QualityPosts:       qualityPosts,
+			BlockedTopics:      blockedTopics,
 		})
 	}
 
@@ -1010,6 +1089,9 @@ func validateMsgPostMedia(media []string) error {
 		if !strings.HasPrefix(mediaItem, "https://") {
 			return fmt.Errorf("media[%d] must use https://", i)
 		}
+		if err := validateSafeText(fmt.Sprintf("media[%d]", i), mediaItem); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1039,6 +1121,16 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	params := am.k.GetParams(sdkCtx)
+
+	if err := rejectUnsafeFields(
+		"topic", req.GetTopic(),
+		"title", req.GetTitle(),
+		"content", req.GetContent(),
+		"target", req.GetTarget(),
+		"tag", req.GetTag(),
+	); err != nil {
+		return nil, err
+	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
 	isComment := target != ""
@@ -1182,6 +1274,16 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	}
 
 	params := am.k.GetParams(sdkCtx)
+
+	if err := rejectUnsafeFields(
+		"topic", req.GetTopic(),
+		"title", req.GetTitle(),
+		"content", req.GetContent(),
+		"target", req.GetTarget(),
+		"tag", req.GetTag(),
+	); err != nil {
+		return nil, err
+	}
 
 	// Validate override txhash (the post/comment being edited)
 	override := strings.ToLower(strings.TrimSpace(req.GetOverride()))
@@ -1345,8 +1447,8 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	if posts, err := am.k.GetProfileBlockedPosts(sdkCtx, owner); err == nil {
 		prof.BlockedPosts = posts
 	}
-	if quality, err := am.k.GetProfileQualityPosts(sdkCtx, owner); err == nil {
-		prof.QualityPosts = quality
+	if blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner); err == nil {
+		prof.BlockedTopics = blockedTopics
 	}
 
 	return prof, true, nil
@@ -1390,6 +1492,9 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	}
 
 	username := req.GetUsername()
+	if err := validateSafeText("username", username); err != nil {
+		return nil, err
+	}
 
 	// Get user's tier to check if they can change name (only need Level and Username)
 	var userLevel int
@@ -1767,6 +1872,28 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, err
 	}
 
+	followedUsers, err := am.k.GetProfileFollowedUsers(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(followedUsers) > 0 {
+		newFollowedUsers := make([]string, 0, len(followedUsers))
+		removed := false
+		for _, u := range followedUsers {
+			if u == target {
+				removed = true
+				continue
+			}
+			newFollowedUsers = append(newFollowedUsers, u)
+		}
+		if removed {
+			if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newFollowedUsers); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("BlockUser removed follow", "owner", owner, "target", target)
+		}
+	}
+
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(10)
 	if tierConfig != nil {
@@ -1848,6 +1975,142 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	return &types.MsgUnblockUserResponse{}, nil
 }
 
+// BlockTopic blocks a topic (persisted on-chain, tier-limited)
+func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	var userLevel int
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+			var core types.ProfileCore
+			_ = json.Unmarshal(bz, &core)
+			userLevel = int(core.Level)
+		}
+	}
+
+	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+	if strings.HasSuffix(topic, "*") {
+		sdkCtx.Logger().Debug("BlockTopic wildcard", "owner", owner, "pattern", topic)
+	}
+
+	followedTopics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(followedTopics) > 0 {
+		newFollowedTopics := make([]string, 0, len(followedTopics))
+		removedCount := 0
+		for _, t := range followedTopics {
+			if topicMatchesPattern(t, topic) {
+				removedCount++
+				continue
+			}
+			newFollowedTopics = append(newFollowedTopics, t)
+		}
+		if removedCount > 0 {
+			if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newFollowedTopics); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("BlockTopic removed follows", "owner", owner, "pattern", topic, "count", removedCount)
+		}
+	}
+
+	tierConfig := params.GetTierConfig(userLevel)
+	maxTopics := uint64(10)
+	if tierConfig != nil {
+		maxTopics = tierConfig.MaxBlockedTopics
+	}
+
+	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	for _, t := range topics {
+		if t == topic {
+			return &types.MsgBlockTopicResponse{}, nil
+		}
+	}
+	topics = append(topics, topic)
+	if uint64(len(topics)) > maxTopics {
+		topics = topics[len(topics)-int(maxTopics):]
+	}
+	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, topics); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info("BlockTopic", "owner", owner, "topic", topic)
+
+	if owner != "" && authority != govAuthority {
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	return &types.MsgBlockTopicResponse{}, nil
+}
+
+// UnblockTopic unblocks a topic (persisted on-chain)
+func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	var userLevel int
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+			var core types.ProfileCore
+			_ = json.Unmarshal(bz, &core)
+			userLevel = int(core.Level)
+		}
+	}
+
+	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
+	if err := validateBlockedTopicPattern(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	newTopics := make([]string, 0, len(topics))
+	for _, t := range topics {
+		if t != topic {
+			newTopics = append(newTopics, t)
+		}
+	}
+	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newTopics); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info("UnblockTopic", "owner", owner, "topic", topic)
+
+	if owner != "" && authority != govAuthority {
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	return &types.MsgUnblockTopicResponse{}, nil
+}
+
 // FollowUser follows a user (adds to followed users list, capped deque)
 func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*types.MsgFollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -1880,6 +2143,28 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 
 	if _, err := sdk.AccAddressFromBech32(user); err != nil {
 		return nil, fmt.Errorf("invalid user address: %s", user)
+	}
+
+	blockedUsers, err := am.k.GetProfileBlockedUsers(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockedUsers) > 0 {
+		newBlockedUsers := make([]string, 0, len(blockedUsers))
+		removed := false
+		for _, u := range blockedUsers {
+			if u == user {
+				removed = true
+				continue
+			}
+			newBlockedUsers = append(newBlockedUsers, u)
+		}
+		if removed {
+			if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newBlockedUsers); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("FollowUser removed block", "owner", owner, "user", user)
+		}
 	}
 
 	var userLevel int
@@ -2013,6 +2298,28 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 
 	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
+	}
+
+	blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	if err != nil {
+		return nil, err
+	}
+	if len(blockedTopics) > 0 {
+		newBlockedTopics := make([]string, 0, len(blockedTopics))
+		removedCount := 0
+		for _, t := range blockedTopics {
+			if topicMatchesPattern(topic, t) {
+				removedCount++
+				continue
+			}
+			newBlockedTopics = append(newBlockedTopics, t)
+		}
+		if removedCount > 0 {
+			if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newBlockedTopics); err != nil {
+				return nil, err
+			}
+			sdkCtx.Logger().Debug("FollowTopic removed blocks", "owner", owner, "topic", topic, "count", removedCount)
+		}
 	}
 
 	var userLevel int

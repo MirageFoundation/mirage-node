@@ -17,7 +17,7 @@ func DefaultTiers() []*TierConfig {
 			MaxFollowedTopics:   50,
 			MaxBlockedUsers:     10,
 			MaxBlockedPosts:     25,
-			MaxQualityPosts:     0,
+			MaxBlockedTopics:    10,
 			MaxTitleLength:      130,
 			MaxContentLength:    1000,
 			EditingTimeMins:     10,
@@ -38,7 +38,7 @@ func DefaultTiers() []*TierConfig {
 			MaxFollowedTopics:   250,
 			MaxBlockedUsers:     125,
 			MaxBlockedPosts:     100,
-			MaxQualityPosts:     0,
+			MaxBlockedTopics:    125,
 			MaxTitleLength:      165,
 			MaxContentLength:    2000,
 			EditingTimeMins:     60,
@@ -59,7 +59,7 @@ func DefaultTiers() []*TierConfig {
 			MaxFollowedTopics:   500,
 			MaxBlockedUsers:     500,
 			MaxBlockedPosts:     200,
-			MaxQualityPosts:     50,
+			MaxBlockedTopics:    500,
 			MaxTitleLength:      200,
 			MaxContentLength:    5000,
 			EditingTimeMins:     360,
@@ -80,7 +80,7 @@ func DefaultTiers() []*TierConfig {
 			MaxFollowedTopics:   1000,
 			MaxBlockedUsers:     1000,
 			MaxBlockedPosts:     500,
-			MaxQualityPosts:     100,
+			MaxBlockedTopics:    1000,
 			MaxTitleLength:      250,
 			MaxContentLength:    25000,
 			EditingTimeMins:     720,
@@ -102,7 +102,7 @@ func DefaultParams() Params {
 	return Params{
 		// Minting
 		MintInterval:         200,         // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
-		MintQuantity:         350_000_000, // 350 MIRAGE per 10min
+		MintQuantity:         125_000_000_000, // 125,000 MIRAGE per 10min
 		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
 		MintDynamicSplit:     0.5,         // 50% dynamic by default
 

@@ -54,7 +54,7 @@ DB_MAX_FOLLOWED_USERS = 2000
 DB_MAX_FOLLOWED_TOPICS = 2000
 DB_MAX_BLOCKED_USERS = 2000
 DB_MAX_BLOCKED_POSTS = 1000
-DB_MAX_QUALITY_POSTS = 200
+DB_MAX_BLOCKED_TOPICS = 2000
 
 # ========== Quest System Settings ==========
 # Feature flags - set to False to disable without code changes

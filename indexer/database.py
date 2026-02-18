@@ -320,10 +320,10 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_owner_lower ON blocked_users(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_target_lower ON blocked_users(LOWER(target))")
 
-                # quality_posts (for v1.5)
+                # blocked_topics (with position for order)
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS quality_posts (
+                    CREATE TABLE IF NOT EXISTS blocked_topics (
                         owner TEXT NOT NULL,
                         target TEXT NOT NULL,
                         position INTEGER NOT NULL DEFAULT 0,
@@ -331,8 +331,10 @@ class DatabaseManager:
                     )
                     """
                 )
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_quality_posts_owner_lower ON quality_posts(LOWER(owner))")
-                cur.execute("CREATE INDEX IF NOT EXISTS idx_quality_posts_target_lower ON quality_posts(LOWER(target))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_owner_lower ON blocked_topics(LOWER(owner))")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))"
+                )
 
                 # reports
                 cur.execute(
@@ -838,6 +840,13 @@ class DatabaseManager:
 
         return None, None
 
+    @staticmethod
+    def _strip_nul(val: Optional[str]) -> Optional[str]:
+        """PostgreSQL text fields cannot contain NUL (0x00) bytes."""
+        if val is None:
+            return None
+        return val.replace("\x00", "")
+
     def upsert_post(
         self,
         txhash: str,
@@ -859,6 +868,14 @@ class DatabaseManager:
         """Insert or update a post."""
         import json as _json
 
+        topic = self._strip_nul(topic) or ""
+        title = self._strip_nul(title) or ""
+        content = self._strip_nul(content) or ""
+        target = self._strip_nul(target) or ""
+        tag = self._strip_nul(tag) or ""
+        thumbnail_url = self._strip_nul(thumbnail_url)
+        root_topic = self._strip_nul(root_topic)
+        root_post_id = self._strip_nul(root_post_id)
         media_json = _json.dumps(media or [])
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1426,6 +1443,7 @@ class DatabaseManager:
 
     def upsert_profile(self, owner: str, username: str | None, level: int, updated_at: int) -> None:
         """Insert or update a profile (basic fields only)."""
+        username = self._strip_nul(username)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1513,6 +1531,10 @@ class DatabaseManager:
         updated_at: int,
     ) -> None:
         """Insert or update a profile with all fields."""
+        username = self._strip_nul(username)
+        biography = self._strip_nul(biography) or ""
+        avatar = self._strip_nul(avatar) or ""
+        banner = self._strip_nul(banner) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1600,6 +1622,7 @@ class DatabaseManager:
 
     def follow_topic(self, owner: str, topic: str) -> None:
         """Follow a topic (add to followed_topics with next position)."""
+        topic = self._strip_nul(topic) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1624,6 +1647,26 @@ class DatabaseManager:
                     "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
                     (owner, topic),
                 )
+
+    def unfollow_topics_matching(self, owner: str, topic_pattern: str) -> int:
+        """Unfollow topics matching a glob pattern (* maps to SQL %)."""
+        pattern = str(topic_pattern or "").strip().lower()
+        if not pattern:
+            raise ValueError("topic pattern cannot be empty")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if "*" in pattern:
+                    like_pat = pattern.replace("%", "\\%").replace("_", "\\_").replace("*", "%")
+                    cur.execute(
+                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) LIKE %s",
+                        (owner, like_pat),
+                    )
+                else:
+                    cur.execute(
+                        "DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(topic) = LOWER(%s)",
+                        (owner, pattern),
+                    )
+                return int(cur.rowcount or 0)
 
     def block_post(self, owner: str, target: str) -> None:
         """Block a post (add to blocked_posts with next position)."""
@@ -1678,6 +1721,51 @@ class DatabaseManager:
                     "DELETE FROM blocked_users WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
                     (owner, target),
                 )
+
+    def block_topic(self, owner: str, target: str) -> None:
+        """Block a topic (add to blocked_topics with next position)."""
+        target = self._strip_nul(target) or ""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM blocked_topics WHERE LOWER(owner) = LOWER(%s)",
+                    (owner,),
+                )
+                pos = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    INSERT INTO blocked_topics(owner, target, position)
+                    VALUES(%s, %s, %s)
+                    ON CONFLICT(owner, target) DO NOTHING
+                    """,
+                    (owner, target, pos),
+                )
+
+    def unblock_topic(self, owner: str, target: str) -> None:
+        """Unblock a topic (remove from blocked_topics)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM blocked_topics WHERE LOWER(owner) = LOWER(%s) AND LOWER(target) = LOWER(%s)",
+                    (owner, target),
+                )
+
+    def unblock_topics_matching(self, owner: str, topic: str) -> int:
+        """Unblock topics whose pattern matches the topic."""
+        t = str(topic or "").strip().lower()
+        if not t:
+            raise ValueError("topic cannot be empty")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM blocked_topics
+                    WHERE LOWER(owner) = LOWER(%s)
+                      AND LOWER(%s) LIKE LOWER(REPLACE(target, '*', '%'))
+                    """,
+                    (owner, t),
+                )
+                return int(cur.rowcount or 0)
 
     def delete_post(self, target: str, owner: str | None = None) -> int:
         """Delete a post. If owner is None, admin delete."""

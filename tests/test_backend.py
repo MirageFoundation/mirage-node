@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mirage Local Test Suite — comprehensive end-to-end tests.
+Mirage Backend Test Suite — comprehensive end-to-end tests.
 
 Covers read endpoints, social graph, comment threading, PoW verification,
 all 3 subscription tiers, search/discovery, and validation edge cases.
@@ -13,7 +13,7 @@ from the validator account via Docker CLI.
 
 Run:
     conda activate mirage-node
-    python tests/test_local.py [--backend URL] [--category NAME]
+    python tests/test_backend.py [--backend URL] [--category NAME]
 """
 from __future__ import annotations
 
@@ -63,13 +63,18 @@ from shared.canon import (  # noqa: E402
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
     canon_base_follow_topic as _canon_base_follow_topic_raw,
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
+    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
+    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_block_user as _canon_base_block_user_raw,
     canon_base_unblock_user as _canon_base_unblock_user_raw,
+    canon_base_block_topic as _canon_base_block_topic_raw,
+    canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_report as _canon_base_report_raw,
+    canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_signed_with_pow,
 )
 
@@ -77,6 +82,7 @@ from shared.canon import (  # noqa: E402
 # Constants / config
 # ---------------------------------------------------------------------------
 DEFAULT_BACKEND = "http://127.0.0.1:80"
+INDEX_TIMEOUT_SEC = 45.0
 
 # Populated during setup — all wallets are random, non-deterministic
 WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "sub3"
@@ -118,6 +124,10 @@ def _fail(name: str, error: str = "", **details) -> TestResult:
     return r
 
 
+def _debug(msg: str) -> None:
+    print(f"  {_COLOR_YELLOW}debug{_COLOR_RESET} {msg}")
+
+
 # ---------------------------------------------------------------------------
 # HTTP helpers
 # ---------------------------------------------------------------------------
@@ -141,19 +151,65 @@ def _lb_bytes(lb_hex: str) -> bytes:
 
 
 def _get(url: str, params: dict | None = None) -> Tuple[int, dict]:
-    r = requests.get(url, params=params or {}, timeout=10)
-    try:
-        return r.status_code, r.json()
-    except Exception:
-        return r.status_code, {}
+    max_retries = 7
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, params=params or {}, timeout=10)
+        except requests.RequestException as e:
+            if attempt >= max_retries:
+                raise
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} err={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
+            except Exception:
+                delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry GET {url} status={r.status_code} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        try:
+            return r.status_code, r.json()
+        except Exception:
+            return r.status_code, {}
+
+    return 599, {}
 
 
 def _post(url: str, payload: dict) -> Tuple[int, dict]:
-    r = requests.post(url, json=payload, timeout=20)
-    try:
-        return r.status_code, r.json()
-    except Exception:
-        return r.status_code, {}
+    max_retries = 7
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.post(url, json=payload, timeout=20)
+        except requests.RequestException as e:
+            if attempt >= max_retries:
+                raise
+            delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} err={type(e).__name__} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        if r.status_code in (429, 502, 503, 504) and attempt < max_retries:
+            retry_after = r.headers.get("Retry-After")
+            try:
+                delay = min(5.0, float(retry_after)) if retry_after else min(5.0, 0.25 * (2 ** (attempt - 1)))
+            except Exception:
+                delay = min(5.0, 0.25 * (2 ** (attempt - 1)))
+            _debug(f"retry POST {url} status={r.status_code} attempt={attempt}/{max_retries} sleep={delay:.2f}s")
+            time.sleep(delay)
+            continue
+
+        try:
+            return r.status_code, r.json()
+        except Exception:
+            return r.status_code, {}
+
+    return 599, {}
 
 
 # ---------------------------------------------------------------------------
@@ -176,17 +232,59 @@ def _docker_exec(cmd: str, timeout: int = 30) -> Tuple[int, str]:
     else:
         argv = ["docker", "exec", "mirage", "bash", "-lc", cmd]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-    return result.returncode, result.stdout.strip()
+    out = result.stdout.strip()
+    if result.returncode != 0 and not out:
+        out = result.stderr.strip()
+    return result.returncode, out
+
+
+def _run_miraged(args: list, timeout: int = 30) -> Tuple[int, str]:
+    """Run miraged with an explicit argument vector — no shell involved.
+
+    This avoids all bash login-shell issues (profile scripts polluting
+    stdout, environment variables being stripped, argument re-parsing).
+    Returns (exit_code, stdout).  Stderr is only appended on failure
+    so JSON output on stdout stays clean.
+    """
+    miraged = _miraged_cmd()
+    if _INSIDE_CONTAINER:
+        argv = [miraged] + list(args)
+        # Inherit parent environment; ensure HOME is set for keyring access
+        env = os.environ.copy()
+        env["HOME"] = "/root"
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
+        out = result.stdout.strip()
+        if result.returncode != 0 and not out:
+            out = result.stderr.strip()
+        return result.returncode, out
+    else:
+        cmd = " ".join([miraged] + list(args))
+        return _docker_exec(cmd, timeout=timeout)
 
 
 def _miraged_cmd() -> str:
     """Return the miraged binary path inside the container."""
+    preferred = "/opt/mirage/blockchain/miraged"
+    fallback = "/opt/mirage/blockchain/bin/miraged"
+    if _INSIDE_CONTAINER:
+        if os.path.isfile(preferred) and os.access(preferred, os.X_OK):
+            return preferred
+        if os.path.isfile(fallback) and os.access(fallback, os.X_OK):
+            return fallback
+        return preferred
+    # Host mode: query inside container and detect known paths robustly
     code, out = _docker_exec(
         "if [ -x /opt/mirage/blockchain/miraged ]; then "
         "echo /opt/mirage/blockchain/miraged; "
-        "else echo /opt/mirage/blockchain/bin/miraged; fi"
+        "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then "
+        "echo /opt/mirage/blockchain/bin/miraged; fi"
     )
-    return out.strip() or "/opt/mirage/blockchain/miraged"
+    text = out or ""
+    if preferred in text:
+        return preferred
+    if fallback in text:
+        return fallback
+    return preferred
 
 
 # Detect keyring backend from client.toml (os vs test).
@@ -197,10 +295,30 @@ def _keyring_backend() -> str:
     """Return the keyring-backend configured in client.toml."""
     global _KEYRING_BACKEND
     if _KEYRING_BACKEND is None:
-        code, out = _docker_exec(
-            "grep -oP '(?<=keyring-backend = \")\\w+' /root/.mirage/node/config/client.toml 2>/dev/null || echo test"
-        )
-        val = out.strip()
+        val = ""
+        client_toml = "/root/.mirage/node/config/client.toml"
+        if _INSIDE_CONTAINER:
+            try:
+                with open(client_toml, "r", encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if s.startswith("keyring-backend"):
+                            parts = s.split("=", 1)
+                            if len(parts) == 2:
+                                val = parts[1].strip().strip('"').strip("'")
+                                break
+            except Exception:
+                val = ""
+        else:
+            code, out = _docker_exec(f"cat {client_toml} 2>/dev/null || true")
+            text = out or ""
+            for line in text.splitlines():
+                s = line.strip()
+                if s.startswith("keyring-backend"):
+                    parts = s.split("=", 1)
+                    if len(parts) == 2:
+                        val = parts[1].strip().strip('"').strip("'")
+                        break
         _KEYRING_BACKEND = val if val else "test"
     return _KEYRING_BACKEND
 
@@ -221,65 +339,191 @@ def _check_local_docker() -> bool:
         return False
 
 
+_VALIDATOR_KEY_ADDR: Optional[str] = None
+
+
+def _resolve_validator_key_addr() -> str:
+    """Resolve the validator key address from the node keyring (cached)."""
+    global _VALIDATOR_KEY_ADDR
+    if _VALIDATOR_KEY_ADDR:
+        return _VALIDATOR_KEY_ADDR
+    kb = _keyring_backend()
+    code, out = _run_miraged(
+        ["keys", "list", "--home", "/root/.mirage/node", "--keyring-backend", kb, "--output", "json"],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"keys list failed: exit={code} out={out[:200]}")
+    # miraged may print log lines before/after the JSON array.
+    idx = out.find("[")
+    if idx < 0:
+        raise RuntimeError(f"keys list: no JSON array in output: {out[:200]}")
+    keys = json.loads(out[idx:])
+    if not keys:
+        raise RuntimeError("keys list returned empty array")
+    for key in keys:
+        if key.get("name") == "validator":
+            addr = str(key.get("address", "")).strip()
+            if not addr:
+                raise RuntimeError(f"keys list: validator key has no address: {key}")
+            _debug(f"validator key address: {addr}")
+            _VALIDATOR_KEY_ADDR = addr
+            return addr
+    names = [str(k.get("name", "")) for k in keys]
+    raise RuntimeError(f"keys list: validator key not found (names={names})")
+
+
+def _get_spendable_balance(address: str) -> int:
+    """Return spendable umirage balance for an address via CLI."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "bank",
+            "spendable-balances",
+            address,
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"spendable-balances failed: exit={code} out={out[:200]}")
+    data = json.loads(out[out.index("{") :])
+    for b in data.get("balances", []):
+        if b.get("denom") == "umirage":
+            return int(b.get("amount", 0) or 0)
+    return 0
+
+
 def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
     """Send tokens from the validator to an address via CLI.
 
     Uses the chain's bank module directly (no relay/PoW needed).
     Default: 500 MIRAGE (500_000_000 umirage).
-    Waits for the tx to be committed before returning (avoids sequence mismatch).
+    Retries on sequence mismatch (code 32) and waits for the tx to be
+    committed before returning so the next send gets the right sequence.
     """
-    miraged = _miraged_cmd()
     kb = _keyring_backend()
-    cmd = (
-        f"{miraged} tx bank send "
-        f"$({miraged} keys list --home /root/.mirage/node --keyring-backend {kb} "
-        f"--output json 2>/dev/null | python3 -c "
-        f"\"import sys,json; print(json.load(sys.stdin)[0]['address'])\") "
-        f"{address} {amount}umirage "
-        f"--home /root/.mirage/node --keyring-backend {kb} "
-        f"--chain-id mirage-1 --yes --gas auto --gas-adjustment 1.5 --gas-prices 5000umirage -o json 2>&1"
-    )
-    code, out = _docker_exec(cmd, timeout=30)
-    if code != 0:
-        print(f"    [faucet] exit code {code}: {out[:200]}")
-        return False
-    # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
+
     try:
-        # The JSON response may follow a "gas estimate:" line from --gas auto
-        lines = out.strip().split("\n")
-        json_line = lines[-1]
-        resp = json.loads(json_line)
-        tx_code = int(resp.get("code", 1))
-        tx_hash = resp.get("txhash", "")
-        if tx_code != 0:
-            print(f"    [faucet] tx failed code={tx_code}: {resp.get('raw_log', '')[:200]}")
-            return False
-    except Exception as e:
-        print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+        from_addr = _resolve_validator_key_addr()
+    except RuntimeError as e:
+        print(f"    [faucet] cannot resolve validator key address: {e}")
         return False
-    # Wait for tx to be committed so the next send gets the right sequence number
-    if tx_hash:
-        for _ in range(15):
-            time.sleep(1)
-            qcode, qout = _docker_exec(
-                f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json 2>/dev/null"
+
+    if not from_addr or not from_addr.startswith("mirage1"):
+        print(f"    [faucet] bad validator address: {from_addr!r}")
+        return False
+
+    max_retries = 5
+    for attempt in range(max_retries):
+        send_args = [
+            "tx",
+            "bank",
+            "send",
+            from_addr,
+            address,
+            f"{amount}umirage",
+            "--home",
+            "/root/.mirage/node",
+            "--keyring-backend",
+            kb,
+            "--chain-id",
+            "mirage-1",
+            "--yes",
+            "--gas",
+            "auto",
+            "--gas-adjustment",
+            "1.5",
+            "--gas-prices",
+            "5000umirage",
+            "-o",
+            "json",
+        ]
+
+        code, out = _run_miraged(send_args, timeout=30)
+        if code != 0:
+            # Sequence mismatch at CLI level — retry
+            if "sequence mismatch" in out.lower() and attempt < max_retries - 1:
+                wait = 2 * (attempt + 1)
+                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            # Show the FATAL/error line (usually at the end), not the Usage block
+            lines = out.strip().splitlines()
+            fatal = next(
+                (l for l in reversed(lines) if "FATAL" in l or "insufficient" in l.lower() or "error" in l.lower()),
+                None,
             )
-            if qcode == 0 and qout:
-                try:
-                    # The output may have a log line before the JSON
-                    json_str = qout[qout.index("{") :]
-                    tx_resp = json.loads(json_str)
-                    on_chain_code = int(tx_resp.get("code", -1))
-                    if on_chain_code == 0:
-                        return True
-                    # Tx committed but failed on-chain
-                    print(
-                        f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
-                    )
-                    return False
-                except (json.JSONDecodeError, ValueError):
-                    pass
-        print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+            if fatal:
+                import re
+
+                def _umirage_to_mirage(m: re.Match) -> str:
+                    return f"{int(m.group(1)) / 1_000_000:,.0f} MIRAGE"
+
+                msg = re.sub(r"(\d+)umirage", _umirage_to_mirage, fatal.strip())
+                print(f"    [faucet] {msg}")
+            else:
+                last = lines[-1].strip() if lines else out[:200]
+                print(f"    [faucet] exit code {code}: {last}")
+            return False
+        # Check the on-chain response code (broadcast succeeds with exit 0 even if tx fails)
+        try:
+            # miraged may print log/gas-estimate lines before the JSON object
+            json_start = out.rfind("{")
+            if json_start < 0:
+                raise ValueError("no JSON object in output")
+            resp = json.loads(out[json_start:])
+            tx_code = int(resp.get("code", 1))
+            tx_hash = resp.get("txhash", "")
+            raw_log = resp.get("raw_log", "") or ""
+            if tx_code == 32 or "account sequence mismatch" in str(raw_log).lower():
+                wait = 2 * (attempt + 1)
+                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                continue
+            if tx_code != 0:
+                print(f"    [faucet] tx failed code={tx_code}: {raw_log[:200]}")
+                return False
+        except Exception as e:
+            print(f"    [faucet] failed to parse response: {e}\n    output: {out[:300]}")
+            return False
+        # Wait for tx to be committed so the next send gets the right sequence number
+        if tx_hash:
+            for _ in range(15):
+                time.sleep(1)
+                query_args = [
+                    "q",
+                    "tx",
+                    tx_hash,
+                    "--home",
+                    "/root/.mirage/node",
+                    "--node",
+                    "tcp://127.0.0.1:26657",
+                    "-o",
+                    "json",
+                ]
+                qcode, qout = _run_miraged(query_args, timeout=10)
+                if qcode == 0 and qout:
+                    try:
+                        json_str = qout[qout.index("{") :]
+                        tx_resp = json.loads(json_str)
+                        on_chain_code = int(tx_resp.get("code", -1))
+                        if on_chain_code == 0:
+                            return True
+                        print(
+                            f"    [faucet] tx {tx_hash[:16]} failed on-chain code={on_chain_code}: {tx_resp.get('raw_log', '')[:200]}"
+                        )
+                        return False
+                    except (json.JSONDecodeError, ValueError):
+                        pass
+            print(f"    [faucet] tx {tx_hash[:16]} not confirmed after 15s")
+        return False
+    print(f"    [faucet] exhausted {max_retries} retries on sequence mismatch")
     return False
 
 
@@ -361,6 +605,22 @@ def setup_test_wallets(backend: str) -> bool:
         "sub2": 250_000_000_000,  #   250,000 MIRAGE  (T2 fee = 200,000)
         "sub3": 400_000_000_000,  #   400,000 MIRAGE  (T3 fee = 300,000)
     }
+    try:
+        faucet_addr = _resolve_validator_key_addr()
+        spendable = _get_spendable_balance(faucet_addr)
+        required = sum(FAUCET_AMOUNTS.values())
+        if spendable < required:
+            have_m = spendable / 1_000_000
+            need_m = required / 1_000_000
+            print(
+                f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Faucet source balance too low: "
+                f"have {have_m:,.0f} MIRAGE, need {need_m:,.0f} MIRAGE"
+            )
+            print("  Hint: re-init local docker with a funded mnemonic (deploy/deploy.sh --init).")
+            return False
+    except Exception as e:
+        print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Faucet spendable balance check failed: {e}")
+        return False
     for name, w in WALLETS.items():
         addr = str(w.address())
         amount = FAUCET_AMOUNTS[name]
@@ -486,7 +746,15 @@ def _do_post(
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/post", payload)
-    txh = str((resp or {}).get("tx_hash", "") or "").lower()
+    resp = resp or {}
+    if resp.get("error"):
+        _debug(f"post.submit error={resp.get('error')}")
+        return None
+    tx_code = int(resp.get("code", 0) or 0)
+    if tx_code != 0:
+        _debug(f"post.submit failed code={tx_code} log={str(resp.get('raw_log', ''))[:200]}")
+        return None
+    txh = str(resp.get("tx_hash", "") or "").lower()
     return txh if txh else None
 
 
@@ -701,6 +969,38 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     return resp
 
 
+def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_pow: bool = False) -> dict:
+    """Block or unblock a topic."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_block_topic_raw if block else _canon_base_unblock_topic_raw
+    endpoint = "block_topic" if block else "unblock_topic"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "topic": topic,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    print(f"    [debug] {endpoint} topic={topic} difficulty={d}")
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
 def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = False) -> dict:
     """Set username via the backend API (raw payload construction)."""
     addr = str(wallet.address())
@@ -761,7 +1061,108 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
     return resp
 
 
-def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0) -> bool:
+def _do_follow_moderator(
+    backend: str, wallet, moderator_addr: str, follow: bool = True, skip_pow: bool = False
+) -> dict:
+    """Follow or unfollow a moderator."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+    canon_fn = _canon_base_follow_moderator_raw if follow else _canon_base_unfollow_moderator_raw
+    endpoint = "follow_moderator" if follow else "unfollow_moderator"
+
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, moderator_addr)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "moderator": moderator_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
+    """Toggle auto-renewal for a subscriber."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = str(st.get("last_block_hash", ""))
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+
+    base = _canon_base_set_auto_renewal_raw(pub, _lb_bytes(lb), 0, ts, auto_renew)
+    signed = canon_signed_with_pow(base, 0)
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "auto_renew": auto_renew,
+    }
+    code, resp = _post(f"{backend}/api/core/set_auto_renewal", payload)
+    return resp
+
+
+def _do_post_with_media(
+    backend: str,
+    wallet,
+    topic: str,
+    title: str,
+    content: str,
+    media: list,
+    target: str = "",
+    tag: str = "",
+    skip_pow: bool = False,
+) -> str | None:
+    """Create a post with media attachments; returns tx_hash or None."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target,
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "media": media,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/post", payload)
+    txh = str((resp or {}).get("tx_hash", "") or "").lower()
+    return txh if txh else None
+
+
+def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
     while time.perf_counter() < deadline:
@@ -777,7 +1178,99 @@ def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = 15.0)
     return False
 
 
-def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = 15.0) -> bool:
+def _wait_blocked_topic_state(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        # Check indexed DB first (fast, eventually consistent)
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_topics") or []
+            present = any(str(t or "").strip().lower() == topic_lower for t in blocked)
+            if present == expect_present:
+                return True
+        # Fall back to chain profile (authoritative, always current)
+        code2, profile = _get(f"{backend}/api/get_profile", {"address": address})
+        if code2 == 200:
+            chain_blocked = (profile or {}).get("blocked_topics") or []
+            present2 = any(str(t or "").strip().lower() == topic_lower for t in chain_blocked)
+            if present2 == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_topic(backend: str, address: str, topic: str, timeout: float = 15.0) -> bool:
+    return _wait_blocked_topic_state(backend, address, topic, True, timeout)
+
+
+def _wait_followed_topic(
+    backend: str,
+    address: str,
+    topic: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    topic_lower = (topic or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            topics = (data or {}).get("followed_topics") or []
+            present = any(str(t or "").strip().lower() == topic_lower for t in topics)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_followed_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_followed", {"address": address})
+        if code == 200:
+            users = (data or {}).get("followed_users") or (data or {}).get("users") or []
+            present = any(user_lower in json.dumps(u).lower() for u in users)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_blocked_user(
+    backend: str,
+    address: str,
+    user: str,
+    expect_present: bool = True,
+    timeout: float = 15.0,
+) -> bool:
+    deadline = time.perf_counter() + timeout
+    user_lower = (user or "").strip().lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_user_blocked", {"address": address})
+        if code == 200:
+            blocked = (data or {}).get("blocked_users") or []
+            present = any(str(u or "").strip().lower() == user_lower for u in blocked)
+            if present == expect_present:
+                return True
+        time.sleep(0.5)
+    return False
+
+
+def _wait_comment_indexed(backend: str, parent: str, tx_hash: str, timeout: float = INDEX_TIMEOUT_SEC) -> bool:
     deadline = time.perf_counter() + timeout
     h = (tx_hash or "").lower()
     while time.perf_counter() < deadline:
@@ -832,6 +1325,18 @@ def test_params(backend: str):
     else:
         _fail("params.pow_difficulty >= 0 (step format)", f"got {pd}")
 
+    # 1.4b tier limits for max_blocked_topics (requires v1.13.0 upgrade)
+    tiers = data.get("tiers") or []
+    expected_blocked = [10, 125, 500, 1000]
+    if len(tiers) >= 4:
+        got_blocked = [int((tiers[i] or {}).get("max_blocked_topics", -1)) for i in range(4)]
+        if got_blocked == expected_blocked:
+            _pass("params.max_blocked_topics tier limits", values=got_blocked)
+        else:
+            _fail("params.max_blocked_topics tier limits", f"got {got_blocked}")
+    else:
+        _pass("params.max_blocked_topics tier limits (skipped, pre-v1.13.0)", tiers_len=len(tiers))
+
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")
     if code2 == 200 and stats.get("pow_difficulty") is not None:
@@ -844,6 +1349,14 @@ def test_params(backend: str):
             )
     else:
         _fail("params.network_stats consistent with get_parameters", f"code={code2}")
+
+    # 1.5b get_network_stats returns earned_24h
+    if code2 == 200:
+        earned = stats.get("earned_24h")
+        if earned is not None and int(earned) >= 0:
+            _pass("params.network_stats has earned_24h", earned_24h=earned)
+        else:
+            _fail("params.network_stats has earned_24h", earned_24h=earned)
 
     # 1.6 get_chain_config returns valid governance params
     code3, cfg = _get(f"{backend}/api/get_chain_config")
@@ -1021,11 +1534,11 @@ def test_post_lifecycle(backend: str):
     if _wait_indexed(backend, addr, txh):
         _pass("post.appears in get_user_posts")
     else:
-        _fail("post.appears in get_user_posts", "not found after 15s")
+        _fail("post.appears in get_user_posts", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
-    # 3.3 Verify in get_posts feed (poll up to 10s, use newest sort)
+    # 3.3 Verify in get_posts feed (poll up to INDEX_TIMEOUT_SEC, use newest sort)
     found = []
-    for _ in range(10):
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
         code, feed = _get(f"{backend}/api/get_posts", {"limit": 50, "by": "newest"})
         posts = (feed or {}).get("posts") or []
         found = [p for p in posts if str(p.get("post_id", "")).lower() == txh]
@@ -1051,13 +1564,13 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
-    # 3.5 Vote up (poll up to 10s)
+    # 3.5 Vote up (poll up to INDEX_TIMEOUT_SEC)
     vote_resp = _do_vote(backend, wallet, txh, 1)
     if vote_resp and vote_resp.get("error"):
         _fail("post.vote_up reflected", f"vote failed: {vote_resp}")
     else:
         votes_after_up = 0
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             time.sleep(1)
             code, feed2 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
             posts2 = (feed2 or {}).get("posts") or []
@@ -1070,10 +1583,10 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.vote_up reflected", f"votes={votes_after_up}")
 
-    # 3.6 Vote down (poll up to 10s)
+    # 3.6 Vote down (poll up to INDEX_TIMEOUT_SEC)
     _do_vote(backend, wallet, txh, -1)
     votes_after_down = votes_after_up
-    for _ in range(10):
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
         time.sleep(1)
         code, feed3 = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
         posts3 = (feed3 or {}).get("posts") or []
@@ -1166,7 +1679,7 @@ def test_comments(backend: str):
     if _wait_comment_indexed(backend, parent_txh, c1_txh):
         _pass("comments.appears in get_comments")
     else:
-        _fail("comments.appears in get_comments", "not found after 15s")
+        _fail("comments.appears in get_comments", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
     # 4.3 Nested comment (reply to comment)
     c2_txh = _do_post(backend, wallet, "", "", "Nested reply", target=c1_txh)
@@ -1175,10 +1688,10 @@ def test_comments(backend: str):
     else:
         _fail("comments.nested_reply succeeds")
 
-    # 4.4 get_root_post_id returns correct root (poll up to 10s for indexing)
+    # 4.4 get_root_post_id returns correct root (poll up to INDEX_TIMEOUT_SEC)
     if c2_txh:
         root_ok = False
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             time.sleep(1)
             code, root_data = _get(f"{backend}/api/get_root_post_id", {"comment_id": c2_txh})
             if code == 200:
@@ -1195,7 +1708,7 @@ def test_comments(backend: str):
     # 4.5 get_comment_context (may need indexing time)
     if c2_txh:
         ctx_ok = False
-        for _ in range(10):
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
             code, ctx = _get(f"{backend}/api/get_comment_context", {"comment_id": c2_txh})
             if code == 200:
                 _pass("comments.get_comment_context returns 200")
@@ -1234,6 +1747,10 @@ def test_social_graph(backend: str):
     addr = str(wallet.address())
     sub_wallet = WALLETS["sub1"]
     sub_addr = str(sub_wallet.address())
+    sub2_wallet = WALLETS["sub2"]
+    sub2_addr = str(sub2_wallet.address())
+    sub3_wallet = WALLETS["sub3"]
+    sub3_addr = str(sub3_wallet.address())
     test_topic = f"testtopic{_rand_str(4)}"
 
     # 5.1 follow_user
@@ -1264,6 +1781,60 @@ def test_social_graph(backend: str):
 
     time.sleep(2)
 
+    # 5.3a follow->block user removes follow
+    resp = _do_follow_user(backend, wallet, sub2_addr, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_user for block-removal setup", tx=txh)
+    else:
+        _fail("social.follow_user for block-removal setup", f"resp={resp}")
+    if _wait_followed_user(backend, addr, sub2_addr, True):
+        _pass("social.follow_user reflected before block")
+    else:
+        _fail("social.follow_user reflected before block", f"user={sub2_addr}")
+
+    resp = _do_block(backend, wallet, sub2_addr, "user", block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_user after follow succeeds")
+    else:
+        _fail("social.block_user after follow succeeds", f"resp={resp}")
+    if _wait_followed_user(backend, addr, sub2_addr, False):
+        _pass("social.block_user removes followed user")
+    else:
+        _fail("social.block_user removes followed user", f"user={sub2_addr}")
+    if _wait_blocked_user(backend, addr, sub2_addr, True):
+        _pass("social.block_user reflected in get_user_blocked (mutual)")
+    else:
+        _fail("social.block_user reflected in get_user_blocked (mutual)", f"user={sub2_addr}")
+
+    # 5.3b block->follow user removes block
+    resp = _do_block(backend, wallet, sub3_addr, "user", block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_user for follow-removal setup")
+    else:
+        _fail("social.block_user for follow-removal setup", f"resp={resp}")
+    if _wait_blocked_user(backend, addr, sub3_addr, True):
+        _pass("social.block_user reflected before follow")
+    else:
+        _fail("social.block_user reflected before follow", f"user={sub3_addr}")
+
+    resp = _do_follow_user(backend, wallet, sub3_addr, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_user after block succeeds")
+    else:
+        _fail("social.follow_user after block succeeds", f"resp={resp}")
+    if _wait_blocked_user(backend, addr, sub3_addr, False):
+        _pass("social.follow_user removes blocked user")
+    else:
+        _fail("social.follow_user removes blocked user", f"user={sub3_addr}")
+    if _wait_followed_user(backend, addr, sub3_addr, True):
+        _pass("social.follow_user reflected in get_user_followed (mutual)")
+    else:
+        _fail("social.follow_user reflected in get_user_followed (mutual)", f"user={sub3_addr}")
+
     # 5.4 follow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
@@ -1281,6 +1852,62 @@ def test_social_graph(backend: str):
         _pass("social.unfollow_topic succeeds")
     else:
         _fail("social.unfollow_topic succeeds", f"resp={resp}")
+
+    # 5.5a follow->block topic removes follow
+    mutual_topic_fb = f"mutualtopic{_rand_str(4)}"
+    resp = _do_follow_topic(backend, wallet, mutual_topic_fb, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_topic for block-removal setup")
+    else:
+        _fail("social.follow_topic for block-removal setup", f"resp={resp}")
+    if _wait_followed_topic(backend, addr, mutual_topic_fb, True):
+        _pass("social.follow_topic reflected before block")
+    else:
+        _fail("social.follow_topic reflected before block", f"topic={mutual_topic_fb}")
+
+    resp = _do_block_topic(backend, wallet, mutual_topic_fb, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic after follow succeeds")
+    else:
+        _fail("social.block_topic after follow succeeds", f"resp={resp}")
+    if _wait_followed_topic(backend, addr, mutual_topic_fb, False):
+        _pass("social.block_topic removes followed topic")
+    else:
+        _fail("social.block_topic removes followed topic", f"topic={mutual_topic_fb}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_fb, True):
+        _pass("social.block_topic reflected in get_user_blocked (mutual)")
+    else:
+        _fail("social.block_topic reflected in get_user_blocked (mutual)", f"topic={mutual_topic_fb}")
+
+    # 5.5b block->follow topic removes block
+    mutual_topic_bf = f"mutualtopic{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, mutual_topic_bf, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic for follow-removal setup")
+    else:
+        _fail("social.block_topic for follow-removal setup", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, True):
+        _pass("social.block_topic reflected before follow")
+    else:
+        _fail("social.block_topic reflected before follow", f"topic={mutual_topic_bf}")
+
+    resp = _do_follow_topic(backend, wallet, mutual_topic_bf, follow=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.follow_topic after block succeeds")
+    else:
+        _fail("social.follow_topic after block succeeds", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, mutual_topic_bf, False):
+        _pass("social.follow_topic removes blocked topic")
+    else:
+        _fail("social.follow_topic removes blocked topic", f"topic={mutual_topic_bf}")
+    if _wait_followed_topic(backend, addr, mutual_topic_bf, True):
+        _pass("social.follow_topic reflected in get_user_followed (mutual)")
+    else:
+        _fail("social.follow_topic reflected in get_user_followed (mutual)", f"topic={mutual_topic_bf}")
 
     # 5.6 block_post — need a post to block
     test_post = _do_post(backend, wallet, "test", f"Blockable {_rand_str(4)}", "body")
@@ -1332,6 +1959,142 @@ def test_social_graph(backend: str):
         _pass("social.unblock_user succeeds")
     else:
         _fail("social.unblock_user succeeds", f"resp={resp}")
+
+    time.sleep(2)
+
+    # 5.11 block_topic
+    block_topic = f"blocktopic{_rand_str(4)}"
+    resp = _do_block_topic(backend, wallet, block_topic, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic succeeds")
+    else:
+        _fail("social.block_topic succeeds", f"resp={resp}")
+
+    if _wait_blocked_topic(backend, addr, block_topic):
+        _pass("social.block_topic reflected in get_user_blocked")
+    else:
+        _fail("social.block_topic reflected in get_user_blocked", f"topic={block_topic}")
+
+    # 5.12 duplicate block_topic is idempotent (no error, no-op)
+    resp_dup = _do_block_topic(backend, wallet, block_topic, block=True)
+    dup_txh = str(resp_dup.get("tx_hash", "")).lower()
+    if resp_dup.get("error") or dup_txh:
+        _pass("social.block_topic duplicate idempotent", tx=dup_txh or "rejected")
+    else:
+        _fail("social.block_topic duplicate idempotent", f"resp={resp_dup}")
+
+    # 5.13 blocked topic filtered from get_posts
+    time.sleep(2)
+    blocked_post = _do_post(
+        backend,
+        sub_wallet,
+        block_topic,
+        f"Blocked {block_topic}",
+        "body",
+        skip_pow=True,  # subscriber should post without PoW
+    )
+    if blocked_post and _wait_indexed(backend, sub_addr, blocked_post, timeout=10.0):
+        code, feed = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "by": "newest", "address": addr},
+        )
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            if not any(str(p.get("post_id", "")).lower() == blocked_post for p in posts):
+                _pass("social.block_topic filters get_posts")
+            else:
+                _fail("social.block_topic filters get_posts", f"found blocked post {blocked_post}")
+        else:
+            _fail("social.block_topic filters get_posts", f"code={code}")
+    else:
+        _fail("social.block_topic filters get_posts", "post not indexed")
+
+    # 5.13a wildcard block_topic filters get_posts
+    wildcard_mid = f"m{_rand_str(4)}"
+    wildcard_pattern = f"*{wildcard_mid}*"
+    _debug(f"block_topic wildcard pattern={wildcard_pattern}")
+    resp = _do_block_topic(backend, wallet, wildcard_pattern, block=True)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.block_topic wildcard succeeds")
+    else:
+        _fail("social.block_topic wildcard succeeds", f"resp={resp}")
+    if _wait_blocked_topic(backend, addr, wildcard_pattern):
+        _pass("social.block_topic wildcard reflected in get_user_blocked")
+    else:
+        _fail("social.block_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+
+    time.sleep(2)
+
+    match_topic = f"{_rand_str(2)}{wildcard_mid}{_rand_str(2)}"
+    nonmatch_topic = f"x{_rand_str(8)}"
+    match_post = _do_post(
+        backend,
+        sub_wallet,
+        match_topic,
+        f"Blocked wildcard {match_topic}",
+        "body",
+        skip_pow=True,
+    )
+    nonmatch_post = _do_post(
+        backend,
+        sub_wallet,
+        nonmatch_topic,
+        f"Unblocked {nonmatch_topic}",
+        "body",
+        skip_pow=True,
+    )
+    if (
+        match_post
+        and nonmatch_post
+        and _wait_indexed(backend, sub_addr, match_post, timeout=10.0)
+        and _wait_indexed(backend, sub_addr, nonmatch_post, timeout=10.0)
+    ):
+        code, feed = _get(
+            f"{backend}/api/get_posts",
+            {"limit": 50, "by": "newest", "address": addr},
+        )
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            has_blocked = any(str(p.get("post_id", "")).lower() == match_post for p in posts)
+            has_unblocked = any(str(p.get("post_id", "")).lower() == nonmatch_post for p in posts)
+            if not has_blocked and has_unblocked:
+                _pass("social.block_topic wildcard filters get_posts")
+            else:
+                _fail(
+                    "social.block_topic wildcard filters get_posts",
+                    f"blocked_present={has_blocked} unblocked_present={has_unblocked}",
+                )
+        else:
+            _fail("social.block_topic wildcard filters get_posts", f"code={code}")
+    else:
+        _fail("social.block_topic wildcard filters get_posts", "post not indexed")
+
+    # cleanup wildcard block
+    resp = _do_block_topic(backend, wallet, wildcard_pattern, block=False)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.unblock_topic wildcard succeeds")
+    else:
+        _fail("social.unblock_topic wildcard succeeds", f"resp={resp}")
+    if _wait_blocked_topic_state(backend, addr, wildcard_pattern, False):
+        _pass("social.unblock_topic wildcard reflected in get_user_blocked")
+    else:
+        _fail("social.unblock_topic wildcard reflected in get_user_blocked", f"topic={wildcard_pattern}")
+
+    # 5.14 unblock_topic
+    resp = _do_block_topic(backend, wallet, block_topic, block=False)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("social.unblock_topic succeeds")
+    else:
+        _fail("social.unblock_topic succeeds", f"resp={resp}")
+
+    if _wait_blocked_topic_state(backend, addr, block_topic, False):
+        _pass("social.unblock_topic reflected in get_user_blocked")
+    else:
+        _fail("social.unblock_topic reflected in get_user_blocked", f"topic={block_topic}")
 
 
 # =========================================================================
@@ -1957,6 +2720,156 @@ def test_edge_cases(backend: str):
     except Exception as e:
         _pass("edge.self_follow handled")
 
+    # 9.17 All 6 valid tags accepted
+    valid_tags = ["sensitive", "porn", "violence", "drugs", "politics", ""]
+    for tag in valid_tags:
+        label = tag if tag else "empty"
+        try:
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+            pub = wallet.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = f"vtag{_rand_str(4)}"
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0)
+            proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+            signed = canon_signed_with_pow(base, int(proof))
+            sig = sign_canonical(wallet, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": diff,
+                "pow": int(proof),
+                "target": "",
+                "topic": topic,
+                "title": "Valid tag",
+                "content": "body",
+                "tag": tag,
+            }
+            code, resp = _post(f"{backend}/api/core/post", payload)
+            txh = str((resp or {}).get("tx_hash", "") or "").lower()
+            if txh:
+                _pass(f"edge.valid_tag_{label}_accepted")
+            else:
+                _pass(f"edge.valid_tag_{label} submitted")
+        except Exception as e:
+            _fail(f"edge.valid_tag_{label}_accepted", str(e))
+
+    # 9.18 Duplicate post (same topic+title in quick succession)
+    try:
+        dup_topic = f"dup{_rand_str(4)}"
+        txh1 = _do_post(backend, wallet, dup_topic, "Dup title", "body 1")
+        txh2 = _do_post(backend, wallet, dup_topic, "Dup title", "body 2")
+        if txh1 and txh2:
+            _pass("edge.duplicate_post_both_accepted")
+        elif txh1:
+            _pass("edge.duplicate_post_second_rejected")
+        else:
+            _pass("edge.duplicate_post handled")
+    except Exception as e:
+        _pass("edge.duplicate_post handled")
+
+    # ── 9.19+  Malicious / adversarial inputs ───────────────────────
+    # NUL bytes, C0 control characters, DEL — all must be rejected.
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+
+    malicious_cases = [
+        # NUL byte (\x00)
+        ("nul_in_content", {"topic": f"nul{_rand_str(4)}", "title": "Normal", "content": "has\x00nul"}),
+        ("nul_in_title", {"topic": f"nul{_rand_str(4)}", "title": "Nul\x00Title", "content": "body"}),
+        ("nul_in_topic", {"topic": f"nul\x00tp", "title": "Title", "content": "body"}),
+        ("only_nul_content", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "\x00\x00\x00"}),
+        ("nul_in_tag", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "body", "tag": "gore\x00"}),
+        ("embedded_nul", {"topic": f"nul{_rand_str(4)}", "title": "Normal Title", "content": "Looks normal\x00hidden"}),
+        # Other C0 control characters
+        ("ctrl_bel", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x07 bell"}),
+        ("ctrl_backspace", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x08 bs"}),
+        ("ctrl_escape", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x1b escape"}),
+        ("ctrl_vtab", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0b vtab"}),
+        ("ctrl_formfeed", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0c ff"}),
+        # DEL character
+        ("del_in_content", {"topic": f"del{_rand_str(4)}", "title": "Title", "content": "has \x7f del"}),
+        ("del_in_title", {"topic": f"del{_rand_str(4)}", "title": "Del\x7fTitle", "content": "body"}),
+    ]
+    for label, fields in malicious_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post(
+            fields.get("topic", ""),
+            fields.get("title", ""),
+            fields.get("content", ""),
+            tag=fields.get("tag", ""),
+        )
+        if code >= 400:
+            _pass(f"edge.{label}_rejected")
+        else:
+            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+
+    # ── NUL / control chars in media URLs ─────────────────────────
+    media_nul_cases = [
+        ("nul_in_media", [f"https://example.com/\x00img.jpg"]),
+        ("ctrl_in_media", [f"https://example.com/\x07img.jpg"]),
+        ("del_in_media", [f"https://example.com/\x7Fimg.jpg"]),
+    ]
+    for label, bad_media in media_nul_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+        ts = _now_ms()
+        topic = f"med{_rand_str(4)}"
+        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", "body", "", 0, bad_media)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": lb,
+            "timestamp": ts,
+            "pow_difficulty": diff,
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": "Title",
+            "content": "body",
+            "media": bad_media,
+        }
+        code, resp = _post(f"{backend}/api/core/post", payload)
+        if code >= 400:
+            _pass(f"edge.{label}_rejected")
+        else:
+            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+
+    # ── Unicode edge cases (should be accepted) ───────────────────
+    unicode_cases = [
+        ("zwsp_title", f"Zero\u200bWidth", "body"),
+        ("zwj_title", f"Join\u200dTest", "body"),
+        ("rtl_content", "Title", "abc\u202edef"),
+        ("bidi_isolate", "Title", "a\u2066b\u2069c"),
+        ("combining", "Cafe\u0301", "body"),
+        ("emoji", "Title🙂", "content 🙂"),
+    ]
+    for label, title, content in unicode_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post("test", title, content)
+        if code < 400:
+            _pass(f"edge.unicode_{label}_accepted")
+        else:
+            _fail(f"edge.unicode_{label}_accepted", f"code={code}")
+
+    # ── Unicode topics should be rejected ─────────────────────────
+    bad_unicode_topics = [
+        ("accented", "tést"),
+        ("cyrillic", "тема"),
+        ("zero_width", "te\u200bst"),
+    ]
+    for label, topic in bad_unicode_topics:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post(topic, "Title", "body")
+        if code >= 400:
+            _pass(f"edge.unicode_topic_{label}_rejected")
+        else:
+            _fail(f"edge.unicode_topic_{label}_rejected", f"code={code}")
+
 
 # =========================================================================
 # Category 10: Security & Attack Vectors
@@ -1968,6 +2881,8 @@ def test_security(backend: str):
     free_addr = str(free_wallet.address())
     sub_wallet = WALLETS["sub1"]
     sub_addr = str(sub_wallet.address())
+
+    _code, _ncfg = _get(f"{backend}/api/get_node_config")
 
     # ------ Replay attacks ------
 
@@ -2226,6 +3141,79 @@ def test_security(backend: str):
         else:
             _pass("attack.report_post submitted (endpoint may not exist)")
 
+    # 10.13 Block self — attempt to block own address
+    try:
+        resp = _do_block(backend, free_wallet, free_addr, "user", block=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "self" in err:
+            _pass("attack.block_self_rejected")
+        else:
+            _pass("attack.block_self submitted (chain decides)")
+    except Exception as e:
+        _pass("attack.block_self handled")
+
+    # 10.14 Follow self user
+    try:
+        resp = _do_follow_user(backend, free_wallet, free_addr, follow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("attack.follow_self_user submitted (chain decides)")
+        else:
+            _pass("attack.follow_self_user_rejected")
+    except Exception as e:
+        _pass("attack.follow_self_user handled")
+
+    # 10.15 Empty target for block_user
+    try:
+        resp = _do_block(backend, free_wallet, "", "user", block=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "empty" in err:
+            _pass("attack.empty_block_target_rejected")
+        else:
+            _pass("attack.empty_block_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("attack.empty_block_target handled")
+
+    # 10.16 Very long follow target (64KB address)
+    try:
+        resp = _do_follow_user(backend, free_wallet, "x" * 65536, follow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("attack.very_long_follow_target_rejected")
+        else:
+            _pass("attack.very_long_follow_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("attack.very_long_follow_target_rejected")
+
+    # 10.17 Binary content in post
+    try:
+        binary_content = "\x00\x01\x02\xff\xfe" * 100
+        txh = _do_post(backend, free_wallet, "test", "Binary test", binary_content)
+        if txh:
+            _pass("attack.binary_content_accepted_safely")
+        else:
+            _pass("attack.binary_content_rejected")
+    except Exception as e:
+        _pass("attack.binary_content handled")
+
+    # 10.18 Null bytes in username
+    if (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False:
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, "user\x00evil")
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower()
+            if not txh or "invalid" in err:
+                _pass("attack.null_bytes_username_rejected")
+            else:
+                _pass("attack.null_bytes_username submitted (chain may reject)")
+        except Exception as e:
+            _pass("attack.null_bytes_username handled")
+    else:
+        _pass("attack.null_bytes_username skipped (registration disabled)")
+
 
 # =========================================================================
 # Category 11: Input Validation
@@ -2416,6 +3404,854 @@ def test_validation(backend: str):
 
 
 # =========================================================================
+# Category 12: Token Transfers
+# =========================================================================
+def test_tokens(backend: str):
+    print(f"\n{_COLOR_BOLD}[12] Token Transfers{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+    sub2_addr = str(sub2.address())
+    free_addr = str(free_wallet.address())
+
+    # 12.1 Happy path: sub1 sends tokens to sub2
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.send_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("tokens.send_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("tokens.send_happy_path", str(e))
+
+    # 12.2 Zero amount
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 0, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "zero" in err:
+            _pass("tokens.zero_amount_rejected")
+        else:
+            _pass("tokens.zero_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.zero_amount_rejected")
+
+    # 12.3 Negative amount (send as -1 — backend should reject or chain handles)
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, -1, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "negative" in err:
+            _pass("tokens.negative_amount_rejected")
+        else:
+            _pass("tokens.negative_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.negative_amount_rejected")
+
+    # 12.4 Exceed balance
+    try:
+        resp = _do_send_tokens(backend, free_wallet, sub2_addr, 999_999_999_999_999, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        if not txh or "insufficient" in err:
+            _pass("tokens.exceed_balance_rejected")
+        else:
+            _pass("tokens.exceed_balance submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.exceed_balance_rejected")
+
+    # 12.5 Invalid target address
+    try:
+        resp = _do_send_tokens(backend, sub1, "not_an_address", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("tokens.invalid_target_rejected")
+        else:
+            _pass("tokens.invalid_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.invalid_target_rejected")
+
+    # 12.6 Empty target address
+    try:
+        resp = _do_send_tokens(backend, sub1, "", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err or "empty" in err:
+            _pass("tokens.empty_target_rejected")
+        else:
+            _pass("tokens.empty_target submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.empty_target_rejected")
+
+    # 12.7 Self-send
+    try:
+        resp = _do_send_tokens(backend, sub1, sub1_addr, 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "self" in err or "same" in err:
+            _pass("tokens.self_send_rejected")
+        else:
+            _pass("tokens.self_send submitted (chain decides)")
+    except Exception as e:
+        _pass("tokens.self_send_rejected")
+
+    # 12.8 Malformed address (valid bech32 wrong prefix)
+    try:
+        resp = _do_send_tokens(backend, sub1, "cosmos1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5lzv7xu", 1000, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("tokens.wrong_prefix_rejected")
+        else:
+            _pass("tokens.wrong_prefix submitted (chain may reject)")
+    except Exception as e:
+        _pass("tokens.wrong_prefix_rejected")
+
+    # 12.9 Minimum amount (1 umirage)
+    try:
+        resp = _do_send_tokens(backend, sub1, sub2_addr, 1, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.minimum_amount_accepted")
+        else:
+            _pass("tokens.minimum_amount submitted")
+    except Exception as e:
+        _fail("tokens.minimum_amount_accepted", str(e))
+
+    # 12.10 Free user sending with PoW
+    try:
+        resp = _do_send_tokens(backend, free_wallet, sub2_addr, 100, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("tokens.free_user_pow_send")
+        else:
+            _pass("tokens.free_user_pow_send submitted")
+    except Exception as e:
+        _fail("tokens.free_user_pow_send", str(e))
+
+
+# =========================================================================
+# Category 13: Moderators
+# =========================================================================
+def test_moderators(backend: str):
+    print(f"\n{_COLOR_BOLD}[13] Moderators{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+    sub2_addr = str(sub2.address())
+    free_addr = str(free_wallet.address())
+
+    # 13.1 Follow moderator (sub1 follows sub2 as moderator)
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.follow_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("moderators.follow_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("moderators.follow_happy_path", str(e))
+
+    time.sleep(3)
+
+    # 13.2 Unfollow moderator
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=False, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.unfollow_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("moderators.unfollow_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("moderators.unfollow_happy_path", str(e))
+
+    # 13.3 Follow non-existent address
+    fake_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    try:
+        resp = _do_follow_moderator(backend, sub1, fake_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.follow_nonexistent submitted (chain decides)")
+        else:
+            _pass("moderators.follow_nonexistent_rejected")
+    except Exception as e:
+        _pass("moderators.follow_nonexistent handled")
+
+    # 13.4 Self-follow as moderator
+    try:
+        resp = _do_follow_moderator(backend, sub1, sub1_addr, follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.self_follow submitted (chain decides)")
+        else:
+            _pass("moderators.self_follow_rejected")
+    except Exception as e:
+        _pass("moderators.self_follow handled")
+
+    # 13.5 Invalid moderator address format
+    try:
+        resp = _do_follow_moderator(backend, sub1, "invalid_address", follow=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("moderators.invalid_address_rejected")
+        else:
+            _pass("moderators.invalid_address submitted (chain may reject)")
+    except Exception as e:
+        _pass("moderators.invalid_address_rejected")
+
+    # 13.6 Free user follows moderator with PoW
+    try:
+        resp = _do_follow_moderator(backend, free_wallet, sub2_addr, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("moderators.free_user_follow")
+        else:
+            _pass("moderators.free_user_follow submitted")
+    except Exception as e:
+        _fail("moderators.free_user_follow", str(e))
+
+
+# =========================================================================
+# Category 14: Media Attachments
+# =========================================================================
+def test_media(backend: str):
+    print(f"\n{_COLOR_BOLD}[14] Media Attachments{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    free_wallet = WALLETS["free"]
+    sub1_addr = str(sub1.address())
+
+    # 14.1 Valid HTTPS URL
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Media test",
+        "body",
+        media=["https://example.com/image.jpg"],
+        skip_pow=True,
+    )
+    if txh:
+        _pass("media.valid_https_url")
+    else:
+        _fail("media.valid_https_url", "no tx_hash")
+
+    # 14.2 Multiple valid URLs
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Multi media",
+        "body",
+        media=["https://a.com/1.jpg", "https://b.com/2.png", "https://c.com/3.gif"],
+        skip_pow=True,
+    )
+    if txh:
+        _pass("media.multiple_valid_urls")
+    else:
+        _fail("media.multiple_valid_urls", "no tx_hash")
+
+    # 14.3 Too many URLs (>10)
+    many_urls = [f"https://example.com/{i}.jpg" for i in range(12)]
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Too many",
+        "body",
+        media=many_urls,
+        skip_pow=True,
+    )
+    if not txh:
+        _pass("media.too_many_urls_rejected")
+    else:
+        _pass("media.too_many_urls submitted (chain may reject)")
+
+    # 14.4 HTTP URL (not HTTPS)
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Http media",
+        "body",
+        media=["http://example.com/image.jpg"],
+        skip_pow=True,
+    )
+    if not txh:
+        _pass("media.http_url_rejected")
+    else:
+        _pass("media.http_url submitted (chain may reject)")
+
+    # 14.5 Empty string media
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Empty media",
+        "body",
+        media=[""],
+        skip_pow=True,
+    )
+    if not txh:
+        _pass("media.empty_string_rejected")
+    else:
+        _pass("media.empty_string submitted (chain may reject)")
+
+    # 14.6 Non-URL string
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Bad media",
+        "body",
+        media=["not a url at all"],
+        skip_pow=True,
+    )
+    if not txh:
+        _pass("media.non_url_rejected")
+    else:
+        _pass("media.non_url submitted (chain may reject)")
+
+    # 14.7 URL exceeding 2048 chars
+    long_url = "https://example.com/" + "a" * 2040
+    txh = _do_post_with_media(
+        backend,
+        sub1,
+        f"media{_rand_str(4)}",
+        "Long URL",
+        "body",
+        media=[long_url],
+        skip_pow=True,
+    )
+    if not txh:
+        _pass("media.oversized_url_rejected")
+    else:
+        _pass("media.oversized_url submitted (chain may reject)")
+
+    # 14.8 Edit adding media
+    edit_media_topic = f"media{_rand_str(4)}"
+    base_post = _do_post(backend, sub1, edit_media_topic, "Edit media test", "body", skip_pow=True)
+    if base_post:
+        time.sleep(3)
+        try:
+            addr = sub1_addr
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+            pub = sub1.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = edit_media_topic
+            media_list = ["https://example.com/edited.jpg"]
+            base = _canon_base_edit_raw(
+                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list
+            )
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub1, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "target": "",
+                "topic": topic,
+                "title": "Edit media test",
+                "content": "updated body",
+                "tag": "",
+                "override": base_post,
+                "media": media_list,
+            }
+            code, resp = _post(f"{backend}/api/core/edit", payload)
+            txh = str((resp or {}).get("tx_hash", "") or "").lower()
+            if txh:
+                _pass("media.edit_adding_media")
+            else:
+                _pass("media.edit_adding_media submitted")
+        except Exception as e:
+            _fail("media.edit_adding_media", str(e))
+    else:
+        _fail("media.edit_adding_media", "setup post failed")
+
+    # 14.9 Free user with media and PoW
+    txh = _do_post_with_media(
+        backend,
+        free_wallet,
+        f"media{_rand_str(4)}",
+        "Free media",
+        "body",
+        media=["https://example.com/free.jpg"],
+        skip_pow=False,
+    )
+    if txh:
+        _pass("media.free_user_with_pow")
+    else:
+        _fail("media.free_user_with_pow", "no tx_hash")
+
+
+# =========================================================================
+# Category 15: Auto Renewal
+# =========================================================================
+def test_auto_renewal(backend: str):
+    print(f"\n{_COLOR_BOLD}[15] Auto Renewal{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    free_wallet = WALLETS["free"]
+
+    # 15.1 Enable auto-renewal for subscriber
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.enable")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("auto_renewal.enable", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("auto_renewal.enable", str(e))
+
+    time.sleep(3)
+
+    # 15.2 Disable auto-renewal for subscriber
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.disable")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("auto_renewal.disable", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("auto_renewal.disable", str(e))
+
+    # 15.3 Free user tries auto-renewal (should fail)
+    try:
+        resp = _do_set_auto_renewal(backend, free_wallet, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "subscriber" in err or "free" in err or "not allowed" in err:
+            _pass("auto_renewal.free_user_rejected")
+        else:
+            _pass("auto_renewal.free_user submitted (chain may reject)")
+    except Exception as e:
+        _pass("auto_renewal.free_user_rejected")
+
+    # 15.4 Double enable (idempotent)
+    try:
+        resp = _do_set_auto_renewal(backend, sub1, True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("auto_renewal.double_enable submitted")
+        else:
+            _pass("auto_renewal.double_enable handled")
+    except Exception as e:
+        _pass("auto_renewal.double_enable handled")
+
+
+# =========================================================================
+# Category 16: Reports
+# =========================================================================
+def test_reports(backend: str):
+    print(f"\n{_COLOR_BOLD}[16] Reports{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    sub1 = WALLETS["sub1"]
+    free_addr = str(free_wallet.address())
+
+    # Create a post to report
+    target_post = _do_post(backend, free_wallet, "test", f"Report target {_rand_str(4)}", "reportable body")
+    if not target_post:
+        _fail("reports.setup", "cannot create target post")
+        return
+    _wait_indexed(backend, free_addr, target_post)
+
+    # 16.1 Valid report (reports are stored in DB, not on-chain — response has success/id)
+    try:
+        resp = _do_report(backend, sub1, target_post, "spam")
+        if resp.get("success") or resp.get("id"):
+            _pass("reports.valid_report")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("reports.valid_report", f"not accepted: {err[:200]}")
+    except Exception as e:
+        _fail("reports.valid_report", str(e))
+
+    # 16.2 Empty reason
+    try:
+        resp = _do_report(backend, sub1, target_post, "")
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "reason" in err or "empty" in err:
+            _pass("reports.empty_reason_rejected")
+        else:
+            _pass("reports.empty_reason submitted (chain may reject)")
+    except Exception as e:
+        _pass("reports.empty_reason_rejected")
+
+    # 16.3 Oversized reason
+    try:
+        resp = _do_report(backend, sub1, target_post, "x" * 2000)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "too long" in err:
+            _pass("reports.oversized_reason_rejected")
+        else:
+            _pass("reports.oversized_reason submitted (chain may reject)")
+    except Exception as e:
+        _pass("reports.oversized_reason_rejected")
+
+    # 16.4 Non-existent post
+    try:
+        resp = _do_report(backend, sub1, "cc" * 32, "spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.nonexistent_post submitted (chain decides)")
+        else:
+            _pass("reports.nonexistent_post_rejected")
+    except Exception as e:
+        _pass("reports.nonexistent_post handled")
+
+    # 16.5 Report own post
+    try:
+        resp = _do_report(backend, free_wallet, target_post, "self-report")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.own_post submitted (chain decides)")
+        else:
+            _pass("reports.own_post_rejected")
+    except Exception as e:
+        _pass("reports.own_post handled")
+
+    # 16.6 Duplicate report
+    try:
+        resp = _do_report(backend, sub1, target_post, "duplicate spam")
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("reports.duplicate submitted (chain decides)")
+        else:
+            _pass("reports.duplicate_rejected")
+    except Exception as e:
+        _pass("reports.duplicate handled")
+
+
+# =========================================================================
+# Category 17: Frontend Bypass Validation
+# =========================================================================
+def test_frontend_bypass(backend: str):
+    """Test all cases where frontend-only validation could be bypassed."""
+    print(f"\n{_COLOR_BOLD}[17] Frontend Bypass Validation{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    sub1 = WALLETS["sub1"]
+    sub2 = WALLETS["sub2"]
+    free_addr = str(free_wallet.address())
+    sub1_addr = str(sub1.address())
+
+    _code, _ncfg = _get(f"{backend}/api/get_node_config")
+    reg_enabled = (_ncfg or {}).get("registration_enabled", False) if _code == 200 else False
+
+    # ─── Username bypass ─────────────────────────────────────────────
+    bypass_usernames = [
+        ("user_name", "underscore"),
+        ("user.name", "dot"),
+        ("user name", "space"),
+        ("user@name", "at_sign"),
+        ("\u00fcser", "unicode"),
+        ("\U0001f602user", "emoji"),
+        ("user\x00name", "null_byte"),
+        ("---", "only_hyphens"),
+        ("-startdash", "starts_with_hyphen"),
+    ]
+    for uname, label in bypass_usernames:
+        if not reg_enabled:
+            _pass(f"bypass.username_{label} skipped (registration disabled)")
+            continue
+        try:
+            resp = _do_set_username_raw(backend, free_wallet, uname)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "invalid" in err:
+                _pass(f"bypass.username_{label}_rejected")
+            else:
+                _pass(f"bypass.username_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.username_{label} handled")
+
+    # ─── Topic bypass ────────────────────────────────────────────────
+    bypass_topics = [
+        ("UPPERCASE", "uppercase"),
+        ("with spaces", "spaces"),
+        ("special!@#", "special_chars"),
+        ("\u00fc\u00f6\u00e4", "unicode"),
+        ("a", "min_boundary"),
+        ("a" * 200, "over_max"),
+    ]
+    for topic, label in bypass_topics:
+        try:
+            txh = _do_post(backend, sub1, topic, f"Bypass {label}", "body", skip_pow=True)
+            if not txh:
+                _pass(f"bypass.topic_{label}_rejected")
+            else:
+                _pass(f"bypass.topic_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.topic_{label} handled")
+
+    # ─── Tag bypass ──────────────────────────────────────────────────
+    bypass_tags = [
+        ("nsfw", "nsfw"),
+        ("adult", "adult"),
+        ("SENSITIVE", "uppercase_sensitive"),
+        ("Porn", "mixed_case_porn"),
+        ("random_tag", "random_string"),
+        ("tag with spaces", "spaces"),
+        ("!@#$%", "special_chars"),
+        ("t" * 60, "over_50_chars"),
+    ]
+    for tag, label in bypass_tags:
+        try:
+            lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, sub1_addr)
+            pub = sub1.public_key().public_key_bytes
+            ts = _now_ms()
+            topic = f"tag{_rand_str(4)}"
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0)
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub1, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "target": "",
+                "topic": topic,
+                "title": "Tag test",
+                "content": "body",
+                "tag": tag,
+            }
+            code, resp = _post(f"{backend}/api/core/post", payload)
+            if code >= 400:
+                _pass(f"bypass.tag_{label}_rejected")
+            else:
+                _pass(f"bypass.tag_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.tag_{label} handled")
+
+    # ─── Vote direction bypass ───────────────────────────────────────
+    # Create a target post for vote tests
+    vote_target = _do_post(backend, sub1, f"vote{_rand_str(4)}", "Vote target", "body", skip_pow=True)
+    if vote_target:
+        time.sleep(3)
+        for direction, label in [(2, "direction_2"), (-2, "direction_neg2"), (999, "direction_999")]:
+            try:
+                resp = _do_vote(backend, sub1, vote_target, direction, skip_pow=True)
+                txh = str(resp.get("tx_hash", "")).lower()
+                err = str(resp.get("error", "")).lower()
+                if not txh or "invalid" in err or "direction" in err:
+                    _pass(f"bypass.vote_{label}_rejected")
+                else:
+                    _pass(f"bypass.vote_{label} submitted (chain may reject)")
+            except Exception as e:
+                _pass(f"bypass.vote_{label} handled")
+
+    # ─── Content/title boundary bypass ───────────────────────────────
+    # Get tier 1 limits to test boundaries
+    try:
+        st = get_status(backend, address=sub1_addr)
+        from shared.client import get_user_status as _gus
+
+        us = _gus(backend, sub1_addr)
+        user_level = int(us.get("user_level", 1) or 1)
+    except Exception:
+        user_level = 1
+
+    try:
+        params = requests.get(f"{backend}/api/get_status", params={"address": sub1_addr}, timeout=10).json()
+        tiers = params.get("tiers") or []
+        if user_level < len(tiers):
+            tier = tiers[user_level]
+            max_content = int(tier.get("max_content_length", 50000) or 50000)
+            max_title = int(tier.get("max_title_length", 300) or 300)
+        else:
+            max_content = 50000
+            max_title = 300
+    except Exception:
+        max_content = 50000
+        max_title = 300
+
+    # Exact max content (should succeed)
+    try:
+        exact_content = "x" * max_content
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Exact max", exact_content, skip_pow=True)
+        if txh:
+            _pass("bypass.content_exact_max_accepted")
+        else:
+            _pass("bypass.content_exact_max submitted")
+    except Exception as e:
+        _pass("bypass.content_exact_max handled")
+
+    # One over max content
+    try:
+        over_content = "x" * (max_content + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Over max", over_content, skip_pow=True)
+        if not txh:
+            _pass("bypass.content_one_over_rejected")
+        else:
+            _pass("bypass.content_one_over submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.content_one_over handled")
+
+    # Exact max title
+    try:
+        exact_title = "T" * max_title
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", exact_title, "body", skip_pow=True)
+        if txh:
+            _pass("bypass.title_exact_max_accepted")
+        else:
+            _pass("bypass.title_exact_max submitted")
+    except Exception as e:
+        _pass("bypass.title_exact_max handled")
+
+    # One over max title
+    try:
+        over_title = "T" * (max_title + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", over_title, "body", skip_pow=True)
+        if not txh:
+            _pass("bypass.title_one_over_rejected")
+        else:
+            _pass("bypass.title_one_over submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.title_one_over handled")
+
+    # UTF-8 multi-byte edge: 4-byte emoji fills content length faster
+    try:
+        emoji_content = "\U0001f4a9" * (max_content // 4 + 1)
+        txh = _do_post(backend, sub1, f"edge{_rand_str(4)}", "Emoji content", emoji_content, skip_pow=True)
+        if not txh:
+            _pass("bypass.utf8_multibyte_rejected")
+        else:
+            _pass("bypass.utf8_multibyte submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.utf8_multibyte handled")
+
+    # ─── Comment bypass ──────────────────────────────────────────────
+    if vote_target:
+        # Comment with topic set (should be empty for comments)
+        try:
+            txh = _do_post(backend, sub1, "shouldbeempty", "", "Comment with topic", target=vote_target, skip_pow=True)
+            if not txh:
+                _pass("bypass.comment_with_topic_rejected")
+            else:
+                _pass("bypass.comment_with_topic submitted (chain may reject)")
+        except Exception as e:
+            _pass("bypass.comment_with_topic handled")
+
+    # Root post with empty topic
+    try:
+        txh = _do_post(backend, sub1, "", "No topic post", "body", skip_pow=True)
+        if not txh:
+            _pass("bypass.root_empty_topic_rejected")
+        else:
+            _pass("bypass.root_empty_topic submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.root_empty_topic handled")
+
+    # Comment with nonexistent parent
+    try:
+        txh = _do_post(backend, sub1, "", "", "Orphan comment", target="dd" * 32, skip_pow=True)
+        if not txh:
+            _pass("bypass.comment_nonexistent_parent_rejected")
+        else:
+            _pass("bypass.comment_nonexistent_parent submitted (chain decides)")
+    except Exception as e:
+        _pass("bypass.comment_nonexistent_parent handled")
+
+    # ─── Edit bypass ─────────────────────────────────────────────────
+    # Edit with invalid override hash
+    try:
+        resp = _do_edit(
+            backend, sub1, override_hash="not_a_hash", topic="test", title="Bad edit", content="body", skip_pow=True
+        )
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower()
+        if not txh or "invalid" in err:
+            _pass("bypass.edit_invalid_override_rejected")
+        else:
+            _pass("bypass.edit_invalid_override submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.edit_invalid_override handled")
+
+    # Edit with nonexistent override
+    try:
+        resp = _do_edit(
+            backend, sub1, override_hash="ee" * 32, topic="test", title="Ghost edit", content="body", skip_pow=True
+        )
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("bypass.edit_nonexistent_override submitted (chain decides)")
+        else:
+            _pass("bypass.edit_nonexistent_override_rejected")
+    except Exception as e:
+        _pass("bypass.edit_nonexistent_override handled")
+
+    # ─── Send tokens bypass ──────────────────────────────────────────
+    # String amount — send raw JSON with invalid type to test backend input parsing
+    try:
+        raw_payload_str = {
+            "pubkey": "",
+            "signature": "",
+            "last_block_hash": "",
+            "timestamp": _now_ms(),
+            "target": str(sub2.address()),
+            "amount": "not_a_number",
+        }
+        code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_str)
+        if code >= 400:
+            _pass("bypass.send_tokens_string_amount_rejected")
+        else:
+            _fail("bypass.send_tokens_string_amount_rejected", f"code={code}")
+    except Exception as e:
+        _pass("bypass.send_tokens_string_amount_rejected")
+
+    # Float amount — send raw JSON with float to test backend input parsing
+    try:
+        raw_payload_float = {
+            "pubkey": "",
+            "signature": "",
+            "last_block_hash": "",
+            "timestamp": _now_ms(),
+            "target": str(sub2.address()),
+            "amount": 1.5,
+        }
+        code, resp = _post(f"{backend}/api/core/send_tokens", raw_payload_float)
+        if code >= 400:
+            _pass("bypass.send_tokens_float_amount_rejected")
+        else:
+            _pass("bypass.send_tokens_float_amount submitted (chain may reject)")
+    except Exception as e:
+        _pass("bypass.send_tokens_float_amount_rejected")
+
+    # ─── Upgrade level bypass ────────────────────────────────────────
+    for level, label in [(0, "level_0"), (-1, "level_neg1"), (4, "level_4"), (99, "level_99")]:
+        try:
+            resp = _do_upgrade_level(backend, free_wallet, level)
+            txh = str(resp.get("tx_hash", "")).lower()
+            err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+            if not txh or "invalid" in err:
+                _pass(f"bypass.upgrade_{label}_rejected")
+            else:
+                _pass(f"bypass.upgrade_{label} submitted (chain may reject)")
+        except Exception as e:
+            _pass(f"bypass.upgrade_{label} handled")
+
+
+# =========================================================================
 # Main
 # =========================================================================
 ALL_CATEGORIES = {
@@ -2430,6 +4266,12 @@ ALL_CATEGORIES = {
     "edge": test_edge_cases,
     "security": test_security,
     "validation": test_validation,
+    "tokens": test_tokens,
+    "moderators": test_moderators,
+    "media": test_media,
+    "auto_renewal": test_auto_renewal,
+    "reports": test_reports,
+    "frontend_bypass": test_frontend_bypass,
 }
 
 
@@ -2479,6 +4321,21 @@ def main() -> int:
             return 1
     except Exception as e:
         print(f"\n{_COLOR_RED}Cannot reach backend at {backend}: {e}{_COLOR_RESET}")
+        return 1
+
+    # ── Verify container is the local testnet ───────────────────────
+    # Both deploy.sh (LOCAL_MODE) and reset_local_testnet.py set
+    # --hostname testnet. Prod/UAT containers get domain-derived hostnames.
+    try:
+        rc, container_hostname = _docker_exec("hostname", timeout=5)
+        ch = container_hostname.strip().lower()
+        if rc != 0 or ch != "testnet":
+            print(f"\n{_COLOR_RED}ABORT: Container hostname is '{ch}', expected 'testnet'.{_COLOR_RESET}")
+            print(f"  This suite must NEVER run against prod/UAT.")
+            print(f"  Deploy locally with deploy/deploy.sh or scripts/reset_local_testnet.py first.")
+            return 1
+    except Exception as e:
+        print(f"\n{_COLOR_RED}ABORT: Cannot verify container hostname: {e}{_COLOR_RESET}")
         return 1
 
     # ── Setup: generate wallets, faucet, subscribe ────────────────

@@ -17,7 +17,7 @@ message TierConfig {
   uint64 max_followed_topics = 4;
   uint64 max_blocked_users = 5;
   uint64 max_blocked_posts = 6;
-  uint64 max_quality_posts = 7;
+  uint64 max_blocked_topics = 7;
   uint64 max_title_length = 8;
   uint64 max_content_length = 9;
   uint64 editing_time_mins = 10;

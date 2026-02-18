@@ -8,7 +8,7 @@ import Button from "./Button";
 import Storage from '../utils/Storage';
 import * as tx from "../utils/tx.js";
 import Api from '../lib/api';
-import { subscribe, unsubscribe, isSubscribed } from '../utils/Subscriptions';
+import { subscribe, unsubscribe, isSubscribed, isSubscribedAsync } from '../utils/Subscriptions';
 import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
@@ -924,6 +924,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [shareCopied, setShareCopied] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
+    const [confirmBlockTopic, setConfirmBlockTopic] = useState(false);
+    const [blockTopicInput, setBlockTopicInput] = useState('');
+    const [blockTopicError, setBlockTopicError] = useState('');
+    const [blockTopicSuccess, setBlockTopicSuccess] = useState('');
+    const [blockingTopic, setBlockingTopic] = useState(false);
+    const [blockTopicInputWidth, setBlockTopicInputWidth] = useState(20);
+    const blockTopicMeasureRef = useRef(null);
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
@@ -1347,6 +1354,70 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmBlockUser(false);
     };
 
+    const handleBlockTopic = () => {
+        setMenuOpen(false);
+        const topicName = (post?.topic || "").trim().toLowerCase();
+        if (!topicName) return;
+        // Close any open confirmation dialogs
+        setConfirmDelete(false);
+        setConfirmSuspendQuests(false);
+        setConfirmDonate(false);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setConfirmUnsuspend(false);
+        setBlockTopicInput(topicName);
+        setConfirmBlockTopic(true);
+    };
+
+    const confirmBlockTopicAction = async () => {
+        const topicName = blockTopicInput.trim().toLowerCase();
+        if (!topicName) return;
+        setBlockTopicError('');
+        setBlockingTopic(true);
+        try {
+            const result = await tx.blockTopic(topicName);
+            setBlockingTopic(false);
+            setConfirmBlockTopic(false);
+            if (result.success) {
+                setBlockTopicSuccess(`#${topicName} blocked`);
+                setTimeout(() => {
+                    setBlockTopicSuccess('');
+                    if (updatePost) {
+                        const hasWildcard = topicName.includes('*');
+                        const allPosts = state?.posts || {};
+                        if (hasWildcard) {
+                            const re = new RegExp('^' + topicName.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+                            for (const [pid, p] of Object.entries(allPosts)) {
+                                const pt = (p?.topic || "").trim().toLowerCase();
+                                if (re.test(pt)) updatePost(pid, { blocked: true });
+                            }
+                        } else {
+                            for (const [pid, p] of Object.entries(allPosts)) {
+                                const pt = (p?.topic || "").trim().toLowerCase();
+                                if (pt === topicName) updatePost(pid, { blocked: true });
+                            }
+                        }
+                    }
+                }, 3000);
+            } else {
+                setBlockTopicError(result.error || 'Unknown error');
+                setTimeout(() => setBlockTopicError(''), 5000);
+            }
+        } catch (err) {
+            setBlockingTopic(false);
+            setConfirmBlockTopic(false);
+            setBlockTopicError(err.message || 'Unknown error');
+            setTimeout(() => setBlockTopicError(''), 5000);
+        }
+    };
+
+    const cancelBlockTopic = () => {
+        if (blockingTopic) return;
+        setConfirmBlockTopic(false);
+        setBlockTopicInput('');
+        setBlockTopicError('');
+    };
+
     const handleFollowUser = async () => {
         setMenuOpen(false);
         if (!post || (!post.user_id && !post.author)) return;
@@ -1436,6 +1507,16 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setFollowOverride(null);
         setTopicFollowOverride(null);
     }, [authorAddress, viewerAddress, postTopic]);
+
+    // Async fallback: if sync cache missed, resolve subscription state from API
+    useEffect(() => {
+        if (topicFollowOverride !== null || computedIsSubscribed || !postTopic || !viewerAddress || viewerAddress === 'guest') return;
+        let alive = true;
+        isSubscribedAsync(viewerAddress, postTopic).then(result => {
+            if (alive && result) setTopicFollowOverride(true);
+        }).catch(() => { });
+        return () => { alive = false; };
+    }, [viewerAddress, postTopic, topicFollowOverride, computedIsSubscribed]);
 
     // Robust elapsed formatter: treat missing/invalid timestamps as "0s"
     const ts = Number(post && post.timestamp);
@@ -2047,6 +2128,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
+                                            {post?.topic && <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockTopic(); }} data-danger="true">Block topic</MenuItem>}
                                         </>
                                     )}
                                     {!isOwnPost && isAdmin && (
@@ -2167,6 +2249,92 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 </ConfirmButtons>
                             </div>
                         </BlockConfirmMessage>
+                    )}
+                    {confirmBlockTopic && (
+                        <BlockConfirmMessage style={blockingTopic ? { opacity: 0.5, pointerEvents: 'none' } : undefined}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%' }}>
+                                <span style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'baseline' }}>
+                                    {blockingTopic ? '⏳' : '🚫'} Block #<span style={{ position: 'relative', display: 'inline-block' }}>
+                                        <span
+                                            ref={blockTopicMeasureRef}
+                                            aria-hidden="true"
+                                            style={{
+                                                position: 'absolute',
+                                                visibility: 'hidden',
+                                                whiteSpace: 'pre',
+                                                font: 'inherit',
+                                                fontSize: 'inherit',
+                                                pointerEvents: 'none',
+                                            }}
+                                        >{blockTopicInput || ' '}</span>
+                                        <input
+                                            type="text"
+                                            value={blockTopicInput}
+                                            disabled={blockingTopic}
+                                            onChange={(e) => {
+                                                const v = e.target.value.toLowerCase().replace(/[^a-z0-9*]/g, '').replace(/\*{2,}/g, '*');
+                                                setBlockTopicInput(v);
+                                                if (blockTopicError) setBlockTopicError('');
+                                                requestAnimationFrame(() => {
+                                                    if (blockTopicMeasureRef.current) {
+                                                        setBlockTopicInputWidth(blockTopicMeasureRef.current.offsetWidth + 2);
+                                                    }
+                                                });
+                                            }}
+                                            onKeyDown={(e) => { if (e.key === 'Enter' && !blockingTopic) confirmBlockTopicAction(); if (e.key === 'Escape' && !blockingTopic) cancelBlockTopic(); }}
+                                            autoFocus
+                                            ref={(el) => {
+                                                if (el && blockTopicMeasureRef.current) {
+                                                    setBlockTopicInputWidth(blockTopicMeasureRef.current.offsetWidth + 2);
+                                                }
+                                            }}
+                                            style={{
+                                                background: 'transparent',
+                                                border: 'none',
+                                                borderBottom: '1px solid var(--color-text-secondary, #888)',
+                                                color: 'inherit',
+                                                font: 'inherit',
+                                                fontSize: 'inherit',
+                                                padding: 0,
+                                                width: `${blockTopicInputWidth}px`,
+                                                maxWidth: '200px',
+                                                outline: 'none',
+                                            }}
+                                            placeholder="topic*"
+                                        />
+                                    </span>{blockingTopic ? '…' : '?'}
+                                </span>
+                                <ConfirmButtons style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                                    <Button variant="warning" size="sm" onClick={confirmBlockTopicAction} disabled={!blockTopicInput.trim() || blockingTopic}>
+                                        {blockingTopic ? 'Blocking…' : 'Block'}
+                                    </Button>
+                                    <Button variant="ghost" size="sm" onClick={cancelBlockTopic} disabled={blockingTopic}>Cancel</Button>
+                                </ConfirmButtons>
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {blockTopicSuccess && (
+                        <ShareSuccessMessage>
+                            <span>✓</span>
+                            {blockTopicSuccess}
+                        </ShareSuccessMessage>
+                    )}
+                    {blockTopicError && (
+                        <div style={{
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            border: '1px solid #ef4444',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: '#ef4444',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>⚠</span>
+                            {blockTopicError}
+                        </div>
                     )}
                     {confirmDelete && (
                         <BlockConfirmMessage>

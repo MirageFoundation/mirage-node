@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.12.0",
-                "height": "T+60",
-                "info": "Add dedicated media field to MsgPost with on-chain validation"
+                "name": "v1.13.0",
+                "height": "T+50",
+                "info": "v1.13.0: Topic blocking + quality_posts removal. New MsgBlockTopic/MsgUnblockTopic message types with tier-dependent limits (10/125/500/1000). Upgrade handler updates MaxBlockedTopics tier params and cleans up orphaned plist_quality/ KV data."
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.12.0",
-    "summary": "Adds a dedicated media field to MsgPost messages, allowing up to 10 HTTPS URLs per post. Media URLs are validated on-chain (https:// required, max 2048 characters per URL). The field is optional and backward compatible.\n\nBINARY REQUIREMENT: All validators must update to v1.12.0 binary BEFORE the upgrade height.",
+    "title": "Upgrade: v1.13.0",
+    "summary": "Introduces topic blocking (MsgBlockTopic / MsgUnblockTopic) with tier-dependent limits, removes the unused quality_posts feature, and migrates existing chain state via upgrade handler.",
     "expedited": true
 }

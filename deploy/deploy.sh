@@ -283,25 +283,36 @@ maybe_proto_gen_and_go_build() {
 docker_build() {
   # docker_build <load_or_push>
   local mode="$1"
+
+  # Local loads use plain docker build to avoid buildx gRPC stream timeout
+  # on large images. Buildx is only needed for --push (registry).
+  if [ "$mode" = "load" ]; then
+    local cache_arg=""
+    if [ "$NO_CACHE" -eq 1 ]; then
+      echo "==> Building WITHOUT cache (use default to enable)"
+      cache_arg="--no-cache"
+    fi
+    DOCKER_BUILDKIT=1 docker build \
+      -t "mirage:local" \
+      $cache_arg \
+      --build-arg GIT_BRANCH="$GIT_BRANCH" \
+      --build-arg GIT_HASH="$GIT_HASH" \
+      -f "$REPO_ROOT/deploy/Dockerfile" \
+      "$REPO_ROOT"
+    return
+  fi
+
+  # Push mode: use buildx for registry push + explicit cache dirs
   local cache_base
   cache_base="$(cache_dir)/buildx-cache"
   mkdir -p "$cache_base"
 
-  local tags=()
-  local out_args=()
-  local cache_args=()
-  if [ "$mode" = "push" ]; then
-    out_args+=(--push)
-    tags+=(-t "$IMAGE_SHA_TAG")
-    if [ -n "$IMAGE_MOVING_TAG" ]; then
-      tags+=(-t "$IMAGE_MOVING_TAG")
-    fi
-  else
-    out_args+=(--load)
-    tags+=(-t "mirage:local")
+  local tags=(-t "$IMAGE_SHA_TAG")
+  if [ -n "$IMAGE_MOVING_TAG" ]; then
+    tags+=(-t "$IMAGE_MOVING_TAG")
   fi
 
-  # Add cache args unless --no-cache was specified
+  local cache_args=()
   if [ "$NO_CACHE" -eq 1 ]; then
     echo "==> Building WITHOUT cache (use default to enable)"
     cache_args+=(--no-cache)
@@ -311,7 +322,7 @@ docker_build() {
   fi
 
   docker buildx build \
-    "${out_args[@]}" \
+    --push \
     "${tags[@]}" \
     "${cache_args[@]}" \
     --build-arg GIT_BRANCH="$GIT_BRANCH" \
@@ -686,7 +697,8 @@ if [ "$LOCAL_MODE" -eq 1 ]; then
     fi
   done
   # Add SKIP_VALIDATOR_CHECK and SKIP_PEERS for local testing
-  docker run -d $PORTS $ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" "$DEPLOY_IMAGE"
+  # Force --hostname testnet so test_backend.py can verify it's a local testnet
+  docker run -d $PORTS $ENV_ARGS --name mirage --hostname testnet --restart unless-stopped $MONIKER_ARG -e SKIP_VALIDATOR_CHECK=1 -e SKIP_PEERS=1 -v "$HOME/.mirage:/root/.mirage" -v "$HOME/.caddy:/root/.local/share/caddy" "$DEPLOY_IMAGE"
 else
   run_ssh "ENV_ARGS=\"\"; for f in backend node indexer frontend secrets; do if [ -f \$HOME/.mirage/env/\$f.env ]; then ENV_ARGS=\"\$ENV_ARGS --env-file \$HOME/.mirage/env/\$f.env\"; fi; done; docker run -d $PORTS \$ENV_ARGS --name mirage --restart unless-stopped $HOSTNAME_ARG $MONIKER_ARG -v \$HOME/.mirage:/root/.mirage -v \$HOME/.caddy:/root/.local/share/caddy '$DEPLOY_IMAGE'"
 fi
@@ -812,7 +824,8 @@ fi
 echo "==> Running post-deploy health check (non-blocking)..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
   sleep 5
-  docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
+  HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+  echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -825,12 +838,13 @@ try:
         print()
         print('    Note: some services unhealthy — expected during upgrade halts')
 except Exception:
-    print('    (could not parse health check output)')
-" 2>/dev/null || echo "    (health check not available yet)"
+    print('    (health check not available yet)')
+"
 else
   run_ssh '
     sleep 5
-    docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
+    HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+    echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -843,8 +857,8 @@ try:
         print()
         print(\"    Note: some services unhealthy — expected during upgrade halts\")
 except Exception:
-    print(\"    (could not parse health check output)\")
-" 2>/dev/null || echo "    (health check not available yet)"
+    print(\"    (health check not available yet)\")
+"
   '
 fi
 

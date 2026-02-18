@@ -161,7 +161,7 @@ export default function DiscoverView({ state }) {
     useEffect(() => {
         let alive = true;
         setLoading(true);
-        Api.get('get_topics', { limit: 200, min_posts: 10 })
+        Api.get('get_topics', { limit: 200, min_posts: 10, address: viewerAddress })
             .then((data) => {
                 if (!alive || !mountedRef.current) return;
                 if (data && Array.isArray(data.topics)) {

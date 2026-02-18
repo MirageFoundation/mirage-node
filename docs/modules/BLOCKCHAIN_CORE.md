@@ -318,7 +318,7 @@ The module stores state under prefixed keys in the KV store:
 | `profile_topics/` | Followed topics list |
 | `profile_blocked_users/` | Blocked users list |
 | `profile_blocked_posts/` | Blocked posts list |
-| `profile_quality_posts/` | Quality-marked posts list |
+| `profile_blocked_topics/` | Blocked topics list |
 | `username/` | Username → address mapping |
 | `difficulty/` | Current PoW difficulty |
 | `pow_window/` | Per-block message counts |
@@ -371,7 +371,7 @@ The tier system serves multiple purposes:
 |-------|------|-------------|--------------|
 | 0 | Free | 0 | PoW required, limited content length, "Anon-" username prefix |
 | 1 | Trusted | 100K MIRAGE | No PoW, custom username, biography, avatar |
-| 2 | Established | 200K MIRAGE | Moderator eligibility, quality posts, longer content |
+| 2 | Established | 200K MIRAGE | Moderator eligibility, extended topic blocking, longer content |
 | 3 | Distinguished | 300K MIRAGE | Maximum limits, highest vote weight |
 | 100+ | Admin | N/A | Governance-assigned, special privileges |
 

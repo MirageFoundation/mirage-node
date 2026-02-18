@@ -666,6 +666,56 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgBlockTopic:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgBlockTopic", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForBlockTopic(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgBlockTopic", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
+		case *coretypes.MsgUnblockTopic:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnblockTopic", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForUnblockTopic(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnblockTopic", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
 		default:
 			// ignore others
 		}
@@ -874,6 +924,28 @@ func buildCanonForUnblockUser(m *coretypes.MsgUnblockUser) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeString(100, m.Target)
+	return cw.buf
+}
+
+func buildCanonForBlockTopic(m *coretypes.MsgBlockTopic) []byte {
+	cw := newCanonWriter("MsgBlockTopic")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Target)
+	cw.writeString(101, m.Topic)
+	return cw.buf
+}
+
+func buildCanonForUnblockTopic(m *coretypes.MsgUnblockTopic) []byte {
+	cw := newCanonWriter("MsgUnblockTopic")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Target)
+	cw.writeString(101, m.Topic)
 	return cw.buf
 }
 

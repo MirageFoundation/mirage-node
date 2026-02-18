@@ -89,7 +89,7 @@ Caddy now serves a maintenance page automatically when the chain is upgrading.
 
 ### Roadmap
 
-- Block entire topics or keywords you don't want to see
+- ~~Block entire topics or keywords you don't want to see~~ — Shipped in [v1.13.0](update_v1.13.0.md)
 - Push notifications for mentions and replies
 - Threaded conversations with inline reply chains
 

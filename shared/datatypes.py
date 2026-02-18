@@ -225,6 +225,32 @@ def _build_pool():
     add_f(msg_unblock_user, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_unblock_user, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # MsgBlockTopic
+    msg_block_topic = file_proto.message_type.add()
+    msg_block_topic.name = "MsgBlockTopic"
+    add_f(msg_block_topic, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_block_topic, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_block_topic, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_block_topic, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_block_topic, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_block_topic, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_block_topic, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_block_topic, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_block_topic, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgUnblockTopic
+    msg_unblock_topic = file_proto.message_type.add()
+    msg_unblock_topic.name = "MsgUnblockTopic"
+    add_f(msg_unblock_topic, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_unblock_topic, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_unblock_topic, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_unblock_topic, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_unblock_topic, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_unblock_topic, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_unblock_topic, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_unblock_topic, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_unblock_topic, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # MsgDelete
     msg_delete = file_proto.message_type.add()
     msg_delete.name = "MsgDelete"
@@ -335,7 +361,7 @@ def _build_pool():
     add_f(tier_config, "max_followed_topics", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_users", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_posts", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_quality_posts", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_blocked_topics", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_title_length", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_content_length", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "editing_time_mins", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -584,6 +610,8 @@ MsgBlockPost = _get_message_class("mirage.core.v1.MsgBlockPost")
 MsgUnblockPost = _get_message_class("mirage.core.v1.MsgUnblockPost")
 MsgBlockUser = _get_message_class("mirage.core.v1.MsgBlockUser")
 MsgUnblockUser = _get_message_class("mirage.core.v1.MsgUnblockUser")
+MsgBlockTopic = _get_message_class("mirage.core.v1.MsgBlockTopic")
+MsgUnblockTopic = _get_message_class("mirage.core.v1.MsgUnblockTopic")
 MsgDelete = _get_message_class("mirage.core.v1.MsgDelete")
 MsgSendTokens = _get_message_class("mirage.core.v1.MsgSendTokens")
 MsgSetLevel = _get_message_class("mirage.core.v1.MsgSetLevel")

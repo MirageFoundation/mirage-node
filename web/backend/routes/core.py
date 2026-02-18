@@ -36,6 +36,8 @@ from shared.datatypes import (
     MsgUnblockPost,
     MsgBlockUser,
     MsgUnblockUser,
+    MsgBlockTopic,
+    MsgUnblockTopic,
     MsgDelete,
     MsgSendTokens,
     MsgPost,
@@ -65,6 +67,8 @@ from pow import (
     canon_base_unblock_post,
     canon_base_block_user,
     canon_base_unblock_user,
+    canon_base_block_topic,
+    canon_base_unblock_topic,
     canon_base_report,
     canon_base_delete,
     canon_base_send_tokens,
@@ -479,6 +483,9 @@ def core_set_username():
             difficulty=difficulty,
             proof=proof,
         )
+
+        if _has_unsafe_chars(username):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
 
         # Minimal required fields; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64 and username):
@@ -1345,6 +1352,217 @@ def core_unblock_user():
         return jsonify({"error": msg}), status
 
 
+@core_bp.route("/api/core/block_topic", methods=["POST"])
+def core_block_topic():
+    rid = next_request_id()
+    log_event(rid, "block_topic.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        log_event(rid, "block_topic.data", data=data)
+        pub_b64 = str(data.get("pubkey", "").strip())
+        sig_b64 = str(data.get("signature", "").strip())
+        topic = str(data.get("topic", "").strip()).lower()
+
+        last_block_hash = str(data.get("last_block_hash", "").strip())
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        import re
+
+        if not topic:
+            return jsonify({"error": "invalid topic format"}), 400
+        # Allow * as glob wildcard anywhere in blocked topic patterns
+        _topic_alpha = topic.replace("*", "")
+        if not _topic_alpha or not re.fullmatch(r"[a-z0-9]+", _topic_alpha):
+            return jsonify({"error": "invalid topic format"}), 400
+        if "**" in topic:
+            return jsonify({"error": "invalid topic format"}), 400
+
+        p = expect_params()
+        min_topic = int(p.get("min_topic_size", 2))
+        max_topic = int(p.get("max_topic_size", 35))
+        if len(_topic_alpha) < min_topic:
+            return jsonify({"error": "topic too short"}), 400
+        if len(_topic_alpha) > max_topic:
+            return jsonify({"error": "topic too long"}), 400
+
+        if not (pub_b64 and sig_b64):
+            log_event(rid, "block_topic.missing_fields", has_pubkey=bool(pub_b64), has_sig=bool(sig_b64))
+            return jsonify({"error": "missing required fields"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        # Check if topic is already blocked
+        try:
+            profile = _query_chain_profile_full(user_addr)
+            if profile:
+                blocked_topics = [t.lower() for t in (profile.get("blocked_topics") or [])]
+                if topic in blocked_topics:
+                    log_event(rid, "block_topic.already_blocked", topic=topic, user_addr=user_addr)
+                    return jsonify({"error": "topic is already blocked"}), 400
+        except Exception:
+            pass
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        if not is_subscriber(user_addr):
+            try:
+                base = canon_base_block_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic)
+                digest = argon2_digest(base, last_block_hash, proof)
+                if digest is not None:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
+                        return jsonify({"error": "insufficient pow (precheck)"}), 400
+            except Exception:
+                pass
+        else:
+            if int(difficulty) > 0 or int(proof) > 0:
+                return jsonify({"error": "pow not allowed for subscribers"}), 400
+
+        msg = MsgBlockTopic()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = int(timestamp)
+        msg.envelope_signature = sig_dec
+        msg.target = ""
+        msg.topic = topic
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgBlockTopic"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "topic": topic,
+                "last_block_hash": last_block_hash,
+                "difficulty": int(difficulty),
+                "proof": int(proof),
+            }
+            return _tx_error(rid, "core/block_topic", "MsgBlockTopic", code, tx_hash, raw_log, extra)
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "block_topic.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/unblock_topic", methods=["POST"])
+def core_unblock_topic():
+    rid = next_request_id()
+    log_event(rid, "unblock_topic.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "").strip())
+        sig_b64 = str(data.get("signature", "").strip())
+        topic = str(data.get("topic", "").strip()).lower()
+        last_block_hash = str(data.get("last_block_hash", "").strip())
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        if not (pub_b64 and sig_b64 and topic):
+            return jsonify({"error": "missing required fields"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields"}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        if not is_subscriber(user_addr):
+            try:
+                base = canon_base_unblock_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic)
+                digest = argon2_digest(base, last_block_hash, proof)
+                if digest is not None:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
+                        return jsonify({"error": "insufficient pow (precheck)"}), 400
+            except Exception:
+                pass
+        else:
+            if int(difficulty) > 0 or int(proof) > 0:
+                return jsonify({"error": "pow not allowed for subscribers"}), 400
+
+        msg = MsgUnblockTopic()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = int(timestamp)
+        msg.envelope_signature = sig_dec
+        msg.target = ""
+        msg.topic = topic
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgUnblockTopic"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(topic)))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "topic": topic,
+                "last_block_hash": last_block_hash,
+                "difficulty": int(difficulty),
+                "proof": int(proof),
+            }
+            return _tx_error(rid, "core/unblock_topic", "MsgUnblockTopic", code, tx_hash, raw_log, extra)
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "unblock_topic.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
 @core_bp.route("/api/core/follow_user", methods=["POST"])
 def core_follow_user():
     rid = next_request_id()
@@ -2032,7 +2250,9 @@ def core_edit():
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
         tag = str(data.get("tag", "")).strip()
-        # no client-provided fees
+
+        if _has_unsafe_chars(topic, title, content, target, tag):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
 
         if tag not in ALLOWED_TAGS:
             return jsonify({"error": f"invalid tag: {tag}"}), 400
@@ -2051,6 +2271,8 @@ def core_edit():
                 return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
             if not media_item.startswith("https://"):
                 return jsonify({"error": f"media[{i}] must use https://"}), 400
+            if _has_unsafe_chars(media_item):
+                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
 
         # Require basics: editing requires an override hash and auth fields
         if not (pub_b64 and sig_b64 and override):
@@ -2218,6 +2440,18 @@ def core_edit():
 ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
 
 
+def _has_unsafe_chars(*values: str) -> bool:
+    """Return True if any value contains NUL, control chars (except tab/newline/CR), or DEL."""
+    for v in values:
+        for ch in v:
+            cp = ord(ch)
+            if cp <= 0x1F and cp not in (0x09, 0x0A, 0x0D):
+                return True
+            if cp == 0x7F:
+                return True
+    return False
+
+
 @core_bp.route("/api/core/post", methods=["POST"])
 def core_post():
     rid = next_request_id()
@@ -2244,6 +2478,10 @@ def core_post():
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
         tag = str(data.get("tag", "")).strip()
+
+        if _has_unsafe_chars(topic, title, content, target, tag):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
+
         # Validate tag
         if tag not in ALLOWED_TAGS:
             return jsonify({"error": f"invalid tag: {tag}"}), 400
@@ -2262,6 +2500,8 @@ def core_post():
                 return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
             if not media_item.startswith("https://"):
                 return jsonify({"error": f"media[{i}] must use https://"}), 400
+            if _has_unsafe_chars(media_item):
+                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
 
         # Basic fields must be present; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64):

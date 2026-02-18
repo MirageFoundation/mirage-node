@@ -330,7 +330,7 @@ function DifficultyChart({ history }) {
     );
 }
 
-function BurnMintChart({ history, mintInterval, mintQuantity }) {
+function BurnMintChart({ history }) {
     if (!history || history.length < 2) {
         return (
             <ChartWrapper>
@@ -345,17 +345,15 @@ function BurnMintChart({ history, mintInterval, mintQuantity }) {
 
     const { width, height, padding, innerW, innerH } = CHART;
 
-    // Cumulative minted/burned (burned derived from cumulative totals, not per-interval)
+    // Cumulative minted/burned from real supply deltas
     const data = [];
     let cumMinted = 0;
-    let cumSupplyChange = 0;
+    let cumBurned = 0;
     for (let i = 1; i < history.length; i++) {
-        const prev = history[i - 1];
-        const curr = history[i];
-        const mintEvents = Math.floor((curr.height - prev.height) / mintInterval);
-        cumMinted += Math.max(0, mintEvents * mintQuantity);
-        cumSupplyChange += curr.total_supply - prev.total_supply;
-        data.push({ timestamp: curr.timestamp, minted: cumMinted, burned: Math.max(0, cumMinted - cumSupplyChange) });
+        const delta = history[i].total_supply - history[i - 1].total_supply;
+        if (delta > 0) cumMinted += delta;
+        else cumBurned += -delta;
+        data.push({ timestamp: history[i].timestamp, minted: cumMinted, burned: cumBurned });
     }
     if (data.length < 1) return null;
 
@@ -559,7 +557,7 @@ function NodeBalanceChart({ history }) {
     );
 }
 
-function NodeMintBurnChart({ history, mintInterval, mintQuantity }) {
+function NodeMintBurnChart({ history }) {
     // Filter to entries that have node_balance recorded
     const raw = (history || []).filter((h) => h.node_balance != null);
     if (raw.length < 2) {
@@ -662,7 +660,7 @@ export default function NetworkView({ state }) {
     const [stakedBalance, setStakedBalance] = useState(null);
     const [copiedAddress, setCopiedAddress] = useState(null);
     const [circulationStats, setCirculationStats] = useState({ total_supply: null, top_accounts: [] });
-    const [supplyHistory, setSupplyHistory] = useState({ history: [], mint_interval: 200, mint_quantity: 100000 });
+    const [supplyHistory, setSupplyHistory] = useState({ history: [] });
 
     // Update tab when URL changes
     useEffect(() => {
@@ -711,6 +709,7 @@ export default function NetworkView({ state }) {
                         pow_last_change_height: (typeof data.pow_last_change_height !== 'undefined') ? Number(data.pow_last_change_height) : undefined,
                         current_height: (typeof data.current_height !== 'undefined') ? Number(data.current_height) : undefined,
                         difficulty_history: Array.isArray(data.difficulty_history) ? data.difficulty_history : [],
+                        earned_24h: (typeof data.earned_24h !== 'undefined') ? Number(data.earned_24h) : undefined,
                     }));
                 }
             } catch (_) { }
@@ -766,8 +765,6 @@ export default function NetworkView({ state }) {
                 if (!cancelled && data) {
                     setSupplyHistory({
                         history: Array.isArray(data.history) ? data.history : [],
-                        mint_interval: data.mint_interval || 200,
-                        mint_quantity: data.mint_quantity || 100000,
                     });
                 }
             } catch (_) { }
@@ -887,7 +884,16 @@ export default function NetworkView({ state }) {
                                     <SectionRow>
                                         <SectionLabel>History:</SectionLabel>
                                         <ValueBox>
-                                            <DifficultyChart history={cfg.difficulty_history} />
+                                            <DifficultyChart history={
+                                                cfg.difficulty_history && typeof cfg.pow_difficulty === 'number'
+                                                    ? [...cfg.difficulty_history, {
+                                                        height: cfg.current_height || 0,
+                                                        difficulty: cfg.pow_difficulty,
+                                                        msg_count: cfg.pow_message_count || 0,
+                                                        timestamp: Math.floor(Date.now() / 1000),
+                                                    }]
+                                                    : cfg.difficulty_history
+                                            } />
                                         </ValueBox>
                                     </SectionRow>
                                     <SectionRow>
@@ -895,8 +901,6 @@ export default function NetworkView({ state }) {
                                         <ValueBox>
                                             <BurnMintChart
                                                 history={supplyHistory.history}
-                                                mintInterval={supplyHistory.mint_interval}
-                                                mintQuantity={supplyHistory.mint_quantity}
                                             />
                                         </ValueBox>
                                     </SectionRow>
@@ -971,15 +975,21 @@ export default function NetworkView({ state }) {
                             {activeTab === 'server' && (
                                 <>
                                     <RowCentered>
+                                        <Label>Staked:</Label>
+                                        <ValueBox>
+                                            <Mono>{stakedBalance === null ? '(loading...)' : `${formatMirage(stakedBalance)} MIRAGE`}</Mono>
+                                        </ValueBox>
+                                    </RowCentered>
+                                    <RowCentered>
                                         <Label>Balance:</Label>
                                         <ValueBox>
                                             <Mono>{serverBalance === null ? '(loading...)' : `${formatMirage(serverBalance)} MIRAGE`}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
-                                        <Label>Staked:</Label>
+                                        <Label>Earned (24h):</Label>
                                         <ValueBox>
-                                            <Mono>{stakedBalance === null ? '(loading...)' : `${formatMirage(stakedBalance)} MIRAGE`}</Mono>
+                                            <Mono>{cfg.earned_24h == null ? '(loading...)' : `${formatMirage(cfg.earned_24h)} MIRAGE`}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
@@ -1053,8 +1063,6 @@ export default function NetworkView({ state }) {
                                         <ValueBox>
                                             <NodeMintBurnChart
                                                 history={supplyHistory.history}
-                                                mintInterval={supplyHistory.mint_interval}
-                                                mintQuantity={supplyHistory.mint_quantity}
                                             />
                                         </ValueBox>
                                     </SectionRow>

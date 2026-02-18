@@ -4,8 +4,6 @@ import styled from "styled-components";
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { bech32 } from 'bech32';
 import Storage from "../utils/Storage";
-import seedVault from "../utils/SeedVault";
-import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from "../utils/CryptoUtils";
 import Api from '../lib/api';
 import * as tx from '../utils/tx';
 import Sidebar from "../components/Sidebar";
@@ -82,94 +80,6 @@ const ValueBoxWithButton = styled(ValueBox)`
     }
 `;
 
-
-const ModeratorsList = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-`;
-
-const ModeratorTag = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.accent || '#2E3238'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 20px;
-    padding: 0.35rem 0.75rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 0.8rem;
-    opacity: ${props => props.$isRemoving ? 0.6 : 1};
-    transition: all 0.2s ease;
-`;
-
-const RemoveModeratorButton = styled.button`
-    background: none;
-    border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    cursor: pointer;
-    padding: 0;
-    font-size: 0.9rem;
-    line-height: 1;
-    
-    &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    }
-`;
-
-const ModeratorInput = styled.input`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.5rem 0.85rem;
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: 0.85rem;
-    flex: 1;
-    transition: all 0.2s ease;
-    
-    &:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
-    }
-`;
-
-const ModeratorInputRow = styled.div`
-    display: flex;
-    margin-top: 0.5rem;
-    align-items: center;
-    gap: 0.5rem;
-    @media (max-width: 600px) {
-        flex-direction: column;
-        align-items: stretch;
-    }
-`;
-
-const ModeratorErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 3px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    color: #dc2626;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-`;
-
-const ModeratorSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 3px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    color: #22c55e;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-`;
 
 const SectionTitle = styled.div`
     margin-top: ${({ $first }) => $first ? '0' : '1.5rem'};
@@ -314,8 +224,6 @@ export default function ProfileView({ state }) {
     const routeParams = useParams();
     const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
-    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : (seedVault.getSeed() || '');
-
     // State for username resolution (for /u/:identity route)
     const [resolvedAddress, setResolvedAddress] = useState(null);
     const [usernameResolutionError, setUsernameResolutionError] = useState(null);
@@ -386,7 +294,7 @@ export default function ProfileView({ state }) {
         ? normalizedOwn === normalizedProfile
         : Boolean(normalizedOwn) && !queryAddress && !routeIdentity;
 
-    const VALID_TABS = ['profile', 'posts', 'follows', 'blocks', 'algo'];
+    const VALID_TABS = ['profile', 'posts', 'algo'];
     const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);
     const [profileUsername, setProfileUsername] = useState(() => (isOwnProfile ? (username || '') : ''));
     const [balance, setBalance] = useState(null);
@@ -394,13 +302,6 @@ export default function ProfileView({ state }) {
     const [profileRegisteredAt, setProfileRegisteredAt] = useState(null);
     const [userLevel, setUserLevel] = useState(0);
     const [subscriptionExpiry, setSubscriptionExpiry] = useState(0);
-    const [moderators, setModerators] = useState([]);
-    const [moderatorUsernames, setModeratorUsernames] = useState({});
-    const [newModeratorInput, setNewModeratorInput] = useState('');
-    const [moderatorError, setModeratorError] = useState('');
-    const [moderatorSuccess, setModeratorSuccess] = useState('');
-    const [isAddingModerator, setIsAddingModerator] = useState(false);
-    const [isRemovingModerator, setIsRemovingModerator] = useState('');
     const [recentPosts, setRecentPosts] = useState([]);
     const [isLoadingRecentPosts, setIsLoadingRecentPosts] = useState(false);
     const [recentPostsError, setRecentPostsError] = useState('');
@@ -411,14 +312,6 @@ export default function ProfileView({ state }) {
     const [recentPostsFilter, setRecentPostsFilter] = useState('all');
     const recentBottomSentinelRef = useRef(null);
     const recentLoadTimerRef = useRef(null);
-    const [followedUsers, setFollowedUsers] = useState([]);
-    const [followedTopics, setFollowedTopics] = useState([]);
-    const [blockedUsers, setBlockedUsers] = useState([]);
-    const [blockedPosts, setBlockedPosts] = useState([]);
-    const [listsLoading, setListsLoading] = useState(false);
-    const [listsError, setListsError] = useState('');
-    const [followedUsernames, setFollowedUsernames] = useState({});
-    const [blockedUsernames, setBlockedUsernames] = useState({});
     const [addressCopied, setAddressCopied] = useState(false);
     const [isFollowingProfile, setIsFollowingProfile] = useState(false);
     const [isFollowInProgress, setIsFollowInProgress] = useState(false);
@@ -441,62 +334,6 @@ export default function ProfileView({ state }) {
     };
     const colorForWeight = (w) => (w > 0 ? '#22c55e' : w < 0 ? '#f87171' : '#888');
     // Server metrics are shown on ServerView; no local server balance state here
-
-    // Fetch follows data when follows tab is opened (always fresh)
-    useEffect(() => {
-        if (activeTab !== 'follows' || !profileAddress) return;
-        let cancelled = false;
-        const fetchFollows = async () => {
-            setListsLoading(true);
-            setListsError('');
-            try {
-                const data = await Api.get('get_user_followed', { address: profileAddress });
-                if (cancelled) return;
-                setFollowedUsers(data?.followed_users || []);
-                setFollowedTopics(data?.followed_topics || []);
-                setModerators(data?.followed_moderators || []);
-                if (isOwnProfile) {
-                    Storage.save('followed_moderators', data?.followed_moderators || []);
-                }
-            } catch (err) {
-                if (!cancelled) {
-                    setListsError(err?.message || 'Failed to load follows');
-                }
-            } finally {
-                if (!cancelled) {
-                    setListsLoading(false);
-                }
-            }
-        };
-        fetchFollows();
-        return () => { cancelled = true; };
-    }, [activeTab, profileAddress, isOwnProfile]);
-
-    // Fetch blocks data when blocks tab is opened (always fresh)
-    useEffect(() => {
-        if (activeTab !== 'blocks' || !profileAddress) return;
-        let cancelled = false;
-        const fetchBlocks = async () => {
-            setListsLoading(true);
-            setListsError('');
-            try {
-                const data = await Api.get('get_user_blocked', { address: profileAddress });
-                if (cancelled) return;
-                setBlockedUsers(data?.blocked_users || []);
-                setBlockedPosts(data?.blocked_posts || []);
-            } catch (err) {
-                if (!cancelled) {
-                    setListsError(err?.message || 'Failed to load blocked items');
-                }
-            } finally {
-                if (!cancelled) {
-                    setListsLoading(false);
-                }
-            }
-        };
-        fetchBlocks();
-        return () => { cancelled = true; };
-    }, [activeTab, profileAddress]);
 
     // Fetch preferences for Algo tab
     useEffect(() => {
@@ -575,11 +412,6 @@ export default function ProfileView({ state }) {
 
     // Reset data when profile changes
     useEffect(() => {
-        setFollowedUsers([]);
-        setFollowedTopics([]);
-        setBlockedUsers([]);
-        setBlockedPosts([]);
-        setModerators([]);
         setPrefsTopics([]);
         setPrefsAuthors([]);
         setPrefsError('');
@@ -587,55 +419,6 @@ export default function ProfileView({ state }) {
         setSimilarUsers([]);
         setSimilarUsersError('');
     }, [profileAddress]);
-
-    // Resolve all usernames in one bulk request (moderators + followed users + blocked users)
-    useEffect(() => {
-        const combined = [...moderators, ...followedUsers, ...blockedUsers]
-            .map(a => String(a || '').trim())
-            .filter(Boolean);
-        if (combined.length === 0) {
-            setModeratorUsernames({});
-            setFollowedUsernames({});
-            setBlockedUsernames({});
-            return;
-        }
-
-        let cancelled = false;
-        const resolveAll = async () => {
-            try {
-                const mapping = await resolveUsernamesCached(combined, { timeoutMs: 5000 });
-                if (cancelled) return;
-
-                // Build maps for each category
-                const buildMap = (addresses) => {
-                    const result = {};
-                    for (const addr of addresses) {
-                        const lower = String(addr || '').toLowerCase();
-                        const uname = mapping[lower];
-                        result[addr] = uname || addr;
-                    }
-                    return result;
-                };
-
-                setModeratorUsernames(buildMap(moderators));
-                setFollowedUsernames(buildMap(followedUsers));
-                setBlockedUsernames(buildMap(blockedUsers));
-            } catch {
-                if (cancelled) return;
-                // Fallback to addresses
-                const buildFallback = (addresses) => {
-                    const result = {};
-                    addresses.forEach(a => { result[a] = a; });
-                    return result;
-                };
-                setModeratorUsernames(buildFallback(moderators));
-                setFollowedUsernames(buildFallback(followedUsers));
-                setBlockedUsernames(buildFallback(blockedUsers));
-            }
-        };
-        resolveAll();
-        return () => { cancelled = true; };
-    }, [moderators, followedUsers, blockedUsers]);
 
     useEffect(() => {
         if (isOwnProfile) {
@@ -949,189 +732,6 @@ export default function ProfileView({ state }) {
 
 
     // Helper functions for better UX
-    const clearMessages = () => {
-        setModeratorError('');
-        setModeratorSuccess('');
-    };
-
-    const showError = (message) => {
-        setModeratorError(message);
-        setModeratorSuccess('');
-        // Auto-clear error after 5 seconds
-        setTimeout(() => setModeratorError(''), 5000);
-    };
-
-    const showSuccess = (message) => {
-        setModeratorSuccess(message);
-        setModeratorError('');
-        // Auto-clear success after 3 seconds
-        setTimeout(() => setModeratorSuccess(''), 3000);
-    };
-
-    const addModerator = async () => {
-        if (!isOwnProfile) return;
-        const trimmed = newModeratorInput.trim();
-        if (!trimmed) return;
-
-        clearMessages();
-        setIsAddingModerator(true);
-
-        // Validate username format (alphanumeric and hyphens)
-        if (!/^[A-Za-z0-9-]+$/.test(trimmed)) {
-            showError('Invalid username format. Only letters, numbers, and hyphens are allowed.');
-            setIsAddingModerator(false);
-            return;
-        }
-
-        // Check if username exists and get the address
-        try {
-            const response = await Api.get('get_address_from_username', { username: trimmed }, { timeoutMs: 5000 });
-            if (!response || !response.exists || !response.address) {
-                showError(`Username "${trimmed}" not found. Make sure the username exists on-chain.`);
-                setIsAddingModerator(false);
-                return;
-            }
-
-            const modAddress = response.address;
-
-            // Check if moderator address is already in list
-            if (moderators.map(m => m.toLowerCase()).includes(modAddress.toLowerCase())) {
-                showError('This moderator is already in your list.');
-                setIsAddingModerator(false);
-                return;
-            }
-
-            // Create transaction to follow moderator on-chain
-
-            // Fetch fresh parameters before submitting
-            const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
-            if (!paramsData) {
-                showError('Unable to fetch network parameters. Please try again.');
-                setIsAddingModerator(false);
-                return;
-            }
-
-            const lastBlockHash = paramsData.last_block_hash || '';
-            const powDifficulty = Number(paramsData.pow_difficulty);
-
-            if (!lastBlockHash) {
-                showError('Unable to get last block hash from server. Please try again.');
-                setIsAddingModerator(false);
-                return;
-            }
-
-            if (!seedPhrase) {
-                showError('Seed phrase not available. Please sign in again.');
-                setIsAddingModerator(false);
-                return;
-            }
-
-            const transaction = {
-                action: 'follow_moderator',
-                moderator: modAddress,
-                last_block_hash: lastBlockHash,
-                pow_difficulty: powDifficulty,
-                difficulty: powDifficulty,
-            };
-
-            // Submit transaction via facade
-            const result = await tx.performTransaction(
-                transaction,
-                lastBlockHash,
-                derivePrivateKeyFromSeed(seedPhrase),
-                address,
-                false // forcePow
-            );
-
-            if (result.success) {
-                // Update local state on success
-                const updated = [...moderators.filter(m => m !== modAddress), modAddress];
-                if (updated.length > 3) updated.shift();
-                setModerators(updated);
-                if (isOwnProfile) {
-                    Storage.save('followed_moderators', updated);
-                }
-                setNewModeratorInput('');
-                showSuccess(`Successfully added moderator "${trimmed}"`);
-            } else {
-                showError(`Failed to add moderator: ${result.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            showError(`Error checking username: ${error.message || 'Network error'}`);
-        } finally {
-            setIsAddingModerator(false);
-        }
-    };
-
-    const removeModerator = async (modAddress) => {
-        if (!isOwnProfile) return;
-        setIsRemovingModerator(modAddress);
-        clearMessages();
-
-        try {
-            // Create updated list without this moderator
-            const updated = moderators.filter(m => m !== modAddress);
-
-            // Fetch fresh parameters before submitting
-            const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
-            if (!paramsData) {
-                showError('Unable to fetch network parameters. Please try again.');
-                setIsRemovingModerator('');
-                return;
-            }
-
-            const lastBlockHash = paramsData.last_block_hash || '';
-            const powDifficulty = Number(paramsData.pow_difficulty);
-
-            if (!lastBlockHash) {
-                showError('Unable to fetch last block hash. Please try again.');
-                setIsRemovingModerator('');
-                return;
-            }
-
-            const transaction = {
-                action: 'unfollow_moderator',
-                moderator: modAddress,
-                last_block_hash: lastBlockHash,
-                pow_difficulty: powDifficulty >>> 0,
-            };
-
-            const seedPhrase = seedVault.getSeed() || '';
-            if (!seedPhrase) {
-                showError('No seed phrase found. Please sign in again.');
-                setIsRemovingModerator('');
-                return;
-            }
-
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
-            const challenge = `${derivedAddress}:${lastBlockHash}:${powDifficulty}`;
-
-            const result = await tx.performTransaction(transaction, challenge, privateKeyHex, derivedAddress, false);
-
-            if (result && result.success) {
-                setModerators(updated);
-                Storage.save('followed_moderators', updated);
-                const username = moderatorUsernames[modAddress] || modAddress;
-                showSuccess(`Removed moderator "${username}"`);
-            } else {
-                showError(`Failed to remove moderator: ${result?.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            console.error('Remove moderator error:', error);
-            showError(`Failed to remove moderator: ${error.message || error}`);
-        } finally {
-            setIsRemovingModerator('');
-        }
-    };
-
-    const handleModeratorKeyDown = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            addModerator();
-        }
-    };
-
     const handleFollowToggle = async () => {
         if (isOwnProfile || !address || !profileAddress || isFollowInProgress) return;
         const queuePos = await getMyQueuePosition();
@@ -1185,9 +785,6 @@ export default function ProfileView({ state }) {
         : '(address required)';
     const registeredDisplay = formatRegistrationDate(profileRegisteredAt);
     const canEditProfile = isOwnProfile && Boolean(address);
-    const moderatorsEmptyMessage = canEditProfile
-        ? 'You can follow moderators, and any posts or users they choose to block will automatically be blocked for you as well.'
-        : 'Not following any moderators.';
 
     const profileTitle = profileUsername
         ? `@${profileUsername}`
@@ -1239,12 +836,6 @@ export default function ProfileView({ state }) {
                             </ClickableTab>
                             <ClickableTab $active={activeTab === 'posts'} onClick={() => setActiveTab('posts')}>
                                 Posts
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'follows'} onClick={() => setActiveTab('follows')}>
-                                Follows
-                            </ClickableTab>
-                            <ClickableTab $active={activeTab === 'blocks'} onClick={() => setActiveTab('blocks')}>
-                                Blocks
                             </ClickableTab>
                             <ClickableTab $active={activeTab === 'algo'} onClick={() => setActiveTab('algo')}>
                                 Algo
@@ -1393,140 +984,6 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {activeTab === 'follows' && (
-                                <>
-                                    <SectionTitle $first>Moderators</SectionTitle>
-                                    <ValueBox>
-                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                        {!listsLoading && !listsError && moderators.length === 0 && (
-                                            <Mono style={{ color: '#888' }}>{moderatorsEmptyMessage}</Mono>
-                                        )}
-                                        {!listsLoading && !listsError && moderators.length > 0 && (
-                                            isOwnProfile ? (
-                                                <ModeratorsList>
-                                                    {moderators.map((modAddr) => (
-                                                        <ModeratorTag key={modAddr} $isRemoving={isRemovingModerator === modAddr}>
-                                                            <Mono
-                                                                style={{ cursor: 'pointer' }}
-                                                                onClick={() => navigate(`/u/${encodeURIComponent(moderatorUsernames[modAddr] || modAddr)}?tab=posts`)}
-                                                            >
-                                                                {moderatorUsernames[modAddr] && moderatorUsernames[modAddr] !== modAddr
-                                                                    ? moderatorUsernames[modAddr]
-                                                                    : shortenAddress(modAddr)}
-                                                            </Mono>
-                                                            <RemoveModeratorButton
-                                                                onClick={() => removeModerator(modAddr)}
-                                                                title="Remove"
-                                                                disabled={isRemovingModerator === modAddr}
-                                                            >
-                                                                {isRemovingModerator === modAddr ? <LoadingSpinner /> : '×'}
-                                                            </RemoveModeratorButton>
-                                                        </ModeratorTag>
-                                                    ))}
-                                                </ModeratorsList>
-                                            ) : (
-                                                <PostsList>
-                                                    {moderators.map((modAddr) => (
-                                                        <PostItem
-                                                            key={modAddr}
-                                                            onClick={() => navigate(`/u/${encodeURIComponent(moderatorUsernames[modAddr] || modAddr)}?tab=posts`)}
-                                                        >
-                                                            <PostPreview>
-                                                                {moderatorUsernames[modAddr] && moderatorUsernames[modAddr] !== modAddr
-                                                                    ? moderatorUsernames[modAddr]
-                                                                    : shortenAddress(modAddr)}
-                                                            </PostPreview>
-                                                            <PostMeta>{modAddr}</PostMeta>
-                                                        </PostItem>
-                                                    ))}
-                                                </PostsList>
-                                            )
-                                        )}
-                                        {isOwnProfile && !listsLoading && (
-                                            <>
-                                                <ModeratorInputRow>
-                                                    <ModeratorInput
-                                                        type="text"
-                                                        placeholder="Add a moderator by username"
-                                                        value={newModeratorInput}
-                                                        onChange={(e) => {
-                                                            setNewModeratorInput(e.target.value);
-                                                            setModeratorError('');
-                                                            setModeratorSuccess('');
-                                                        }}
-                                                        onKeyDown={handleModeratorKeyDown}
-                                                        disabled={isAddingModerator}
-                                                    />
-                                                    <Button
-                                                        onClick={addModerator}
-                                                        disabled={isAddingModerator || !newModeratorInput.trim()}
-                                                        loading={isAddingModerator}
-                                                        size="sm"
-                                                    >
-                                                        Add
-                                                    </Button>
-                                                </ModeratorInputRow>
-                                                {moderatorError && (
-                                                    <ModeratorErrorMessage>
-                                                        <span>⚠</span>
-                                                        {moderatorError}
-                                                    </ModeratorErrorMessage>
-                                                )}
-                                                {moderatorSuccess && (
-                                                    <ModeratorSuccessMessage>
-                                                        <span>✓</span>
-                                                        {moderatorSuccess}
-                                                    </ModeratorSuccessMessage>
-                                                )}
-                                            </>
-                                        )}
-                                    </ValueBox>
-
-                                    <SectionTitle>Topics</SectionTitle>
-                                    <ValueBox>
-                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                        {!listsLoading && !listsError && followedTopics.length === 0 && (
-                                            <Mono style={{ color: '#888' }}>Not following any topics.</Mono>
-                                        )}
-                                        {!listsLoading && !listsError && followedTopics.length > 0 && (
-                                            <PostsList>
-                                                {followedTopics.map((topic) => (
-                                                    <PostItem key={topic} onClick={() => navigate(`/t/${encodeURIComponent(topic)}`)}>
-                                                        <PostPreview>#{topic}</PostPreview>
-                                                    </PostItem>
-                                                ))}
-                                            </PostsList>
-                                        )}
-                                    </ValueBox>
-
-                                    <SectionTitle>Users</SectionTitle>
-                                    <ValueBox>
-                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                        {!listsLoading && listsError && <Mono style={{ color: '#f87171' }}>{listsError}</Mono>}
-                                        {!listsLoading && !listsError && followedUsers.length === 0 && (
-                                            <Mono style={{ color: '#888' }}>Not following any users.</Mono>
-                                        )}
-                                        {!listsLoading && !listsError && followedUsers.length > 0 && (
-                                            <PostsList>
-                                                {followedUsers.map((userAddr) => (
-                                                    <PostItem
-                                                        key={userAddr}
-                                                        onClick={() => navigate(`/u/${encodeURIComponent(followedUsernames[userAddr] || userAddr)}?tab=posts`)}
-                                                    >
-                                                        <PostPreview>
-                                                            {followedUsernames[userAddr] && followedUsernames[userAddr] !== userAddr
-                                                                ? followedUsernames[userAddr]
-                                                                : shortenAddress(userAddr)}
-                                                        </PostPreview>
-                                                        <PostMeta>{userAddr}</PostMeta>
-                                                    </PostItem>
-                                                ))}
-                                            </PostsList>
-                                        )}
-                                    </ValueBox>
-                                </>
-                            )}
-
                             {activeTab === 'algo' && (
                                 <>
                                     <SectionTitle $first>Topic preferences</SectionTitle>
@@ -1605,49 +1062,6 @@ export default function ProfileView({ state }) {
                                 </>
                             )}
 
-                            {activeTab === 'blocks' && (
-                                <>
-                                    <SectionTitle $first>Blocked Users</SectionTitle>
-                                    <ValueBox>
-                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                        {!listsLoading && !listsError && blockedUsers.length === 0 && (
-                                            <Mono style={{ color: '#888' }}>No blocked users.</Mono>
-                                        )}
-                                        {!listsLoading && !listsError && blockedUsers.length > 0 && (
-                                            <PostsList>
-                                                {blockedUsers.map((userAddr) => (
-                                                    <PostItem key={userAddr} onClick={() => navigate(`/u/${encodeURIComponent(blockedUsernames[userAddr] || userAddr)}`)}>
-                                                        <PostPreview>
-                                                            {blockedUsernames[userAddr] && blockedUsernames[userAddr] !== userAddr
-                                                                ? blockedUsernames[userAddr]
-                                                                : shortenAddress(userAddr)}
-                                                        </PostPreview>
-                                                        <PostMeta>{userAddr}</PostMeta>
-                                                    </PostItem>
-                                                ))}
-                                            </PostsList>
-                                        )}
-                                    </ValueBox>
-
-                                    <SectionTitle>Blocked Posts</SectionTitle>
-                                    <ValueBox>
-                                        {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                        {!listsLoading && !listsError && blockedPosts.length === 0 && (
-                                            <Mono style={{ color: '#888' }}>No blocked posts.</Mono>
-                                        )}
-                                        {!listsLoading && !listsError && blockedPosts.length > 0 && (
-                                            <PostsList>
-                                                {blockedPosts.map((postId) => (
-                                                    <PostItem key={postId} onClick={() => navigate(`/p/${encodeURIComponent(postId)}`)}>
-                                                        <PostPreview>{shortenAddress(postId)}</PostPreview>
-                                                        <PostMeta>{postId}</PostMeta>
-                                                    </PostItem>
-                                                ))}
-                                            </PostsList>
-                                        )}
-                                    </ValueBox>
-                                </>
-                            )}
                         </ContainerBody>
                     </TabbedContainer>
                 </ModernPostFeed>

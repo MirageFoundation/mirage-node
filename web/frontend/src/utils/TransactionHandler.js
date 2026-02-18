@@ -5,6 +5,7 @@ import seedVault from './SeedVault';
 import { getPublicKey as secp256k1GetPublicKey } from '@noble/secp256k1';
 import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from './CryptoUtils.js';
 import Api from '../lib/api';
+import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Subscriptions';
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
@@ -84,6 +85,11 @@ class TransactionHandler {
             // Map<key, { action: 'follow'|'unfollow', type: 'user'|'topic', target: string, queuePosition: number }>
             this.pendingFollows = new Map();
             this._followListeners = new Set();
+
+            // Track in-flight block/unblock operations with queue position and action type
+            // Map<key, { action: 'block'|'unblock', type: 'user'|'topic'|'post', target: string, queuePosition: number }>
+            this.pendingBlocks = new Map();
+            this._blockListeners = new Set();
 
             // Track in-flight votes by post ID: Map<postId, { direction: number, queuePosition: number }>
             this.pendingVotes = new Map();
@@ -193,6 +199,39 @@ class TransactionHandler {
     getPendingFollowInfo(type, target) {
         const key = `${type}:${String(target || '').toLowerCase()}`;
         return this.pendingFollows.get(key) || null;
+    }
+
+    // Block tracking methods
+    addBlockListener(callback) {
+        if (typeof callback === 'function') {
+            this._blockListeners.add(callback);
+        }
+        return () => this._blockListeners.delete(callback);
+    }
+
+    _notifyBlockListeners() {
+        const pending = this.getPendingBlocks();
+        this._blockListeners.forEach(cb => {
+            try { cb(pending); } catch (_) { }
+        });
+    }
+
+    getPendingBlocks() {
+        const result = {};
+        this.pendingBlocks.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    isPendingBlock(type, target) {
+        const key = `${type}:${String(target || '').toLowerCase()}`;
+        return this.pendingBlocks.has(key);
+    }
+
+    getPendingBlockInfo(type, target) {
+        const key = `${type}:${String(target || '').toLowerCase()}`;
+        return this.pendingBlocks.get(key) || null;
     }
 
     addStatusListener(callback) {
@@ -459,7 +498,6 @@ class TransactionHandler {
      */
     async blockPost(txhash) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
@@ -473,42 +511,33 @@ class TransactionHandler {
                 }
             } catch (_) { }
 
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                updateNotification("Blocking post");
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
-                try {
-                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
-                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
-                } catch (_) { }
+            const key = `post:${txhashTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "block post already in progress" };
             }
 
-            const tx = {
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'block', type: 'post', target: txhashTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue block_post", { target: txhashTrimmed, queuePosition });
+
+            const baseTx = {
                 action: 'block_post',
                 target: txhashTrimmed,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
             };
 
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    console.debug("[blocks] resolved block_post", { target: txhashTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
         } catch (e) {
             return { success: false, error: String(e?.message || e) };
         }
@@ -516,43 +545,36 @@ class TransactionHandler {
 
     async unblockPost(txhash) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
-
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                updateNotification("Unblocking post");
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
+            const key = `post:${txhashTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "unblock post already in progress" };
             }
 
-            const tx = {
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'unblock', type: 'post', target: txhashTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue unblock_post", { target: txhashTrimmed, queuePosition });
+
+            const baseTx = {
                 action: 'unblock_post',
                 target: txhashTrimmed,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
             };
 
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    console.debug("[blocks] resolved unblock_post", { target: txhashTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
         } catch (e) {
             return { success: false, error: String(e?.message || e) };
         }
@@ -560,7 +582,6 @@ class TransactionHandler {
 
     async blockUser(address) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
@@ -574,38 +595,33 @@ class TransactionHandler {
                 }
             } catch (_) { }
 
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                updateNotification("Blocking user");
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
+            const key = `user:${addressTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "block user already in progress" };
             }
 
-            const tx = {
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'block', type: 'user', target: addressTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue block_user", { target: addressTrimmed, queuePosition });
+
+            const baseTx = {
                 action: 'block_user',
                 target: addressTrimmed,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
             };
 
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
-
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    console.debug("[blocks] resolved block_user", { target: addressTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
         } catch (e) {
             return { success: false, error: String(e?.message || e) };
         }
@@ -613,43 +629,135 @@ class TransactionHandler {
 
     async unblockUser(address) {
         try {
-            const seedPhrase = seedVault.getSeed() || "";
             const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
-
-            const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            let last_block_hash = "";
-            let pow_difficulty = 0;
-            let pow_base_bits = 0;
-            let pow_factor = 0;
-            if (userLevel === 0) {
-                updateNotification("Unblocking user");
-                const [statusData] = await Promise.all([
-                    Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
-                ]);
-                last_block_hash = statusData.last_block_hash || "";
-                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
-                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
-                pow_factor = requirePowFactor(statusData.pow_factor);
+            const key = `user:${addressTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "unblock user already in progress" };
             }
 
-            const tx = {
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'unblock', type: 'user', target: addressTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue unblock_user", { target: addressTrimmed, queuePosition });
+
+            const baseTx = {
                 action: 'unblock_user',
                 target: addressTrimmed,
-                last_block_hash,
-                pow_difficulty,
-                pow_base_bits,
-                pow_factor,
-                timestamp: Math.max(0, Date.now() - 15000),
             };
 
-            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
-            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
-            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    console.debug("[blocks] resolved unblock_user", { target: addressTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
 
-            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
-            return result;
+    async blockTopic(topic) {
+        try {
+            const publicKey = Storage.load("publicKey", "");
+            const topicTrimmed = String(topic || "").trim().toLowerCase();
+            if (!topicTrimmed) return { success: false, error: "empty topic" };
+
+            // Check if topic is already blocked
+            try {
+                const blocked = await Api.get('get_user_blocked', { address: publicKey }, { timeoutMs: 5000 });
+                const blockedTopics = (blocked?.blocked_topics || []).map(t => String(t).toLowerCase());
+                if (blockedTopics.includes(topicTrimmed)) {
+                    return { success: false, error: "topic is already blocked" };
+                }
+            } catch (_) { }
+
+            const key = `topic:${topicTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "block topic already in progress" };
+            }
+
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'block', type: 'topic', target: topicTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue block_topic", { target: topicTrimmed, queuePosition });
+
+            const baseTx = {
+                action: 'block_topic',
+                topic: topicTrimmed,
+                target: "",
+            };
+
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    // Mutual exclusion: blocking a topic unfollows it on-chain.
+                    // Update sidebar immediately so the blocked topic disappears.
+                    if (result?.success) {
+                        // Delay all feed/sidebar updates so the caller can show success UI first
+                        setTimeout(() => {
+                            notifyTopicsUpdated({ removed: topicTrimmed });
+                            invalidateSubCache();
+                            window.dispatchEvent(new CustomEvent('topicBlocked', { detail: { topic: topicTrimmed } }));
+                        }, 3200);
+                    }
+                    console.debug("[blocks] resolved block_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
+    async unblockTopic(topic) {
+        try {
+            const publicKey = Storage.load("publicKey", "");
+            const topicTrimmed = String(topic || "").trim().toLowerCase();
+            if (!topicTrimmed) return { success: false, error: "empty topic" };
+            const key = `topic:${topicTrimmed}`;
+            if (this.pendingBlocks.has(key)) {
+                return { success: false, error: "unblock topic already in progress" };
+            }
+
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingBlocks.set(key, { action: 'unblock', type: 'topic', target: topicTrimmed, queuePosition });
+            this._notifyBlockListeners();
+            console.debug("[blocks] enqueue unblock_topic", { target: topicTrimmed, queuePosition });
+
+            const baseTx = {
+                action: 'unblock_topic',
+                topic: topicTrimmed,
+                target: "",
+            };
+
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingBlocks.delete(key);
+                    this._notifyBlockListeners();
+                    if (result?.success) {
+                        window.dispatchEvent(new CustomEvent('topicUnblocked', { detail: { topic: topicTrimmed } }));
+                    }
+                    console.debug("[blocks] resolved unblock_topic", { target: topicTrimmed, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _blockKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
         } catch (e) {
             return { success: false, error: String(e?.message || e) };
         }
@@ -810,6 +918,10 @@ class TransactionHandler {
             const wrappedResolve = (result) => {
                 this.pendingFollows.delete(key);
                 this._notifyFollowListeners();
+                if (result?.success) {
+                    notifyTopicsUpdated({ removed: topicTrimmed });
+                    invalidateSubCache();
+                }
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
@@ -1481,7 +1593,7 @@ class TransactionHandler {
             // Get the next transaction  
             const queued = this.transactions.shift() || {};
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
-            const { _resolve: _ignored, _followKey: _ignored2, ...transaction } = queued;
+            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, ...transaction } = queued;
             this.processedTransactions += 1;
             // Track quest-relevant actions
             if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
@@ -1634,6 +1746,43 @@ class TransactionHandler {
                 final_transaction = {
                     action: transaction.action,
                     topic: transaction.topic,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "block_user" || transaction.action === "unblock_user") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "block_post" || transaction.action === "unblock_post") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target,
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "block_topic" || transaction.action === "unblock_topic") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2566,6 +2715,114 @@ class TransactionHandler {
         );
     }
 
+    // Build canonical bytes for MsgBlockTopic
+    canonicalBlockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]); // topic
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            tag101, encStr(topic || ""),
+        );
+    }
+
+    // Build canonical bytes for MsgUnblockTopic
+    canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);    // envelope_timestamp
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]); // topic
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            tag101, encStr(topic || ""),
+        );
+    }
+
     // Build canonical bytes for MsgDelete (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
     canonicalDelete({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
@@ -2714,6 +2971,8 @@ class TransactionHandler {
             else if (action === 'unblock_post') msgName = 'MsgUnblockPost';
             else if (action === 'block_user') msgName = 'MsgBlockUser';
             else if (action === 'unblock_user') msgName = 'MsgUnblockUser';
+            else if (action === 'block_topic') msgName = 'MsgBlockTopic';
+            else if (action === 'unblock_topic') msgName = 'MsgUnblockTopic';
             else if (action === 'delete_post') msgName = 'MsgDelete';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
             else if (action === 'set_username') msgName = 'MsgSetUsername';
@@ -3054,6 +3313,56 @@ class TransactionHandler {
                     pow: Number(proof),
                 };
                 endpoint = 'core/unblock_user';
+            } else if (msgName === 'MsgBlockTopic') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const canon = this.canonicalBlockTopic({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    topic: transaction.topic || "",
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/block_topic';
+            } else if (msgName === 'MsgUnblockTopic') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const canon = this.canonicalUnblockTopic({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: transaction.target || "",
+                    topic: transaction.topic || "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    topic: transaction.topic || "",
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/unblock_topic';
             } else if (msgName === 'MsgDelete') {
                 // Sign relay for delete post (must match chain ante)
                 const difficulty = resolveTxDifficulty(transaction);
@@ -4116,6 +4425,38 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     tag100, encStr(transaction.target || ""),
                 );
+            } else if (action === 'block_topic') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgBlockTopic\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.topic || ""),
+                );
+            } else if (action === 'unblock_topic') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnblockTopic\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.topic || ""),
+                );
             } else if (action === 'delete_post') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgDelete\x00");
                 const tag2 = Uint8Array.from([2]);
@@ -4217,7 +4558,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, delete_post, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();
@@ -4292,8 +4633,8 @@ class TransactionHandler {
 
                 // Log PoW completion stats
                 const iterations = ((rawProof - start) >>> 0) + 1;
-                const hashesPerSec = taken > 0 ? (iterations / taken).toFixed(1) : 'N/A';
-                console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec} H/s`);
+                const hashesPerSec = taken > 0.05 ? (iterations / taken).toFixed(1) : null;
+                console.log(`[PoW] completed: ${taken.toFixed(2)}s, difficulty=${difficulty}, iterations=${iterations}, speed=${hashesPerSec || 'instant'} H/s`);
                 if (rawProof !== proof) {
                     try {
                         console.warn('[PoW] proof overflow normalized', { rawProof, proof, start });
@@ -4302,7 +4643,7 @@ class TransactionHandler {
                 this._setStatus("submitting");
                 try {
                     await this.handleTransactionResult(proof, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
-                    updateNotification(`Transaction submitted (${hashesPerSec} H/s)`);
+                    updateNotification(hashesPerSec ? `Transaction submitted (${hashesPerSec} H/s)` : "Transaction submitted");
                 } finally {
                     this._setStatus("idle");
                 }

@@ -114,6 +114,10 @@ from shared.canon import (
     uvarint,
 )
 
+_RETRY_STATUS_CODES = {429, 502, 503, 504}
+_MAX_HTTP_RETRIES = 10
+_BASE_RETRY_SLEEP_SEC = 0.5
+
 try:
     from argon2.low_level import hash_secret_raw as _argon2_hash_raw, Type as _Argon2Type
 except Exception:
@@ -126,6 +130,51 @@ def _log(msg: str) -> None:
         print(msg, flush=True)
     except Exception:
         pass
+
+
+def _retry_delay_seconds(attempt: int, retry_after_header: str | None = None) -> float:
+    if retry_after_header:
+        try:
+            retry_after = float(str(retry_after_header).strip())
+            if retry_after > 0:
+                return min(5.0, retry_after)
+        except Exception:
+            pass
+    # bounded exponential backoff: 0.5, 1, 2, 4, 8, 8...
+    return min(8.0, _BASE_RETRY_SLEEP_SEC * (2 ** max(0, attempt - 1)))
+
+
+def _request_with_retries(method: str, url: str, **kwargs) -> requests.Response:
+    last_exc: Exception | None = None
+    last_resp: requests.Response | None = None
+    for attempt in range(1, _MAX_HTTP_RETRIES + 1):
+        try:
+            resp = _session.request(method, url, **kwargs)
+            if resp.status_code in _RETRY_STATUS_CODES and attempt < _MAX_HTTP_RETRIES:
+                delay = _retry_delay_seconds(attempt, resp.headers.get("Retry-After"))
+                _log(
+                    f"[http-retry] {method} {url} status={resp.status_code} "
+                    f"attempt={attempt}/{_MAX_HTTP_RETRIES} sleep={delay:.2f}s"
+                )
+                time.sleep(delay)
+                last_resp = resp
+                continue
+            return resp
+        except requests.RequestException as e:
+            last_exc = e
+            if attempt >= _MAX_HTTP_RETRIES:
+                raise
+            delay = _retry_delay_seconds(attempt, None)
+            _log(
+                f"[http-retry] {method} {url} error={type(e).__name__} "
+                f"attempt={attempt}/{_MAX_HTTP_RETRIES} sleep={delay:.2f}s"
+            )
+            time.sleep(delay)
+    if last_exc:
+        raise last_exc
+    if last_resp is not None:
+        return last_resp
+    raise RuntimeError(f"request failed without response: {method} {url}")
 
 
 _BASE_DIFFICULTY_FACTOR = 1000
@@ -337,7 +386,7 @@ def create_wallet_from_seed(seed_phrase: str, prefix: str = "mirage") -> LocalWa
 
 def get_status(backend: str, address: str | None = None) -> dict:
     params = {"address": address} if address else {}
-    r = _session.get(f"{backend}/api/get_parameters", params=params, timeout=5)
+    r = _request_with_retries("GET", f"{backend}/api/get_parameters", params=params, timeout=5)
     r.raise_for_status()
     try:
         return r.json()
@@ -346,19 +395,19 @@ def get_status(backend: str, address: str | None = None) -> dict:
 
 
 def get_chain_config(backend: str) -> dict:
-    r = _session.get(f"{backend}/api/get_chain_config", timeout=5)
+    r = _request_with_retries("GET", f"{backend}/api/get_chain_config", timeout=5)
     r.raise_for_status()
     return r.json()
 
 
 def get_node_config(backend: str) -> dict:
-    r = _session.get(f"{backend}/api/get_node_config", timeout=5)
+    r = _request_with_retries("GET", f"{backend}/api/get_node_config", timeout=5)
     r.raise_for_status()
     return r.json()
 
 
 def get_user_status(backend: str, address: str) -> dict:
-    r = _session.get(f"{backend}/api/get_user_status", params={"address": address}, timeout=5)
+    r = _request_with_retries("GET", f"{backend}/api/get_user_status", params={"address": address}, timeout=5)
     r.raise_for_status()
     return r.json()
 
@@ -369,7 +418,7 @@ def get_config(*_args, **_kwargs) -> dict:
 
 def get_username_from_address(backend: str, address: str) -> str | None:
     try:
-        r = _session.get(f"{backend}/api/get_profile", params={"address": address}, timeout=5)
+        r = _request_with_retries("GET", f"{backend}/api/get_profile", params={"address": address}, timeout=5)
         r.raise_for_status()
         profile = r.json()
         username = profile.get("username")
@@ -380,7 +429,9 @@ def get_username_from_address(backend: str, address: str) -> str | None:
 
 def get_address_from_username(backend: str, username: str) -> str | None:
     try:
-        r = _session.get(f"{backend}/api/get_address_from_username", params={"username": username}, timeout=5)
+        r = _request_with_retries(
+            "GET", f"{backend}/api/get_address_from_username", params={"username": username}, timeout=5
+        )
         r.raise_for_status()
         data = r.json()
         if data.get("exists"):
@@ -417,7 +468,7 @@ def get_user_level(backend: str, address: str, use_cache: bool = True) -> int:
             return cached
 
     try:
-        r = _session.get(f"{backend}/api/get_user_status", params={"address": addr}, timeout=5)
+        r = _request_with_retries("GET", f"{backend}/api/get_user_status", params={"address": addr}, timeout=5)
         r.raise_for_status()
         data = r.json()
         level = int(data.get("user_level", 0) or 0)

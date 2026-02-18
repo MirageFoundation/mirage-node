@@ -1296,6 +1296,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     useEffect(() => { hideDownvotedPostsRef.current = hideDownvotedPosts; }, [hideDownvotedPosts]);
 
     const [hidingPostsSet, setHidingPostsSet] = useState(() => new Set()); // Posts animating out
+    const [blockedTopicsLocal, setBlockedTopicsLocal] = useState(() => new Set()); // Optimistic blocked topic patterns (may contain *)
     const [flashingPostsSet, setFlashingPostsSet] = useState(() => {
         // Consume any pending highlight on mount
         const pendingId = Storage.consumePendingPostHighlight();
@@ -1313,8 +1314,26 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         } catch (_) { }
         return false;
     });
+    const _topicMatchesPattern = (topic, pattern) => {
+        if (!pattern.includes('*')) return topic === pattern;
+        const re = new RegExp('^' + pattern.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+        return re.test(topic);
+    };
+    const isTopicBlockedLocal = (topicVal) => {
+        const t = String(topicVal || '').trim().toLowerCase();
+        if (!t) return false;
+        if (blockedTopicsLocal.size === 0) return false;
+        for (const pat of blockedTopicsLocal) {
+            if (_topicMatchesPattern(t, pat)) return true;
+        }
+        return false;
+    };
     const location = useLocation();  // Call useLocation at the top level of the component
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
+
+    useEffect(() => {
+        setBlockedTopicsLocal(new Set());
+    }, [viewerAddress]);
     const [followedTopicsSet, setFollowedTopicsSet] = useState(new Set());
     const [followedAuthorsSet, setFollowedAuthorsSet] = useState(new Set());
     const [topicFollowHover, setTopicFollowHover] = useState(false);
@@ -2158,7 +2177,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         if (shouldFetch && !topicsLoadedRef.current) {
             topicsLoadedRef.current = true;
             let cancelled = false;
-            Api.get('get_topics', { limit: 50, min_posts: 1 })
+            Api.get('get_topics', { limit: 50, min_posts: 1, address: viewerAddress })
                 .then((data) => {
                     if (cancelled || !isMountedRef.current) return;
                     if (data && Array.isArray(data.topics)) {
@@ -2283,6 +2302,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
             const topicVal = String(p.topic || '').trim().toLowerCase();
             const isReserved = ['all', 'home', 'following'].includes(topicVal);
+            if (isTopicBlockedLocal(topicVal)) return false;
             return hasTitle && hasTopic && !isReserved;
         };
         const topLevelPosts = postsArray.filter(isTopLevelPost);
@@ -2431,8 +2451,42 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 getPosts(urlTopic, null, 1);
             } catch (_) { /* noop */ }
         };
+        const applyBlockedTopic = (raw) => {
+            const topic = String(raw || '').trim().toLowerCase();
+            if (!topic) return;
+            setBlockedTopicsLocal(prev => new Set([...prev, topic]));
+            console.debug('[blocked_topics] optimistic pattern added', { topic });
+        };
+        const removeBlockedTopic = (raw) => {
+            const topic = String(raw || '').trim().toLowerCase();
+            if (!topic) return;
+            setBlockedTopicsLocal(prev => {
+                const next = new Set(prev);
+                next.delete(topic);
+                return next;
+            });
+            console.debug('[blocked_topics] optimistic pattern removed', { topic });
+        };
+        const onTopicBlocked = (e) => {
+            applyBlockedTopic(e?.detail?.topic || '');
+            handler();
+        };
+        const onTopicUnblocked = (e) => {
+            removeBlockedTopic(e?.detail?.topic || '');
+            handler();
+        };
         window.addEventListener('mirageRefreshFeed', handler);
-        return () => window.removeEventListener('mirageRefreshFeed', handler);
+        window.addEventListener('followedTopicsUpdated', handler);
+        window.addEventListener('followedUsersUpdated', handler);
+        window.addEventListener('topicBlocked', onTopicBlocked);
+        window.addEventListener('topicUnblocked', onTopicUnblocked);
+        return () => {
+            window.removeEventListener('mirageRefreshFeed', handler);
+            window.removeEventListener('followedTopicsUpdated', handler);
+            window.removeEventListener('followedUsersUpdated', handler);
+            window.removeEventListener('topicBlocked', onTopicBlocked);
+            window.removeEventListener('topicUnblocked', onTopicUnblocked);
+        };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [getPosts, urlTopic]);
 
@@ -2545,7 +2599,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             // Convert the posts object to an array once
             const postsArray = Object.values(state.posts || {});
 
-            // Only include top-level posts (exclude comments or partial objects, and deleted posts)
+            // Only include top-level posts (exclude comments or partial objects, deleted, and optimistically blocked topics)
             const isTopLevelPost = (p) => {
                 if (!p || p.deleted) return false;
                 if (p.hidden_client) return false;
@@ -2553,6 +2607,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const hasTopic = typeof p.topic === 'string' && p.topic.trim().length > 0;
                 const topicVal = String(p.topic || '').trim().toLowerCase();
                 const isReserved = ['all', 'home', 'following'].includes(topicVal);
+                if (isTopicBlockedLocal(topicVal)) return false;
                 return hasTitle && hasTopic && !isReserved;
             };
             const topLevelPosts = postsArray.filter(isTopLevelPost);

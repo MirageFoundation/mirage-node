@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	storetypes "cosmossdk.io/store/types"
 	upgradetypes "cosmossdk.io/x/upgrade/types"
 	cmtproto "github.com/cometbft/cometbft/proto/tendermint/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
@@ -166,7 +167,7 @@ func (app *App) RegisterUpgradeHandlers() {
 					{"followed_topics", app.CoreKeeper.SetProfileFollowedTopics},
 					{"blocked_users", app.CoreKeeper.SetProfileBlockedUsers},
 					{"blocked_posts", app.CoreKeeper.SetProfileBlockedPosts},
-					{"quality_posts", app.CoreKeeper.SetProfileQualityPosts},
+					{"blocked_topics", app.CoreKeeper.SetProfileBlockedTopics},
 				}
 
 				for _, lm := range listMigrations {
@@ -1206,6 +1207,78 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.12.0 complete - media field on MsgPost, params renamed")
+			return toVM, nil
+		},
+	)
+
+	// v1.13.0: Topic blocking + quality_posts removal
+	// - TierConfig field 7 renamed from max_quality_posts to max_blocked_topics (same wire format)
+	// - New MsgBlockTopic / MsgUnblockTopic message types
+	// - Old plist_quality/ KV data is orphaned (no code reads it) — cleaned up here
+	// - Tier configs updated with correct MaxBlockedTopics values (10/125/500/1000)
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.13.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.13.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Update tier configs with correct MaxBlockedTopics values.
+			// Field 7 was renamed from max_quality_posts to max_blocked_topics (same field number),
+			// so existing chains may have stale values from the old quality_posts feature.
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			desiredMaxBlockedTopics := []uint64{10, 125, 500, 1000}
+			changed := false
+			for i, tier := range params.Tiers {
+				if i < len(desiredMaxBlockedTopics) && tier.MaxBlockedTopics != desiredMaxBlockedTopics[i] {
+					sdkCtx.Logger().Info("v1.13.0: updating MaxBlockedTopics",
+						"tier", i, "old", tier.MaxBlockedTopics, "new", desiredMaxBlockedTopics[i])
+					tier.MaxBlockedTopics = desiredMaxBlockedTopics[i]
+					params.Tiers[i] = tier
+					changed = true
+				}
+			}
+			if changed {
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.13.0: failed to update params", "err", err)
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.13.0: tier MaxBlockedTopics updated")
+			}
+
+			// Clean up orphaned plist_quality/ KV data from removed quality_posts feature.
+			// This prefix is no longer read by any code, so we delete all keys under it.
+			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
+			qualityPrefix := []byte("plist_quality/")
+			iter, err := store.Iterator(qualityPrefix, storetypes.PrefixEndBytes(qualityPrefix))
+			if err == nil {
+				deletedCount := 0
+				for ; iter.Valid(); iter.Next() {
+					_ = store.Delete(iter.Key())
+					deletedCount++
+				}
+				iter.Close()
+				if deletedCount > 0 {
+					sdkCtx.Logger().Info("v1.13.0: cleaned up orphaned quality_posts data", "keys_deleted", deletedCount)
+				}
+			}
+
+			// Increase MintQuantity: 350 MIRAGE → 125,000 MIRAGE per 10min (~357x)
+			if params.MintQuantity != 125_000_000_000 {
+				sdkCtx.Logger().Info("v1.13.0: updating MintQuantity",
+					"old", params.MintQuantity, "new", 125_000_000_000)
+				params.MintQuantity = 125_000_000_000
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					sdkCtx.Logger().Error("v1.13.0: failed to update MintQuantity", "err", err)
+					return nil, err
+				}
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.13.0 complete - topic blocking, quality_posts removed, minting increased")
 			return toVM, nil
 		},
 	)

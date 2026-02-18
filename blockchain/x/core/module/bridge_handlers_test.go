@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"strings"
 	"testing"
 
 	sdkmath "cosmossdk.io/math"
@@ -12,19 +13,19 @@ import (
 )
 
 type bridgeMockKeeper struct {
-	params            types.Params
-	balances          map[string]uint64
-	sequences         map[string]uint64
-	burnRecords       map[string]*types.BridgeBurnRecord
-	mintedRecords     map[string]*types.BridgeMintedRecord
-	attestations      map[string]*types.BridgeAttestation
-	mintAttestations  map[string]*types.BridgeMintAttestation
-	burnAttestors     map[string]int64 // inbound attestors
-	mintAttestors     map[string]int64 // outbound attestors
-	bondedValidators  map[string]bool
-	validatorPowers   map[string]int64
-	totalPower        int64
-	pendingCount      int64
+	params           types.Params
+	balances         map[string]uint64
+	sequences        map[string]uint64
+	burnRecords      map[string]*types.BridgeBurnRecord
+	mintedRecords    map[string]*types.BridgeMintedRecord
+	attestations     map[string]*types.BridgeAttestation
+	mintAttestations map[string]*types.BridgeMintAttestation
+	burnAttestors    map[string]int64 // inbound attestors
+	mintAttestors    map[string]int64 // outbound attestors
+	bondedValidators map[string]bool
+	validatorPowers  map[string]int64
+	totalPower       int64
+	pendingCount     int64
 }
 
 func newBridgeMockKeeper(params types.Params) *bridgeMockKeeper {
@@ -193,9 +194,9 @@ func testBridgeParams(chain string, fee uint64) types.Params {
 	params := types.DefaultParams()
 	params.BridgeChains = []*types.BridgeChainConfig{
 		{
-			ChainId:  chain,
-			Enabled:  true,
-			Fee:      fee,
+			ChainId: chain,
+			Enabled: true,
+			Fee:     fee,
 		},
 	}
 	return params
@@ -252,11 +253,11 @@ func TestBridgeAttestBurnedHandlerThreshold(t *testing.T) {
 
 	recipient := testAccAddressString()
 	req := &types.MsgBridgeAttestBurned{
-		Validator:        validator,
-		SourceChain:      "solana",
-		BurnId:           "burn123",
-		MirageRecipient:  recipient,
-		Amount:           1000,
+		Validator:       validator,
+		SourceChain:     "solana",
+		BurnId:          "burn123",
+		MirageRecipient: recipient,
+		Amount:          1000,
 	}
 
 	resp, err := bridgeAttestBurned(ctx, mk, req)
@@ -318,6 +319,31 @@ func TestBridgeAttestBurnedHandlerDuplicate(t *testing.T) {
 	}
 }
 
+func TestBridgeAttestBurnedRejectsUnbondedValidator(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	validator := testAccAddressString()
+	recipient := sdk.AccAddress(bytes.Repeat([]byte{0x02}, 20)).String()
+	req := &types.MsgBridgeAttestBurned{
+		Validator:       validator,
+		SourceChain:     "solana",
+		BurnId:          "burn-unbonded",
+		MirageRecipient: recipient,
+		Amount:          100,
+	}
+
+	t.Logf("[debug] unbonded validator=%s burn_id=%s", validator, req.BurnId)
+	_, err := bridgeAttestBurned(ctx, mk, req)
+	if err == nil {
+		t.Fatal("expected error for unbonded validator")
+	}
+	if !strings.Contains(err.Error(), "not bonded") {
+		t.Fatalf("expected bonded validation error, got %v", err)
+	}
+}
+
 func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 	ctx := newMockContext()
 	params := testBridgeParams("solana", 0)
@@ -353,6 +379,41 @@ func TestBridgeAttestMintedHandlerHappyPath(t *testing.T) {
 	}
 	if _, found := mk.mintedRecords["solana/1"]; !found {
 		t.Fatal("expected mint record to be stored")
+	}
+}
+
+func TestBridgeAttestMintedRejectsFutureSequence(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	mk.sequences["solana"] = 1
+
+	validator := testAccAddressString()
+	validatorAcc, err := sdk.AccAddressFromBech32(validator)
+	if err != nil {
+		t.Fatalf("validator bech32 error: %v", err)
+	}
+	valoper := sdk.ValAddress(validatorAcc).String()
+	mk.bondedValidators[valoper] = true
+	mk.validatorPowers[valoper] = 10
+	mk.totalPower = 100
+
+	req := &types.MsgBridgeAttestMinted{
+		Validator:        validator,
+		BurnId:           "2",
+		DestinationChain: "solana",
+		DestinationTx:    "sig123",
+		MirageTxHash:     "miragehash",
+	}
+
+	t.Logf("[debug] current_seq=%d burn_id=%s", mk.sequences["solana"], req.BurnId)
+	_, err = bridgeAttestMinted(ctx, mk, req)
+	if err == nil {
+		t.Fatal("expected error for burn_id beyond current sequence")
+	}
+	if !strings.Contains(err.Error(), "invalid burn_id") {
+		t.Fatalf("expected burn_id range error, got %v", err)
 	}
 }
 

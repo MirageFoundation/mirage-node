@@ -22,6 +22,8 @@ from shared.datatypes import (
     MsgUnblockPost,
     MsgBlockUser,
     MsgUnblockUser,
+    MsgBlockTopic,
+    MsgUnblockTopic,
     MsgDelete,
     MsgSetLevel,
     MsgUpgradeLevel,
@@ -87,6 +89,8 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgUnblockPost": MsgUnblockPost,
     "/mirage.core.v1.MsgBlockUser": MsgBlockUser,
     "/mirage.core.v1.MsgUnblockUser": MsgUnblockUser,
+    "/mirage.core.v1.MsgBlockTopic": MsgBlockTopic,
+    "/mirage.core.v1.MsgUnblockTopic": MsgUnblockTopic,
     "/mirage.core.v1.MsgDelete": MsgDelete,
     "/mirage.core.v1.MsgSetLevel": MsgSetLevel,
     "/mirage.core.v1.MsgUpgradeLevel": MsgUpgradeLevel,
@@ -137,6 +141,10 @@ class MessageProcessor:
             self._handle_block_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgUnblockUser":
             self._handle_unblock_user(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgBlockTopic":
+            self._handle_block_topic(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgUnblockTopic":
+            self._handle_unblock_topic(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgDelete":
             self._handle_delete(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetLevel":
@@ -1023,6 +1031,8 @@ class MessageProcessor:
                 return
 
             self.db.follow_user(owner, user)
+            self.db.unblock_user(owner, user)
+            logger.debug("Follow user removed block: owner=%s user=%s", owner, user)
             self.log_yaml(
                 "Follow user",
                 {"owner": owner, "user": user, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1065,6 +1075,9 @@ class MessageProcessor:
                 return
 
             self.db.follow_topic(owner, topic)
+            removed = self.db.unblock_topics_matching(owner, topic)
+            if removed > 0:
+                logger.debug("Follow topic removed block(s): owner=%s topic=%s removed=%d", owner, topic, removed)
             self.log_yaml(
                 "Follow topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1149,6 +1162,8 @@ class MessageProcessor:
                 return
 
             self.db.block_user(owner, target)
+            self.db.unfollow_user(owner, target)
+            logger.debug("Block user removed follow: owner=%s target=%s", owner, target)
             self.log_yaml(
                 "Block user",
                 {"owner": owner, "target": target, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1176,6 +1191,51 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnblockUser: %s", e, exc_info=True)
+
+    def _handle_block_topic(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgBlockTopic."""
+        try:
+            parsed = MsgBlockTopic()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = derive_owner_from_msg(msg_dict)
+            topic = str(msg_dict.get("topic", "")).strip().lower()
+
+            if not owner or not topic:
+                logger.warning("Rejected block_topic: missing owner or topic")
+                return
+
+            self.db.block_topic(owner, topic)
+            removed = self.db.unfollow_topics_matching(owner, topic)
+            if removed > 0:
+                logger.debug("Block topic removed follow(s): owner=%s pattern=%s removed=%d", owner, topic, removed)
+            self.log_yaml(
+                "Block topic",
+                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
+            )
+        except Exception as e:
+            logger.error("Error handling MsgBlockTopic: %s", e, exc_info=True)
+
+    def _handle_unblock_topic(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgUnblockTopic."""
+        try:
+            parsed = MsgUnblockTopic()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = derive_owner_from_msg(msg_dict)
+            topic = str(msg_dict.get("topic", "")).strip().lower()
+
+            if not owner or not topic:
+                logger.warning("Rejected unblock_topic: missing owner or topic")
+                return
+
+            self.db.unblock_topic(owner, topic)
+            self.log_yaml(
+                "Unblock topic",
+                {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
+            )
+        except Exception as e:
+            logger.error("Error handling MsgUnblockTopic: %s", e, exc_info=True)
 
     def _handle_delete(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDelete.

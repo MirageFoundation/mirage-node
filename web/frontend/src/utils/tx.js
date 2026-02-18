@@ -86,6 +86,27 @@ export async function getPendingFollowInfo(type, target) {
     return h.getPendingFollowInfo(type, target);
 }
 
+// Block tracking
+export async function addBlockListener(fn) {
+    const h = await getHandler();
+    return h.addBlockListener(fn);
+}
+
+export async function getPendingBlocks() {
+    const h = await getHandler();
+    return h.getPendingBlocks();
+}
+
+export async function isPendingBlock(type, target) {
+    const h = await getHandler();
+    return h.isPendingBlock(type, target);
+}
+
+export async function getPendingBlockInfo(type, target) {
+    const h = await getHandler();
+    return h.getPendingBlockInfo(type, target);
+}
+
 export async function cacheChainConfig(data) {
     const h = await getHandler();
     return h.cacheChainConfig(data);
@@ -157,6 +178,26 @@ export async function blockPost(txhash, block = true) {
     return h.blockPost(txhash, block);
 }
 
+export async function unblockUser(address) {
+    const h = await getHandler();
+    return h.unblockUser(address);
+}
+
+export async function unblockPost(txhash) {
+    const h = await getHandler();
+    return h.unblockPost(txhash);
+}
+
+export async function blockTopic(topic) {
+    const h = await getHandler();
+    return h.blockTopic(topic);
+}
+
+export async function unblockTopic(topic) {
+    const h = await getHandler();
+    return h.unblockTopic(topic);
+}
+
 export async function reportPost(txhash, reason) {
     const h = await getHandler();
     return h.reportPost(txhash, reason);
@@ -180,6 +221,26 @@ export async function setAutoRenewal(autoRenew) {
 export async function bridgeBurn(destinationChain, destinationAddress, amountUmirage) {
     const h = await getHandler();
     return h.bridgeBurn(destinationChain, destinationAddress, amountUmirage);
+}
+
+export async function followUser(address) {
+    const h = await getHandler();
+    return h.followUser(address);
+}
+
+export async function unfollowUser(address) {
+    const h = await getHandler();
+    return h.unfollowUser(address);
+}
+
+export async function followTopic(topic) {
+    const h = await getHandler();
+    return h.followTopic(topic);
+}
+
+export async function unfollowTopic(topic) {
+    const h = await getHandler();
+    return h.unfollowTopic(topic);
 }
 
 export async function editPost(overrideId, changes) {
