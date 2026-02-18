@@ -119,6 +119,15 @@ _VALIDATOR_ADDR: Optional[str] = None
 _GOV_MODULE_ADDR: Optional[str] = None
 
 
+def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
+    """compute_pow with progress output suppressed."""
+    import contextlib
+    import io
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        return int(compute_pow(base, diff, base_bits, pow_factor, lb))
+
+
 @dataclass
 class TestResult:
     name: str
@@ -1455,82 +1464,122 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.upgrade_level_invalid", ccode, dcode, dlog)
 
-    # 6.10 Block limits: use sub1 (tier 1) wallet but cap at free-tier limits
-    # Free tier has the smallest limits (25/10/10), keeps the test fast.
+    # 6.10 Block limits — use the FREE wallet (tier 0) so we hit the real
+    # free-tier ceiling and can verify overflow is rejected.
     tier0 = _get_tier_config(0)
     max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
     max_blocked_users = _tier_int(tier0, "max_blocked_users")
     max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
 
-    # We still use w1 (paid, no PoW needed) but only fill to free-tier count.
-    # The chain allows more for w1's actual tier, so we can't test overflow
-    # rejection here — that's validated by the limit being < w1's tier limit.
-    lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
-    ts = _now_ms()
+    bw = WALLETS["free"]
+    bw_addr = str(bw.address())
+    bw_pub = bw.public_key().public_key_bytes
 
+    # ── blocked posts fill + overflow ────────────────────────────
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+    ts = _now_ms()
     _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
+    fill_ok = True
     for i in range(max_blocked_posts):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
+            print(f"    [{i}/{max_blocked_posts}] blocked posts…")
         target = _rand_hex(64)
-        msg = _build_msg_block_post(w1, lb, 0, ts, target, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockPost")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w1.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockPost")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("msg.block_post_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"msg.block_post_fill ({max_blocked_posts} blocked)")
 
-    lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_target = _rand_hex(64)
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_post(bw, lb, diff, ts, over_target, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockPost")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("msg.block_post_overflow", ccode, dcode, dlog)
+
+    # ── blocked users fill + overflow ────────────────────────────
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     _debug(f"free-tier max_blocked_users={max_blocked_users}")
+    fill_ok = True
     for i in range(max_blocked_users):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        msg = _build_msg_block_user(w1, lb, 0, ts, target, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w1.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockUser")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("msg.block_user_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"msg.block_user_fill ({max_blocked_users} blocked)")
 
-    lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_user(bw, lb, diff, ts, over_target, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockUser")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("msg.block_user_overflow", ccode, dcode, dlog)
+
+    # ── blocked topics fill + overflow ───────────────────────────
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     _debug(f"free-tier max_blocked_topics={max_blocked_topics}")
+    fill_ok = True
     for i in range(max_blocked_topics):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
             ts = _now_ms()
         topic = f"t{_rand_str(6)}{i}"
-        msg = _build_msg_block_topic(w1, lb, 0, ts, str(w1.address()), topic, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockTopic")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w1.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockTopic")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("msg.block_topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"msg.block_topic_fill ({max_blocked_topics} blocked)")
+
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        over_topic = f"t{_rand_str(6)}over"
+        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockTopic")], FILL_GAS_LIMIT, fee_payer, bw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("msg.block_topic_overflow", ccode, dcode, dlog)
 
     # 6.11 Unblock post (happy path: block then unblock)
     lb, _, _, _ = _get_pow_params(backend, str(w2.address()))
@@ -1696,86 +1745,123 @@ def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
 
-    w_test = WALLETS["sub2"]
-    w_addr = str(w_test.address())
+    # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
+    # and can verify overflow is rejected.
+    fw = WALLETS["free"]
+    fw_addr = str(fw.address())
+    fw_pub = fw.public_key().public_key_bytes
     fee_payer = _VALIDATOR_ADDR or ""
-    lb, _, _, _ = _get_pow_params(backend, w_addr)
-    ts = _now_ms()
-    # Use free-tier limits (smallest) to keep the test fast.
-    # w_test is paid so no PoW needed, but we only fill to tier-0 counts.
     tier0 = _get_tier_config(0)
 
-    # 8.1 Fill free-tier max_followed_users
+    # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
     _debug(f"free-tier max_followed_users={max_followed_users}")
-    lb, _, _, _ = _get_pow_params(backend, w_addr)
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
     ts = _now_ms()
+    fill_ok = True
     for i in range(max_followed_users):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, w_addr)
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
             ts = _now_ms()
+            print(f"    [{i}/{max_followed_users}] followed users…")
         target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        msg = _build_msg_follow_user(w_test, lb, 0, ts, w_addr, target_addr, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w_test.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("follow.user_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"follow.user_fill ({max_followed_users} followed)")
 
-    # 8.2 Fill free-tier max_followed_topics
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
+        over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_addr)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, over_addr, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.user_overflow", ccode, dcode, dlog)
+
+    # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
     _debug(f"free-tier max_followed_topics={max_followed_topics}")
-    lb, _, _, _ = _get_pow_params(backend, w_addr)
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
     ts = _now_ms()
+    fill_ok = True
     for i in range(max_followed_topics):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, w_addr)
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
             ts = _now_ms()
+            print(f"    [{i}/{max_followed_topics}] followed topics…")
         topic = f"ft{_rand_str(4)}{i}"
-        msg = _build_msg_follow_topic(w_test, lb, 0, ts, w_addr, topic, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowTopic")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w_test.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowTopic")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("follow.topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"follow.topic_fill ({max_followed_topics} followed)")
 
-    # 8.3 Fill free-tier max_followed_mods
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
+        over_topic = f"ft{_rand_str(4)}over"
+        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_topic)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, over_topic, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowTopic")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.topic_overflow", ccode, dcode, dlog)
+
+    # 8.3 Fill free-tier max_followed_mods + overflow
     max_followed_mods = _tier_int(tier0, "max_followed_mods")
     _debug(f"free-tier max_followed_mods={max_followed_mods}")
-    lb, _, _, _ = _get_pow_params(backend, w_addr)
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
     ts = _now_ms()
+    fill_ok = True
     for i in range(max_followed_mods):
         if i > 0 and i % 10 == 0:
-            lb, _, _, _ = _get_pow_params(backend, w_addr)
+            lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
             ts = _now_ms()
         mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        msg = _build_msg_follow_moderator(w_test, lb, 0, ts, w_addr, mod_addr, pow_val=0)
-        _, ccode, clog, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowModerator")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            w_test.public_key().public_key_bytes,
-            wait_deliver=True,
+        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, mod_addr)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, mod_addr, pow_val=proof)
+        _, ccode, _, dcode, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowModerator")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
             _fail("follow.mod_fill", f"index={i} check={ccode} deliver={dcode}")
+            fill_ok = False
             break
     else:
         _pass(f"follow.mod_fill ({max_followed_mods} followed)")
+
+    if fill_ok:
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
+        over_mod = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_mod)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, over_mod, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowModerator")], FILL_GAS_LIMIT, fee_payer, fw_pub, wait_deliver=True,
+        )
+        _check_deliver_reject("follow.mod_overflow", ccode, dcode, dlog)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
     w_mx = WALLETS["sub3"]
