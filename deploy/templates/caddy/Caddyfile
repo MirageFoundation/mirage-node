@@ -5,12 +5,12 @@
 ${DOMAIN:-:80} {
 	encode zstd gzip
 
-	# Rate limit: 30 requests per second per IP
+	# Rate limit: 10 requests per second per IP
 	# If using Cloudflare Proxy, change key to: {http.request.header.CF-Connecting-IP}
 	rate_limit {
 		zone global_limit {
 			key {http.request.remote_ip}
-			events 30
+			events 10
 			window 1s
 		}
 	}

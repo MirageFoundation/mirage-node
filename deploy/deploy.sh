@@ -813,7 +813,8 @@ fi
 echo "==> Running post-deploy health check (non-blocking)..."
 if [ "$LOCAL_MODE" -eq 1 ]; then
   sleep 5
-  docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
+  HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+  echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -826,12 +827,13 @@ try:
         print()
         print('    Note: some services unhealthy — expected during upgrade halts')
 except Exception:
-    print('    (could not parse health check output)')
-" 2>/dev/null || echo "    (health check not available yet)"
+    print('    (health check not available yet)')
+"
 else
   run_ssh '
     sleep 5
-    docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>&1 | python3 -c "
+    HEALTH_JSON=$(docker exec mirage python3 /opt/mirage/scripts/status_dashboard.py --json 2>/dev/null) || true
+    echo "$HEALTH_JSON" | python3 -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -844,8 +846,8 @@ try:
         print()
         print(\"    Note: some services unhealthy — expected during upgrade halts\")
 except Exception:
-    print(\"    (could not parse health check output)\")
-" 2>/dev/null || echo "    (health check not available yet)"
+    print(\"    (health check not available yet)\")
+"
   '
 fi
 

@@ -113,13 +113,22 @@ function LoginView({ state, setCredentials }) {
                 return;
             }
 
-            if (!validateMnemonic(trimmedSeed)) {
+            const normalizedSeed = trimmedSeed.toLowerCase();
+            if (trimmedSeed !== normalizedSeed) {
+                try {
+                    console.debug('[Login] normalized recovery phrase to lowercase', {
+                        wordCount: trimmedSeed.split(/\s+/).filter(Boolean).length
+                    });
+                } catch (_) { }
+            }
+
+            if (!validateMnemonic(normalizedSeed)) {
                 if (mountedRef.current) setError('Invalid recovery phrase');
                 if (mountedRef.current) setLoading(false);
                 return;
             }
 
-            const { publicKey } = deriveKeysFromSeed(trimmedSeed);
+            const { publicKey } = deriveKeysFromSeed(normalizedSeed);
 
             const username = await fetchUsernameFromAddress(publicKey);
 
@@ -128,7 +137,7 @@ function LoginView({ state, setCredentials }) {
                 if (mountedRef.current) setLoading(false);
                 navigate('/create_account', {
                     state: {
-                        importedSeed: trimmedSeed,
+                        importedSeed: normalizedSeed,
                         fromRecovery: true
                     },
                     replace: true
@@ -139,7 +148,7 @@ function LoginView({ state, setCredentials }) {
             // Dismiss the welcome card for returning users (they already know the app)
             try { Storage.save('welcome_card_dismissed_v1', true); } catch (_) { }
 
-            setCredentials(publicKey, username, trimmedSeed);
+            setCredentials(publicKey, username, normalizedSeed);
             navigate('/');
         } catch (e) {
             if (mountedRef.current) setError(String(e?.message || e || 'Login failed'));
@@ -174,9 +183,12 @@ function LoginView({ state, setCredentials }) {
                                     placeholder="Enter your 12-word recovery phrase"
                                     value={seedPhrase}
                                     onChange={(e) => {
-                                        setSeedPhrase(e.target.value);
+                                        setSeedPhrase(e.target.value.toLowerCase());
                                         setError('');
                                     }}
+                                    autoCorrect="off"
+                                    autoCapitalize="off"
+                                    spellCheck="false"
                                     disabled={loading}
                                 />
                                 <IntroP style={{ marginTop: '0.5rem', fontSize: '0.7rem' }}>
