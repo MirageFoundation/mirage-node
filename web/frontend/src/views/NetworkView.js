@@ -884,7 +884,16 @@ export default function NetworkView({ state }) {
                                     <SectionRow>
                                         <SectionLabel>History:</SectionLabel>
                                         <ValueBox>
-                                            <DifficultyChart history={cfg.difficulty_history} />
+                                            <DifficultyChart history={
+                                                cfg.difficulty_history && typeof cfg.pow_difficulty === 'number'
+                                                    ? [...cfg.difficulty_history, {
+                                                        height: cfg.current_height || 0,
+                                                        difficulty: cfg.pow_difficulty,
+                                                        msg_count: cfg.pow_message_count || 0,
+                                                        timestamp: Math.floor(Date.now() / 1000),
+                                                    }]
+                                                    : cfg.difficulty_history
+                                            } />
                                         </ValueBox>
                                     </SectionRow>
                                     <SectionRow>

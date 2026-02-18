@@ -840,6 +840,13 @@ class DatabaseManager:
 
         return None, None
 
+    @staticmethod
+    def _strip_nul(val: Optional[str]) -> Optional[str]:
+        """PostgreSQL text fields cannot contain NUL (0x00) bytes."""
+        if val is None:
+            return None
+        return val.replace("\x00", "")
+
     def upsert_post(
         self,
         txhash: str,
@@ -861,6 +868,14 @@ class DatabaseManager:
         """Insert or update a post."""
         import json as _json
 
+        topic = self._strip_nul(topic) or ""
+        title = self._strip_nul(title) or ""
+        content = self._strip_nul(content) or ""
+        target = self._strip_nul(target) or ""
+        tag = self._strip_nul(tag) or ""
+        thumbnail_url = self._strip_nul(thumbnail_url)
+        root_topic = self._strip_nul(root_topic)
+        root_post_id = self._strip_nul(root_post_id)
         media_json = _json.dumps(media or [])
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1428,6 +1443,7 @@ class DatabaseManager:
 
     def upsert_profile(self, owner: str, username: str | None, level: int, updated_at: int) -> None:
         """Insert or update a profile (basic fields only)."""
+        username = self._strip_nul(username)
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1515,6 +1531,10 @@ class DatabaseManager:
         updated_at: int,
     ) -> None:
         """Insert or update a profile with all fields."""
+        username = self._strip_nul(username)
+        biography = self._strip_nul(biography) or ""
+        avatar = self._strip_nul(avatar) or ""
+        banner = self._strip_nul(banner) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1602,6 +1622,7 @@ class DatabaseManager:
 
     def follow_topic(self, owner: str, topic: str) -> None:
         """Follow a topic (add to followed_topics with next position)."""
+        topic = self._strip_nul(topic) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1703,6 +1724,7 @@ class DatabaseManager:
 
     def block_topic(self, owner: str, target: str) -> None:
         """Block a topic (add to blocked_topics with next position)."""
+        target = self._strip_nul(target) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(

@@ -2769,6 +2769,76 @@ def test_edge_cases(backend: str):
     except Exception as e:
         _pass("edge.duplicate_post handled")
 
+    # ── 9.19+  Malicious / adversarial inputs ───────────────────────
+    # NUL bytes, C0 control characters, DEL — all must be rejected.
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+
+    malicious_cases = [
+        # NUL byte (\x00)
+        ("nul_in_content", {"topic": f"nul{_rand_str(4)}", "title": "Normal", "content": "has\x00nul"}),
+        ("nul_in_title", {"topic": f"nul{_rand_str(4)}", "title": "Nul\x00Title", "content": "body"}),
+        ("nul_in_topic", {"topic": f"nul\x00tp", "title": "Title", "content": "body"}),
+        ("only_nul_content", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "\x00\x00\x00"}),
+        ("nul_in_tag", {"topic": f"nul{_rand_str(4)}", "title": "Title", "content": "body", "tag": "gore\x00"}),
+        ("embedded_nul", {"topic": f"nul{_rand_str(4)}", "title": "Normal Title", "content": "Looks normal\x00hidden"}),
+        # Other C0 control characters
+        ("ctrl_bel", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x07 bell"}),
+        ("ctrl_backspace", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x08 bs"}),
+        ("ctrl_escape", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x1b escape"}),
+        ("ctrl_vtab", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0b vtab"}),
+        ("ctrl_formfeed", {"topic": f"ctl{_rand_str(4)}", "title": "Title", "content": "has \x0c ff"}),
+        # DEL character
+        ("del_in_content", {"topic": f"del{_rand_str(4)}", "title": "Title", "content": "has \x7f del"}),
+        ("del_in_title", {"topic": f"del{_rand_str(4)}", "title": "Del\x7fTitle", "content": "body"}),
+    ]
+    for label, fields in malicious_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post(
+            fields.get("topic", ""),
+            fields.get("title", ""),
+            fields.get("content", ""),
+            tag=fields.get("tag", ""),
+        )
+        if code >= 400:
+            _pass(f"edge.{label}_rejected")
+        else:
+            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+
+    # ── NUL / control chars in media URLs ─────────────────────────
+    media_nul_cases = [
+        ("nul_in_media", [f"https://example.com/\x00img.jpg"]),
+        ("ctrl_in_media", [f"https://example.com/\x07img.jpg"]),
+        ("del_in_media", [f"https://example.com/\x7Fimg.jpg"]),
+    ]
+    for label, bad_media in media_nul_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        pub = wallet.public_key().public_key_bytes
+        ts = _now_ms()
+        topic = f"med{_rand_str(4)}"
+        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", "body", "", 0, bad_media)
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+        signed = canon_signed_with_pow(base, int(proof))
+        sig = sign_canonical(wallet, signed)
+        payload = {
+            "pubkey": _b64(pub),
+            "signature": _b64(sig),
+            "last_block_hash": lb,
+            "timestamp": ts,
+            "pow_difficulty": diff,
+            "pow": int(proof),
+            "target": "",
+            "topic": topic,
+            "title": "Title",
+            "content": "body",
+            "media": bad_media,
+        }
+        code, resp = _post(f"{backend}/api/core/post", payload)
+        if code >= 400:
+            _pass(f"edge.{label}_rejected")
+        else:
+            _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
+
 
 # =========================================================================
 # Category 10: Security & Attack Vectors

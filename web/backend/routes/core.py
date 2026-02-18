@@ -484,6 +484,9 @@ def core_set_username():
             proof=proof,
         )
 
+        if _has_unsafe_chars(username):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
+
         # Minimal required fields; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64 and username):
             log_event(
@@ -2247,7 +2250,9 @@ def core_edit():
         content = str(data.get("content", "")).strip()
         override = str(data.get("override", "")).strip().lower()
         tag = str(data.get("tag", "")).strip()
-        # no client-provided fees
+
+        if _has_unsafe_chars(topic, title, content, target, tag):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
 
         if tag not in ALLOWED_TAGS:
             return jsonify({"error": f"invalid tag: {tag}"}), 400
@@ -2266,6 +2271,8 @@ def core_edit():
                 return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
             if not media_item.startswith("https://"):
                 return jsonify({"error": f"media[{i}] must use https://"}), 400
+            if _has_unsafe_chars(media_item):
+                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
 
         # Require basics: editing requires an override hash and auth fields
         if not (pub_b64 and sig_b64 and override):
@@ -2433,6 +2440,18 @@ def core_edit():
 ALLOWED_TAGS = {"", "sensitive", "porn", "gore", "violence", "death"}
 
 
+def _has_unsafe_chars(*values: str) -> bool:
+    """Return True if any value contains NUL, control chars (except tab/newline/CR), or DEL."""
+    for v in values:
+        for ch in v:
+            cp = ord(ch)
+            if cp <= 0x1F and cp not in (0x09, 0x0A, 0x0D):
+                return True
+            if cp == 0x7F:
+                return True
+    return False
+
+
 @core_bp.route("/api/core/post", methods=["POST"])
 def core_post():
     rid = next_request_id()
@@ -2459,6 +2478,10 @@ def core_post():
         title = str(data.get("title", ""))
         content = str(data.get("content", ""))
         tag = str(data.get("tag", "")).strip()
+
+        if _has_unsafe_chars(topic, title, content, target, tag):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
+
         # Validate tag
         if tag not in ALLOWED_TAGS:
             return jsonify({"error": f"invalid tag: {tag}"}), 400
@@ -2477,6 +2500,8 @@ def core_post():
                 return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
             if not media_item.startswith("https://"):
                 return jsonify({"error": f"media[{i}] must use https://"}), 400
+            if _has_unsafe_chars(media_item):
+                return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
 
         # Basic fields must be present; last_block_hash is optional for subscribers
         if not (pub_b64 and sig_b64):

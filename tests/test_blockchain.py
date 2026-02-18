@@ -2162,6 +2162,102 @@ def test_msg_format(backend: str) -> None:
     _check_deliver_reject("format.title_oversized", ccode, dcode, dlog)
 
 
+def test_malicious_inputs(backend: str) -> None:
+    """Test that NUL bytes, control chars, and other dangerous payloads are rejected at chain level."""
+    print(f"\n{_COLOR_BOLD}[9b] Malicious / adversarial inputs{_COLOR_RESET}")
+
+    w1 = WALLETS["sub1"]
+    fee_payer = _VALIDATOR_ADDR or ""
+    lb, _, _, _ = _get_pow_params(backend, str(w1.address()))
+    ts = _now_ms()
+
+    def _submit_post(label, topic="", title="", content="", tag=""):
+        nonlocal lb, ts
+        msg = _build_msg_post(w1, lb, 0, ts, topic, title, content, tag=tag, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            w1.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_reject(f"malicious.{label}", ccode, dcode, dlog)
+
+    # ─── NUL bytes (\x00) in every text field ─────────────────────
+    _submit_post("nul_in_topic", topic=f"nul\x00topic", title="Title", content="body")
+    _submit_post("nul_in_title", topic=f"t{_rand_str(4)}", title="Nul\x00Title", content="body")
+    _submit_post("nul_in_content", topic=f"t{_rand_str(4)}", title="Title", content="Has\x00Nul")
+    _submit_post("nul_in_tag", topic=f"t{_rand_str(4)}", title="Title", content="body", tag="gore\x00")
+    _submit_post("embedded_nul", topic=f"t{_rand_str(4)}", title="Normal Title", content="Looks normal\x00hidden")
+    _submit_post("only_nul_bytes", topic=f"t{_rand_str(4)}", title="\x00\x00\x00", content="\x00\x00\x00")
+
+    # ─── Other C0 control characters ──────────────────────────────
+    for byte_val, label in [
+        ("\x01", "soh"),
+        ("\x02", "stx"),
+        ("\x07", "bel"),
+        ("\x08", "backspace"),
+        ("\x0b", "vtab"),
+        ("\x0c", "formfeed"),
+        ("\x0e", "shift_out"),
+        ("\x1b", "escape"),
+        ("\x1f", "unit_sep"),
+    ]:
+        _submit_post(
+            f"control_{label}_in_content",
+            topic=f"t{_rand_str(4)}",
+            title="Title",
+            content=f"has {byte_val} control char",
+        )
+
+    # ─── DEL character (\x7F) ─────────────────────────────────────
+    _submit_post("del_in_content", topic=f"t{_rand_str(4)}", title="Title", content=f"has \x7f del")
+    _submit_post("del_in_title", topic=f"t{_rand_str(4)}", title=f"Del\x7fTitle", content="body")
+
+    # ─── NUL bytes in username ────────────────────────────────────
+    msg = _build_msg_set_username(w1, lb, 0, ts, str(w1.address()), f"user\x00name", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetUsername")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("malicious.nul_in_username", ccode, dcode, dlog)
+
+    # ─── Control char in username ─────────────────────────────────
+    msg = _build_msg_set_username(w1, lb, 0, ts, str(w1.address()), f"user\x08name", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetUsername")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("malicious.control_in_username", ccode, dcode, dlog)
+
+    # ─── NUL / control chars in media URLs ────────────────────────
+    media_cases = [
+        ("nul_in_media", [f"https://example.com/\x00img.jpg"]),
+        ("control_in_media", [f"https://example.com/\x07img.jpg"]),
+        ("del_in_media", [f"https://example.com/\x7Fimg.jpg"]),
+    ]
+    for label, bad_media in media_cases:
+        msg = _build_msg_post(
+            w1, lb, 0, ts,
+            f"t{_rand_str(4)}", "Title", "body",
+            media=bad_media, pow_val=0,
+        )
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            w1.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_reject(f"malicious.{label}", ccode, dcode, dlog)
+
+
 def test_tier_enforcement(backend: str) -> None:
     """Test content/title limits per tier at chain level."""
     print(f"\n{_COLOR_BOLD}[10] Tier-based content/title limits{_COLOR_RESET}")
@@ -2513,6 +2609,7 @@ ALL_CATEGORIES = {
     "direct_bank": test_direct_bank,
     "follow_limits": test_follow_limits,
     "msg_format": test_msg_format,
+    "malicious_inputs": test_malicious_inputs,
     "tier_enforcement": test_tier_enforcement,
     "auto_renewal": test_chain_auto_renewal,
     "governance": test_governance_reject,

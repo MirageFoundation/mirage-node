@@ -46,6 +46,37 @@ var (
 
 const logDelimiter = "----------------------------------------------------------------------------------------------------"
 
+// validateSafeText checks that s is valid UTF-8 and contains no control
+// characters other than horizontal tab, newline, and carriage return.
+// Rejects: NUL, C0 controls (\x01-\x08, \x0B, \x0C, \x0E-\x1F), DEL (\x7F).
+func validateSafeText(field, s string) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("%s contains invalid UTF-8", field)
+	}
+	for i, r := range s {
+		if r == utf8.RuneError {
+			return fmt.Errorf("%s contains invalid UTF-8 at byte %d", field, i)
+		}
+		if r <= 0x1F && r != '\t' && r != '\n' && r != '\r' {
+			return fmt.Errorf("%s contains control character 0x%02X", field, r)
+		}
+		if r == 0x7F {
+			return fmt.Errorf("%s contains DEL character", field)
+		}
+	}
+	return nil
+}
+
+// rejectUnsafeFields validates all provided name/value pairs are safe text.
+func rejectUnsafeFields(pairs ...string) error {
+	for i := 0; i < len(pairs)-1; i += 2 {
+		if err := validateSafeText(pairs[i], pairs[i+1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // validateTxHash validates that a string is exactly 64 hex characters (for post/comment/vote targets)
 func validateTxHash(target string) error {
 	target = strings.ToLower(strings.TrimSpace(target))
@@ -1058,6 +1089,9 @@ func validateMsgPostMedia(media []string) error {
 		if !strings.HasPrefix(mediaItem, "https://") {
 			return fmt.Errorf("media[%d] must use https://", i)
 		}
+		if err := validateSafeText(fmt.Sprintf("media[%d]", i), mediaItem); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1087,6 +1121,16 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	params := am.k.GetParams(sdkCtx)
+
+	if err := rejectUnsafeFields(
+		"topic", req.GetTopic(),
+		"title", req.GetTitle(),
+		"content", req.GetContent(),
+		"target", req.GetTarget(),
+		"tag", req.GetTag(),
+	); err != nil {
+		return nil, err
+	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
 	isComment := target != ""
@@ -1230,6 +1274,16 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	}
 
 	params := am.k.GetParams(sdkCtx)
+
+	if err := rejectUnsafeFields(
+		"topic", req.GetTopic(),
+		"title", req.GetTitle(),
+		"content", req.GetContent(),
+		"target", req.GetTarget(),
+		"tag", req.GetTag(),
+	); err != nil {
+		return nil, err
+	}
 
 	// Validate override txhash (the post/comment being edited)
 	override := strings.ToLower(strings.TrimSpace(req.GetOverride()))
@@ -1438,6 +1492,9 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	}
 
 	username := req.GetUsername()
+	if err := validateSafeText("username", username); err != nil {
+		return nil, err
+	}
 
 	// Get user's tier to check if they can change name (only need Level and Username)
 	var userLevel int
