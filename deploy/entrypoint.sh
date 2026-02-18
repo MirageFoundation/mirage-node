@@ -278,7 +278,15 @@ if [ -n "${DOMAIN:-}" ]; then
     echo "==> Domain configured: $DOMAIN"
     echo "==> Configuring HTTPS automatically..."
     sleep 2  # Give Caddy a moment to start
-    python3 "$ROOT_DIR/deploy/setup_letsencrypt.py" --domain="$DOMAIN"
+    HTTPS_ARGS="--domain=$DOMAIN"
+    if [ "${SKIP_HTTPS_IP_CHECK:-}" = "true" ]; then
+      HTTPS_ARGS="$HTTPS_ARGS --skip-ip-check"
+      echo "    (SKIP_HTTPS_IP_CHECK=1, skipping DNS-to-IP validation)"
+    fi
+    if ! python3 "$ROOT_DIR/deploy/setup_letsencrypt.py" $HTTPS_ARGS; then
+      echo "WARNING: HTTPS setup failed (non-fatal). Caddy continues with existing config." >&2
+      echo "         To retry: python3 $ROOT_DIR/deploy/setup_letsencrypt.py $HTTPS_ARGS" >&2
+    fi
   fi
 fi
 
