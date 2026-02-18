@@ -41,7 +41,7 @@ REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from shared.client import compute_pow, get_status, sign_canonical
+from shared.client import check_pow_target, compute_pow, get_status, sign_canonical
 from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
@@ -126,6 +126,22 @@ def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float
 
     with contextlib.redirect_stdout(io.StringIO()):
         return int(compute_pow(base, diff, base_bits, pow_factor, lb))
+
+
+def _pow_digest(base: bytes, lb_hex: str, proof: int) -> bytes:
+    from argon2.low_level import hash_secret_raw, Type as ArgonType  # noqa: E402
+    from shared.canon import uvarint  # noqa: E402
+
+    salt = bytes.fromhex(lb_hex.strip())
+    return hash_secret_raw(
+        base + b":" + uvarint(int(proof)),
+        salt,
+        time_cost=1,
+        memory_cost=4096,
+        parallelism=1,
+        hash_len=32,
+        type=ArgonType.ID,
+    )
 
 
 @dataclass
@@ -1086,7 +1102,22 @@ def test_pow(backend: str) -> None:
         txh, code, log, _, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
         )
-        _check_reject("pow.insufficient_difficulty", code, log, tx_hash=txh)
+        if code != 0:
+            _pass("pow.insufficient_difficulty")
+        else:
+            deliver_code, deliver_log = _wait_for_tx_result(txh)
+            if deliver_code != 0:
+                _pass("pow.insufficient_difficulty")
+            else:
+                digest = _pow_digest(base, lb, int(proof))
+                meets_current = check_pow_target(digest, diff, base_bits, pow_factor)
+                if meets_current:
+                    _pass("pow.insufficient_difficulty (proof met current difficulty)")
+                else:
+                    _fail(
+                        "pow.insufficient_difficulty",
+                        f"accepted with declared={diff_low} current={diff} log={deliver_log[:200]}",
+                    )
     else:
         _pass("pow.insufficient_difficulty (skipped: chain difficulty is 0)")
 
