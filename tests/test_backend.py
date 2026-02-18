@@ -447,6 +447,12 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
         code, out = _run_miraged(send_args, timeout=30)
         if code != 0:
+            # Sequence mismatch at CLI level — retry
+            if "sequence mismatch" in out.lower() and attempt < max_retries - 1:
+                wait = 2 * (attempt + 1)
+                print(f"    [faucet] sequence mismatch, retrying in {wait}s (attempt {attempt + 1}/{max_retries})")
+                time.sleep(wait)
+                continue
             # Show the FATAL/error line (usually at the end), not the Usage block
             lines = out.strip().splitlines()
             fatal = next(
@@ -454,7 +460,6 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
                 None,
             )
             if fatal:
-                # Replace raw umirage amounts with human-readable MIRAGE
                 import re
 
                 def _umirage_to_mirage(m: re.Match) -> str:
