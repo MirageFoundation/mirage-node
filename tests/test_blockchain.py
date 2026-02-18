@@ -294,8 +294,7 @@ def _assert_capped_deque(name: str, got: list[str], expected: list[str]) -> None
         return
     _fail(
         name,
-        f"expected_len={len(expected)} got_len={len(got)} "
-        f"expected_tail={expected[-3:]} got_tail={got[-3:]}",
+        f"expected_len={len(expected)} got_len={len(got)} " f"expected_tail={expected[-3:]} got_tail={got[-3:]}",
     )
 
 
@@ -1523,16 +1522,27 @@ def test_msg_validation(backend: str) -> None:
     bw_addr = str(bw.address())
     bw_pub = bw.public_key().public_key_bytes
 
-    # ── blocked posts fill + overflow ────────────────────────────
+    # Ensure the free wallet has a profile core so GetProfile queries work
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
+    bw_uname = f"bw{_rand_str(6)}"
+    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=0)
+    _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetUsername")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        bw_pub,
+        wait_deliver=True,
+    )
+
+    # ── blocked posts fill + overflow ────────────────────────────
     _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
     fill_ok = True
     blocked_post_targets: list[str] = []
     for i in range(max_blocked_posts):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
         if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-            ts = _now_ms()
             print(f"    [{i}/{max_blocked_posts}] blocked posts…")
         target = _rand_hex(64)
         blocked_post_targets.append(target)
@@ -1574,15 +1584,12 @@ def test_msg_validation(backend: str) -> None:
         _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
 
     # ── blocked users fill + overflow ────────────────────────────
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-    ts = _now_ms()
     _debug(f"free-tier max_blocked_users={max_blocked_users}")
     fill_ok = True
     blocked_user_targets: list[str] = []
     for i in range(max_blocked_users):
-        if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-            ts = _now_ms()
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
         blocked_user_targets.append(target.lower())
         base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
@@ -1623,15 +1630,12 @@ def test_msg_validation(backend: str) -> None:
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
 
     # ── blocked topics fill + overflow ───────────────────────────
-    lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-    ts = _now_ms()
     _debug(f"free-tier max_blocked_topics={max_blocked_topics}")
     fill_ok = True
     blocked_topic_targets: list[str] = []
     for i in range(max_blocked_topics):
-        if i > 0 and i % 10 == 0:
-            lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-            ts = _now_ms()
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
         topic = f"t{_rand_str(6)}{i}"
         blocked_topic_targets.append(topic)
         base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
@@ -2340,13 +2344,19 @@ def test_malicious_inputs(backend: str) -> None:
     media_cases = [
         ("nul_in_media", [f"https://example.com/\x00img.jpg"]),
         ("control_in_media", [f"https://example.com/\x07img.jpg"]),
-        ("del_in_media", [f"https://example.com/\x7Fimg.jpg"]),
+        ("del_in_media", [f"https://example.com/\x7fimg.jpg"]),
     ]
     for label, bad_media in media_cases:
         msg = _build_msg_post(
-            w1, lb, 0, ts,
-            f"t{_rand_str(4)}", "Title", "body",
-            media=bad_media, pow_val=0,
+            w1,
+            lb,
+            0,
+            ts,
+            f"t{_rand_str(4)}",
+            "Title",
+            "body",
+            media=bad_media,
+            pow_val=0,
         )
         _, ccode, clog, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")],

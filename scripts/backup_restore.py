@@ -69,7 +69,7 @@ SSH_USER = "root"
 
 # All production servers (same as deploy_all_prod.sh)
 ALL_SERVERS = [
-    "mirage.vote",
+    # "mirage.vote",
     "146.190.108.140",
     "139.59.9.96",
     "mirage.talk",
@@ -104,7 +104,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     for _ in range(20):
         try:
             result = subprocess.run(
-                ["curl", "-sf", rpc_status_url],
+                ["curl", "-sfL", rpc_status_url],
                 check=False,
                 capture_output=True,
                 text=True,
@@ -124,7 +124,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     # Check node has peers
     try:
         result = subprocess.run(
-            ["curl", "-sf", rpc_net_info_url],
+            ["curl", "-sfL", rpc_net_info_url],
             check=True,
             capture_output=True,
             text=True,
@@ -142,7 +142,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
     # Check block height is increasing (node not stuck)
     try:
         result1 = subprocess.run(
-            ["curl", "-sf", rpc_status_url],
+            ["curl", "-sfL", rpc_status_url],
             check=True,
             capture_output=True,
             text=True,
@@ -154,7 +154,7 @@ def verify_server_health(host: str, ssh_user: str = SSH_USER, timeout: int = 120
         time.sleep(6)  # Wait for at least 1 block
 
         result2 = subprocess.run(
-            ["curl", "-sf", rpc_status_url],
+            ["curl", "-sfL", rpc_status_url],
             check=True,
             capture_output=True,
             text=True,
@@ -753,7 +753,7 @@ echo "PostgreSQL restore complete"
         time.sleep(3)
         try:
             result = subprocess.run(
-                ["curl", "-sf", rpc_url],
+                ["curl", "-sfL", rpc_url],
                 check=False,
                 capture_output=True,
                 text=True,
