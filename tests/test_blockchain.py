@@ -1536,7 +1536,8 @@ def test_msg_validation(backend: str) -> None:
         bw_pub,
         wait_deliver=True,
     )
-    _debug(f"free wallet SetUsername check={ccode} deliver={dcode} log={dlog}")
+    if ccode != 0 or dcode != 0:
+        _debug(f"free wallet SetUsername FAILED check={ccode} deliver={dcode} log={dlog}")
 
     # ── blocked posts fill + overflow ────────────────────────────
     _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
@@ -1582,7 +1583,6 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
         profile = _get_profile_full(backend, bw_addr)
-        _debug(f"block_post profile keys={sorted(profile.keys())} blocked_posts_len={len(profile.get('blocked_posts') or profile.get('blockedPosts') or [])} raw_keys_sample={list(profile.keys())[:5]}")
         got = [str(v).lower() for v in (profile.get("blocked_posts") or [])]
         expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
         _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
@@ -1629,7 +1629,6 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
         profile = _get_profile_full(backend, bw_addr)
-        _debug(f"block_user profile blocked_users_len={len(profile.get('blocked_users') or [])} blocked_users_raw={profile.get('blocked_users')}")
         got = [str(v).lower() for v in (profile.get("blocked_users") or [])]
         expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
