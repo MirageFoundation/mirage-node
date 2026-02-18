@@ -83,6 +83,7 @@ scripts/*
 !scripts/show_balances.py
 !scripts/verify_upgrade.py
 !scripts/proposals/proposal_upgrade.json
+!scripts/proposals/proposal_economics_v3_mint_params.json
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
