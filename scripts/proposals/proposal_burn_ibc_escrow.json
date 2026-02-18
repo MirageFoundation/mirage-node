@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgBurnTokens",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1kq2rzz6fq2q7fsu75a9g7cpzjeanmk6877t950",
+      "amount": "599382304755058",
+      "reason": "Burn stuck IBC escrow tokens from dead Osmosis channel-1"
+    }
+  ],
+  "metadata": "",
+  "deposit": "1000000000000umirage",
+  "title": "Burn Stuck IBC Escrow Tokens",
+  "summary": "Burns ~599M MIRAGE stuck in the IBC escrow account for transfer/channel-1 (Osmosis).\n\nThe IBC client to Osmosis expired because Osmosis pruned the required historical data for light client verification. These tokens can never be recovered - they are permanently stuck.\n\nThis proposal burns those tokens to accurately reflect the actual circulating supply.\n\nEscrow address: mirage1kq2rzz6fq2q7fsu75a9g7cpzjeanmk6877t950",
+  "expedited": true
+}

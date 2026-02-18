@@ -1,0 +1,21 @@
+{
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgSetLevel",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1u4lcw3x32mwweh3utg66fynt5g0p2zclnp5n5q",
+      "level": 0
+    },
+    {
+      "@type": "/mirage.core.v1.MsgSetLevel",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1p9te3c5fgjjw4dkg4kmm6g4yy62a3z3003l0td",
+      "level": 100
+    }
+  ],
+  "metadata": "",
+  "deposit": "1000000000000umirage",
+  "title": "Set user levels",
+  "summary": "Set mirage1u4lcw3x32mwweh3utg66fynt5g0p2zclnp5n5q to level 0 (Free tier) and mirage1p9te3c5fgjjw4dkg4kmm6g4yy62a3z3003l0td to level 100 (Admin).",
+  "expedited": true
+}

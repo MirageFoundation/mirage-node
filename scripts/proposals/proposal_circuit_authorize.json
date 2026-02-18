@@ -1,0 +1,23 @@
+{
+    "messages": [
+        {
+            "@type": "/cosmos.circuit.v1.MsgAuthorizeCircuitBreaker",
+            "granter": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "grantee": "mirage1securitymultisigxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "permissions": {
+                "level": "LEVEL_SOME_MSGS",
+                "limit_type_urls": [
+                    "/mirage.core.v1.MsgPost",
+                    "/mirage.core.v1.MsgVote",
+                    "/mirage.core.v1.MsgSendTokens",
+                    "/cosmos.bank.v1beta1.MsgSend"
+                ]
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Circuit: authorize security multisig",
+    "summary": "Grant circuit breaker rights over selected messages to the security multisig.",
+    "expedited": true
+}

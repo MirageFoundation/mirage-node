@@ -1,0 +1,18 @@
+{
+    "messages": [
+        {
+            "@type": "/cosmos.circuit.v1.MsgTripCircuitBreaker",
+            "authority": "mirage1securitymultisigxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "msg_type_urls": [
+                "/mirage.core.v1.MsgPost",
+                "/mirage.core.v1.MsgVote",
+                "/mirage.core.v1.MsgSendTokens"
+            ]
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Circuit: trip (pause core msgs)",
+    "summary": "Pause processing of core posting/voting/send messages.",
+    "expedited": true
+}

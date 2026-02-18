@@ -82,6 +82,8 @@ scripts/*
 !scripts/list_validators.sh
 !scripts/show_balances.py
 !scripts/verify_upgrade.py
+!scripts/submit_proposal.py
+!scripts/proposals/
 !scripts/proposals/proposal_upgrade.json
 !scripts/proposals/proposal_economics_v3_mint_params.json
 !scripts/check_grpc.py
