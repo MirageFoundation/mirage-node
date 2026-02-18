@@ -1461,37 +1461,32 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     // Fetch welcome stats for logged-out users (user count, posts in 24h, DAU)
     // Uses lightweight endpoint that only returns essential counts (fast, cached)
     // Implements stale-while-revalidate: show cached value immediately, update when fresh
-    // On gated nodes (invite-only / registration disabled), skip all fetches for logged-out users
     useEffect(() => {
         if (isLoggedIn) return; // Only fetch for logged-out visitors
-        if (isNodeGated) return; // No fetches on gated nodes for guests
 
         let cancelled = false;
         const loadWelcomeStats = async () => {
             try {
-                // Use lightweight endpoint - only 3 queries, cached 30s
                 const data = await Api.get('get_welcome_stats', {}, { timeoutMs: 3000 });
                 if (cancelled) return;
                 if (data) {
                     const freshStats = {
                         userCount: data.registered_users || 0,
                         posts24h: data.posts_24h || 0,
-                        comments24h: 0, // Not returned by lightweight endpoint
+                        comments24h: 0,
                         active24h: data.active_24h || 0,
                     };
                     setWelcomeStats(freshStats);
-                    setWelcomeStatsStale(false); // Fresh data loaded
-                    // Cache for next visit
+                    setWelcomeStatsStale(false);
                     try { Storage.save('welcome_stats_cache', freshStats); } catch (_) { }
                 }
             } catch (_) {
-                // Silently fail - stats are optional enhancement
                 // Keep showing stale data if we have it
             }
         };
         loadWelcomeStats();
         return () => { cancelled = true; };
-    }, [isLoggedIn, isNodeGated]);
+    }, [isLoggedIn]);
 
     // Get next available invite code
     const nextAvailableCode = inviteCodes.find(c => !c.is_used);
