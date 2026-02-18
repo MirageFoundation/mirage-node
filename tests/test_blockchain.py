@@ -1526,14 +1526,17 @@ def test_msg_validation(backend: str) -> None:
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     bw_uname = f"bw{_rand_str(6)}"
-    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=0)
-    _submit_tx(
+    base = _canon_base_set_username_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, bw_uname)
+    proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=proof)
+    _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetUsername")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         bw_pub,
         wait_deliver=True,
     )
+    _debug(f"free wallet SetUsername check={ccode} deliver={dcode} log={dlog}")
 
     # ── blocked posts fill + overflow ────────────────────────────
     _debug(f"free-tier max_blocked_posts={max_blocked_posts}")
@@ -1579,6 +1582,7 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
         profile = _get_profile_full(backend, bw_addr)
+        _debug(f"block_post profile keys={sorted(profile.keys())} blocked_posts_len={len(profile.get('blocked_posts') or profile.get('blockedPosts') or [])} raw_keys_sample={list(profile.keys())[:5]}")
         got = [str(v).lower() for v in (profile.get("blocked_posts") or [])]
         expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
         _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
@@ -1625,6 +1629,7 @@ def test_msg_validation(backend: str) -> None:
         )
         _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
         profile = _get_profile_full(backend, bw_addr)
+        _debug(f"block_user profile blocked_users_len={len(profile.get('blocked_users') or [])} blocked_users_raw={profile.get('blocked_users')}")
         got = [str(v).lower() for v in (profile.get("blocked_users") or [])]
         expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
