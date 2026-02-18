@@ -1,16 +1,13 @@
-# Mirage v1.13.0 Release Notes
-
-### Overview
-
 v1.13.0 introduces **topic blocking** — a long-requested feature that lets users hide all content from topics they don't want to see. Pick a topic, confirm the block, and every post tagged with that topic disappears from your feeds, search results, inbox, and comment trees. Blocked topics are stored on-chain and sync to the indexer, so they persist across devices and sessions. Even better, blocking is **optimistic** — posts vanish from your feed the instant you confirm, no waiting for blockchain finality.
 
 This release also adds **wildcard topic blocking**: instead of blocking topics one by one, you can enter a glob pattern like `news*` or `*politics*` to block every topic that matches. The editable input in the block dialog lets you tweak the pattern before confirming, so a single block can cover an entire family of topics. Wildcards are validated and matched consistently across the blockchain, backend, and frontend.
 
 On the infrastructure side, the `/server` page now shows real minting earnings computed from actual balance history instead of a theoretical projection, the test suite has been split into dedicated backend and blockchain runners, and a round of robustness fixes hardens JSON parsing against `miraged` log-line noise.
 
+We added 520 new tests for the backend and 146 new tests for the blockchain itself, which should improve resiliency.
+
 Security hardening closes a critical edge case: **NUL and control characters are now rejected on-chain and in the backend**, media URLs are validated for unsafe control characters, and the indexer strips any remaining NUL bytes before database writes. New malicious-input tests (NUL, control chars, Unicode edge cases) ensure the whole stack stays resilient.
 
-**Upgrade Name:** `v1.13.0`
 
 ---
 
@@ -147,32 +144,5 @@ The spam-attack harness can flood the chain with concurrent transactions for soa
 
 ---
 
-### Bug Fixes
-
-- Fixed `miraged` printing log lines to stdout before JSON, breaking command output parsing
-- Fixed `_miraged_cmd` and `_keyring_backend` failing on multi-line bash login output
-- Fixed gov module address parsing for `type/value` response format
-- Fixed topic follow/unfollow not updating sidebar and card menus without a page refresh
-- Fixed faucet sequence mismatch in test suite by retrying on code 32
-- Fixed `search_topics` 500 error caused by log-line noise in query output
-- Prevented indexer stalls caused by NUL/control bytes in posts, media URLs, and profile fields
-
----
-
-### Upgrade Handler
-
-The v1.13.0 upgrade handler migrates existing chain state:
-
-- Clears any leftover `quality_posts` data from all profiles
-- Updates tier parameters to include the new `max_blocked_topics` values
-- Initializes empty `blocked_topics` lists for all existing profiles
-- Updates `MintQuantity` from 350,000,000 to 125,000,000,000
-
----
-
-### Roadmap
-
-- Push notifications for mentions and replies
-- Threaded conversations with inline reply chains
 
 Have a feature suggestion? Let us know on [Mirage](https://mirage.talk) — post it in the #feedback topic or message us directly.
