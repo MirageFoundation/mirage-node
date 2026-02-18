@@ -8,6 +8,8 @@ This release also adds **wildcard topic blocking**: instead of blocking topics o
 
 On the infrastructure side, the `/server` page now shows real minting earnings computed from actual balance history instead of a theoretical projection, the test suite has been split into dedicated backend and blockchain runners, and a round of robustness fixes hardens JSON parsing against `miraged` log-line noise.
 
+Security hardening closes a critical edge case: **NUL and control characters are now rejected on-chain and in the backend**, media URLs are validated for unsafe control characters, and the indexer strips any remaining NUL bytes before database writes. New malicious-input tests (NUL, control chars, Unicode edge cases) ensure the whole stack stays resilient.
+
 **Upgrade Name:** `v1.13.0`
 
 ---
@@ -115,9 +117,22 @@ The test suite has been split and expanded for better coverage.
 
 - **Split**: `test_local.py` separated into `test_backend.py` (API endpoint tests) and `test_blockchain.py` (direct relay/chain tests)
 - **Wildcard tests**: Dedicated tests for wildcard block topic patterns across both backend and blockchain suites
+- **Malicious inputs**: Added NUL/control-char rejection tests and media URL validation in both backend and blockchain suites
+- **Unicode edge cases**: Content/title with zero-width, bidi, combining, and emoji are accepted; Unicode topics are rejected
 - **Robustness**: All JSON parsing now locates the first `{` or `[` in `miraged` output, skipping log lines that previously broke parsers
 - **Faucet fix**: Faucet sequence mismatch errors handled with retry on code 32
 - **Gov module**: Address parsing now handles the `{type, value: {address}}` response format alongside `{base_account: {address}}`
+
+---
+
+### Input Validation Hardening
+
+Defense-in-depth against malformed text inputs and database-stalling bytes.
+
+- **Blockchain**: `validateSafeText` rejects NUL, C0 control chars (except tab/newline/CR), DEL, and invalid UTF-8 in `Post`, `Edit`, `SetUsername`, and media URLs
+- **Backend**: `_has_unsafe_chars` blocks the same character classes in `core_post`, `core_edit`, `core_set_username`, and media validation
+- **Indexer**: `_strip_nul` safety net applied to posts, profiles, and topic tables to prevent PostgreSQL NUL errors
+- **Behavior**: Unicode content remains fully supported; only unsafe control characters are blocked
 
 ---
 
@@ -129,6 +144,7 @@ The test suite has been split and expanded for better coverage.
 - Fixed topic follow/unfollow not updating sidebar and card menus without a page refresh
 - Fixed faucet sequence mismatch in test suite by retrying on code 32
 - Fixed `search_topics` 500 error caused by log-line noise in query output
+- Prevented indexer stalls caused by NUL/control bytes in posts, media URLs, and profile fields
 
 ---
 

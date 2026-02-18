@@ -2054,6 +2054,9 @@ def test_msg_format(backend: str) -> None:
         ("UPPER", "uppercase"),
         ("with spaces", "spaces"),
         ("special!@#", "special_chars"),
+        ("tést", "accented"),
+        ("тема", "cyrillic"),
+        ("te\u200bst", "zero_width"),
         ("a", "too_short"),
         ("a" * 200, "too_long"),
     ]
@@ -2089,6 +2092,26 @@ def test_msg_format(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_reject(f"format.tag_{label}", ccode, dcode, dlog)
+
+    # ─── Unicode content/title accepted ───────────────────────────
+    unicode_cases = [
+        ("zwsp_title", f"Zero\u200bWidth", "body"),
+        ("zwj_title", f"Join\u200dTest", "body"),
+        ("rtl_content", "Title", "abc\u202edef"),
+        ("bidi_isolate", "Title", "a\u2066b\u2069c"),
+        ("combining", "Cafe\u0301", "body"),
+        ("emoji", "Title🙂", "content 🙂"),
+    ]
+    for label, title, content in unicode_cases:
+        msg = _build_msg_post(w1, lb, 0, ts, f"fmt{_rand_str(4)}", title, content, pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            w1.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(f"format.unicode_{label}", ccode, dcode, dlog)
 
     # ─── Vote direction at chain level ────────────────────────────
     # Chain may accept any integer direction (clamping or treating as no-op)

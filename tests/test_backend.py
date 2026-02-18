@@ -2839,6 +2839,37 @@ def test_edge_cases(backend: str):
         else:
             _fail(f"edge.{label}_rejected", f"code={code}, should have been rejected")
 
+    # ── Unicode edge cases (should be accepted) ───────────────────
+    unicode_cases = [
+        ("zwsp_title", f"Zero\u200bWidth", "body"),
+        ("zwj_title", f"Join\u200dTest", "body"),
+        ("rtl_content", "Title", "abc\u202edef"),
+        ("bidi_isolate", "Title", "a\u2066b\u2069c"),
+        ("combining", "Cafe\u0301", "body"),
+        ("emoji", "Title🙂", "content 🙂"),
+    ]
+    for label, title, content in unicode_cases:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post("test", title, content)
+        if code < 400:
+            _pass(f"edge.unicode_{label}_accepted")
+        else:
+            _fail(f"edge.unicode_{label}_accepted", f"code={code}")
+
+    # ── Unicode topics should be rejected ─────────────────────────
+    bad_unicode_topics = [
+        ("accented", "tést"),
+        ("cyrillic", "тема"),
+        ("zero_width", "te\u200bst"),
+    ]
+    for label, topic in bad_unicode_topics:
+        lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+        code, resp = _try_post(topic, "Title", "body")
+        if code >= 400:
+            _pass(f"edge.unicode_topic_{label}_rejected")
+        else:
+            _fail(f"edge.unicode_topic_{label}_rejected", f"code={code}")
+
 
 # =========================================================================
 # Category 10: Security & Attack Vectors
