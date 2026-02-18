@@ -283,25 +283,36 @@ maybe_proto_gen_and_go_build() {
 docker_build() {
   # docker_build <load_or_push>
   local mode="$1"
+
+  # Local loads use plain docker build to avoid buildx gRPC stream timeout
+  # on large images. Buildx is only needed for --push (registry).
+  if [ "$mode" = "load" ]; then
+    local cache_arg=""
+    if [ "$NO_CACHE" -eq 1 ]; then
+      echo "==> Building WITHOUT cache (use default to enable)"
+      cache_arg="--no-cache"
+    fi
+    DOCKER_BUILDKIT=1 docker build \
+      -t "mirage:local" \
+      $cache_arg \
+      --build-arg GIT_BRANCH="$GIT_BRANCH" \
+      --build-arg GIT_HASH="$GIT_HASH" \
+      -f "$REPO_ROOT/deploy/Dockerfile" \
+      "$REPO_ROOT"
+    return
+  fi
+
+  # Push mode: use buildx for registry push + explicit cache dirs
   local cache_base
   cache_base="$(cache_dir)/buildx-cache"
   mkdir -p "$cache_base"
 
-  local tags=()
-  local out_args=()
-  local cache_args=()
-  if [ "$mode" = "push" ]; then
-    out_args+=(--push)
-    tags+=(-t "$IMAGE_SHA_TAG")
-    if [ -n "$IMAGE_MOVING_TAG" ]; then
-      tags+=(-t "$IMAGE_MOVING_TAG")
-    fi
-  else
-    out_args+=(--load)
-    tags+=(-t "mirage:local")
+  local tags=(-t "$IMAGE_SHA_TAG")
+  if [ -n "$IMAGE_MOVING_TAG" ]; then
+    tags+=(-t "$IMAGE_MOVING_TAG")
   fi
 
-  # Add cache args unless --no-cache was specified
+  local cache_args=()
   if [ "$NO_CACHE" -eq 1 ]; then
     echo "==> Building WITHOUT cache (use default to enable)"
     cache_args+=(--no-cache)
@@ -311,7 +322,7 @@ docker_build() {
   fi
 
   docker buildx build \
-    "${out_args[@]}" \
+    --push \
     "${tags[@]}" \
     "${cache_args[@]}" \
     --build-arg GIT_BRANCH="$GIT_BRANCH" \
