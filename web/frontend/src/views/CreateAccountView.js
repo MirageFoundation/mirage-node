@@ -111,6 +111,7 @@ function CreateAccountView({ state, setCredentials }) {
     const navigate = useNavigate();
     const location = useLocation();
     const [configUpdateTrigger, setConfigUpdateTrigger] = React.useState(0);
+    const configFetchAttemptedRef = React.useRef(false);
 
     // Re-read config when App.js fetches fresh data
     React.useEffect(() => {
@@ -139,7 +140,31 @@ function CreateAccountView({ state, setCredentials }) {
     const inviteCodeRequired = nodeConfig ? nodeConfig.registration_invite_code_required : false;
 
     // App.js fetches get_node_config on mount when stale and fires nodeConfigUpdated.
-    // No duplicate fetch here — just wait for the event (listened above).
+    // If config is missing (cleared or never cached), fetch here once to avoid
+    // a permanent "Loading..." state on this view.
+    React.useEffect(() => {
+        if (nodeConfig || configFetchAttemptedRef.current) return;
+        configFetchAttemptedRef.current = true;
+        let cancelled = false;
+        try { console.debug('[CreateAccount] nodeConfig missing, fetching...'); } catch (_) { }
+        Api.get('get_node_config', undefined)
+            .then((cfg) => {
+                if (!cfg || typeof cfg !== 'object') {
+                    try { console.warn('[CreateAccount] nodeConfig fetch returned invalid payload'); } catch (_) { }
+                    return;
+                }
+                try { tx.cacheNodeConfig(cfg); } catch (_) { }
+            })
+            .catch((err) => {
+                try { console.error('[CreateAccount] nodeConfig fetch failed:', err); } catch (_) { }
+            })
+            .finally(() => {
+                if (cancelled) return;
+                // Ensure we exit the loading state even if fetch failed.
+                setConfigUpdateTrigger((prev) => prev + 1);
+            });
+        return () => { cancelled = true; };
+    }, [nodeConfig]);
 
     // Check if we're coming from login with an imported seed (account not found on chain)
     const importedSeed = location.state?.importedSeed || null;
