@@ -68,6 +68,9 @@ service Msg {
   // Delete marks a post or comment as deleted (only emits event for indexer).
   rpc Delete(MsgDelete) returns (MsgDeleteResponse);
 
+  // DeleteUser permanently removes a user account.
+  rpc DeleteUser(MsgDeleteUser) returns (MsgDeleteUserResponse);
+
   // SendTokens sends tokens from signer to target.
   rpc SendTokens(MsgSendTokens) returns (MsgSendTokensResponse);
 
@@ -515,6 +518,28 @@ message MsgDelete {
 }
 
 message MsgDeleteResponse {}
+
+// MsgDeleteUser permanently removes a user account
+message MsgDeleteUser {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+
+  // Payload
+  string target = 100;
+}
+
+message MsgDeleteUserResponse {}
 
 // MsgSendTokens sends tokens from signer to target
 message MsgSendTokens {
