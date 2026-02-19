@@ -1,35 +1,11 @@
-# Mirage v1.14.0 Release Notes
+v1.14.0 brings **account deletion** to Mirage. Your data, your choice — head to Settings, type "DELETE," and your entire presence is wiped from the chain: profile, username, follows, blocks, subscription, everything. Your username is freed up instantly for anyone else to claim, and any remaining token balance flows back to the community pool.
 
-v1.14.0 introduces **MsgDeleteUser** — users can permanently delete their account. Deletion can be initiated by the user themselves (self-signed via `envelope_pubkey`) or by governance. On-chain, the handler clears the profile KV, all profile lists, releases the username, removes the subscription index entry, and sweeps all spendable balances to the community pool. The indexer soft-deletes profiles (sets `deleted_at`) so that post attribution — the original author's username on historical posts — is preserved while deleted usernames no longer resolve for new lookups.
+Mirage is built on a blockchain, so deletion works a bit differently than what you're used to. When you delete your account, the network broadcasts a deletion request to every node. The vast majority will honor it immediately, but because each node is independently operated, we can't promise that every last copy disappears from every corner of the network. Your historical posts stick around with your old username for context — but your profile and identity are gone for good.
 
----
+For cases where the community needs to step in, account deletion can also happen through **governance**. If a spam account, an impersonator, or a bad actor needs to go, the community can propose and vote on it — no user signature needed. When the vote passes, the same full cleanup runs automatically.
 
-### MsgDeleteUser
+We've also tightened up the infrastructure in this release. All API and chain endpoints now enforce **per-IP rate limiting** — 10 requests per second on API routes, 5 on chain routes — with clean JSON errors instead of cryptic HTML when you hit the ceiling. Structured access logs, automatic Cloudflare IP trust, and smarter cache headers round out the hardening.
 
-Permanently remove a user account from the blockchain.
+The deletion experience is designed to be final. Once you confirm, the app **clears your seed phrase, wipes local data, and logs you out** on the spot. No cooldown period, no "we'll keep your data for 30 days just in case." When you say delete, we mean it.
 
-- **Authorization**: Self-signed (envelope derives to target) or governance module
-- **On-chain**: Clears profile core, followed mods/users/topics, blocked users/posts/topics, username mapping, subscription index; sweeps spendable to community pool
-- **Indexer**: Soft-deletes profile (`deleted_at`); username resolution excludes deleted users; post attribution still shows original username from soft-deleted rows
-- **Re-registration**: If a user is deleted and later re-registers (e.g. chain replay), `upsert_profile` and `upsert_profile_full` clear `deleted_at` on conflict
-
----
-
-### Technical Details
-
-- **Blockchain**: `MsgDeleteUser` (fields: authority, envelope_*, target); `DeleteUserState` keeper method; relay gas fee deducted for self-delete
-- **Indexer**: `soft_delete_profile()`, `deleted_at` column, `idx_profiles_username_active` partial index
-- **Backend**: `deleted_at IS NULL` in username resolution, user search, and subscriber queries
-- **Governance**: `MsgDeleteUser` in `TYPE_URL_TO_PROTO` for proposal parsing
-
----
-
-### Upgrade
-
-**Upgrade Name:** `v1.14.0`
-
-No on-chain state migration — new message types only.
-
----
-
-Have a feature suggestion? Let us know on [Mirage](https://mirage.talk) — post it in the #feedback topic or message us directly.
+Every layer of the deletion flow is battle-tested: the chain rejects any attempt to delete someone else's account, the API enforces the same ownership check, and the full self-delete path is validated end to end with dedicated security tests.

@@ -1983,6 +1983,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'popular' && 'popular'}
                                             {post.feed_bucket === 'discussion' && 'discussed'}
                                             {post.feed_bucket === 'second_chance' && 'second chance'}
+                                            {post.feed_bucket === 'fresh' && 'fresh pick'}
                                             {post.feed_bucket === 'newest' && 'newest'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>
@@ -2156,6 +2157,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
                             {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
+                            {post.feed_bucket === 'fresh' && (post.feed_debug?.reason || 'Fresh pick')}
                             {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
                             {post.feed_debug && typeof post.feed_debug.score === 'number' && (
                                 <ScoreDisplay>
@@ -2187,6 +2189,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {post.feed_bucket === 'popular' && (post.feed_debug?.reason || 'Popular post')}
                             {post.feed_bucket === 'discussion' && (post.feed_debug?.reason || 'Active discussion')}
                             {post.feed_bucket === 'second_chance' && (post.feed_debug?.reason || 'Second chance')}
+                            {post.feed_bucket === 'fresh' && (post.feed_debug?.reason || 'Fresh pick')}
                             {post.feed_bucket === 'newest' && (post.feed_debug?.reason || 'Newest')}
                             {post.feed_debug && typeof post.feed_debug.score === 'number' && (
                                 <ScoreDisplay>
