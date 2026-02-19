@@ -73,12 +73,13 @@ build-orchestrator:
 
 build-all: test-fast build build-orchestrator
 
-# Build a specific version for upgrades
+# Build a specific version for upgrades (version embedded via ldflags; binary is always miraged)
 build-version:
 	@if [ -z "$(V)" ]; then echo "Usage: make build-version V=v2.0.0"; exit 1; fi
 	@echo "--> Building $(APPNAME)d version $(V)"
-	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./$(APPNAME)d-$(V) ./cmd/$(APPNAME)d
-	@echo "--> Binary created: ./$(APPNAME)d-$(V)"
+	@mkdir -p ./bin
+	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
+	@echo "--> Binary created: ./bin/$(APPNAME)d"
 
 .PHONY: all install build build-version build-orchestrator build-all
 
