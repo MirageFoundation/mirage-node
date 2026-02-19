@@ -2959,7 +2959,7 @@ def get_address_from_username():
                 return jsonify({"map": {}})
             ph = ",".join(["%s"] * len(cleaned))
             cur.execute(
-                f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph})",
+                f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph}) AND deleted_at IS NULL",
                 cleaned,
             )
             result = {}
@@ -2974,7 +2974,7 @@ def get_address_from_username():
             conn.close()
             return jsonify({"error": "username is required"}), 400
         username = single.strip()
-        cur.execute("SELECT owner FROM profiles WHERE LOWER(username)=LOWER(%s) LIMIT 1", (username,))
+        cur.execute("SELECT owner FROM profiles WHERE LOWER(username)=LOWER(%s) AND deleted_at IS NULL LIMIT 1", (username,))
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -3002,7 +3002,7 @@ def username_search():
         cur = conn.cursor()
         # Prefix match on username, exclude empty usernames
         cur.execute(
-            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' ORDER BY username LIMIT %s",
+            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' AND deleted_at IS NULL ORDER BY username LIMIT %s",
             (q + "%", limit),
         )
         results = [{"username": row[0], "address": row[1]} for row in cur.fetchall() if row[0] and row[1]]
@@ -3103,9 +3103,9 @@ def get_users():
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
 
-        username_filter = ""
+        username_filter = "WHERE deleted_at IS NULL"
         if has_username:
-            username_filter = "WHERE username IS NOT NULL AND username != ''"
+            username_filter = "WHERE username IS NOT NULL AND username != '' AND deleted_at IS NULL"
 
         cur.execute(
             f"""
@@ -3436,7 +3436,7 @@ def search():
                        (SELECT COUNT(1) FROM posts p WHERE LOWER(p.owner) = LOWER(pr.owner) 
                         AND COALESCE(p.target, '') = '' {deleted_clause}) as post_count
                 FROM profiles pr
-                WHERE LOWER(pr.username) LIKE %s
+                WHERE LOWER(pr.username) LIKE %s AND pr.deleted_at IS NULL
                 ORDER BY 
                     CASE WHEN LOWER(pr.username) = %s THEN 0 ELSE 1 END,
                     pr.created_at DESC
@@ -3640,6 +3640,7 @@ def search():
                     WHERE pr.username IS NOT NULL 
                       AND pr.username != ''
                       AND LOWER(pr.username) LIKE %s
+                      AND pr.deleted_at IS NULL
                     ORDER BY pr.created_at DESC
                     LIMIT %s OFFSET %s
                     """,
@@ -6236,7 +6237,7 @@ def _get_stats_subscribers(rid: int):
                     (SELECT COUNT(*) FROM votes WHERE LOWER(owner) = LOWER(p.owner)) as vote_count,
                     (SELECT COUNT(*) FROM followed_users WHERE LOWER(target) = LOWER(p.owner)) as follower_count
                 FROM profiles p
-                WHERE p.subscription_expiry > %s AND p.level > 0 AND p.level < 100
+                WHERE p.subscription_expiry > %s AND p.level > 0 AND p.level < 100 AND p.deleted_at IS NULL
                 ORDER BY p.level DESC, p.created_at DESC
                 """,
                 (now,),

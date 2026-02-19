@@ -240,6 +240,14 @@ class DatabaseManager:
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_owner_lower ON profiles(LOWER(owner))")
 
+                # v1.13.0: soft-delete support for MsgDeleteUser
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_deleted_at ON profiles(deleted_at)")
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_profiles_username_active "
+                    "ON profiles(LOWER(username)) WHERE deleted_at IS NULL"
+                )
+
                 # followed_mods (with position for order)
                 cur.execute(
                     """
@@ -966,7 +974,9 @@ class DatabaseManager:
                 cur.execute("DELETE FROM mentions WHERE post_txhash = %s", (post_txhash,))
 
     def resolve_usernames_to_addresses(self, usernames: list[str]) -> dict[str, str]:
-        """Bulk-resolve usernames to addresses. Returns {lowercase_username: owner_address}."""
+        """Bulk-resolve usernames to addresses (active profiles only).
+        Returns {lowercase_username: owner_address}.
+        """
         if not usernames:
             return {}
         with self._connect() as conn:
@@ -976,7 +986,8 @@ class DatabaseManager:
                     return {}
                 ph = ",".join(["%s"] * len(cleaned))
                 cur.execute(
-                    f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph})",
+                    f"SELECT LOWER(username), owner FROM profiles "
+                    f"WHERE LOWER(username) IN ({ph}) AND deleted_at IS NULL",
                     cleaned,
                 )
                 return {row[0]: row[1] for row in cur.fetchall() if row[0] and row[1]}
@@ -1453,7 +1464,8 @@ class DatabaseManager:
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
                       level=EXCLUDED.level,
-                      updated_at=EXCLUDED.updated_at
+                      updated_at=EXCLUDED.updated_at,
+                      deleted_at=NULL
                     """,
                     (owner, username, int(level), int(updated_at), int(updated_at)),
                 )
@@ -1556,7 +1568,8 @@ class DatabaseManager:
                       biography=EXCLUDED.biography,
                       avatar=EXCLUDED.avatar,
                       banner=EXCLUDED.banner,
-                      updated_at=EXCLUDED.updated_at
+                      updated_at=EXCLUDED.updated_at,
+                      deleted_at=NULL
                     """,
                     (
                         owner,
@@ -1581,6 +1594,17 @@ class DatabaseManager:
                     "UPDATE profiles SET updated_at = %s WHERE LOWER(owner) = LOWER(%s)",
                     (int(updated_at), owner),
                 )
+
+    def soft_delete_profile(self, owner: str, deleted_at: int) -> int:
+        """Mark a profile as deleted (soft-delete). Returns rows affected."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE profiles SET deleted_at = %s, updated_at = %s "
+                    "WHERE LOWER(owner) = LOWER(%s) AND deleted_at IS NULL",
+                    (int(deleted_at), int(deleted_at), owner),
+                )
+                return cur.rowcount
 
     def set_moderators(self, owner: str, moderators: list[str]) -> None:
         """Set moderators for an owner."""

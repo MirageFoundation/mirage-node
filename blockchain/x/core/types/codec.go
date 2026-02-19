@@ -21,7 +21,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBlockPost{}, &MsgUnblockPost{},
 		&MsgBlockUser{}, &MsgUnblockUser{},
 		&MsgBlockTopic{}, &MsgUnblockTopic{},
-		&MsgDelete{}, &MsgSendTokens{}, &MsgSetLevel{},
+		&MsgDelete{}, &MsgDeleteUser{}, &MsgSendTokens{}, &MsgSetLevel{},
 		&MsgPunishValidator{}, &MsgMintTokens{}, &MsgBurnTokens{}, &MsgUpgradeLevel{},
 		&MsgSetAutoRenewal{},
 		// Bridge messages
@@ -40,7 +40,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},
 		&MsgBlockUserResponse{}, &MsgUnblockUserResponse{},
 		&MsgBlockTopicResponse{}, &MsgUnblockTopicResponse{},
-		&MsgDeleteResponse{}, &MsgSendTokensResponse{}, &MsgSetLevelResponse{},
+		&MsgDeleteResponse{}, &MsgDeleteUserResponse{}, &MsgSendTokensResponse{}, &MsgSetLevelResponse{},
 		&MsgPunishValidatorResponse{}, &MsgMintTokensResponse{}, &MsgBurnTokensResponse{}, &MsgUpgradeLevelResponse{},
 		&MsgSetAutoRenewalResponse{},
 		// Bridge responses

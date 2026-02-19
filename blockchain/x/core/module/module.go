@@ -2482,6 +2482,70 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 	return &types.MsgDeleteResponse{}, nil
 }
 
+// DeleteUser permanently removes a user account.
+// Authorization: self-signed (envelope_pubkey derives to target) or governance.
+func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*types.MsgDeleteUserResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+
+	if err := validateAddress(target); err != nil {
+		return nil, fmt.Errorf("invalid target address: %w", err)
+	}
+
+	var actorType string
+	if authority == govAuthority {
+		actorType = "governance"
+	} else {
+		// Self-delete: envelope_pubkey must derive to target
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if derived != target {
+			return nil, fmt.Errorf("unauthorized: envelope_pubkey does not derive to target")
+		}
+		actorType = "self"
+	}
+
+	// Verify the profile exists and extract level for gas fee
+	bz, found, _ := am.k.GetProfileCore(sdkCtx, target)
+	if !found {
+		return nil, fmt.Errorf("profile not found or already deleted for %s", target)
+	}
+
+	// Deduct relay gas fee for self-delete (relay node compensation)
+	if actorType == "self" {
+		var userLevel int
+		var core types.ProfileCore
+		if err := json.Unmarshal(bz, &core); err == nil {
+			userLevel = int(core.Level)
+		}
+		if err := am.deductRelayGasFee(sdkCtx, target, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	// Execute the full deletion
+	usernameReleased, sweptAmounts, err := am.k.DeleteUserState(sdkCtx, target)
+	if err != nil {
+		return nil, fmt.Errorf("delete user failed: %w", err)
+	}
+
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("DeleteUser",
+		"actor_type", actorType,
+		"target", target,
+		"username_released", usernameReleased,
+		"swept_amounts", sweptAmounts.String(),
+	)
+	sdkCtx.Logger().Info(logDelimiter)
+
+	return &types.MsgDeleteUserResponse{}, nil
+}
+
 // SendTokens sends tokens from signer to target.
 func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*types.MsgSendTokensResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)

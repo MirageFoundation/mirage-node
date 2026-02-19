@@ -136,8 +136,7 @@ const excludedRoutes = [
     '/create_account',
     '/welcome',
     '/sign_out',
-    '/view_post', // DEPRECATED: legacy post route, remove in future release
-    '/p/',        // New clean post route (not restored like view_post)
+    '/p/',
     '/create_post'
 ];
 
@@ -146,8 +145,7 @@ const restorableRoutePrefixes = [
     '/home',
     '/following',
     '/t/',
-    '/profile', // DEPRECATED: legacy profile route, remove in future release
-    '/u/',      // New clean user profile route
+    '/u/',
     '/settings',
     '/follows',
     '/blocks',
@@ -936,9 +934,7 @@ class App extends Component {
                                             {/* New clean URL routes */}
                                             <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
-                                            {/* DEPRECATED: legacy routes, remove in future release */}
-                                            <Route path="/view_post" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
-                                            <Route path="/profile" element={<ProfileView state={this.state} />} />
+
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />

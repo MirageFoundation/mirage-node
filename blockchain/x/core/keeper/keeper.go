@@ -1215,6 +1215,62 @@ func (k Keeper) BurnFromAccount(ctx sdk.Context, addr string, amount uint64) err
 	return k.bank.BurnCoins(ctx, types.ModuleName, coins)
 }
 
+// DeleteUserState removes all on-chain state for a user:
+// profile core, all profile lists, username mapping, subscription index,
+// and sweeps spendable balances to the community pool.
+// Returns the username that was released (for logging) and the swept amounts.
+func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased string, sweptAmounts sdk.Coins, err error) {
+	store := k.storeService.OpenKVStore(ctx)
+	accAddr, err := sdk.AccAddressFromBech32(addr)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid address: %w", err)
+	}
+
+	// Load profile to get username and subscription expiry before deletion
+	var username string
+	var subscriptionExpiry int64
+	if bz, found, _ := k.GetProfileCore(ctx, addr); found {
+		var core types.ProfileCore
+		if err := json.Unmarshal(bz, &core); err == nil {
+			username = core.Username
+			subscriptionExpiry = core.SubscriptionExpiry
+		}
+	}
+
+	// Delete profile core KV
+	_ = store.Delete(k.profileKey(addr))
+
+	// Delete all profile list keys
+	_ = store.Delete(k.profileFollowedModsKey(addr))
+	_ = store.Delete(k.profileFollowedUsersKey(addr))
+	_ = store.Delete(k.profileFollowedTopicsKey(addr))
+	_ = store.Delete(k.profileBlockedUsersKey(addr))
+	_ = store.Delete(k.profileBlockedPostsKey(addr))
+	_ = store.Delete(k.profileBlockedTopicsKey(addr))
+
+	// Release username mapping
+	if username != "" {
+		_ = k.ReleaseUsername(ctx, username, addr)
+		usernameReleased = username
+	}
+
+	// Remove subscription index entry if present
+	if subscriptionExpiry > 0 {
+		_ = k.RemoveSubscription(ctx, addr, subscriptionExpiry)
+	}
+
+	// Sweep all spendable balances to community pool
+	spendable := k.bank.SpendableCoins(ctx, accAddr)
+	if spendable.IsAllPositive() {
+		if err := k.distribution.FundCommunityPool(ctx, spendable, accAddr); err != nil {
+			return usernameReleased, nil, fmt.Errorf("failed to sweep funds to community pool: %w", err)
+		}
+		sweptAmounts = spendable
+	}
+
+	return usernameReleased, sweptAmounts, nil
+}
+
 // ============================================
 // Bridge Attestation State Management
 // ============================================

@@ -152,7 +152,7 @@ function CreateAccountView({ state, setCredentials }) {
     // If user is already signed in, redirect to their profile
     React.useEffect(() => {
         if (state.publicKey) {
-            navigate('/profile', { replace: true });
+            navigate(`/u/${state.publicKey}`, { replace: true });
         }
     }, [state.publicKey, navigate]);
 

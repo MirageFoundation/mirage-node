@@ -998,7 +998,7 @@ const EmptyHomeMessage = () => (
 const getFeedKey = (topic, suffix) => `feed_${suffix}_${topic}`;
 
 // In-memory (per-tab) feed cache to avoid sessionStorage quota issues on long feeds.
-// This cache survives SPA navigation (feed -> view_post -> back), but not a full page refresh.
+// This cache survives SPA navigation (feed -> post -> back), but not a full page refresh.
 const getFeedMemCache = () => {
     try {
         if (typeof window === 'undefined') return null;
@@ -1111,8 +1111,8 @@ const clearRestoreFeedIntent = () => {
     try { sessionStorage.removeItem('mirage_restore_feed'); } catch (_) { }
 };
 
-// Check if we navigated here from view_post via browser back button
-// This flag is set when clicking a view_post link from the feed
+// Check if we navigated here from a post view via browser back button
+// This flag is set when clicking a post link from the feed
 const checkCameFromViewPost = () => {
     try {
         const raw = sessionStorage.getItem('mirage_came_from_feed');
@@ -1171,7 +1171,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     const currentTopicRef = useRef(urlTopic); // Track current topic to detect changes
     const restoreFeedIntentRef = useRef(checkRestoreFeedIntent(urlTopic));
-    // For browser back button: only restore if we came from a view_post that was opened from the feed
+    // For browser back button: only restore if we came from a post view that was opened from the feed
     const cameFromViewPostRef = useRef(isBackNavigation && checkCameFromViewPost());
 
     // If we are switching topics (and reusing component), we must invalidate any stale "restore" intents
@@ -2363,12 +2363,11 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             // eslint-disable-next-line no-script-url
             if (link && link.href && !link.href.startsWith('javascript:')) {
                 saveScrollPosition();
-                // Mark that we navigated to view_post from the feed
+                // Mark that we navigated to a post from the feed
                 // This enables browser back button to restore feed position
                 try {
                     const url = new URL(link.href, window.location.origin);
-                    // Support both new /p/ routes and legacy /view_post
-                    if (url.pathname === '/view_post' || url.pathname.startsWith('/view_post') || url.pathname.startsWith('/p/')) {
+                    if (url.pathname.startsWith('/p/')) {
                         sessionStorage.setItem('mirage_post_nav_source', JSON.stringify({
                             source: 'feed',
                             topic: urlTopic,
@@ -2489,9 +2488,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         return <StyledError>{error}</StyledError>;
     }
 
-    // When viewing a single post with comments, header should show topic > title
-    // Support both new /p/ routes and legacy /view_post
-    const isPostView = location.pathname.startsWith('/view_post') || location.pathname.startsWith('/p/');
+    const isPostView = location.pathname.startsWith('/p/');
     let header = null;
     if (isPostView) {
         const pid = (() => {
@@ -2499,8 +2496,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                 const raw = location.pathname.slice(3);
                 return raw ? decodeURIComponent(raw) : null;
             }
-            const params = new URLSearchParams(location.search);
-            return params.get('post_id');
+            return null;
         })();
         const p = pid ? state.posts[pid] : null;
         if (p) {

@@ -1024,7 +1024,7 @@ function ViewPostView({ state, updatePost }) {
     }, [location.search]);
 
     // If this post wasn't opened from the feed, clear any stale "came from feed" flag.
-    // We only want feed restoration for browser-back when the user navigated feed -> view_post.
+    // We only want feed restoration for browser-back when the user navigated feed -> post view.
     useEffect(() => {
         const openedFromFeed = openedFromFeedInfoRef.current?.opened === true;
 
@@ -2210,7 +2210,6 @@ function ViewPostView({ state, updatePost }) {
         }
     };
 
-    // Support new clean URL /p/:postId and legacy /view_post?post_id=...
     const routeParams = useParams();
 
     // Parse depth from query params (0-5, must be valid integer when provided)
@@ -2230,47 +2229,24 @@ function ViewPostView({ state, updatePost }) {
         return num;
     }, [location.search]);
 
-    const postId = React.useMemo(() => {
-        // New clean URL: /p/:postId
-        if (routeParams.postId) {
-            return routeParams.postId;
-        }
-        // DEPRECATED: Legacy query params, remove in future release
-        const params = new URLSearchParams(location.search);
-        return params.get('root') || params.get('post_id');
-    }, [routeParams.postId, location.search]);
+    const postId = routeParams.postId || null;
 
-    // focusedCommentId: set when viewing a specific comment (not the root post)
-    // For legacy URLs: when both root and post_id are provided
-    // DEPRECATED: Legacy query params, remove in future release
-    const legacyFocusedCommentId = React.useMemo(() => {
-        const params = new URLSearchParams(location.search);
-        const r = params.get('root');
-        const pid = params.get('post_id');
-        if (r && pid) return String(pid).toLowerCase();
-        return '';
-    }, [location.search]);
-
-    // For new URLs (/p/:postId): detect if loaded post is a comment (has non-empty target)
-    // This is computed after root loads
+    // Detect if loaded post is a comment (has non-empty target)
     const isViewingComment = React.useMemo(() => {
         if (!root) return false;
-        // Check if this post has a target (is a reply) and has a different root_post_id
         const target = root.target || '';
         const rootPostId = root.root_post_id || '';
         const thisPostId = (root.post_id || '').toLowerCase();
         return target.trim() !== '' && rootPostId.toLowerCase() !== thisPostId;
     }, [root]);
 
-    // Effective focusedCommentId: use legacy param if set, otherwise detect from loaded data
+    // If we loaded a comment (not root), treat postId as focused
     const focusedCommentId = React.useMemo(() => {
-        if (legacyFocusedCommentId) return legacyFocusedCommentId;
-        // For new URL scheme: if we loaded a comment (not root), treat postId as focused
         if (isViewingComment && routeParams.postId) {
             return String(routeParams.postId).toLowerCase();
         }
         return '';
-    }, [legacyFocusedCommentId, isViewingComment, routeParams.postId]);
+    }, [isViewingComment, routeParams.postId]);
 
     // The actual root post ID (for "view full thread" links)
     const actualRootPostId = React.useMemo(() => {
@@ -3688,7 +3664,7 @@ function ViewPostView({ state, updatePost }) {
 
     if (root) {
         const origin = typeof window !== 'undefined' && window.location && window.location.origin ? window.location.origin : 'https://mirage.vote';
-        const postUrl = `${origin}/view_post?post_id=${root.post_id}`;
+        const postUrl = `${origin}/p/${root.post_id}`;
         const postTitle = mergedRoot && mergedRoot.title ? String(mergedRoot.title).trim() : (root && root.title ? String(root.title).trim() : 'Mirage');
         const postDescription = mergedRoot && mergedRoot.content ? String(mergedRoot.content).trim().substring(0, 200) : (root && root.content ? String(root.content).trim().substring(0, 200) : 'Decentralized social network');
         const imageUrl = `${origin}/images/logo.webp`;
