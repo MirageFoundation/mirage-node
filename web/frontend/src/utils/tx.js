@@ -107,6 +107,17 @@ export async function getPendingBlockInfo(type, target) {
     return h.getPendingBlockInfo(type, target);
 }
 
+// Delete-account tracking
+export async function addDeleteListener(fn) {
+    const h = await getHandler();
+    return h.addDeleteListener(fn);
+}
+
+export async function getPendingDeletes() {
+    const h = await getHandler();
+    return h.getPendingDeletes();
+}
+
 export async function cacheChainConfig(data) {
     const h = await getHandler();
     return h.cacheChainConfig(data);
@@ -166,6 +177,11 @@ export async function performTransaction(tx, challenge, privateKeyHex, signerAdd
 export async function deletePost(txhash) {
     const h = await getHandler();
     return h.deletePost(txhash);
+}
+
+export async function deleteUser() {
+    const h = await getHandler();
+    return h.deleteUser();
 }
 
 export async function blockUser(address, block = true) {

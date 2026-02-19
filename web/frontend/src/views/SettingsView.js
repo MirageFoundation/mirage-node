@@ -4,6 +4,8 @@ import styled from "styled-components";
 import { useLocation, Navigate } from 'react-router-dom';
 import Storage from "../utils/Storage";
 import seedVault from "../utils/SeedVault";
+import { deleteUser } from "../utils/tx";
+import usePendingDeletes from "../utils/usePendingDeletes";
 import Sidebar from '../components/Sidebar';
 import TopBar from '../components/TopBar';
 import MobileHeader from '../components/MobileHeader';
@@ -274,6 +276,46 @@ const SmallButton = styled.button`
     }
 `;
 
+const DangerButton = styled(SmallButton)`
+    background: #dc2626;
+
+    &:hover:not(:disabled) {
+        background: #b91c1c;
+    }
+`;
+
+const DangerInput = styled.input`
+    flex: 1;
+    min-width: 160px;
+    padding: 0.45rem 0.7rem;
+    font-size: 0.8rem;
+    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 6px;
+    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    box-sizing: border-box;
+
+    &:focus {
+        outline: none;
+        border-color: #ef4444;
+        box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+    }
+`;
+
+const DangerRow = styled.div`
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+`;
+
+const DangerNotice = styled.div`
+    color: #fca5a5;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    margin-bottom: 0.5rem;
+`;
+
 const SecurityError = styled.div`
     color: #f66;
     font-size: 0.72rem;
@@ -364,6 +406,7 @@ const Divider = styled.hr`
 
 export default function SettingsView({ state }) {
     const location = useLocation();
+    const { getInfo: getDeleteInfo, formatStatus: formatDeleteStatus } = usePendingDeletes();
 
     const [themeMode, setThemeMode] = useState(() => {
         try {
@@ -469,6 +512,16 @@ export default function SettingsView({ state }) {
     const [secError, setSecError] = useState('');
     const [secSuccess, setSecSuccess] = useState('');
     const [secBusy, setSecBusy] = useState(false);
+    const [deleteConfirmText, setDeleteConfirmText] = useState('');
+    const [deleteError, setDeleteError] = useState('');
+    const [deleteSuccess, setDeleteSuccess] = useState('');
+    const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
+    const deleteTarget = String(state?.publicKey || '').trim().toLowerCase();
+    const deleteInfo = getDeleteInfo(deleteTarget);
+    const deleteStatus = formatDeleteStatus(deleteTarget);
+    const deleteBusy = deleteSubmitting || !!deleteInfo;
+    const deleteConfirmReady = deleteConfirmText.trim().toUpperCase() === 'DELETE';
     const [seedRevealed, setSeedRevealed] = useState(false);
     const [seedCopied, setSeedCopied] = useState(false);
 
@@ -615,6 +668,51 @@ export default function SettingsView({ state }) {
                 return 'Light theme during daytime hours, dark theme at night (based on date & time)';
             default:
                 return '';
+        }
+    };
+
+    const handleDeleteAccount = async () => {
+        setDeleteError('');
+        setDeleteSuccess('');
+
+        if (!deleteTarget || deleteTarget === 'guest') {
+            setDeleteError('Not signed in.');
+            return;
+        }
+        if (!deleteTarget.startsWith('mirage1')) {
+            setDeleteError('Invalid account address.');
+            return;
+        }
+        if (!deleteConfirmReady) {
+            setDeleteError('Type DELETE to confirm.');
+            return;
+        }
+        if (deleteBusy) {
+            return;
+        }
+
+        setDeleteSubmitting(true);
+        console.debug('[Settings] delete_user.start', { target: deleteTarget });
+        try {
+            const result = await deleteUser();
+            console.debug('[Settings] delete_user.result', result);
+            if (result && result.success) {
+                if (!result.tx_hash) {
+                    setDeleteError('Delete account failed: missing tx hash.');
+                    setDeleteSubmitting(false);
+                    return;
+                }
+                seedVault.clear();
+                Storage.clear();
+                window.location.replace('/');
+                return;
+            } else {
+                setDeleteError(result?.error || 'Delete account failed.');
+            }
+        } catch (err) {
+            setDeleteError(String(err?.message || err || 'Delete account failed.'));
+        } finally {
+            setDeleteSubmitting(false);
         }
     };
 
@@ -1022,6 +1120,43 @@ export default function SettingsView({ state }) {
                                         />
                                         Immediately hide downvoted posts
                                     </CheckboxLabel>
+                                </ValueBox>
+                            </Row>
+
+                            <Divider />
+
+                            <Row>
+                                <Label style={{ whiteSpace: 'normal' }}>Delete account:</Label>
+                                <ValueBox>
+                                    <DangerNotice>
+                                        This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
+                                    </DangerNotice>
+                                    <DangerRow>
+                                        <DangerInput
+                                            value={deleteConfirmText}
+                                            onChange={(e) => {
+                                                setDeleteConfirmText(e.target.value);
+                                                if (deleteError) setDeleteError('');
+                                                if (deleteSuccess) setDeleteSuccess('');
+                                            }}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    handleDeleteAccount();
+                                                }
+                                            }}
+                                            placeholder="Type DELETE to confirm"
+                                            disabled={deleteBusy}
+                                        />
+                                        <DangerButton
+                                            disabled={!deleteConfirmReady || deleteBusy}
+                                            onClick={handleDeleteAccount}
+                                        >
+                                            {deleteStatus || (deleteBusy ? 'Deleting...' : 'Delete account')}
+                                        </DangerButton>
+                                    </DangerRow>
+                                    {deleteError && <SecurityError>{deleteError}</SecurityError>}
+                                    {deleteSuccess && <SecuritySuccess><span>✓</span>{deleteSuccess}</SecuritySuccess>}
                                 </ValueBox>
                             </Row>
 

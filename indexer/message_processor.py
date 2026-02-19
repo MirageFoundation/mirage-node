@@ -25,6 +25,7 @@ from shared.datatypes import (
     MsgBlockTopic,
     MsgUnblockTopic,
     MsgDelete,
+    MsgDeleteUser,
     MsgSetLevel,
     MsgUpgradeLevel,
     MsgSetAutoRenewal,
@@ -92,6 +93,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgBlockTopic": MsgBlockTopic,
     "/mirage.core.v1.MsgUnblockTopic": MsgUnblockTopic,
     "/mirage.core.v1.MsgDelete": MsgDelete,
+    "/mirage.core.v1.MsgDeleteUser": MsgDeleteUser,
     "/mirage.core.v1.MsgSetLevel": MsgSetLevel,
     "/mirage.core.v1.MsgUpgradeLevel": MsgUpgradeLevel,
     "/mirage.core.v1.MsgSetAutoRenewal": MsgSetAutoRenewal,
@@ -147,6 +149,8 @@ class MessageProcessor:
             self._handle_unblock_topic(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgDelete":
             self._handle_delete(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgDeleteUser":
+            self._handle_delete_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetLevel":
             self._handle_set_level(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgUpgradeLevel":
@@ -1320,6 +1324,38 @@ class MessageProcessor:
                     logger.warning("Delete rejected: target %s not found or not owned by %s", target, owner)
         except Exception as e:
             logger.error("Error handling MsgDelete: %s", e, exc_info=True)
+
+    def _handle_delete_user(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgDeleteUser - soft-delete the user's profile.
+
+        On-chain authorization (self or governance) is already enforced by the
+        blockchain module. The indexer just marks the profile as deleted while
+        preserving the row for historical post attribution.
+        """
+        try:
+            parsed = MsgDeleteUser()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            target = str(msg_dict.get("target", "")).strip().lower()
+
+            if not target:
+                logger.warning("Rejected delete_user: missing target")
+                return
+
+            rows = self.db.soft_delete_profile(target, ts)
+            if rows > 0:
+                self.log_yaml(
+                    "Delete user (soft-delete)",
+                    {
+                        "target": target,
+                        "timestamp": int(ts),
+                        "time_iso": self.iso_timestamp(ts),
+                    },
+                )
+            else:
+                logger.warning("DeleteUser: profile not found or already deleted for %s", target)
+        except Exception as e:
+            logger.error("Error handling MsgDeleteUser: %s", e, exc_info=True)
 
     def _handle_set_level(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetLevel."""

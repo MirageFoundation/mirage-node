@@ -229,19 +229,7 @@ export default function ProfileView({ state }) {
     const [usernameResolutionError, setUsernameResolutionError] = useState(null);
     const [isResolvingUsername, setIsResolvingUsername] = useState(false);
 
-    // Support new clean URL /u/:identity and legacy /profile?address=...
     const routeIdentity = routeParams.identity || '';
-
-    // DEPRECATED: Legacy query params, remove in future release
-    const queryAddress = useMemo(() => {
-        try {
-            const params = new URLSearchParams(location.search);
-            const raw = params.get('address');
-            return raw ? raw.trim() : '';
-        } catch {
-            return '';
-        }
-    }, [location.search]);
 
     // Resolve username to address for /u/:identity route
     useEffect(() => {
@@ -277,22 +265,19 @@ export default function ProfileView({ state }) {
             });
     }, [routeIdentity]);
 
-    // Determine effective profile address: route identity (resolved) > legacy query > own address
     const profileAddress = useMemo(() => {
         if (routeIdentity) {
-            // For /u/:identity route
             if (isValidMirageAddress(routeIdentity)) return routeIdentity.trim().toLowerCase();
             return resolvedAddress || '';
         }
-        // Legacy /profile?address=... or own profile
-        return queryAddress || address || '';
-    }, [routeIdentity, resolvedAddress, queryAddress, address]);
+        return address || '';
+    }, [routeIdentity, resolvedAddress, address]);
 
     const normalizedOwn = (address || '').trim().toLowerCase();
     const normalizedProfile = (profileAddress || '').trim().toLowerCase();
     const isOwnProfile = normalizedOwn && normalizedProfile
         ? normalizedOwn === normalizedProfile
-        : Boolean(normalizedOwn) && !queryAddress && !routeIdentity;
+        : Boolean(normalizedOwn) && !routeIdentity;
 
     const VALID_TABS = ['profile', 'posts', 'algo'];
     const [activeTab, setActiveTab] = useTabs('profile', VALID_TABS);

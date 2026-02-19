@@ -263,6 +263,18 @@ def _build_pool():
     add_f(msg_delete, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_delete, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # MsgDeleteUser (permanently removes a user account)
+    msg_delete_user = file_proto.message_type.add()
+    msg_delete_user.name = "MsgDeleteUser"
+    add_f(msg_delete_user, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_delete_user, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_delete_user, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_delete_user, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_delete_user, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_delete_user, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_delete_user, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_delete_user, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # MsgSendTokens
     msg_send_tokens = file_proto.message_type.add()
     msg_send_tokens.name = "MsgSendTokens"
@@ -613,6 +625,7 @@ MsgUnblockUser = _get_message_class("mirage.core.v1.MsgUnblockUser")
 MsgBlockTopic = _get_message_class("mirage.core.v1.MsgBlockTopic")
 MsgUnblockTopic = _get_message_class("mirage.core.v1.MsgUnblockTopic")
 MsgDelete = _get_message_class("mirage.core.v1.MsgDelete")
+MsgDeleteUser = _get_message_class("mirage.core.v1.MsgDeleteUser")
 MsgSendTokens = _get_message_class("mirage.core.v1.MsgSendTokens")
 MsgSetLevel = _get_message_class("mirage.core.v1.MsgSetLevel")
 MsgMintTokens = _get_message_class("mirage.core.v1.MsgMintTokens")

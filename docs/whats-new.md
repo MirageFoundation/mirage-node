@@ -1,6 +1,6 @@
 # What's New in Mirage
 
-A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.13.0**.
+A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.14.0**.
 
 ---
 
@@ -99,3 +99,4 @@ Across the entire stack, silent fallbacks and recovery paths were stripped out i
 - [v1.11.0](updates/update_v1.11.0.md) — PoW difficulty overhaul, governable parameters, test suite
 - [v1.12.0](updates/update_v1.12.0.md) — Multi-media posts, gallery component, API timeout fix
 - [v1.13.0](updates/update_v1.13.0.md) — Topic blocking, quality_posts removal, tier-dependent limits
+- [v1.14.0](updates/update_v1.14.0.md) — MsgDeleteUser for account deletion, soft-delete indexing, post attribution preserved

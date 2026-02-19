@@ -1091,6 +1091,7 @@ def _get_home_feed(
             blocked_posts,
             blocked_users,
             allowed_tags,
+            seed=seed,
             blocked_topics=blocked_topics,
             blocked_topic_prefixes=blocked_topic_prefixes,
         )
@@ -1104,6 +1105,7 @@ def _get_home_feed(
         blocked_posts,
         blocked_users,
         allowed_tags,
+        seed=seed,
         blocked_topics=blocked_topics,
         blocked_topic_prefixes=blocked_topic_prefixes,
     )
@@ -1200,6 +1202,7 @@ def _get_home_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
@@ -1290,11 +1293,12 @@ def _get_home_feed_magic(
     # 7. Sort by score descending
     scored_posts.sort(key=lambda p: -p["_score"])
 
-    # 8. Paginate
+    # 8. Interleave fresh/random picks with ranked posts, then paginate
+    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
     start = (page - 1) * limit
     end = start + limit
-    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
-    has_more = len(scored_posts) > end
+    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
+    has_more = len(interleaved_posts) > end
 
     # Clean up internal fields
     for post in page_posts:
@@ -1302,11 +1306,104 @@ def _get_home_feed_magic(
 
     return {
         "posts": page_posts,
-        "total": len(scored_posts),
+        "total": len(interleaved_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
     }
+
+
+def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -> list[dict]:
+    """
+    Alternate fresh/random and ranked posts 1:1.
+
+    Order pattern:
+    - fresh from <=1h window, then ranked #1
+    - fresh from <=2h window, then ranked #2
+    - fresh from <=4h window, then ranked #3
+    - ...
+
+    If a fresh slot has no candidates in its window, expand the window up to 7 days.
+    If still empty, gracefully fall back to the next ranked post.
+    """
+    import random
+
+    if not scored_posts:
+        return []
+
+    ranked_posts = list(scored_posts)
+    ranked_idx = 0
+    fresh_pool: dict[str, dict] = {str(p.get("post_id") or ""): p for p in scored_posts if p.get("post_id")}
+    used: set[str] = set()
+    interleaved: list[dict] = []
+    max_window_hours = 168
+
+    def _next_ranked() -> dict | None:
+        nonlocal ranked_idx
+        while ranked_idx < len(ranked_posts):
+            post = ranked_posts[ranked_idx]
+            ranked_idx += 1
+            pid = str(post.get("post_id") or "")
+            if not pid or pid in used:
+                continue
+            used.add(pid)
+            fresh_pool.pop(pid, None)
+            debug = post.setdefault("feed_debug", {})
+            debug["interleave"] = "ranked"
+            return post
+        return None
+
+    while len(interleaved) < len(scored_posts):
+        slot = len(interleaved)
+        is_fresh_slot = (slot % 2) == 0
+
+        if is_fresh_slot:
+            k = slot // 2
+            window_hours = min(2**k, max_window_hours)
+            picked = None
+            chosen_window = window_hours
+
+            while True:
+                eligible = []
+                for post in fresh_pool.values():
+                    pid = str(post.get("post_id") or "")
+                    if not pid or pid in used:
+                        continue
+                    age_hours = max(0.0, (now_ts - int(post.get("timestamp", 0) or 0)) / 3600.0)
+                    if age_hours <= float(window_hours):
+                        eligible.append(post)
+                if eligible:
+                    rng = random.Random(int(seed) + int(k))
+                    picked = eligible[rng.randrange(len(eligible))]
+                    chosen_window = window_hours
+                    break
+                if window_hours >= max_window_hours:
+                    break
+                window_hours = min(window_hours * 2, max_window_hours)
+
+            if picked is not None:
+                pid = str(picked.get("post_id") or "")
+                if pid:
+                    used.add(pid)
+                    fresh_pool.pop(pid, None)
+                debug = picked.setdefault("feed_debug", {})
+                debug["interleave"] = "fresh"
+                debug["fresh_window_h"] = int(chosen_window)
+                interleaved.append(picked)
+                continue
+
+            fallback = _next_ranked()
+            if fallback is None:
+                break
+            interleaved.append(fallback)
+            continue
+
+        ranked_post = _next_ranked()
+        if ranked_post is None:
+            break
+        interleaved.append(ranked_post)
+
+    return interleaved
 
 
 def _score_magic(
@@ -1809,6 +1906,7 @@ def _get_guest_feed_magic(
     blocked_posts: set[str],
     blocked_users: set[str],
     allowed_tags: set[str],
+    seed: int = 0,
     blocked_topics: set[str] = None,
     blocked_topic_prefixes: tuple[str, ...] | None = None,
 ) -> dict:
@@ -1874,18 +1972,19 @@ def _get_guest_feed_magic(
         scored_posts.append(post)
 
     scored_posts.sort(key=lambda p: -float(p.get("_score", 0.0)))
+    interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
 
     start = (page - 1) * limit
     end = start + limit
-    page_posts = scored_posts[start:end] if start < len(scored_posts) else []
-    has_more = len(scored_posts) > end
+    page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
+    has_more = len(interleaved_posts) > end
 
     for p in page_posts:
         p.pop("_score", None)
 
     return {
         "posts": page_posts,
-        "total": len(scored_posts),
+        "total": len(interleaved_posts),
         "page": page,
         "limit": limit,
         "has_more": has_more,
@@ -2959,7 +3058,7 @@ def get_address_from_username():
                 return jsonify({"map": {}})
             ph = ",".join(["%s"] * len(cleaned))
             cur.execute(
-                f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph})",
+                f"SELECT LOWER(username), owner FROM profiles WHERE LOWER(username) IN ({ph}) AND deleted_at IS NULL",
                 cleaned,
             )
             result = {}
@@ -2974,7 +3073,9 @@ def get_address_from_username():
             conn.close()
             return jsonify({"error": "username is required"}), 400
         username = single.strip()
-        cur.execute("SELECT owner FROM profiles WHERE LOWER(username)=LOWER(%s) LIMIT 1", (username,))
+        cur.execute(
+            "SELECT owner FROM profiles WHERE LOWER(username)=LOWER(%s) AND deleted_at IS NULL LIMIT 1", (username,)
+        )
         row = cur.fetchone()
         conn.close()
         if row and row[0]:
@@ -3002,7 +3103,7 @@ def username_search():
         cur = conn.cursor()
         # Prefix match on username, exclude empty usernames
         cur.execute(
-            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' ORDER BY username LIMIT %s",
+            "SELECT username, owner FROM profiles WHERE LOWER(username) LIKE %s AND username != '' AND deleted_at IS NULL ORDER BY username LIMIT %s",
             (q + "%", limit),
         )
         results = [{"username": row[0], "address": row[1]} for row in cur.fetchall() if row[0] and row[1]]
@@ -3103,9 +3204,9 @@ def get_users():
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
 
-        username_filter = ""
+        username_filter = "WHERE deleted_at IS NULL"
         if has_username:
-            username_filter = "WHERE username IS NOT NULL AND username != ''"
+            username_filter = "WHERE username IS NOT NULL AND username != '' AND deleted_at IS NULL"
 
         cur.execute(
             f"""
@@ -3436,7 +3537,7 @@ def search():
                        (SELECT COUNT(1) FROM posts p WHERE LOWER(p.owner) = LOWER(pr.owner) 
                         AND COALESCE(p.target, '') = '' {deleted_clause}) as post_count
                 FROM profiles pr
-                WHERE LOWER(pr.username) LIKE %s
+                WHERE LOWER(pr.username) LIKE %s AND pr.deleted_at IS NULL
                 ORDER BY 
                     CASE WHEN LOWER(pr.username) = %s THEN 0 ELSE 1 END,
                     pr.created_at DESC
@@ -3640,6 +3741,7 @@ def search():
                     WHERE pr.username IS NOT NULL 
                       AND pr.username != ''
                       AND LOWER(pr.username) LIKE %s
+                      AND pr.deleted_at IS NULL
                     ORDER BY pr.created_at DESC
                     LIMIT %s OFFSET %s
                     """,
@@ -6236,7 +6338,7 @@ def _get_stats_subscribers(rid: int):
                     (SELECT COUNT(*) FROM votes WHERE LOWER(owner) = LOWER(p.owner)) as vote_count,
                     (SELECT COUNT(*) FROM followed_users WHERE LOWER(target) = LOWER(p.owner)) as follower_count
                 FROM profiles p
-                WHERE p.subscription_expiry > %s AND p.level > 0 AND p.level < 100
+                WHERE p.subscription_expiry > %s AND p.level > 0 AND p.level < 100 AND p.deleted_at IS NULL
                 ORDER BY p.level DESC, p.created_at DESC
                 """,
                 (now,),
