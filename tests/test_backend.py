@@ -4349,6 +4349,54 @@ def test_frontend_bypass(backend: str):
             _pass(f"bypass.upgrade_{label} handled")
 
 
+def test_rate_limit(backend: str):
+    """Verify Caddy rate limiting returns HTTP 429 on API bursts."""
+    print(f"\n{_COLOR_BOLD}[18] Caddy Rate Limit{_COLOR_RESET}")
+
+    url = f"{backend}/api/get_parameters"
+    session = requests.Session()
+    burst_size = 30
+    max_attempts = 3
+
+    for attempt in range(1, max_attempts + 1):
+        statuses: list[int] = []
+        first_429: Optional[requests.Response] = None
+
+        for _ in range(burst_size):
+            try:
+                resp = session.get(url, timeout=3)
+            except Exception as e:
+                _fail("rate_limit.api_burst", str(e), attempt=attempt)
+                return
+            statuses.append(resp.status_code)
+            if resp.status_code == 429 and first_429 is None:
+                first_429 = resp
+
+        hits_429 = sum(1 for s in statuses if s == 429)
+        hits_200 = sum(1 for s in statuses if s == 200)
+        _debug(f"rate_limit burst attempt={attempt} total={len(statuses)} " f"ok={hits_200} rate_limited={hits_429}")
+
+        if hits_429 > 0:
+            # Caddy can return JSON for /api/* rate limits.
+            if first_429 is not None:
+                try:
+                    body = first_429.json() or {}
+                    err = str(body.get("error", "")).lower()
+                    msg = str(body.get("message", "")).lower()
+                    if "rate" in err or "too many" in msg:
+                        _pass("rate_limit.api_returns_429", attempt=attempt, rate_limited=hits_429, ok=hits_200)
+                        return
+                except Exception:
+                    pass
+            _pass("rate_limit.api_returns_429", attempt=attempt, rate_limited=hits_429, ok=hits_200)
+            return
+
+        # Window in Caddyfile is 1s; let it reset and try again.
+        time.sleep(1.25)
+
+    _fail("rate_limit.api_returns_429", f"no 429 observed across {max_attempts} bursts of {burst_size}")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -4370,6 +4418,7 @@ ALL_CATEGORIES = {
     "auto_renewal": test_auto_renewal,
     "reports": test_reports,
     "frontend_bypass": test_frontend_bypass,
+    "rate_limit": test_rate_limit,
 }
 
 
