@@ -154,6 +154,31 @@ function withInboxLastViewed(params) {
     }
 }
 
+async function readErrorDetail(resp) {
+    if (!resp) return 'request failed';
+    const fallback = (resp.statusText && String(resp.statusText).trim()) || 'request failed';
+    try {
+        const ct = resp.headers && typeof resp.headers.get === 'function' ? (resp.headers.get('content-type') || '') : '';
+        if (ct.includes('application/json') && typeof resp.json === 'function') {
+            const payload = await resp.json();
+            if (payload && typeof payload === 'object') {
+                const message = typeof payload.message === 'string' ? payload.message.trim() : '';
+                if (message) return message;
+                const error = typeof payload.error === 'string' ? payload.error.trim() : '';
+                if (error) return error;
+                return JSON.stringify(payload);
+            }
+        }
+        if (typeof resp.text === 'function') {
+            const text = (await resp.text()) || '';
+            if (text.trim()) return text.trim();
+        }
+    } catch (_) {
+        // Keep fallback message below
+    }
+    return fallback;
+}
+
 /**
  * @typedef {Object} RequestOptions
  * @property {number=} timeoutMs
@@ -184,8 +209,7 @@ async function get(path, params, options) {
                 return await resp.text();
             }
         }
-        let detail = '';
-        try { detail = resp && typeof resp.text === 'function' ? await resp.text() : ''; } catch (_) { detail = ''; }
+        const detail = await readErrorDetail(resp);
         throw new Error(`HTTP ${resp && typeof resp.status === 'number' ? resp.status : 'ERR'}: ${detail}`);
     } finally {
         clearTimeout(id);
@@ -220,8 +244,7 @@ async function post(path, body, options) {
                 return await resp.text();
             }
         }
-        let detail = '';
-        try { detail = resp && typeof resp.text === 'function' ? await resp.text() : ''; } catch (_) { detail = ''; }
+        const detail = await readErrorDetail(resp);
         throw new Error(`HTTP ${resp && typeof resp.status === 'number' ? resp.status : 'ERR'}: ${detail}`);
     } finally {
         clearTimeout(id);

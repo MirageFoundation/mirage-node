@@ -1,0 +1,39 @@
+{
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgSetUsername",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage13e3rxansuzneayrf9nwrxdpp38sphshz7ly8xd",
+      "username": "mirage-dev-distribution"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgSetUsername",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1zjs7qn3chramktnu96wft4cs6ry2srddv27dmr",
+      "username": "mirage-marketing-distribution"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgSetUsername",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1x2epe8m0x3jkfxm4x4fpns4anv8u78ywm77ygg",
+      "username": "mirage-founders-distribution"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgSetUsername",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3",
+      "username": "mirage-node-3"
+    },
+    {
+      "@type": "/mirage.core.v1.MsgSetUsername",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage1ur6xu4ue9f4pk4a2thnhnf8ctu4dpkqehp7yqs",
+      "username": "mirage-node-4"
+    }
+  ],
+  "metadata": "",
+  "deposit": "1000000000000umirage",
+  "title": "Rename distribution accounts and validator accounts to mirage-* naming convention",
+  "summary": "Renames five accounts from their legacy usernames to the standardized mirage-* naming convention. Anon-DevelopmentDistribution becomes mirage-dev-distribution, Anon-MarketingDistribution becomes mirage-marketing-distribution, Anon-FoundersDistribution becomes mirage-founders-distribution, Validator-Bangalore-1 becomes mirage-node-4, and the account at mirage1w77ptf0m759n9dnu4rflms8dm69a7g7vec6zu3 becomes mirage-node-3.",
+  "expedited": true
+}

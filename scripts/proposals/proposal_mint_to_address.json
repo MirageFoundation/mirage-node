@@ -1,0 +1,16 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgMintTokens",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "target": "mirage1q60exftpdcaklfhjgwkrc6pa8ze744zw4lg40t",
+            "amount": "50000000",
+            "reason": "Mint MIRAGE to bootstrap a new account"
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Mint to account",
+    "summary": "Mint new tokens directly to a specified account.",
+    "expedited": true
+}

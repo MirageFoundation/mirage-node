@@ -67,6 +67,7 @@ referrals/payout_history.csv
 # Scripts - node-operator scripts are tracked; internal admin tools are not.
 # Everything on disk still gets packaged by Docker (COPY scripts/).
 scripts/*
+!scripts/proposals/
 !scripts/__init__.py
 !scripts/status_dashboard.py
 !scripts/stake.py
@@ -82,7 +83,7 @@ scripts/*
 !scripts/list_validators.sh
 !scripts/show_balances.py
 !scripts/verify_upgrade.py
-!scripts/proposals/proposal_upgrade.json
+!scripts/submit_proposal.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py

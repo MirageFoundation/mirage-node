@@ -4,7 +4,8 @@ FROM caddy:builder AS caddy-builder
 
 RUN xcaddy build \
     --output /usr/bin/caddy \
-    --with github.com/mholt/caddy-ratelimit
+    --with github.com/mholt/caddy-ratelimit \
+    --with github.com/WeidiDeng/caddy-cloudflare-ip
 
 # Stage 1: Build frontend, install dependencies
 FROM ubuntu:24.04 AS builder

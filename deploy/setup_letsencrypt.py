@@ -20,19 +20,12 @@ Cloudflare Proxy (Orange Cloud) for DDoS protection and CDN:
    - This script's IP check will fail (domain resolves to Cloudflare, not your server)
    - Run with --skip-ip-check to bypass (ensure DNS is correct first!)
 
-3. **Update Caddyfile to trust Cloudflare IPs:**
-   Add to the site block in deploy/templates/caddy/Caddyfile:
-   
-       trusted_proxies cloudflare
-   
-   And change rate_limit key from:
-       key {http.request.remote_ip}
-   To:
-       key {http.request.header.CF-Connecting-IP}
-   
-   This ensures rate limiting uses the real visitor IP, not Cloudflare's IP.
+3. **Cloudflare IP handling is automatic:** The Caddyfile uses the
+   caddy-cloudflare-ip plugin with trusted_proxies. When a request arrives
+   from a Cloudflare IP, {client_ip} resolves to CF-Connecting-IP (real user).
+   Direct connections use the remote IP. No manual config needed.
 
-4. **Defense in depth:** Caddy rate limiting (100 req/s per IP) works as a
+4. **Defense in depth:** Caddy rate limiting (10 req/s per IP) works as a
    fallback even with Cloudflare. Cloudflare blocks at the edge (saves bandwidth),
    Caddy blocks anything that gets through.
 """
