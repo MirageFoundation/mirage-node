@@ -1317,14 +1317,13 @@ def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -
     """
     Alternate fresh/random and ranked posts 1:1.
 
-    Order pattern:
-    - fresh from <=1h window, then ranked #1
-    - fresh from <=2h window, then ranked #2
-    - fresh from <=4h window, then ranked #3
-    - ...
+    Each fresh slot draws from a 1-hour band:
+    - fresh from hour 0–1, then ranked #1
+    - fresh from hour 1–2, then ranked #2
+    - fresh from hour 2–3, then ranked #3
+    - ... up to hour 168 (7 days)
 
-    If a fresh slot has no candidates in its window, expand the window up to 7 days.
-    If still empty, gracefully fall back to the next ranked post.
+    If a band is empty, fall back to the next ranked post.
     """
     import random
 
@@ -1336,7 +1335,7 @@ def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -
     fresh_pool: dict[str, dict] = {str(p.get("post_id") or ""): p for p in scored_posts if p.get("post_id")}
     used: set[str] = set()
     interleaved: list[dict] = []
-    max_window_hours = 168
+    max_band_start = 168
 
     def _next_ranked() -> dict | None:
         nonlocal ranked_idx
@@ -1359,36 +1358,35 @@ def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -
 
         if is_fresh_slot:
             k = slot // 2
-            window_hours = min(2**k, max_window_hours)
-            picked = None
-            chosen_window = window_hours
+            band_start = k
+            band_end = k + 1
 
-            while True:
-                eligible = []
-                for post in fresh_pool.values():
-                    pid = str(post.get("post_id") or "")
-                    if not pid or pid in used:
-                        continue
-                    age_hours = max(0.0, (now_ts - int(post.get("timestamp", 0) or 0)) / 3600.0)
-                    if age_hours <= float(window_hours):
-                        eligible.append(post)
-                if eligible:
-                    rng = random.Random(int(seed) + int(k))
-                    picked = eligible[rng.randrange(len(eligible))]
-                    chosen_window = window_hours
+            if band_start >= max_band_start:
+                ranked_post = _next_ranked()
+                if ranked_post is None:
                     break
-                if window_hours >= max_window_hours:
-                    break
-                window_hours = min(window_hours * 2, max_window_hours)
+                interleaved.append(ranked_post)
+                continue
 
-            if picked is not None:
+            eligible = []
+            for post in fresh_pool.values():
+                pid = str(post.get("post_id") or "")
+                if not pid or pid in used:
+                    continue
+                age_hours = max(0.0, (now_ts - int(post.get("timestamp", 0) or 0)) / 3600.0)
+                if float(band_start) <= age_hours < float(band_end):
+                    eligible.append(post)
+
+            if eligible:
+                rng = random.Random(int(seed) + int(k))
+                picked = eligible[rng.randrange(len(eligible))]
                 pid = str(picked.get("post_id") or "")
                 if pid:
                     used.add(pid)
                     fresh_pool.pop(pid, None)
                 debug = picked.setdefault("feed_debug", {})
                 debug["interleave"] = "fresh"
-                debug["fresh_window_h"] = int(chosen_window)
+                debug["fresh_band"] = f"{band_start}h-{band_end}h"
                 interleaved.append(picked)
                 continue
 

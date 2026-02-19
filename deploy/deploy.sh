@@ -33,6 +33,7 @@ Modes (exactly one required, except for --build-only):
   --build-only         Build Docker image only (default: pushes to registry; use --file to save tarball).
 
 Options:
+  --image IMAGE        Use a pre-built image (skip dirty check and build). Used by deploy_all_prod.sh.
   --file TARBALL       Use tarball flow (legacy fallback). If omitted, deploy uses GHCR by default.
   --moniker VALUE      Set CometBFT node moniker (default: mirage-node, REQUIRED for --init)
   --proxyjump HOST     Route traffic through a jump host (for high-latency servers).
@@ -70,6 +71,7 @@ fi
 
 MODE=""
 TARBALL_FILE=""
+PRE_BUILT_IMAGE=""
 MONIKER_VALUE="mirage-node"
 PROXYJUMP=""
 NO_CACHE=0
@@ -89,6 +91,18 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       MONIKER_VALUE="$2"
+      shift 2
+      ;;
+    --image=*)
+      PRE_BUILT_IMAGE="${1#*=}"
+      shift
+      ;;
+    --image)
+      if [ $# -lt 2 ]; then
+        echo "ERROR: --image requires an image reference" >&2
+        exit 1
+      fi
+      PRE_BUILT_IMAGE="$2"
       shift 2
       ;;
     --file=*)
@@ -122,12 +136,14 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Fail fast if there are uncommitted changes
-dirty_files="$(git -C "$REPO_ROOT" diff --name-only 2>/dev/null; git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null)"
-if [ -n "$dirty_files" ]; then
-  echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
-  git -C "$REPO_ROOT" status --short >&2
-  exit 1
+# Fail fast if there are uncommitted changes (skip when using a pre-built image)
+if [ -z "$PRE_BUILT_IMAGE" ]; then
+  dirty_files="$(git -C "$REPO_ROOT" diff --name-only 2>/dev/null; git -C "$REPO_ROOT" diff --cached --name-only 2>/dev/null)"
+  if [ -n "$dirty_files" ]; then
+    echo "ERROR: You have uncommitted changes. Commit or stash them before deploying." >&2
+    git -C "$REPO_ROOT" status --short >&2
+    exit 1
+  fi
 fi
 
 GIT_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
@@ -469,7 +485,10 @@ fi
 DEPLOY_IMAGE="mirage:local"
 USE_TARBALL=0
 
-if [ -n "$TARBALL_FILE" ]; then
+if [ -n "$PRE_BUILT_IMAGE" ]; then
+  echo "==> Using pre-built image: $PRE_BUILT_IMAGE"
+  DEPLOY_IMAGE="$PRE_BUILT_IMAGE"
+elif [ -n "$TARBALL_FILE" ]; then
   USE_TARBALL=1
   TARBALL="$TARBALL_FILE"
   echo "==> Using provided tarball: $TARBALL"

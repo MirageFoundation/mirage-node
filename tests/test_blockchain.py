@@ -2066,6 +2066,51 @@ def test_follow_limits(backend: str) -> None:
         expected = (followed_mod_targets + [over_mod.lower()])[-max_followed_mods:]
         _assert_capped_deque("follow.mod_overflow_deque", got, expected)
 
+    # 8.3b Subscriber bulk fill (no PoW): submit many follow-user messages in
+    # multi-message tx chunks, then verify tier-1 deque capping behavior.
+    sub = WALLETS["sub1"]
+    sub_addr = str(sub.address())
+    sub_pub = sub.public_key().public_key_bytes
+    sub_tier = _get_tier_config(1)
+    sub_max_followed_users = _tier_int(sub_tier, "max_followed_users")
+    bulk_targets = [
+        str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(sub_max_followed_users + 1)
+    ]
+    before_profile = _get_profile_full(backend, sub_addr)
+    before_followed = [str(v).lower() for v in (before_profile.get("followed_users") or [])]
+    chunk_size = 25
+    bulk_ok = True
+    _debug(f"subscriber tier1 bulk follow users: total={len(bulk_targets)} chunk_size={chunk_size}")
+    for start in range(0, len(bulk_targets), chunk_size):
+        batch = bulk_targets[start : start + chunk_size]
+        lb, _, _, _ = _get_pow_params(backend, sub_addr)
+        ts_base = _now_ms()
+        msgs: list[tuple[object, str]] = []
+        for i, target_addr in enumerate(batch):
+            msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
+            msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
+        gas_limit = max(FILL_GAS_LIMIT, DEFAULT_GAS_LIMIT * len(msgs))
+        _, ccode, _, dcode, dlog = _submit_tx(
+            msgs,
+            gas_limit,
+            fee_payer,
+            sub_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail(
+                "follow.subscriber_bulk_user_fill",
+                f"chunk_start={start} size={len(batch)} check={ccode} deliver={dcode} log={str(dlog or '')[:120]}",
+            )
+            bulk_ok = False
+            break
+    if bulk_ok:
+        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} in chunks)")
+        profile = _get_profile_full(backend, sub_addr)
+        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
+        expected = (before_followed + bulk_targets)[-sub_max_followed_users:]
+        _assert_capped_deque("follow.subscriber_bulk_user_overflow_deque", got, expected)
+
     # 8.4 Follow user removes blocked user (mutual exclusion)
     w_mx = WALLETS["sub3"]
     w_mx_addr = str(w_mx.address())
