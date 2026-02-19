@@ -91,6 +91,11 @@ class TransactionHandler {
             this.pendingBlocks = new Map();
             this._blockListeners = new Set();
 
+            // Track in-flight delete-account operations with queue position
+            // Map<key, { action: 'delete', type: 'account', target: string, queuePosition: number }>
+            this.pendingDeletes = new Map();
+            this._deleteListeners = new Set();
+
             // Track in-flight votes by post ID: Map<postId, { direction: number, queuePosition: number }>
             this.pendingVotes = new Map();
             this._voteListeners = new Set();
@@ -232,6 +237,39 @@ class TransactionHandler {
     getPendingBlockInfo(type, target) {
         const key = `${type}:${String(target || '').toLowerCase()}`;
         return this.pendingBlocks.get(key) || null;
+    }
+
+    // Delete-account tracking methods
+    addDeleteListener(callback) {
+        if (typeof callback === 'function') {
+            this._deleteListeners.add(callback);
+        }
+        return () => this._deleteListeners.delete(callback);
+    }
+
+    _notifyDeleteListeners() {
+        const pending = this.getPendingDeletes();
+        this._deleteListeners.forEach(cb => {
+            try { cb(pending); } catch (_) { }
+        });
+    }
+
+    getPendingDeletes() {
+        const result = {};
+        this.pendingDeletes.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    isPendingDelete(target) {
+        const key = `account:${String(target || '').toLowerCase()}`;
+        return this.pendingDeletes.has(key);
+    }
+
+    getPendingDeleteInfo(target) {
+        const key = `account:${String(target || '').toLowerCase()}`;
+        return this.pendingDeletes.get(key) || null;
     }
 
     addStatusListener(callback) {
@@ -1168,6 +1206,53 @@ class TransactionHandler {
     }
 
     /**
+     * Delete the current user's account (permanent).
+     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
+     */
+    async deleteUser() {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            if (!seedPhrase) {
+                return { success: false, error: "missing recovery phrase" };
+            }
+            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
+            const target = String(derivedAddress || "").trim().toLowerCase();
+            if (!target) return { success: false, error: "invalid signer address" };
+            if (!target.startsWith("mirage1")) return { success: false, error: "invalid address" };
+
+            const key = `account:${target}`;
+            if (this.pendingDeletes.has(key)) {
+                return { success: false, error: "delete account already in progress" };
+            }
+
+            const queuePosition = this.totalTransactions + 1;
+            this.pendingDeletes.set(key, { action: 'delete', type: 'account', target, queuePosition });
+            this._notifyDeleteListeners();
+            console.debug("[delete_user] enqueue", { target, queuePosition });
+
+            const baseTx = {
+                action: 'delete_user',
+                target,
+            };
+
+            return new Promise((resolve) => {
+                const wrappedResolve = (result) => {
+                    this.pendingDeletes.delete(key);
+                    this._notifyDeleteListeners();
+                    console.debug("[delete_user] resolved", { target, success: !!result?.success, error: result?.error });
+                    resolve(result);
+                };
+                const transaction = { ...baseTx, _resolve: wrappedResolve, _deleteKey: key };
+                this.transactions.push(transaction);
+                this.totalTransactions += 1;
+                this.processTransactions();
+            });
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
+    /**
      * Delete a post or comment
      * @param {string} txhash - The transaction hash of the post/comment to delete
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
@@ -1593,7 +1678,7 @@ class TransactionHandler {
             // Get the next transaction  
             const queued = this.transactions.shift() || {};
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
-            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, ...transaction } = queued;
+            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, ...transaction } = queued;
             this.processedTransactions += 1;
             // Track quest-relevant actions
             if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
@@ -1783,6 +1868,18 @@ class TransactionHandler {
                     action: transaction.action,
                     target: transaction.target || "",
                     topic: transaction.topic || "",
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "delete_user") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    target: transaction.target || "",
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,
@@ -2877,6 +2974,60 @@ class TransactionHandler {
         );
     }
 
+    // Build canonical bytes for MsgDeleteUser (must match chain ante)
+    // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
+    canonicalDeleteUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgDeleteUser\x00");
+        const tag2 = Uint8Array.from([2]);    // envelope_pubkey (bytes)
+        const tag3 = Uint8Array.from([3]);    // envelope_block_hash (string)
+        const tag4 = Uint8Array.from([4]);    // envelope_difficulty (uvarint)
+        const tag5 = Uint8Array.from([5]);    // envelope_pow (uvarint)
+        const tag6 = Uint8Array.from([6]);    // envelope_timestamp (uvarint)
+        const tag100 = Uint8Array.from([100]); // target (string)
+
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+        );
+    }
+
     // Build canonical bytes for MsgSendTokens (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
     canonicalSendTokens({ pub_bytes, last_block_hash, difficulty, proof, timestamp, sender, target, amount }) {
@@ -2974,6 +3125,7 @@ class TransactionHandler {
             else if (action === 'block_topic') msgName = 'MsgBlockTopic';
             else if (action === 'unblock_topic') msgName = 'MsgUnblockTopic';
             else if (action === 'delete_post') msgName = 'MsgDelete';
+            else if (action === 'delete_user') msgName = 'MsgDeleteUser';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
             else if (action === 'set_username') msgName = 'MsgSetUsername';
             else if (action === 'report') msgName = 'MsgReport';
@@ -3388,6 +3540,32 @@ class TransactionHandler {
                     pow: Number(proof),
                 };
                 endpoint = 'core/delete_post';
+            } else if (msgName === 'MsgDeleteUser') {
+                // Sign relay for delete user (must match chain ante)
+                const difficulty = resolveTxDifficulty(transaction);
+                const targetLower = (transaction.target || "").toLowerCase();
+                const canon = this.canonicalDeleteUser({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: targetLower,
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    target: targetLower,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/delete_user';
             } else if (msgName === 'MsgSendTokens') {
                 // Sign relay for send tokens (must match chain ante)
                 const difficulty = resolveTxDifficulty(transaction);
@@ -4471,6 +4649,20 @@ class TransactionHandler {
                     tag6, uvarint64(transaction.timestamp || 0),
                     tag100, encStr(transaction.target || ""),
                 );
+            } else if (action === 'delete_user') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgDeleteUser\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                );
             } else if (action === 'send_tokens') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSendTokens\x00");
                 const tag2 = Uint8Array.from([2]);
@@ -4558,7 +4750,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

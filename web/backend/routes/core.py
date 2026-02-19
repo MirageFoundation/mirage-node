@@ -39,6 +39,7 @@ from shared.datatypes import (
     MsgBlockTopic,
     MsgUnblockTopic,
     MsgDelete,
+    MsgDeleteUser,
     MsgSendTokens,
     MsgPost,
     MsgVote,
@@ -71,6 +72,7 @@ from pow import (
     canon_base_unblock_topic,
     canon_base_report,
     canon_base_delete,
+    canon_base_delete_user,
     canon_base_send_tokens,
     canon_base_upgrade_level,
     canon_base_set_auto_renewal,
@@ -2064,6 +2066,130 @@ def core_delete_post():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "delete_post.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/delete_user", methods=["POST"])
+def core_delete_user():
+    rid = next_request_id()
+    log_event(rid, "delete_user.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        # Ensure params cache is initialized (avoids 'params cache uninitialized' until profile is visited)
+        try:
+            load_params(force=False)
+        except Exception:
+            pass
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "")).strip()
+        sig_b64 = str(data.get("signature", "")).strip()
+        last_block_hash = str(data.get("last_block_hash", "")).strip()
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+        target = str(data.get("target", "")).strip().lower()
+
+        log_event(
+            rid,
+            "delete_user.params",
+            pubkey_len=len(pub_b64),
+            sig_len=len(sig_b64),
+            target=target[:16] if target else "",
+            last_block_hash=last_block_hash[:16] if last_block_hash else "",
+            difficulty=difficulty,
+            proof=proof,
+        )
+
+        if not (pub_b64 and sig_b64 and target):
+            log_event(
+                rid,
+                "delete_user.missing_fields",
+                has_pubkey=bool(pub_b64),
+                has_sig=bool(sig_b64),
+                has_last_block_hash=bool(last_block_hash),
+                has_target=bool(target),
+            )
+            return jsonify({"error": "missing required fields"}), 400
+
+        if not _is_valid_mirage_addr(target):
+            return jsonify({"error": "target must be a valid mirage1 address"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+        user_addr = user_addr.strip().lower()
+        if user_addr != target:
+            return jsonify({"error": "unauthorized"}), 403
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        if not is_subscriber(user_addr):
+            required = _min_required_difficulty()
+            if int(difficulty) < int(required):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
+            if not _is_hex64(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
+            if not is_valid_recent_block_hash(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
+            try:
+                base = canon_base_delete_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                digest = argon2_digest(base, last_block_hash, proof)
+                if digest is not None and not check_pow_target(
+                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                ):
+                    return jsonify({"error": "insufficient pow (precheck)"}), 400
+            except Exception:
+                pass
+
+        msg = MsgDeleteUser()
+        # AUTHORITY IS ALWAYS THE VALIDATOR NODE (or gov), NEVER the user
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = int(timestamp)
+        msg.envelope_signature = sig_dec
+        msg.target = target
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgDeleteUser"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(target)))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "target": target,
+                "last_block_hash": last_block_hash,
+                "difficulty": int(difficulty),
+                "proof": int(proof),
+            }
+            return _tx_error(rid, "core/delete_user", "MsgDeleteUser", code, tx_hash, raw_log, extra)
+
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "delete_user.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 
