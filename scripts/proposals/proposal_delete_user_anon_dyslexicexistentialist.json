@@ -1,14 +1,14 @@
 {
-    "messages": [
-        {
-            "@type": "/mirage.core.v1.MsgDeleteUser",
-            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "target": "mirage15g3adfa6e3xff0zfevlvla40wcyh5ywexneswt"
-        }
-    ],
-    "metadata": "",
-    "deposit": "auto",
-    "title": "Delete account: Anon-Dyslexicexistentialist",
-    "summary": "Governance request to permanently delete the account Anon-Dyslexicexistentialist (mirage15g3adfa6e3xff0zfevlvla40wcyh5ywexneswt) and release its username.",
-    "expedited": true
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgDeleteUser",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "target": "mirage15g3adfa6e3xff0zfevlvla40wcyh5ywexneswt"
+    }
+  ],
+  "metadata": "",
+  "deposit": "1000000000000umirage",
+  "title": "Delete account: Anon-Dyslexicexistentialist",
+  "summary": "Governance request to permanently delete the account Anon-Dyslexicexistentialist (mirage15g3adfa6e3xff0zfevlvla40wcyh5ywexneswt) and release its username.",
+  "expedited": true
 }

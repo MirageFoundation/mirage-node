@@ -50,6 +50,7 @@ from shared.canon import (
     canon_base_unblock_user as _canon_base_unblock_user_raw,
     canon_base_unblock_topic as _canon_base_unblock_topic_raw,
     canon_base_delete as _canon_base_delete_raw,
+    canon_base_delete_user as _canon_base_delete_user_raw,
     canon_base_edit as _canon_base_edit_raw,
     canon_base_follow_user as _canon_base_follow_user_raw,
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
@@ -71,6 +72,7 @@ from shared.datatypes import (
     MsgBlockUser,
     MsgBurnTokens,
     MsgDelete,
+    MsgDeleteUser,
     MsgEdit,
     MsgFollowModerator,
     MsgFollowTopic,
@@ -535,6 +537,30 @@ def _build_msg_delete(
     base = _canon_base_delete_raw(pub, lb_bytes, diff, ts, target)
     sig = _sign_relay(wallet, base, pow_val)
     msg = MsgDelete()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    return msg
+
+
+def _build_msg_delete_user(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    pow_val: int = 0,
+) -> MsgDeleteUser:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_delete_user_raw(pub, lb_bytes, diff, ts, target)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgDeleteUser()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -1840,6 +1866,42 @@ def test_msg_validation(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_reject("msg.post_oversized_title", ccode, dcode, dlog)
+
+    # 6.21 MsgDeleteUser — cross-account deletion rejected (w1 tries to delete w2)
+    msg = _build_msg_delete_user(w1, lb, 0, ts, str(w2.address()), pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgDeleteUser")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.delete_user_cross_account", ccode, dcode, dlog)
+
+    # 6.22 MsgDeleteUser — self-deletion accepted (w2 deletes own account)
+    # Uses a throwaway wallet so we don't break other tests
+    throwaway = LocalWallet(PrivateKey(), prefix="mirage")
+    throwaway_addr = str(throwaway.address())
+    msg = _build_msg_delete_user(throwaway, lb, 0, ts, throwaway_addr, pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgDeleteUser")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        throwaway.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("msg.delete_user_self", ccode, dcode, dlog)
+
+    # 6.23 MsgDeleteUser — empty target rejected
+    msg = _build_msg_delete_user(w1, lb, 0, ts, "", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgDeleteUser")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.delete_user_empty_target", ccode, dcode, dlog)
 
 
 def test_follow_limits(backend: str) -> None:

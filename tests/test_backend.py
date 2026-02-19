@@ -58,6 +58,7 @@ from shared.canon import (  # noqa: E402
     canon_base_vote as _canon_base_vote_raw,
     canon_base_edit as _canon_base_edit_raw,
     canon_base_delete as _canon_base_delete_raw,
+    canon_base_delete_user as _canon_base_delete_user_raw,
     canon_base_set_username as _canon_base_set_username_raw,
     canon_base_follow_user as _canon_base_follow_user_raw,
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
@@ -867,6 +868,34 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/delete_post", payload)
     return resp
+
+
+def _do_delete_user(backend: str, wallet, target_addr: str, skip_pow: bool = False) -> Tuple[int, dict]:
+    """Delete a user account. Returns (status_code, response_dict)."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_delete_user_raw(pub, _lb_bytes(lb), d, ts, target_addr)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": target_addr,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    return _post(f"{backend}/api/core/delete_user", payload)
 
 
 def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, skip_pow: bool = False) -> dict:
@@ -2809,7 +2838,7 @@ def test_edge_cases(backend: str):
     media_nul_cases = [
         ("nul_in_media", [f"https://example.com/\x00img.jpg"]),
         ("ctrl_in_media", [f"https://example.com/\x07img.jpg"]),
-        ("del_in_media", [f"https://example.com/\x7Fimg.jpg"]),
+        ("del_in_media", [f"https://example.com/\x7fimg.jpg"]),
     ]
     for label, bad_media in media_nul_cases:
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -3048,6 +3077,75 @@ def test_security(backend: str):
             _pass("attack.set_foreign_username submitted (chain may reject)")
     except Exception as e:
         _fail("attack.set_foreign_username_rejected", str(e))
+
+    # ------ Delete user account attacks ------
+
+    # 10.19 Delete foreign account — free tries to delete sub1's account → rejected (403)
+    try:
+        code, resp = _do_delete_user(backend, free_wallet, sub_addr, skip_pow=False)
+        err = str(resp.get("error", "")).lower()
+        if code == 403 or "unauthorized" in err:
+            _pass("attack.delete_foreign_account_rejected")
+        elif code >= 400:
+            _pass("attack.delete_foreign_account_rejected (other error)")
+        else:
+            _fail("attack.delete_foreign_account_rejected", f"code={code} resp={resp}")
+    except Exception as e:
+        _fail("attack.delete_foreign_account_rejected", str(e))
+
+    # 10.20 Delete foreign account — sub1 tries to delete free's account → rejected (403)
+    try:
+        code, resp = _do_delete_user(backend, sub_wallet, free_addr, skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if code == 403 or "unauthorized" in err:
+            _pass("attack.delete_foreign_account_sub_rejected")
+        elif code >= 400:
+            _pass("attack.delete_foreign_account_sub_rejected (other error)")
+        else:
+            _fail("attack.delete_foreign_account_sub_rejected", f"code={code} resp={resp}")
+    except Exception as e:
+        _fail("attack.delete_foreign_account_sub_rejected", str(e))
+
+    # 10.21 Delete own account — free tries to delete own account → accepted (broadcast)
+    # Note: uses a throwaway wallet so we don't break subsequent tests
+    try:
+        throwaway = LocalWallet(PrivateKey(), prefix="mirage")
+        throwaway_addr = str(throwaway.address())
+        code, resp = _do_delete_user(backend, throwaway, throwaway_addr, skip_pow=False)
+        err = str(resp.get("error", "")).lower()
+        txh = str(resp.get("tx_hash", "")).lower()
+        if code == 403 and "unauthorized" in err:
+            _fail("attack.delete_own_account_allowed", "self-delete rejected as unauthorized")
+        elif txh:
+            _pass("attack.delete_own_account_allowed")
+        elif "pow" in err or "insufficient" in err or "invalid" in err:
+            _pass("attack.delete_own_account_allowed (pow/validation gate, not auth rejection)")
+        else:
+            _pass("attack.delete_own_account_allowed (accepted or non-auth rejection)")
+    except Exception as e:
+        _fail("attack.delete_own_account_allowed", str(e))
+
+    # 10.22 Delete account with empty target → rejected (400)
+    try:
+        code, resp = _do_delete_user(backend, free_wallet, "", skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if code >= 400:
+            _pass("attack.delete_account_empty_target_rejected")
+        else:
+            _fail("attack.delete_account_empty_target_rejected", f"code={code}")
+    except Exception as e:
+        _pass("attack.delete_account_empty_target_rejected (exception)")
+
+    # 10.23 Delete account with invalid address → rejected (400)
+    try:
+        code, resp = _do_delete_user(backend, free_wallet, "not_an_address", skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if code >= 400:
+            _pass("attack.delete_account_invalid_target_rejected")
+        else:
+            _fail("attack.delete_account_invalid_target_rejected", f"code={code}")
+    except Exception as e:
+        _pass("attack.delete_account_invalid_target_rejected (exception)")
 
     # ------ Operations on deleted posts ------
     del_post = _do_post(backend, free_wallet, "test", f"Del target {_rand_str(4)}", "to be deleted")

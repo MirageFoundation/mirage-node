@@ -699,10 +699,13 @@ export default function SettingsView({ state }) {
             if (result && result.success) {
                 if (!result.tx_hash) {
                     setDeleteError('Delete account failed: missing tx hash.');
+                    setDeleteSubmitting(false);
                     return;
                 }
-                setDeleteSuccess(`Delete account submitted. Tx ${result.tx_hash}`);
-                setDeleteConfirmText('');
+                seedVault.clear();
+                Storage.clear();
+                window.location.replace('/');
+                return;
             } else {
                 setDeleteError(result?.error || 'Delete account failed.');
             }
@@ -1126,7 +1129,7 @@ export default function SettingsView({ state }) {
                                 <Label style={{ whiteSpace: 'normal' }}>Delete account:</Label>
                                 <ValueBox>
                                     <DangerNotice>
-                                        This permanently deletes your account and cannot be undone. Your posts remain, but your username and profile are removed.
+                                        This submits an account deletion request to the network. Most nodes will honor it, but some may not — full removal cannot be guaranteed.
                                     </DangerNotice>
                                     <DangerRow>
                                         <DangerInput
