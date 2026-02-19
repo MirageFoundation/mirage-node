@@ -1,15 +1,30 @@
 {
 	order rate_limit before basicauth
+	servers {
+		trusted_proxies cloudflare {
+			interval 12h
+			timeout 15s
+		}
+		client_ip_headers CF-Connecting-IP
+	}
 }
 
 ${DOMAIN:-:80} {
 	encode zstd gzip
 
-	# Rate limit: 10 requests per second per IP
-	# If using Cloudflare Proxy, change key to: {http.request.header.CF-Connecting-IP}
+	log {
+		output file ${LOGS_DIR}/caddy/access.log {
+			roll_size 100mb
+			roll_keep_for 720h
+		}
+		format json {
+			time_format iso8601
+		}
+	}
+
 	rate_limit {
 		zone global_limit {
-			key {http.request.remote_ip}
+			key {client_ip}
 			events 10
 			window 1s
 		}
@@ -61,6 +76,13 @@ ${DOMAIN:-:80} {
 
 	handle {
 		root * /opt/mirage/web/frontend/build
+
+		@immutable path /static/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+		@html path /
+		header @html Cache-Control "no-cache"
+
 		try_files {path} /index.html
 		file_server
 	}

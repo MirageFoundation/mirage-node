@@ -1,18 +1,18 @@
 {
-    "messages": [
-        {
-            "@type": "/mirage.core.v1.MsgUpdateParams",
-            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "params": {
-                "mint_quantity": "5800000000",
-                "mint_dynamic_split": 0.75,
-                "mint_dynamic_credit_cap": "100"
-            }
-        }
-    ],
-    "metadata": "ipfs://economics-v3-mint-rebalance",
-    "deposit": "1000000000000umirage",
-    "title": "Economics v3.0: Rebalance minting to match network spending",
-    "summary": "Reduce mint_quantity from 125,000 to 5,800 MIRAGE per interval (~21x reduction), increase mint_dynamic_split from 0.50 to 0.75, and raise mint_dynamic_credit_cap from 25 to 100. Current minting is 18M MIRAGE/day but network spending is only ~336K/day (54x overshoot). New minting targets ~840K/day (~2.5x spending) which keeps active nodes profitable (PROD earns ~317K vs ~280K spend = 13% margin) while dramatically reducing inflation. The higher dynamic split (75% activity-weighted, 25% baseline) and increased credit cap (100 vs 25) reward validators that relay more transactions, allowing greater differentiation between high and low activity nodes.",
-    "expedited": true
+  "messages": [
+    {
+      "@type": "/mirage.core.v1.MsgUpdateParams",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "params": {
+        "mint_quantity": "5800000000",
+        "mint_dynamic_split": 0.75,
+        "mint_dynamic_credit_cap": "100"
+      }
+    }
+  ],
+  "metadata": "ipfs://economics-v3-mint-rebalance",
+  "deposit": "1000000000000umirage",
+  "title": "Economics v3.0: Rebalance minting to match network spending",
+  "summary": "Reduce mint_quantity from 125,000 to 5,800 MIRAGE per interval (~21x reduction), increase mint_dynamic_split from 0.50 to 0.75, and raise mint_dynamic_credit_cap from 25 to 100. Current minting is 18M MIRAGE/day but network spending is only ~336K/day (54x overshoot). New minting targets ~840K/day (~2.5x spending) which keeps active nodes profitable (PROD earns ~317K vs ~280K spend = 13% margin) while dramatically reducing inflation. The higher dynamic split (75% activity-weighted, 25% baseline) and increased credit cap (100 vs 25) reward validators that relay more transactions, allowing greater differentiation between high and low activity nodes.",
+  "expedited": true
 }
