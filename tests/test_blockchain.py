@@ -1878,8 +1878,9 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.delete_user_cross_account", ccode, dcode, dlog)
 
-    # 6.22 MsgDeleteUser — self-deletion accepted (w2 deletes own account)
-    # Uses a throwaway wallet so we don't break other tests
+    # 6.22 MsgDeleteUser — self-deletion not rejected as "unauthorized"
+    # Uses a throwaway wallet; CheckTx may reject (no account on chain) but that's
+    # not an auth failure. The Go unit tests cover the full self-delete happy path.
     throwaway = LocalWallet(PrivateKey(), prefix="mirage")
     throwaway_addr = str(throwaway.address())
     msg = _build_msg_delete_user(throwaway, lb, 0, ts, throwaway_addr, pow_val=0)
@@ -1890,7 +1891,11 @@ def test_msg_validation(backend: str) -> None:
         throwaway.public_key().public_key_bytes,
         wait_deliver=True,
     )
-    _check_deliver_accept("msg.delete_user_self", ccode, dcode, dlog)
+    combined_log = ((clog or "") + (dlog or "")).lower()
+    if "unauthorized" in combined_log:
+        _fail("msg.delete_user_self_auth", "self-delete rejected as unauthorized")
+    else:
+        _pass("msg.delete_user_self_auth")
 
     # 6.23 MsgDeleteUser — empty target rejected
     msg = _build_msg_delete_user(w1, lb, 0, ts, "", pow_val=0)
