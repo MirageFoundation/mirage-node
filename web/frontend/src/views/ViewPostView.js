@@ -2533,12 +2533,12 @@ function ViewPostView({ state, updatePost }) {
             return out;
         }
 
-        // Normal view (viewing a root post, or legacy focused comment flow)
+        // Normal view (viewing a root post, or a focused comment flow)
         const out = [{ ...root, level: 0 }];
         const base = mergeChildren(root, children);
 
         if (focusedCommentId && !isViewingComment) {
-            // Legacy focused comment view (from ?root=X&post_id=Y)
+            // Focused comment view for non-root comment targets
             const lcTarget = String(focusedCommentId).toLowerCase();
             const findInMerged = (nodes) => {
                 if (!Array.isArray(nodes)) return null;
@@ -2740,7 +2740,7 @@ function ViewPostView({ state, updatePost }) {
         const displayWithAt = `@${display}`;
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
-        const href = trimmedUsername ? `/u/${encodeURIComponent(trimmedUsername)}` : (ownerAddress ? `/u/${encodeURIComponent(ownerAddress)}` : '/profile');
+        const href = trimmedUsername ? `/u/${encodeURIComponent(trimmedUsername)}` : `/u/${encodeURIComponent(ownerAddress)}`;
         const tierColor = getTierColor(currentPost.author_level);
         const tierName = getTierName(currentPost.author_level);
         const content = ownerAddress ? (

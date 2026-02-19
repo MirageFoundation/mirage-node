@@ -322,7 +322,7 @@ function ChangeUsernameView({ state }) {
                 setButtonStatus("idle");
                 setStatusStartTime(null);
                 setTimeout(() => {
-                    navigate(`/u/${publicKey}`);
+                    navigate('/profile');
                     window.location.reload();
                 }, 3000);
             } catch (e) {

@@ -240,7 +240,7 @@ class DatabaseManager:
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_owner_lower ON profiles(LOWER(owner))")
 
-                # v1.13.0: soft-delete support for MsgDeleteUser
+                # v1.14.0: soft-delete support for MsgDeleteUser
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_deleted_at ON profiles(deleted_at)")
                 cur.execute(

@@ -1659,7 +1659,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const display = username ? `@${username}` : `@${shortenAddress(post.user_id)}`;
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
-        const href = username ? `/u/${encodeURIComponent(username)}` : (ownerAddress ? `/u/${encodeURIComponent(ownerAddress)}` : '/profile');
+        const href = username ? `/u/${encodeURIComponent(username)}` : `/u/${encodeURIComponent(ownerAddress)}`;
         const tierColor = getTierColor(post.author_level);
         const tierName = getTierName(post.author_level);
         const content = ownerAddress ? (

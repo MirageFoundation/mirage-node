@@ -145,6 +145,7 @@ const restorableRoutePrefixes = [
     '/home',
     '/following',
     '/t/',
+    '/profile',
     '/u/',
     '/settings',
     '/follows',
@@ -934,6 +935,7 @@ class App extends Component {
                                             {/* New clean URL routes */}
                                             <Route path="/p/:postId" element={<ViewPostView state={this.state} updatePost={this.updatePost} />} />
                                             <Route path="/u/:identity" element={<ProfileView state={this.state} />} />
+                                            <Route path="/profile" element={<ProfileView state={this.state} />} />
 
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />

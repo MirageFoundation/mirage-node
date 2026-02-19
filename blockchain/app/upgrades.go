@@ -1282,6 +1282,27 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.14.0: MsgDeleteUser for account deletion
+	// - New MsgDeleteUser message type: self-signed (envelope_pubkey derives to target) or governance
+	// - DeleteUserState: clears profile KV, lists, username, subscription; sweeps spendable to community pool
+	// - Indexer: soft-deletes profile (deleted_at) for post attribution; upsert clears deleted_at on re-register
+	// - No on-chain state migration needed — just new message types
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.14.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.14.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.14.0 complete - MsgDeleteUser enabled")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)
