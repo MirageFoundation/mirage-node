@@ -22,14 +22,6 @@ ${DOMAIN:-:80} {
 		}
 	}
 
-	rate_limit {
-		zone global_limit {
-			key {client_ip}
-			events 10
-			window 1s
-		}
-	}
-
 	# Maintenance mode: when /etc/caddy/.maintenance exists, serve upgrade page for ALL routes.
 	# Created by entrypoint at startup, removed when backend is ready.
 	@maintenance file {
@@ -59,17 +51,38 @@ ${DOMAIN:-:80} {
 		path /api/*
 	}
 	handle @api {
+		rate_limit {
+			zone api_limit {
+				key {client_ip}
+				events 10
+				window 1s
+			}
+		}
 		reverse_proxy 127.0.0.1:5000
 	}
 
 	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket
 	handle /chain/rpc/* {
+		rate_limit {
+			zone chain_rpc_limit {
+				key {client_ip}
+				events 10
+				window 1s
+			}
+		}
 		uri strip_prefix /chain/rpc
 		reverse_proxy 127.0.0.1:26657
 	}
 
 	# Chain REST (Cosmos SDK)
 	handle /chain/rest/* {
+		rate_limit {
+			zone chain_rest_limit {
+				key {client_ip}
+				events 10
+				window 1s
+			}
+		}
 		uri strip_prefix /chain/rest
 		reverse_proxy 127.0.0.1:1317
 	}
@@ -89,6 +102,22 @@ ${DOMAIN:-:80} {
 
 	# Show maintenance page when backends are down (502/503)
 	handle_errors {
+		@rate_limited expression {err.status_code} == 429
+		handle @rate_limited {
+			handle /api/* {
+				header Content-Type "application/json"
+				respond `{"error":"rate_limited","message":"Too many requests. Please retry shortly."}` 429
+			}
+			handle /chain/* {
+				header Content-Type "application/json"
+				respond `{"error":"rate_limited","message":"Too many requests. Please retry shortly."}` 429
+			}
+			handle {
+				header Content-Type "text/plain; charset=utf-8"
+				respond "Too many requests. Please retry shortly." 429
+			}
+		}
+
 		@maintenance_err expression {err.status_code} in [502, 503]
 		handle @maintenance_err {
 			# API and chain endpoints get JSON error
