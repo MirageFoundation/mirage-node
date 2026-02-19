@@ -803,10 +803,6 @@ def _load_following_candidates(
 
     conditions = []
     params: list = []
-    if followed_topics:
-        ph = ",".join(["%s"] * len(followed_topics))
-        conditions.append(f"LOWER(p.topic) IN ({ph})")
-        params.extend(list(followed_topics))
     if followed_users:
         ph = ",".join(["%s"] * len(followed_users))
         conditions.append(f"LOWER(p.owner) IN ({ph})")
@@ -870,7 +866,7 @@ def _get_following_feed(
 ) -> dict:
     """
     Following feed:
-    - Candidates: root posts from followed topics/users + your own posts
+    - Candidates: root posts from followed users + your own posts
     - Sorting:
       - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
       - newest: fast chronological path
@@ -925,17 +921,11 @@ def _get_following_feed(
         for post in page_posts:
             pid = post["post_id"]
             author_lower = (post.get("author") or "").strip().lower()
-            topic_lower = (post.get("topic") or "").strip().lower()
             is_own = author_lower == viewer_lower
-            in_topic = topic_lower in followed_topics
             by_user = author_lower in followed_users
 
             if is_own:
                 reason = "Your post"
-            elif in_topic and by_user:
-                reason = "From a followed topic and user"
-            elif in_topic:
-                reason = "From a followed topic"
             else:
                 reason = "From a followed user"
 
@@ -979,15 +969,11 @@ def _get_following_feed(
         comments = int(comment_counts.get(pid, 0) or 0)
 
         author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
-        topic_lower = (post.get("topic") or "").strip().lower()
         is_own_post = author_lower == viewer_lower
-        in_followed_topic = topic_lower in followed_topics if topic_lower else False
         by_followed_user = author_lower in followed_users if author_lower else False
 
-        if not (is_own_post or in_followed_topic or by_followed_user):
-            raise RuntimeError(
-                f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]} topic={topic_lower}"
-            )
+        if not (is_own_post or by_followed_user):
+            raise RuntimeError(f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]}")
 
         score, debug, should_hide = _score_magic(
             post,
@@ -1005,10 +991,6 @@ def _get_following_feed(
 
         if is_own_post:
             reason = "Your post"
-        elif in_followed_topic and by_followed_user:
-            reason = "From a followed topic and user"
-        elif in_followed_topic:
-            reason = "From a followed topic"
         else:
             reason = "From a followed user"
 

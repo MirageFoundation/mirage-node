@@ -1874,6 +1874,35 @@ def test_social_graph(backend: str):
 
     time.sleep(2)
 
+    # 5.4a following feed (magic) must not include topic-only matches from non-followed users
+    topic_only_post = _do_post(
+        backend,
+        sub_wallet,
+        test_topic,
+        f"Topic-only following leak {_rand_str(4)}",
+        "body",
+        skip_pow=True,
+    )
+    if topic_only_post and _wait_indexed(backend, sub_addr, topic_only_post, timeout=10.0):
+        code, follow_feed = _get(
+            f"{backend}/api/get_posts",
+            {"feed": "following", "by": "magic", "address": addr, "limit": 50, "page": 1},
+        )
+        if code == 200:
+            posts = (follow_feed or {}).get("posts") or []
+            leaked = any(str(p.get("post_id", "")).lower() == topic_only_post for p in posts)
+            if leaked:
+                _fail(
+                    "social.following_magic excludes topic-only non-followed authors",
+                    f"found_nonfollowed_topic_post={topic_only_post}",
+                )
+            else:
+                _pass("social.following_magic excludes topic-only non-followed authors")
+        else:
+            _fail("social.following_magic excludes topic-only non-followed authors", f"code={code}")
+    else:
+        _fail("social.following_magic excludes topic-only non-followed authors", "topic-only post not indexed")
+
     # 5.5 unfollow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=False)
     txh = str(resp.get("tx_hash", "")).lower()
