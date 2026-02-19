@@ -10,7 +10,7 @@ The community can also delete accounts through governance. If a spam account, an
 
 ### Feed interleaving
 
-The Magic feed now interleaves fresh posts with top-ranked ones instead of just sorting by score. Every other slot in your feed pulls a random recent post from an expanding time window — starting at 1 hour, then 2, then 4, up to 7 days — so new content gets a fair shot even when older posts have racked up more votes and engagement. The result is a feed that still surfaces the best stuff but doesn't bury fresh posts the way a pure score sort does.
+The Magic feed now interleaves fresh posts with top-ranked ones instead of just sorting by score. Every other slot in your feed pulls a random post from a 1-hour band — the first fresh slot draws from 0–1 hours ago, the next from 1–2 hours, then 2–3, and so on up to 7 days. New content gets a fair shot even when older posts have racked up more votes and engagement, and the linear hour-by-hour bands mean your feed stays consistently fresh rather than skipping big chunks of time.
 
 ### Rate limiting
 
