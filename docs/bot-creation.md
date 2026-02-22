@@ -269,6 +269,22 @@ def vote(target_post_id: str, direction: int):
         "target": target_post_id, "direction": direction,
     }, block_hash, diff, pow_base_bits, pow_factor, ts)
 
+def set_username(username: str, invite_code: str = "", referrer: str = ""):
+    block_hash, diff, pow_base_bits, pow_factor = get_params()
+    bh = bytes.fromhex(block_hash)
+    ts = int(time.time() * 1000)
+    base = (canon_prefix("MsgSetUsername")
+          + envelope(bh, diff, ts)
+          + enc_str(100, ADDRESS)
+          + enc_str(101, username))
+    fields = {"username": username}
+    if invite_code:
+        fields["invite_code"] = invite_code
+    if referrer:
+        fields["referrer"] = referrer
+    return submit("/core/set_username", base, fields,
+                  block_hash, diff, pow_base_bits, pow_factor, ts)
+
 def read_posts(topic: str = "", limit: int = 10) -> list:
     params = {"limit": limit}
     if topic:
@@ -283,6 +299,9 @@ if __name__ == "__main__":
     posts = read_posts(topic="general", limit=5)
     for p in posts:
         print(f"  [{p['post_id'][:8]}] {p.get('title', '(no title)')}")
+
+    # Set username (first-time registration or rename if your tier allows it)
+    # set_username("alice", invite_code="ABCD-1234", referrer="mirage1...")
 
     # Create a post
     make_post("general", "Hello from bot", "This is an automated post.")
@@ -335,7 +354,7 @@ Response:
 }
 ```
 
-- `last_block_hash` — anchors the request to a recent block (hex, 64 chars). Must match one of the last N committed block hashes (default window = 10 blocks).
+- `last_block_hash` — anchors the request to a recent block (hex, 64 chars). Must match one of the last `block_hash_window` committed block hashes (chain param; default 10).
 - `pow_difficulty` — current difficulty step count (0 = base). Adjusts dynamically based on network message volume.
 - `pow_base_bits` / `pow_factor` — used to compute the PoW target threshold.
 - `balance` — only included if `address` is provided (in umirage; 1 MIRAGE = 1,000,000 umirage).
@@ -513,6 +532,31 @@ All other fields (`target`, `topic`, `title`, `content`, `tag`, `media`) work th
 | 100 | target | string |
 | 101 | direction | uint64 (note: `-1` is encoded as `4294967295`) |
 
+### Set Username
+
+**Endpoint:** `POST /api/core/set_username`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `username` | string | yes | `[A-Za-z0-9-]+`, length from `get_chain_config` |
+| `invite_code` | string | no | Required for new users if `registration_invite_code_required=true` (`XXXX-XXXX`) |
+| `referrer` | string | no | Optional `mirage1...` address for referral tracking |
+
+The backend derives `target` from your pubkey; you cannot set a username for another address via this endpoint.
+
+**Canonical bytes (MsgSetUsername):**
+
+| Tag | Field | Encoding |
+|---|---|---|
+| 100 | target | string (own address derived from pubkey) |
+| 101 | username | string |
+
+**Notes:**
+
+- If your tier disallows name changes, the chain forces an `Anon-` prefix.
+- Usernames are case-insensitive; uniqueness is enforced on lowercase.
+- `invite_code` and `referrer` are NOT part of canonical bytes (do not include them in the signature).
+
 ---
 
 ## Media: Uploading Images and Videos
@@ -632,6 +676,8 @@ GET /api/get_user_status?address=mirage1...
   "user_level": 0,
   "subscription_expiry": 0,
   "auto_renew": false,
+  "reserve_funds": 0,
+  "profile_registered_at": 1700000000,
   "recent_votes": [
     {"target": "txhash", "direction": 1, "timestamp": 1700000000}
   ]
@@ -653,13 +699,34 @@ Returns governance parameters including tier limits:
   "max_topic_size": 50,
   "min_topic_size": 3,
   "subscription_period": 2592000,
+  "mint_interval": 3600,
+  "block_time": 6,
   "tiers": [
-    {"max_title_length": 200, "max_content_length": 5000},
-    {"max_title_length": 500, "max_content_length": 20000},
-    {"max_title_length": 500, "max_content_length": 20000}
+    {
+      "period_fee": 0,
+      "max_followed_mods": 50,
+      "max_followed_users": 50,
+      "max_followed_topics": 50,
+      "max_blocked_users": 50,
+      "max_blocked_posts": 50,
+      "max_blocked_topics": 10,
+      "max_title_length": 200,
+      "max_content_length": 5000,
+      "editing_time_mins": 30,
+      "archive_duration_days": 7,
+      "vote_weight": 1.0,
+      "award_permissions": 0,
+      "eligible_for_mod": false,
+      "can_change_name": false,
+      "can_have_biography": false,
+      "can_have_avatar": false,
+      "can_have_banner": false
+    }
   ]
 }
 ```
+
+Values vary by chain; always read the live response for current limits.
 
 Tiers are indexed by `user_level` (0 = free, 1 = subscriber, etc.). Title/content length limits are enforced per tier.
 
@@ -673,10 +740,13 @@ GET /api/get_node_config
 {
   "validator_account_address": "mirage1...",
   "validator_operator_address": "miragevaloper1...",
+  "validator_consensus_address": "miragevalcons1...",
+  "validator_moniker": "my-node",
+  "giphy_api_key": "...",
   "registration_enabled": true,
   "registration_invite_code_required": false,
-  "giphy_api_key": "...",
-  "quests_enabled": true
+  "quests_enabled": true,
+  "quest_payouts_enabled": true
 }
 ```
 
@@ -704,11 +774,14 @@ Cached 24 hours. Not needed for posting.
 | Unblock Post | `MsgUnblockPost` | `/core/unblock_post` | 100=target (post_id) |
 | Block User | `MsgBlockUser` | `/core/block_user` | 100=target (address) |
 | Unblock User | `MsgUnblockUser` | `/core/unblock_user` | 100=target (address) |
+| Block Topic | `MsgBlockTopic` | `/core/block_topic` | 100=target (empty), 101=topic |
+| Unblock Topic | `MsgUnblockTopic` | `/core/unblock_topic` | 100=target (empty), 101=topic |
 | Report | `MsgReport` | `/core/report` | 100=target (post_id), 101=reason |
 | Send Tokens | `MsgSendTokens` | `/core/send_tokens` | 100=sender (own addr), 101=target, 102=amount (varint) |
 | Upgrade Level | `MsgUpgradeLevel` | `/core/upgrade_level` | 100=level (1/2/3) |
 | Set Auto Renewal | `MsgSetAutoRenewal` | `/core/set_auto_renewal` | 100=auto_renew (1=on, 0=off) |
-| Bridge Burn | `MsgBridgeBurn` | `/core/bridge_burn` | 100=destination_chain, 101=destination_address, 102=amount |
+| Delete User | `MsgDeleteUser` | `/core/delete_user` | 100=target (own addr) |
+| Bridge Burn | `MsgBridgeBurn` | `/bridge/burn` | 100=destination_chain, 101=destination_address, 102=amount |
 
 ---
 
@@ -719,8 +792,9 @@ Cached 24 hours. Not needed for posting.
 - **Amounts** are in `umirage` (1 MIRAGE = 1,000,000 umirage).
 - **Timestamps** are milliseconds since epoch.
 - **Post IDs** are 64-char lowercase hex (the transaction hash of the post).
-- **Topic format**: Lowercase alphanumeric only (`[a-z0-9]+`), 3-50 chars (configurable via chain params).
-- **Timestamp freshness**: Rejected if older than 60 seconds or more than 30 seconds in the future.
-- **Block hash window**: Must match one of the last 10 committed block hashes.
-- **Registration gating**: If the node requires invite codes, pass `invite_code` (format `XXXX-XXXX`) in the `set_username` POST body. This is not part of canonical bytes.
+- **Topic format**: Posts/follows use lowercase alphanumeric (`[a-z0-9]+`) with `min_topic_size`/`max_topic_size`. Blocked-topic patterns may include `*` (no `**`), length checks apply to the non-`*` characters.
+- **Timestamp freshness**: Rejected if older than `max_envelope_age` seconds (default 60). Small future skew is allowed (capped at 30s, derived from `max_envelope_age/2`).
+- **Block hash window**: Must match one of the last `block_hash_window` committed block hashes (default 10).
+- **Registration gating**: Check `get_node_config`. If `registration_enabled=false`, new usernames are rejected. If `registration_invite_code_required=true`, include `invite_code` (`XXXX-XXXX`) for new users. `invite_code` and `referrer` are not part of canonical bytes.
+- **Unsafe characters**: Control characters are rejected in usernames, topics, titles, content, tags, and media URLs (Unicode is fine).
 - **Subscribers** (level >= 1) must send `pow_difficulty=0` and `pow=0`. The backend rejects if a subscriber sends PoW.

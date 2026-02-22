@@ -11,6 +11,7 @@ Endpoints:
 """
 
 import base64
+import ipaddress
 import os
 import re
 from typing import Any, Dict
@@ -48,7 +49,7 @@ from shared.datatypes import (
     MsgSetAutoRenewal,
 )
 
-from logging_utils import log_event, next_request_id
+from logging_utils import log_event, next_request_id, logger
 from node import derive_address_from_pubkey, min_gas_price_umirage, require_runtime
 from params import expect_params, load_params
 from db import connect_db
@@ -121,6 +122,41 @@ def _query_chain_profile_full(addr: str) -> dict | None:
 def _get_utc_julian_day(ts: int) -> int:
     """Convert Unix timestamp to UTC Julian day number."""
     return 2440588 + (ts // 86400)
+
+
+def _get_trusted_client_ip() -> str | None:
+    raw_ip = str(request.headers.get("CF-Connecting-IP", "") or "").strip()
+    if not raw_ip:
+        return None
+    try:
+        ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return None
+    return raw_ip
+
+
+def _get_username_for_owner(owner: str) -> str:
+    addr = str(owner or "").strip()
+    if not addr:
+        return ""
+    with connect_db(timeout=3.0, busy_timeout_ms=5000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT username FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1", (addr,))
+        row = cur.fetchone()
+    if not row or not row[0]:
+        return ""
+    return str(row[0]).strip()
+
+
+def _log_user_action(username: str, client_ip: str, action: str, target: str, tx_hash: str) -> None:
+    logger().info(
+        "user_action username=%s ip=%s action=%s target=%s tx_hash=%s",
+        username,
+        client_ip,
+        action,
+        target,
+        tx_hash,
+    )
 
 
 def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
@@ -2811,6 +2847,12 @@ def core_post():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/post", "MsgPost", code, tx_hash, raw_log, extra)
+        client_ip = _get_trusted_client_ip()
+        if client_ip:
+            target_log = str(target or "").strip().lower()
+            action = "create_comment" if target_log else "create_post"
+            username = _get_username_for_owner(user_addr)
+            _log_user_action(username, client_ip, action, target_log, str(tx_hash or "").lower())
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -2996,6 +3038,11 @@ def core_vote():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/vote", "MsgVote", code, tx_hash, raw_log, extra)
+        client_ip = _get_trusted_client_ip()
+        if client_ip:
+            target_log = str(target or "").strip().lower()
+            username = _get_username_for_owner(user_addr)
+            _log_user_action(username, client_ip, "vote", target_log, str(tx_hash or "").lower())
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "vote.err", error=str(e))
