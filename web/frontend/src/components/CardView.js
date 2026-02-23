@@ -921,6 +921,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
     const [isDonating, setIsDonating] = useState(false);
     const [donateMessage, setDonateMessage] = useState(null); // { type, message }
+    const [confirmAward, setConfirmAward] = useState(false);
+    const [isAwarding, setIsAwarding] = useState(false);
+    const [awardMessage, setAwardMessage] = useState(null); // { type, message }
     const [shareCopied, setShareCopied] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
@@ -1284,6 +1287,63 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const cancelDonate = () => {
         setConfirmDonate(false);
+    };
+
+    const AWARD_TYPES = [
+        { name: 'quality_post', label: 'Quality Post', icon: '\uD83C\uDFC6' },
+        { name: 'original_content', label: 'Original Content', icon: '\uD83D\uDCA1' },
+        { name: 'based', label: 'Based AF', icon: '\uD83D\uDCAA' },
+        { name: 'receipts', label: 'Receipts', icon: '\uD83C\uDFF7\uFE0F' },
+    ];
+
+    const awardConfigs = useMemo(() => {
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            return cfg?.award_configs || [];
+        } catch (_) {
+            return [];
+        }
+    }, [nodeConfigTick]);
+
+    const getAwardCost = (name) => {
+        const cfg = awardConfigs.find(c => c.name === name);
+        return cfg ? Number(cfg.cost || 0) : 0;
+    };
+
+    const handleGiveAward = () => {
+        setMenuOpen(false);
+        if (!post || !post.post_id) return;
+        setConfirmDonate(false);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setAwardMessage(null);
+        setConfirmAward(true);
+    };
+
+    const confirmAwardAction = async (awardType) => {
+        if (!post || !post.post_id || isAwarding) return;
+        setIsAwarding(true);
+        try {
+            const result = await tx.giveAward(post.post_id, awardType);
+            if (result.success) {
+                const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
+                setAwardMessage({ type: 'success', message: `${label} award given!` });
+                setConfirmAward(false);
+                setTimeout(() => setAwardMessage(null), 5000);
+            } else {
+                setAwardMessage({ type: 'error', message: `Failed: ${result.error || 'Unknown error'}` });
+                setTimeout(() => setAwardMessage(null), 5000);
+            }
+        } catch (error) {
+            setAwardMessage({ type: 'error', message: `Error: ${error.message || error}` });
+            setTimeout(() => setAwardMessage(null), 5000);
+        }
+        setIsAwarding(false);
+    };
+
+    const cancelAward = () => {
+        setConfirmAward(false);
     };
 
     const handleBlockPost = () => {
@@ -2136,6 +2196,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     </MenuItem>
                                     {!isOwnPost && (
                                         <>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleGiveAward(); }}>Give Award</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
@@ -2230,6 +2291,19 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             </Icon>
                             <ShareText>share</ShareText>
                         </span>
+                        {post?.awards?.length > 0 && (
+                            <>
+                                <MetaSeparatorAction>•</MetaSeparatorAction>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.82rem' }}>
+                                    {post.awards.map(a => {
+                                        const def = AWARD_TYPES.find(t => t.name === a.type);
+                                        if (!def) return null;
+                                        const cnt = Number(a.count || 0);
+                                        return <span key={a.type} title={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</span>;
+                                    })}
+                                </span>
+                            </>
+                        )}
                     </MetaRow>
                     {shareCopied && (
                         <ShareSuccessMessage>
@@ -2477,6 +2551,69 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {donateMessage.message}
                         </div>
                     )}
+                    {confirmAward && (
+                        <BlockConfirmMessage>
+                            <div style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Give Award</span>
+                                    <Button variant="ghost" size="sm" onClick={cancelAward} style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem' }}>Cancel</Button>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                                    {AWARD_TYPES.map(award => {
+                                        const costUmirage = getAwardCost(award.name);
+                                        const costMirage = costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() : 'Free';
+                                        return (
+                                            <button
+                                                key={award.name}
+                                                onClick={() => confirmAwardAction(award.name)}
+                                                disabled={isAwarding}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.4rem',
+                                                    padding: '0.45rem 0.6rem',
+                                                    background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
+                                                    border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                                    borderRadius: '8px',
+                                                    color: theme?.colors?.text || 'inherit',
+                                                    cursor: isAwarding ? 'wait' : 'pointer',
+                                                    opacity: isAwarding ? 0.6 : 1,
+                                                    fontSize: '0.78rem',
+                                                    transition: 'background 0.15s',
+                                                }}
+                                                onMouseEnter={e => { if (!isAwarding) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                            >
+                                                <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
+                                                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                                                    <span style={{ fontWeight: 600 }}>{award.label}</span>
+                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6 }}>{costMirage} MIRAGE</span>
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {isAwarding && <div style={{ textAlign: 'center', marginTop: '0.4rem', fontSize: '0.75rem', opacity: 0.7 }}>Submitting...</div>}
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {awardMessage && (
+                        <div style={{
+                            background: awardMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                            border: awardMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: awardMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>{awardMessage.type === 'success' ? '✓' : '⚠'}</span>
+                            {awardMessage.message}
+                        </div>
+                    )}
                     {showContent && post.content && (
                         <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} />
                     )}
@@ -2510,6 +2647,7 @@ export default memo(CardView, (prevProps, nextProps) => {
         prevPost.deleted === nextPost.deleted &&
         prevPost.collapsed === nextPost.collapsed &&
         prevPost.flash === nextPost.flash &&
+        JSON.stringify(prevPost.awards) === JSON.stringify(nextPost.awards) &&
         prevProps.state?.username === nextProps.state?.username &&
         prevProps.state?.publicKey === nextProps.state?.publicKey
     );

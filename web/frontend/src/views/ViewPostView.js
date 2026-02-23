@@ -909,6 +909,9 @@ function ViewPostView({ state, updatePost }) {
     const [donateAmount, setDonateAmount] = useState("1");
     const [isDonating, setIsDonating] = useState(false);
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
+    const [confirmAward, setConfirmAward] = useState(null); // { postId }
+    const [isAwarding, setIsAwarding] = useState(false);
+    const [awardMessages, setAwardMessages] = useState({}); // { postId: { type, message } }
     const [confirmReportPost, setConfirmReportPost] = useState(null);
     const [reportReason, setReportReason] = useState("");
     const [isReporting, setIsReporting] = useState(false);
@@ -1783,6 +1786,59 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
         setDonateAmount("1"); // Reset to default
+    };
+
+    const AWARD_TYPES = [
+        { name: 'quality_post', label: 'Quality Post', icon: '\uD83C\uDFC6' },
+        { name: 'original_content', label: 'Original Content', icon: '\uD83D\uDCA1' },
+        { name: 'based', label: 'Based AF', icon: '\uD83D\uDCAA' },
+        { name: 'receipts', label: 'Receipts', icon: '\uD83C\uDFF7\uFE0F' },
+    ];
+
+    const awardConfigs = useMemo(() => {
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            return cfg?.award_configs || [];
+        } catch (_) {
+            return [];
+        }
+    }, []);
+
+    const getAwardCost = (name) => {
+        const cfg = awardConfigs.find(c => c.name === name);
+        return cfg ? Number(cfg.cost || 0) : 0;
+    };
+
+    const handleGiveAward = (postId) => {
+        setOpenMenuId(null);
+        if (!postId) return;
+        setConfirmDonate(null);
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmReportPost(null);
+        setConfirmAward({ postId });
+    };
+
+    const confirmAwardAction = async (postId, awardType) => {
+        if (!postId || isAwarding) return;
+        setIsAwarding(true);
+        try {
+            const result = await tx.giveAward(postId, awardType);
+            if (result.success) {
+                const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
+                setAwardMessages(prev => ({ ...prev, [postId]: { type: 'success', message: `${label} award given!` } }));
+                setConfirmAward(null);
+                setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+            } else {
+                setAwardMessages(prev => ({ ...prev, [postId]: { type: 'error', message: `Failed: ${result.error || 'Unknown error'}` } }));
+                setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+            }
+        } catch (error) {
+            setAwardMessages(prev => ({ ...prev, [postId]: { type: 'error', message: `Error: ${error.message || error}` } }));
+            setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+        }
+        setIsAwarding(false);
     };
 
     const openEdit = (post) => {
@@ -3056,6 +3112,64 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        if (confirmAward?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Give Award</span>
+                            <Button variant="ghost" size="sm" onClick={() => setConfirmAward(null)} style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem' }}>Cancel</Button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                            {AWARD_TYPES.map(award => {
+                                const costUmirage = getAwardCost(award.name);
+                                const costMirage = costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() : 'Free';
+                                return (
+                                    <button
+                                        key={award.name}
+                                        onClick={() => confirmAwardAction(post.post_id, award.name)}
+                                        disabled={isAwarding}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem',
+                                            padding: '0.45rem 0.6rem',
+                                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
+                                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                            borderRadius: '8px',
+                                            color: theme?.colors?.text || 'inherit',
+                                            cursor: isAwarding ? 'wait' : 'pointer',
+                                            opacity: isAwarding ? 0.6 : 1,
+                                            fontSize: '0.78rem',
+                                            transition: 'background 0.15s',
+                                        }}
+                                        onMouseEnter={e => { if (!isAwarding) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                    >
+                                        <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
+                                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                                            <span style={{ fontWeight: 600 }}>{award.label}</span>
+                                            <span style={{ fontSize: '0.68rem', opacity: 0.6 }}>{costMirage} MIRAGE</span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {isAwarding && <div style={{ textAlign: 'center', marginTop: '0.4rem', fontSize: '0.75rem', opacity: 0.7 }}>Submitting...</div>}
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
+        const awardMsg = awardMessages[post.post_id];
+        if (awardMsg) {
+            return awardMsg.type === 'error' ? (
+                <BlockErrorMessage><span>⚠</span>{awardMsg.message}</BlockErrorMessage>
+            ) : (
+                <BlockSuccessMessage><span>✓</span>{awardMsg.message}</BlockSuccessMessage>
+            );
+        }
+
         // Show delete-specific messages for this post
         const deleteMsg = deleteMessages[post.post_id];
         if (deleteMsg) {
@@ -3205,6 +3319,7 @@ function ViewPostView({ state, updatePost }) {
                                         ? formatUserStatus(authorAddr)
                                         : (isFollowingThisAuthor ? 'Unfollow user' : 'Follow user')}
                                 </MenuItem>
+                                <MenuItem onClick={() => { setOpenMenuId(null); handleGiveAward(post.post_id); }}>Give Award</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>
@@ -3267,6 +3382,19 @@ function ViewPostView({ state, updatePost }) {
                     </Icon>
                     <span className="share-text">share</span>
                 </ActionButton>
+                {post?.awards?.length > 0 && (
+                    <>
+                        <MetaSeparatorAction>•</MetaSeparatorAction>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.82rem' }}>
+                            {post.awards.map(a => {
+                                const def = AWARD_TYPES.find(t => t.name === a.type);
+                                if (!def) return null;
+                                const cnt = Number(a.count || 0);
+                                return <span key={a.type} title={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</span>;
+                            })}
+                        </span>
+                    </>
+                )}
             </MetaRow>
         );
     };

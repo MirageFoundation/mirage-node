@@ -1092,6 +1092,58 @@ class TransactionHandler {
     }
 
     /**
+     * Give an award to a post or comment (burn-only).
+     * @param {string} targetPostId - The post/comment tx hash to award
+     * @param {string} awardType - One of the configured award types (e.g. "quality_post")
+     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
+     */
+    async giveAward(targetPostId, awardType) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const target = String(targetPostId || "").trim().toLowerCase();
+            const type = String(awardType || "").trim();
+
+            if (!target || !type) {
+                return { success: false, error: "Missing target or award type" };
+            }
+
+            updateNotification("Giving award");
+
+            const [statusData] = await Promise.all([
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
+            ]);
+            let last_block_hash = statusData?.last_block_hash || "";
+            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            if (userLevel >= 1) {
+                pow_difficulty = 0;
+                last_block_hash = "";
+            }
+
+            const tx = {
+                action: 'award',
+                target,
+                award_type: type,
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits: 0,
+                pow_factor: 0,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
+    /**
      * Upgrade subscription level (tier)
      * @param {number} level - Target paid subscription level (1-3)
      * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier (unused, kept for API compatibility)

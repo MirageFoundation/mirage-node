@@ -224,6 +224,11 @@ export async function sendTokens(targetAddress, amountMirage) {
     return h.sendTokens(targetAddress, amountMirage);
 }
 
+export async function giveAward(targetPostId, awardType) {
+    const h = await getHandler();
+    return h.giveAward(targetPostId, awardType);
+}
+
 export async function upgradeLevel(level, monthlyFeeUmirage) {
     const h = await getHandler();
     return h.upgradeLevel(level, monthlyFeeUmirage);
