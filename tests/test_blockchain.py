@@ -2028,19 +2028,32 @@ def test_msg_validation(backend: str) -> None:
 
 
 def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
-    """Top up test wallets via the validator faucet before gas-heavy tests.
+    """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
 
+    Uses the sub3 wallet (highest residual balance) as the donor.
     Default: 10,000 MIRAGE per wallet.
     """
+    donor = WALLETS["sub3"]
+    donor_addr = str(donor.address())
+    fee_payer = _VALIDATOR_ADDR or ""
     for name in names:
         w = WALLETS[name]
         addr = str(w.address())
-        ok = tb._faucet(backend, addr, amount)
+        lb, _, _, _ = _get_pow_params(backend, donor_addr)
+        ts = _now_ms()
+        msg = _build_msg_send_tokens(donor, lb, 0, ts, donor_addr, addr, amount, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSendTokens")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            donor.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
         label = f"{amount / 1_000_000:,.0f} MIRAGE"
-        if ok:
+        if ccode == 0 and (dcode is None or dcode == 0):
             _pass(f"topup.{name}", extra=label)
         else:
-            _fail(f"topup.{name}", f"faucet failed ({label})")
+            _fail(f"topup.{name}", f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}")
 
 
 def test_follow_limits(backend: str) -> None:
