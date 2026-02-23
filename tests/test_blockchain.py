@@ -2227,7 +2227,7 @@ def test_follow_limits(backend: str) -> None:
         for i, target_addr in enumerate(batch):
             msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
-        gas_limit = max(FILL_GAS_LIMIT, DEFAULT_GAS_LIMIT * len(msgs))
+        gas_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 1.5))
         _, ccode, _, dcode, dlog = _submit_tx(
             msgs,
             gas_limit,
