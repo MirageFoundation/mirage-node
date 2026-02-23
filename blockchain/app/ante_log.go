@@ -77,6 +77,8 @@ func (d LoggingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 			logger.Info("--> Tx SendTokens", "phase", phase, "tx", hash, "signer", m.Authority, "sender", m.Sender, "target", m.Target, "amount", m.Amount)
 		case *coretypes.MsgSetLevel:
 			logger.Info("--> Tx SetLevel", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "level", m.Level)
+		case *coretypes.MsgAward:
+			logger.Info("--> Tx Award", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "award_type", m.AwardType)
 		default:
 			logger.Info("--> Tx Msg", "phase", phase, "tx", hash, "type", sdk.MsgTypeURL(msg))
 		}

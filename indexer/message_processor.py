@@ -32,6 +32,7 @@ from shared.datatypes import (
     MsgBridgeBurn,
     MsgBridgeAttestBurned,
     MsgBridgeAttestMinted,
+    MsgAward,
 )
 from indexer.address_utils import derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import (
@@ -100,6 +101,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgBridgeBurn": MsgBridgeBurn,
     "/mirage.core.v1.MsgBridgeAttestBurned": MsgBridgeAttestBurned,
     "/mirage.core.v1.MsgBridgeAttestMinted": MsgBridgeAttestMinted,
+    "/mirage.core.v1.MsgAward": MsgAward,
 }
 
 
@@ -157,6 +159,8 @@ class MessageProcessor:
             self._handle_upgrade_level(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgSetAutoRenewal":
             self._handle_set_auto_renewal(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgAward":
+            self._handle_award(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSendTokens":
             pass
         # Bridge messages - index for status queries
@@ -891,6 +895,71 @@ class MessageProcessor:
                 "is_root": bool(is_root),
             },
         )
+
+    def _handle_award(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
+        """Handle MsgAward — store one award per owner+target."""
+        try:
+            parsed = MsgAward()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = derive_owner_from_msg(msg_dict)
+            target = str(msg_dict.get("target", "")).strip().lower()
+            award_type = str(msg_dict.get("award_type", "")).strip()
+
+            if not owner or not target or not award_type:
+                logger.warning("Award %s: missing fields owner=%s target=%s type=%s", tx_hash, owner, target, award_type)
+                return
+
+            user_level = self.db.get_profile_level(owner) or 0
+            is_admin = user_level >= 100
+
+            burned_amount = 0
+            if not is_admin:
+                award_configs = self._get_award_configs()
+                for ac in award_configs:
+                    if ac.get("name") == award_type:
+                        burned_amount = int(ac.get("cost", 0))
+                        break
+
+            try:
+                with self.db._connect() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO awards (owner, target, award_type, burned_amount, created_at)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (LOWER(owner), LOWER(target)) DO NOTHING
+                            """,
+                            (owner.lower(), target, award_type, burned_amount, ts),
+                        )
+                        if cur.rowcount == 0:
+                            logger.info("Award %s: duplicate owner=%s target=%s, skipped", tx_hash, owner, target)
+                            return
+            except Exception as e:
+                logger.error("Award %s: DB error: %s", tx_hash, e, exc_info=True)
+                return
+
+            self.log_yaml(
+                "Stored award",
+                {
+                    "txhash": tx_hash,
+                    "owner": owner,
+                    "target": target,
+                    "award_type": award_type,
+                    "burned": burned_amount,
+                    "admin": is_admin,
+                },
+            )
+        except Exception as e:
+            logger.error("Error handling MsgAward %s: %s", tx_hash, e, exc_info=True)
+
+    def _get_award_configs(self) -> list:
+        """Get award configs from cached chain params."""
+        try:
+            from indexer.params import get_award_configs
+            return get_award_configs()
+        except Exception:
+            return []
 
     def _handle_set_username(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetUsername."""

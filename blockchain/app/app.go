@@ -274,7 +274,7 @@ func New(
 						*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
 						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
 						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-						*coretypes.MsgBridgeBurn:
+						*coretypes.MsgBridgeBurn, *coretypes.MsgAward:
 						containsMeta = true
 					}
 				}

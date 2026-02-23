@@ -319,6 +319,7 @@ def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
 def _assign_daily_quests_if_needed(
     owner: str,
     day_utc: int,
+    ts: int,
     daily_defs: Dict[str, Any],
     special_defs: Dict[str, Any] = None,
     use_random_rolls: bool = False,
@@ -420,6 +421,13 @@ def _assign_daily_quests_if_needed(
                     (owner, day_utc, quest_id),
                 )
 
+            # Delay flash quest by at least 1h after daily quests are first assigned
+            min_flash_at = ts + 3600
+            next_flash = _get_next_flash_time(owner)
+            if next_flash < min_flash_at:
+                _set_next_flash_time(owner, min_flash_at)
+                log_event(None, "quest.flash_delayed", owner=owner, min_flash_at=min_flash_at)
+
             return quest_ids
 
 
@@ -487,7 +495,7 @@ def get_rewards_summary():
         all_defs = {**daily_defs, **special_defs}
 
         # ===== DAILY QUESTS =====
-        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs, use_random_rolls=_is_localhost())
+        _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
         with connect_db() as conn:
             with conn.cursor() as cur:
@@ -718,7 +726,6 @@ def get_achievements():
                     "target": achievement_def.get("target_count", 1),
                     "unlocked": user_data.get("unlocked_at") is not None,
                     "unlocked_at": user_data.get("unlocked_at"),
-                    "badge_icon": achievement_def.get("badge_icon"),
                     "rewards": achievement_def.get("rewards", []),
                 }
             )

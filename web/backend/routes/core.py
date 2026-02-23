@@ -47,6 +47,7 @@ from shared.datatypes import (
     MsgEdit,
     MsgUpgradeLevel,
     MsgSetAutoRenewal,
+    MsgAward,
 )
 
 from logging_utils import log_event, next_request_id, logger
@@ -77,6 +78,7 @@ from pow import (
     canon_base_send_tokens,
     canon_base_upgrade_level,
     canon_base_set_auto_renewal,
+    canon_base_award,
     check_pow_target,
     decode_b64,
 )
@@ -3461,6 +3463,132 @@ def core_set_auto_renewal():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "set_auto_renewal.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/award", methods=["POST"])
+def core_award():
+    rid = next_request_id()
+    log_event(rid, "award.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "")).strip()
+        sig_b64 = str(data.get("signature", "")).strip()
+        last_block_hash = str(data.get("last_block_hash", "")).strip()
+        difficulty = int(data.get("pow_difficulty", 0) or 0)
+        proof = int(data.get("pow", 0) or 0)
+        target = str(data.get("target", "")).strip().lower()
+        award_type = str(data.get("award_type", "")).strip()
+
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        if difficulty != 0 or proof != 0:
+            return jsonify({"error": "pow not allowed for award"}), 400
+
+        if not (pub_b64 and sig_b64 and target and award_type):
+            return jsonify({"error": "missing required fields"}), 400
+
+        if not _is_hex64(target):
+            return jsonify({"error": "invalid target"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields"}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        p = expect_params()
+        valid_types = {ac["name"] for ac in p.get("award_configs", [])}
+        if award_type not in valid_types:
+            return jsonify({"error": f"unknown award_type: {award_type}"}), 400
+
+        post_owner = _get_post_owner(target)
+        if not post_owner:
+            return jsonify({"error": "target not found"}), 404
+
+        if post_owner == user_addr.lower():
+            return jsonify({"error": "cannot award your own post"}), 400
+
+        try:
+            with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT 1 FROM awards WHERE LOWER(owner)=LOWER(%s) AND LOWER(target)=LOWER(%s) LIMIT 1",
+                    (user_addr, target),
+                )
+                if cur.fetchone():
+                    return jsonify({"error": "already awarded this post"}), 409
+        except Exception as e:
+            log_event(rid, "award.dup_check_failed", error=str(e))
+            return jsonify({"error": "unable to verify award eligibility"}), 503
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        try:
+            base = canon_base_award(
+                pub_dec,
+                last_block_hash,
+                0,
+                timestamp,
+                target,
+                award_type,
+            )
+            signed = canon_signed_with_pow(base, 0)
+            if not _verify_signature(pub_dec, sig_dec, signed):
+                return jsonify({"error": "invalid signature"}), 400
+        except Exception:
+            return jsonify({"error": "invalid signature"}), 400
+
+        msg = MsgAward()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = 0
+        msg.envelope_pow = 0
+        msg.envelope_timestamp = int(timestamp)
+        msg.envelope_signature = sig_dec
+        msg.target = target
+        msg.award_type = award_type
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgAward"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        gas_est = int(estimate_total_gas_limit(body_bytes, 0))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+
+        if code != 0:
+            extra = {
+                "height": height,
+                "user_addr": user_addr,
+                "target": target,
+                "award_type": award_type,
+                "last_block_hash": last_block_hash,
+            }
+            return _tx_error(rid, "core/award", "MsgAward", code, tx_hash, raw_log, extra)
+
+        log_event(rid, "award.success", tx_hash=tx_hash, target=target, award_type=award_type)
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "award.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 

@@ -715,7 +715,6 @@ Returns governance parameters including tier limits:
       "editing_time_mins": 30,
       "archive_duration_days": 7,
       "vote_weight": 1.0,
-      "award_permissions": 0,
       "eligible_for_mod": false,
       "can_change_name": false,
       "can_have_biography": false,
@@ -781,6 +780,7 @@ Cached 24 hours. Not needed for posting.
 | Upgrade Level | `MsgUpgradeLevel` | `/core/upgrade_level` | 100=level (1/2/3) |
 | Set Auto Renewal | `MsgSetAutoRenewal` | `/core/set_auto_renewal` | 100=auto_renew (1=on, 0=off) |
 | Delete User | `MsgDeleteUser` | `/core/delete_user` | 100=target (own addr) |
+| Award | `MsgAward` | `/core/award` | 100=target (post_id), 101=award_type |
 | Bridge Burn | `MsgBridgeBurn` | `/bridge/burn` | 100=destination_chain, 101=destination_address, 102=amount |
 
 ---

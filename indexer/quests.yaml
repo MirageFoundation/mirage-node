@@ -2,9 +2,7 @@
 #
 # Reward type definitions:
 # - type: "mirage" - MIRAGE tokens (amount in MIRAGE, not umirage)
-# - type: "icon" - Unlockable profile icon (future)
-# - type: "badge" - Achievement badge displayed on profile (future)
-# - type: "frame" - Profile frame/border (future)
+# - type: "invite_code" - Invite code (amount = number of codes)
 #
 # Quest parameters:
 # - action_type: The type of action that progresses this quest
@@ -55,10 +53,10 @@ daily_quests:
 
   - id: community_curator
     title: "Community Curator"
-    description: "Vote on 15 different posts, each at least 5 minutes apart"
+    description: "Vote on 15 different posts across 3+ topics, each at least 20 minutes apart"
     action_type: vote
     target_count: 15
-    time_spacing_minutes: 5
+    time_spacing_minutes: 20
     unique_target: true
     unique_topics_min: 3
     allow_self: false
@@ -69,11 +67,11 @@ daily_quests:
 
   - id: balanced_voter
     title: "Balanced Voter"
-    description: "Give 5 upvotes and 5 downvotes, each at least 5 minutes apart"
+    description: "Give 5 upvotes and 5 downvotes across 3+ topics, each at least 20 minutes apart"
     action_type: balanced_vote
     target_upvotes: 5
     target_downvotes: 5
-    time_spacing_minutes: 5
+    time_spacing_minutes: 20
     unique_target: true
     unique_topics_min: 3
     allow_self: false
@@ -84,11 +82,11 @@ daily_quests:
 
   - id: topic_explorer
     title: "Topic Explorer"
-    description: "Post in 3 different topics, each at least 1 hour apart"
+    description: "Post in 3 different topics, each at least 2 hours apart"
     action_type: unique_topic_post
     target_count: 3
     min_content_length: 30
-    time_spacing_minutes: 60
+    time_spacing_minutes: 120
     unique_topic: true
     rewards:
       - type: mirage
@@ -96,20 +94,22 @@ daily_quests:
 
   - id: casual_poster
     title: "Casual Poster"
-    description: "Create 2 posts today"
+    description: "Create 2 posts, at least 4 hours apart"
     action_type: post
     target_count: 2
     min_content_length: 50
+    time_spacing_minutes: 240
     rewards:
       - type: mirage
         amount: 400
 
   - id: conversation_contributor
     title: "Conversation Contributor"
-    description: "Leave 5 comments on different posts"
+    description: "Leave 5 comments on different posts, each at least 1 hour apart"
     action_type: comment
     target_count: 5
     min_content_length: 20
+    time_spacing_minutes: 60
     unique_root_post: true
     rewards:
       - type: mirage
@@ -117,9 +117,10 @@ daily_quests:
 
   - id: quick_curator
     title: "Quick Curator"
-    description: "Vote on 5 different posts"
+    description: "Vote on 5 different posts, each at least 1 hour apart"
     action_type: vote
     target_count: 5
+    time_spacing_minutes: 60
     unique_target: true
     allow_self: false
     count_vote_changes: false
@@ -129,10 +130,11 @@ daily_quests:
 
   - id: thoughtful_commenter
     title: "Thoughtful Commenter"
-    description: "Leave 3 detailed comments (50+ chars each)"
+    description: "Leave 3 detailed comments (50+ chars each), each at least 2 hours apart"
     action_type: comment
     target_count: 3
     min_content_length: 50
+    time_spacing_minutes: 120
     unique_root_post: true
     rewards:
       - type: mirage
@@ -140,9 +142,10 @@ daily_quests:
 
   - id: daily_voter
     title: "Daily Voter"
-    description: "Vote on 10 different posts"
+    description: "Vote on 10 different posts, each at least 30 minutes apart"
     action_type: vote
     target_count: 10
+    time_spacing_minutes: 30
     unique_target: true
     allow_self: false
     count_vote_changes: false
@@ -265,7 +268,6 @@ achievements:
     rewards:
       - type: mirage
         amount: 100000
-    badge_icon: "🔥"
 
   - id: conversation_starter
     title: "Conversation Starter"
@@ -276,7 +278,6 @@ achievements:
     rewards:
       - type: mirage
         amount: 50000
-    badge_icon: "💬"
 
   - id: trusted_member
     title: "Trusted Member"
@@ -288,7 +289,6 @@ achievements:
     rewards:
       - type: mirage
         amount: 75000
-    badge_icon: "⭐"
 
   - id: topic_pioneer
     title: "Topic Pioneer"
@@ -298,7 +298,6 @@ achievements:
     rewards:
       - type: mirage
         amount: 20000
-    badge_icon: "🏴"
 
 # Special quests - NOT included in random daily pool, assigned via specific gating logic
 special_quests:

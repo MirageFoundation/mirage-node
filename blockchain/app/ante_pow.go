@@ -406,6 +406,14 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgAward:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if m.EnvelopePow > 0 || m.EnvelopeDifficulty > 0 {
+				return ctx, fmt.Errorf("MsgAward cannot use PoW")
+			}
+
 		case *coretypes.MsgBridgeBurn:
 			if m.Authority == govAuthority {
 				continue
@@ -803,6 +811,17 @@ func buildCanonForSendTokens(m *coretypes.MsgSendTokens) []byte {
 	cw.writeString(100, m.Sender)
 	cw.writeString(101, m.Target)
 	cw.writeUvarint(102, m.Amount)
+	return cw.buf
+}
+
+func buildCanonForAward(m *coretypes.MsgAward) []byte {
+	cw := newCanonWriter("MsgAward")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Target)
+	cw.writeString(101, m.AwardType)
 	return cw.buf
 }
 

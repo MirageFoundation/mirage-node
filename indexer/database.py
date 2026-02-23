@@ -168,6 +168,25 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_target_lower ON votes(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_created_at ON votes(created_at DESC)")
 
+                # Awards (burn-only signals on posts/comments)
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS awards (
+                        id SERIAL PRIMARY KEY,
+                        owner TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        award_type TEXT NOT NULL,
+                        burned_amount BIGINT NOT NULL DEFAULT 0,
+                        created_at BIGINT NOT NULL
+                    )
+                    """
+                )
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_awards_owner_target ON awards(LOWER(owner), LOWER(target))"
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_target_lower ON awards(LOWER(target))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_created_at ON awards(created_at DESC)")
+
                 # Per-user preferences for topics and authors (for home feed recommendations)
                 cur.execute(
                     """
@@ -1451,6 +1470,14 @@ class DatabaseManager:
             with conn.cursor() as cur:
                 cur.execute("SELECT username, level, created_at FROM profiles WHERE LOWER(owner) = LOWER(%s)", (owner,))
                 return cur.fetchone()
+
+    def get_profile_level(self, owner: str) -> int | None:
+        """Get profile level by owner address. Returns level or None if not found."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                row = cur.fetchone()
+                return int(row[0]) if row else None
 
     def upsert_profile(self, owner: str, username: str | None, level: int, updated_at: int) -> None:
         """Insert or update a profile (basic fields only)."""

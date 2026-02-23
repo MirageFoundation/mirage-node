@@ -3133,6 +3133,7 @@ class TransactionHandler {
             else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
             else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
+            else if (action === 'award') msgName = 'MsgAward';
             else throw new Error(`CRITICAL: Missing or invalid transaction.action: "${action}". Transaction must have explicit action field.`);
 
             let endpoint = '';
@@ -3997,6 +3998,70 @@ class TransactionHandler {
                     amount: transaction.amount || 0,
                 };
                 endpoint = 'bridge/burn';
+            } else if (msgName === 'MsgAward') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const uvarint = (n) => {
+                    const out = [];
+                    let v = (n >>> 0);
+                    while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+                    out.push(v);
+                    return Uint8Array.from(out);
+                };
+                const uvarint64 = (n) => {
+                    const out = [];
+                    let v = BigInt(n || 0);
+                    while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+                    out.push(Number(v));
+                    return Uint8Array.from(out);
+                };
+                const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+                const encStr = (s) => { const b = new TextEncoder().encode(s || ""); return new Uint8Array([...uvarint(b.length), ...b]); };
+                const hexToBytes = (hex) => {
+                    const h = (hex || "").replace(/^0x/i, "");
+                    if (!h || h.length % 2) return new Uint8Array(0);
+                    const arr = new Uint8Array(h.length / 2);
+                    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+                    return arr;
+                };
+                const concat = (...arrs) => {
+                    let total = 0; arrs.forEach(a => total += a.length);
+                    const out = new Uint8Array(total);
+                    let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+                    return out;
+                };
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgAward\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag5 = Uint8Array.from([5]);
+                const tag6 = Uint8Array.from([6]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                const canon = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag5, uvarint(Number(proof)),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.award_type || ""),
+                );
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp || 0,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                    target: transaction.target || "",
+                    award_type: transaction.award_type || "",
+                };
+                endpoint = 'core/award';
             }
 
             // Submit transaction

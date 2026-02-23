@@ -106,6 +106,9 @@ service Msg {
   // When 2/3 threshold is met, BridgeConfirmed event is emitted.
   // Signed by validator's operator key.
   rpc BridgeAttestMinted(MsgBridgeAttestMinted) returns (MsgBridgeAttestMintedResponse);
+
+  // Award gives an award to a post/comment, burning MIRAGE (free for admins).
+  rpc Award(MsgAward) returns (MsgAwardResponse);
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
@@ -775,3 +778,26 @@ message MsgBridgeAttestMintedResponse {
   int64 attested_power = 2;
   int64 required_power = 3;
 }
+
+// MsgAward gives an award to a post/comment, burning MIRAGE tokens
+message MsgAward {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+
+  // Payload
+  string target = 100;
+  string award_type = 101;
+}
+
+message MsgAwardResponse {}

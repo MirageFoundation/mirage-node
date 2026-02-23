@@ -479,6 +479,24 @@ def canon_base_set_auto_renewal(
     return bytes(out)
 
 
+def canon_base_award(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    award_type: str,
+) -> bytes:
+    out = bytearray(_prefix("MsgAward"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    out += _enc_str(101, award_type)
+    return bytes(out)
+
+
 def canon_base_bridge_burn(
     pubkey: bytes,
     last_block_hash: bytes,

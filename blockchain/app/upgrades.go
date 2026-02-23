@@ -1303,6 +1303,35 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// v1.15.0: Awards (burn-only signal)
+	// - MsgAward: burns MIRAGE to give an award to a post/comment (free for level >= 100)
+	// - award_configs added to Params (replaces unused award_permissions on TierConfig)
+	// - Indexer stores award records; backend aggregates for display and magic scoring
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.15.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.15.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			if len(params.AwardConfigs) == 0 {
+				params.AwardConfigs = coretypes.DefaultAwardConfigs()
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, err
+				}
+				sdkCtx.Logger().Info("v1.15.0: set default award_configs")
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.15.0 complete - MsgAward + award_configs")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

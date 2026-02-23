@@ -58,9 +58,6 @@ class QuestDefinition:
     # For flash quests
     time_window_minutes: Optional[int] = None
 
-    # For achievements
-    badge_icon: Optional[str] = None
-
 
 @dataclass
 class QuestProgress:
@@ -272,7 +269,7 @@ class QuestTracker:
         rng = random.Random(seed_int)
         return rng.random()
 
-    def _assign_daily_quests(self, owner: str, day_utc: int) -> list[str]:
+    def _assign_daily_quests(self, owner: str, day_utc: int, ts: int) -> list[str]:
         """Assign random daily quests to a user for the day, including special quest gating."""
         if not self.daily_quests:
             return []
@@ -323,6 +320,13 @@ class QuestTracker:
                         """,
                         (owner, day_utc, quest_id),
                     )
+
+        # Delay flash quest by at least 1h after daily quests are first assigned
+        min_flash_at = ts + 3600
+        next_flash = self._get_next_flash_time(owner)
+        if next_flash < min_flash_at:
+            self._set_next_flash_time(owner, min_flash_at)
+            logger.info(f"Pushed flash quest eligibility to {min_flash_at} for {owner} (1h after daily assignment)")
 
         logger.info(f"Assigned daily quests {quest_ids} to {owner} for day {day_utc}")
         return quest_ids
@@ -966,7 +970,7 @@ class QuestTracker:
             # Ensure user has assigned quests for today
             assigned_ids = self._get_user_assigned_quests(owner, day_utc)
             if not assigned_ids:
-                assigned_ids = self._assign_daily_quests(owner, day_utc)
+                assigned_ids = self._assign_daily_quests(owner, day_utc, ts)
 
             # Check progress on each assigned quest
             for quest_id in assigned_ids:
@@ -1003,7 +1007,7 @@ class QuestTracker:
         # Ensure user has assigned quests
         assigned_ids = self._get_user_assigned_quests(owner, day_utc)
         if not assigned_ids:
-            assigned_ids = self._assign_daily_quests(owner, day_utc)
+            assigned_ids = self._assign_daily_quests(owner, day_utc, ts)
 
         # Get daily quest progress
         daily_quests = []
@@ -1057,7 +1061,6 @@ class QuestTracker:
                     "progress": progress,
                     "target": achievement.target_count,
                     "unlocked": unlocked,
-                    "badge_icon": achievement.badge_icon,
                     "rewards": achievement.rewards,
                 }
             )

@@ -59,6 +59,8 @@ func (d EnsureAccountsDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate
 			addrStr = mm.Authority
 		case *coretypes.MsgSendTokens:
 			addrStr = mm.Authority
+		case *coretypes.MsgAward:
+			addrStr = mm.Authority
 		default:
 		}
 		if addrStr == "" {

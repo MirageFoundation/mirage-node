@@ -959,6 +959,7 @@ def _get_following_feed(
     similar_addrs = set(sim_lookup.keys())
     similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
     now_ts = int(time.time())
     topic_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
@@ -985,6 +986,7 @@ def _get_following_feed(
             author_prefs,
             now_ts,
             False,
+            unique_awarders,
         )
         if should_hide:
             continue
@@ -998,6 +1000,7 @@ def _get_following_feed(
         post["points"] = pts
         post["comments"] = comments
         post["unique_commenters"] = unique_commenters.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "following"
         post["feed_bucket"] = debug.get("bucket", "following")
@@ -1239,6 +1242,7 @@ def _get_home_feed_magic(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
 
     # 6. Score each post with Magic algorithm
     now_ts = int(time.time())
@@ -1255,16 +1259,19 @@ def _get_home_feed_magic(
             author_prefs,
             now_ts,
             True,
+            unique_awarders,
         )
 
         if should_hide:
             continue
 
+        pid = post["post_id"]
         post["_score"] = score
         post["feed_debug"] = debug
-        post["points"] = vote_totals.get(post["post_id"], 0.0)
-        post["comments"] = comment_counts.get(post["post_id"], 0)
-        post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
+        post["points"] = vote_totals.get(pid, 0.0)
+        post["comments"] = comment_counts.get(pid, 0)
+        post["unique_commenters"] = unique_commenters.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = debug["bucket"]
@@ -1396,15 +1403,17 @@ def _score_magic(
     author_prefs: dict[str, float],
     now_ts: int,
     use_prefs: bool = True,
+    unique_awarders: dict[str, int] | None = None,
 ) -> tuple[float, dict, bool]:
     """
-    Magic scoring: (S + V + U + P) × R
+    Magic scoring: (S + V + U + P + A) × R
 
     Components (uniform weighting):
     - S = sqrt(similarity_sum)
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
     - P = sqrt(max(0, topic_pref + author_pref))
+    - A = sqrt(unique_award_givers)
     - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
 
     Returns (score, debug_info, should_hide).
@@ -1462,16 +1471,20 @@ def _score_magic(
     # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
     P = _sqrt_signed(combined_pref)
 
+    # A = Award score (unique awarders, always >= 0)
+    award_count = (unique_awarders or {}).get(pid, 0)
+    A = math.sqrt(max(0.0, float(award_count)))
+
     # R = Recency: inverse polynomial decay (gentler than exponential)
     # 4.5h=0.75, 9h=0.50, 18h=0.25, 36h=0.11
     age_hours = max(0, (now_ts - timestamp) / 3600)
     R = 1 / (1 + (age_hours / 9) ** 1.585)
 
     # Final score
-    score = (S + V + U + P) * R
+    score = (S + V + U + P + A) * R
 
     # Determine primary reason based on dominant component
-    components = [("S", S), ("V", V), ("U", U), ("P", P)]
+    components = [("S", S), ("V", V), ("U", U), ("P", P), ("A", A)]
     dominant = max(components, key=lambda x: x[1])
 
     if dominant[0] == "S" and S > 0.3:
@@ -1499,12 +1512,13 @@ def _score_magic(
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
-        "equation": "(√S + √V + √U + √P) × R",
+        "equation": "(√S + √V + √U + √P + √A) × R",
         # Raw input values (before sqrt) so the formula makes sense
         "S": round(raw_sim, 3),
         "V": round(net_vote, 3),
         "U": unique_count,
         "P": round(combined_pref, 3),
+        "A": award_count,
         "R": round(R, 4),
         "age_hours": round(age_hours, 1),
         "t_pref": round(topic_pref, 1),
@@ -1576,6 +1590,43 @@ def _load_unique_commenter_counts(
             result[root_id] = int(cnt or 0)
 
     return result
+
+
+def _load_award_aggregates(
+    cur,
+    post_ids: list[str],
+) -> tuple[dict[str, int], dict[str, list[dict]]]:
+    """
+    Load per-post award data:
+    - unique_awarders: {post_id: count_of_distinct_award_givers}
+    - award_details: {post_id: [{"type": "quality_post", "count": 3}, ...]}
+    """
+    if not post_ids:
+        return {}, {}
+
+    unique_awarders: dict[str, int] = {}
+    award_details: dict[str, list[dict]] = {}
+    id_ph = ",".join(["%s"] * len(post_ids))
+
+    cur.execute(
+        f"SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
+        post_ids,
+    )
+    for tgt, cnt in cur.fetchall():
+        if tgt:
+            unique_awarders[tgt] = int(cnt or 0)
+
+    cur.execute(
+        f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
+            FROM awards WHERE LOWER(target) IN ({id_ph})
+            GROUP BY LOWER(target), award_type""",
+        post_ids,
+    )
+    for tgt, atype, cnt in cur.fetchall():
+        if tgt:
+            award_details.setdefault(tgt, []).append({"type": atype, "count": int(cnt or 0)})
+
+    return unique_awarders, award_details
 
 
 def _load_home_candidates(
@@ -1914,6 +1965,7 @@ def _get_guest_feed_magic(
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
 
     now_ts = int(time.time())
     sim_lookup: dict[str, float] = {}
@@ -1935,6 +1987,7 @@ def _get_guest_feed_magic(
             author_prefs,
             now_ts,
             False,
+            unique_awarders,
         )
         if should_hide:
             continue
@@ -1944,6 +1997,7 @@ def _get_guest_feed_magic(
         post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
         post["comments"] = int(comment_counts.get(pid, 0) or 0)
         post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = debug["bucket"]
@@ -2845,6 +2899,7 @@ def get_chain_config():
             "mint_interval": p["mint_interval"],
             "block_time": _get_block_time_seconds(),
             "tiers": p["tiers"],
+            "award_configs": p["award_configs"],
         }
 
         _CHAIN_CONFIG_CACHE = resp
@@ -3893,6 +3948,9 @@ def _format_search_posts(
                 user_votes[tgt] = int(vote) if vote else 0
                 user_weight_map[tgt] = float(weight) if weight else 0.0
 
+    # Load awards for all posts
+    _, award_details = _load_award_aggregates(cur, post_ids) if post_ids else ({}, {})
+
     posts = []
     for row in filtered:
         import json as _json
@@ -3928,6 +3986,7 @@ def _format_search_posts(
                 "comments": comment_counts.get(pid, 0),
                 "user_vote": user_votes.get(pid, 0),
                 "user_weight": user_weight_map.get(pid, 0.0),
+                "awards": award_details.get(pid, []),
             }
         )
 
@@ -4227,6 +4286,7 @@ def get_posts():
             post_ids = [p["post_id"] for p in candidates]
             similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+            unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
             topic_prefs: dict[str, float] = {}
             author_prefs: dict[str, float] = {}
             now_ts = int(time.time())
@@ -4243,6 +4303,7 @@ def get_posts():
                     author_prefs,
                     now_ts,
                     False,
+                    unique_awarders,
                 )
                 if should_hide:
                     continue
@@ -4252,6 +4313,7 @@ def get_posts():
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
                 post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+                post["awards"] = award_details.get(pid, [])
                 post["children"] = []
                 post["feed_type"] = topic_feed_type
                 post["feed_bucket"] = debug.get("bucket", "discovery")
@@ -5112,6 +5174,27 @@ def get_comments():
 
                 apply_votes(children)
         t_votes_ms = (time.time() - t_votes) * 1000
+
+        # Load awards for root + all children
+        all_ids_for_awards = [root["post_id"]]
+
+        def collect_ids_for_awards(nodes):
+            for n in nodes:
+                all_ids_for_awards.append(n["post_id"])
+                if n.get("children"):
+                    collect_ids_for_awards(n["children"])
+
+        collect_ids_for_awards(children)
+        _, award_details = _load_award_aggregates(cur, all_ids_for_awards)
+        root["awards"] = award_details.get(root["post_id"], [])
+
+        def apply_awards(nodes):
+            for n in nodes:
+                n["awards"] = award_details.get(n["post_id"], [])
+                if n.get("children"):
+                    apply_awards(n["children"])
+
+        apply_awards(children)
 
         resp = {"root": root, "children": children}
 

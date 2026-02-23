@@ -495,6 +495,26 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgBridgeBurn", "err", err.Error())
 				return ctx, err
 			}
+		case *coretypes.MsgAward:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgAward", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgAward", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(100, m.Target)
+				w.writeString(101, m.AwardType)
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAward", "err", err.Error())
+				return ctx, err
+			}
 		// Note: MsgBridgeAttest does NOT use envelope - it's signed directly by validators
 		default:
 			// ignore others

@@ -853,21 +853,6 @@ export default function SubscriptionView({ state }) {
             details.push('Profile banner not available.');
         }
 
-        const awardPerms = Number(raw.award_permissions ?? 0);
-        if (awardPerms > 0) {
-            if (awardPerms === 1) {
-                details.push('Can give basic awards.');
-            } else if (awardPerms === 2) {
-                details.push('Can give more awards.');
-            } else if (awardPerms >= 3) {
-                details.push('Can give all award types.');
-            } else {
-                details.push(`Can give awards (permission level ${awardPerms}).`);
-            }
-        } else {
-            details.push('Cannot give awards.');
-        }
-
         if (tier.level === 0) {
             details.push('Uses proof-of-work (PoW) for posts and votes.');
         } else {
