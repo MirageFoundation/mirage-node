@@ -1297,6 +1297,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     ];
 
     const awardConfigs = useMemo(() => {
+        void nodeConfigTick;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
