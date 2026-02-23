@@ -316,5 +316,6 @@ export function generateCSSVariables(theme) {
     return vars;
 }
 
-export default { darkTheme, lightTheme, shadows, radius };
+const themeExports = { darkTheme, lightTheme, shadows, radius };
+export default themeExports;
 

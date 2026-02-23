@@ -191,7 +191,7 @@ export default function DiscoverView({ state }) {
                 setLoading(false);
             });
         return () => { alive = false; };
-    }, []);
+    }, [viewerAddress]);
 
     // Filter local topics and search API for more results
     useEffect(() => {

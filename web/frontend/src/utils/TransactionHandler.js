@@ -583,7 +583,6 @@ class TransactionHandler {
 
     async unblockPost(txhash) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
             const key = `post:${txhashTrimmed}`;
@@ -667,7 +666,6 @@ class TransactionHandler {
 
     async unblockUser(address) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
             const key = `user:${addressTrimmed}`;
@@ -762,7 +760,6 @@ class TransactionHandler {
 
     async unblockTopic(topic) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const topicTrimmed = String(topic || "").trim().toLowerCase();
             if (!topicTrimmed) return { success: false, error: "empty topic" };
             const key = `topic:${topicTrimmed}`;

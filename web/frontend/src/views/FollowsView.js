@@ -12,7 +12,7 @@ import TopBar from "../components/TopBar";
 import Button from "../components/Button";
 import MobileHeader from "../components/MobileHeader";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerBody, TabsRow, ClickableTab } from "../styled/Layout";
-import { follow, unfollow, invalidateCache as invalidateFollowCache, notifyUsersUpdated } from "../utils/FollowUsers";
+import { unfollow, notifyUsersUpdated } from "../utils/FollowUsers";
 import { notifyTopicsUpdated } from "../utils/Subscriptions";
 import { usePendingFollows } from "../utils/useFollowState";
 import { resolveUsernames as resolveUsernamesCached } from "../utils/UsernameCache";
@@ -221,7 +221,6 @@ const shortenAddress = (addr) => {
 export default function FollowsView({ state }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const username = (state && state.username) ? state.username : Storage.load('username', '');
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
     const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : (seedVault.getSeed() || '');
 

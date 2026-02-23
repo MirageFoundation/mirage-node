@@ -84,6 +84,77 @@ func TestVerifyRelaySignatureBlockTopicRejectsTopicChange(t *testing.T) {
 	require.Contains(t, err.Error(), "invalid relay signature")
 }
 
+func TestVerifyRelaySignatureAward(t *testing.T) {
+	priv := secp.PrivKey{Key: bytes.Repeat([]byte{0x03}, 32)}
+	pub := priv.PubKey().Bytes()
+
+	blockHash := []byte("blockhash")
+	difficulty := uint64(1)
+	pow := uint64(0)
+	timestamp := uint64(1710003334445)
+	target := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	awardType := "quality_post"
+
+	w := newCanonWriter("MsgAward")
+	w.writeBytes(2, pub)
+	w.writeBytes(3, blockHash)
+	w.writeUvarint(4, difficulty)
+	w.writeUvarint(5, pow)
+	w.writeUvarint(6, timestamp)
+	w.writeString(100, target)
+	w.writeString(101, awardType)
+	sig, err := priv.Sign(w.buf)
+	require.NoError(t, err)
+
+	t.Logf("[debug] award sig len=%d type=%s target=%s", len(sig), awardType, target)
+	err = verifyRelaySignature("MsgAward", pub, sig, func(cw *canonWriter) {
+		cw.writeBytes(2, pub)
+		cw.writeBytes(3, blockHash)
+		cw.writeUvarint(4, difficulty)
+		cw.writeUvarint(5, pow)
+		cw.writeUvarint(6, timestamp)
+		cw.writeString(100, target)
+		cw.writeString(101, awardType)
+	})
+	require.NoError(t, err)
+}
+
+func TestVerifyRelaySignatureAwardRejectsTypeChange(t *testing.T) {
+	priv := secp.PrivKey{Key: bytes.Repeat([]byte{0x04}, 32)}
+	pub := priv.PubKey().Bytes()
+
+	blockHash := []byte("blockhash")
+	difficulty := uint64(2)
+	pow := uint64(1)
+	timestamp := uint64(1710004445556)
+	target := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	awardType := "quality_post"
+
+	w := newCanonWriter("MsgAward")
+	w.writeBytes(2, pub)
+	w.writeBytes(3, blockHash)
+	w.writeUvarint(4, difficulty)
+	w.writeUvarint(5, pow)
+	w.writeUvarint(6, timestamp)
+	w.writeString(100, target)
+	w.writeString(101, awardType)
+	sig, err := priv.Sign(w.buf)
+	require.NoError(t, err)
+
+	t.Logf("[debug] award sig mismatch type=%s", awardType)
+	err = verifyRelaySignature("MsgAward", pub, sig, func(cw *canonWriter) {
+		cw.writeBytes(2, pub)
+		cw.writeBytes(3, blockHash)
+		cw.writeUvarint(4, difficulty)
+		cw.writeUvarint(5, pow)
+		cw.writeUvarint(6, timestamp)
+		cw.writeString(100, target)
+		cw.writeString(101, "based")
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid relay signature")
+}
+
 func TestVerifyRelaySignatureInvalidFields(t *testing.T) {
 	err := verifyRelaySignature("MsgBlockTopic", []byte{1, 2}, []byte{3, 4}, func(cw *canonWriter) {
 		cw.writeString(100, "")

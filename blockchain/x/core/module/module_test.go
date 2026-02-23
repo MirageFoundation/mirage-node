@@ -44,6 +44,8 @@ func TestUpdateParamsCoversAllFields(t *testing.T) {
 		// Bridge
 		"BridgeChains":               true,
 		"BridgeAttestationThreshold": true,
+		// Awards
+		"AwardConfigs": true,
 	}
 
 	// Get all fields from Params struct using reflection
