@@ -2027,9 +2027,29 @@ def test_msg_validation(backend: str) -> None:
     _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
 
 
+def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
+    """Top up test wallets via the validator faucet before gas-heavy tests.
+
+    Default: 10,000 MIRAGE per wallet.
+    """
+    for name in names:
+        w = WALLETS[name]
+        addr = str(w.address())
+        ok = tb._faucet(backend, addr, amount)
+        label = f"{amount / 1_000_000:,.0f} MIRAGE"
+        if ok:
+            _pass(f"topup.{name}", extra=label)
+        else:
+            _fail(f"topup.{name}", f"faucet failed ({label})")
+
+
 def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
+
+    # Top up wallets before the gas-heavy fill loops
+    _topup_wallets(backend, ["free", "sub1"])
+    time.sleep(3)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
