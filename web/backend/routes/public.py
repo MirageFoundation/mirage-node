@@ -2557,6 +2557,7 @@ def get_network_stats():
 
         # Compute real 24h earned from node_balance changes in supply_history
         earned_24h = 0
+        burned_24h = 0
         try:
             since_ts = int(time.time()) - 86400
             conn_sh = connect_db(timeout=5.0, busy_timeout_ms=5000)
@@ -2575,6 +2576,8 @@ def get_network_stats():
                 diff = rows_sh[i][0] - rows_sh[i - 1][0]
                 if diff > 0:
                     earned_24h += diff
+                elif diff < 0:
+                    burned_24h += abs(diff)
         except Exception:
             pass
 
@@ -2583,6 +2586,7 @@ def get_network_stats():
             "staked_balance": staked_balance,
             "block_time": block_time,
             "earned_24h": earned_24h,
+            "burned_24h": burned_24h,
             "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),

@@ -710,6 +710,7 @@ export default function NetworkView({ state }) {
                         current_height: (typeof data.current_height !== 'undefined') ? Number(data.current_height) : undefined,
                         difficulty_history: Array.isArray(data.difficulty_history) ? data.difficulty_history : [],
                         earned_24h: (typeof data.earned_24h !== 'undefined') ? Number(data.earned_24h) : undefined,
+                        burned_24h: (typeof data.burned_24h !== 'undefined') ? Number(data.burned_24h) : undefined,
                     }));
                 }
             } catch (_) { }
@@ -990,6 +991,12 @@ export default function NetworkView({ state }) {
                                         <Label>Earned (24h):</Label>
                                         <ValueBox>
                                             <Mono>{cfg.earned_24h == null ? '(loading...)' : `${formatMirage(cfg.earned_24h)} MIRAGE`}</Mono>
+                                        </ValueBox>
+                                    </RowCentered>
+                                    <RowCentered>
+                                        <Label>Burned (24h):</Label>
+                                        <ValueBox>
+                                            <Mono>{cfg.burned_24h == null ? '(loading...)' : `${formatMirage(cfg.burned_24h)} MIRAGE`}</Mono>
                                         </ValueBox>
                                     </RowCentered>
                                     <RowCentered>
