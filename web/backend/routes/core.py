@@ -129,10 +129,15 @@ def _get_trusted_client_ip() -> str | None:
     if not raw_ip:
         return None
     try:
-        ipaddress.ip_address(raw_ip)
+        ip_obj = ipaddress.ip_address(raw_ip)
     except ValueError:
         return None
-    return raw_ip
+    if ip_obj.version == 6 and ip_obj.ipv4_mapped:
+        return str(ip_obj.ipv4_mapped)
+    if ip_obj.version == 6:
+        net = ipaddress.ip_network(f"{ip_obj}/64", strict=False)
+        return f"{net.network_address}/{net.prefixlen}"
+    return str(ip_obj)
 
 
 def _get_username_for_owner(owner: str) -> str:
@@ -2847,12 +2852,15 @@ def core_post():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/post", "MsgPost", code, tx_hash, raw_log, extra)
-        client_ip = _get_trusted_client_ip()
-        if client_ip:
-            target_log = str(target or "").strip().lower()
-            action = "create_comment" if target_log else "create_post"
-            username = _get_username_for_owner(user_addr)
-            _log_user_action(username, client_ip, action, target_log, str(tx_hash or "").lower())
+        try:
+            client_ip = _get_trusted_client_ip()
+            if client_ip:
+                target_log = str(target or "").strip().lower()
+                action = "create_comment" if target_log else "create_post"
+                username = _get_username_for_owner(user_addr)
+                _log_user_action(username, client_ip, action, target_log, str(tx_hash or "").lower())
+        except Exception:
+            pass
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "post.err", error=str(e))
@@ -3038,11 +3046,14 @@ def core_vote():
                 "proof": int(proof),
             }
             return _tx_error(rid, "core/vote", "MsgVote", code, tx_hash, raw_log, extra)
-        client_ip = _get_trusted_client_ip()
-        if client_ip:
-            target_log = str(target or "").strip().lower()
-            username = _get_username_for_owner(user_addr)
-            _log_user_action(username, client_ip, "vote", target_log, str(tx_hash or "").lower())
+        try:
+            client_ip = _get_trusted_client_ip()
+            if client_ip:
+                target_log = str(target or "").strip().lower()
+                username = _get_username_for_owner(user_addr)
+                _log_user_action(username, client_ip, "vote", target_log, str(tx_hash or "").lower())
+        except Exception:
+            pass
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "vote.err", error=str(e))
