@@ -14,6 +14,8 @@ import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
 import { getTierColor, getTierName } from "../utils/tierColors";
+import useBalance from "../utils/useBalance";
+import { formatMirage } from "../utils/formatters";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -1289,6 +1291,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmDonate(false);
     };
 
+    const { displayBalance: userBalanceUmirage } = useBalance();
+
     const AWARD_TYPES = [
         { name: 'quality_post', label: 'Quality Post', icon: '\uD83C\uDFC6' },
         { name: 'original_content', label: 'Original Content', icon: '\uD83D\uDCA1' },
@@ -1332,11 +1336,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                 setAwardMessage({ type: 'success', message: `${label} award given!` });
                 setConfirmAward(false);
                 setTimeout(() => setAwardMessage(null), 5000);
+                tx.refreshBalance();
             } else {
+                setConfirmAward(false);
                 setAwardMessage({ type: 'error', message: `Failed: ${result.error || 'Unknown error'}` });
                 setTimeout(() => setAwardMessage(null), 5000);
             }
         } catch (error) {
+            setConfirmAward(false);
             setAwardMessage({ type: 'error', message: `Error: ${error.message || error}` });
             setTimeout(() => setAwardMessage(null), 5000);
         }
@@ -2557,17 +2564,28 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <div style={{ width: '100%' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                                     <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Give Award</span>
-                                    <Button variant="ghost" size="sm" onClick={cancelAward} style={{ padding: '0.1rem 0.4rem', fontSize: '0.75rem' }}>Cancel</Button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        {userBalanceUmirage !== null && (
+                                            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>
+                                                Balance: {formatMirage(userBalanceUmirage)} MIRAGE
+                                            </span>
+                                        )}
+                                        <ConfirmButtons>
+                                            <Button variant="ghost" size="sm" onClick={cancelAward}>Cancel</Button>
+                                        </ConfirmButtons>
+                                    </div>
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
                                     {AWARD_TYPES.map(award => {
                                         const costUmirage = getAwardCost(award.name);
                                         const costMirage = costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() : 'Free';
+                                        const canAfford = costUmirage === 0 || (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
+                                        const disabled = isAwarding || !canAfford;
                                         return (
                                             <button
                                                 key={award.name}
-                                                onClick={() => confirmAwardAction(award.name)}
-                                                disabled={isAwarding}
+                                                onClick={() => canAfford && confirmAwardAction(award.name)}
+                                                disabled={disabled}
                                                 style={{
                                                     display: 'flex',
                                                     alignItems: 'center',
@@ -2577,18 +2595,20 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                     border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
                                                     borderRadius: '8px',
                                                     color: theme?.colors?.text || 'inherit',
-                                                    cursor: isAwarding ? 'wait' : 'pointer',
-                                                    opacity: isAwarding ? 0.6 : 1,
+                                                    cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
+                                                    opacity: disabled ? 0.4 : 1,
                                                     fontSize: '0.78rem',
-                                                    transition: 'background 0.15s',
+                                                    transition: 'background 0.15s, opacity 0.15s',
                                                 }}
-                                                onMouseEnter={e => { if (!isAwarding) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
+                                                onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
                                                 onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
                                             >
                                                 <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
                                                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
                                                     <span style={{ fontWeight: 600 }}>{award.label}</span>
-                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6 }}>{costMirage} MIRAGE</span>
+                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
+                                                        {!canAfford ? 'Insufficient MIRAGE' : `${costMirage} MIRAGE`}
+                                                    </span>
                                                 </span>
                                             </button>
                                         );

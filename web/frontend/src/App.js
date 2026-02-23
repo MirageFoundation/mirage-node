@@ -571,6 +571,16 @@ class App extends Component {
             }
         } catch (_) { }
 
+        // Refresh user balance on every page load for logged-in users
+        try {
+            const pk = this.state.publicKey || Storage.load('publicKey', '');
+            if (pk) {
+                Api.get('get_user_status', { address: pk, _cb: Date.now() })
+                    .then((data) => { if (data) try { tx.cacheUserStatus(data); } catch (_) { } })
+                    .catch(() => { });
+            }
+        } catch (_) { }
+
         // Add the "beforeunload" event listener
         window.addEventListener('beforeunload', this.handleBeforeUnload);
 

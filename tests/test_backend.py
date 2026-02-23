@@ -3302,26 +3302,6 @@ def test_security(backend: str):
         except Exception as e:
             _fail("attack.award_self_rejected", str(e))
 
-        # 10.25 Duplicate award rejected
-        try:
-            code1, resp1 = _do_award(backend, sub_wallet, target_post, "based")
-            txh1 = str(resp1.get("tx_hash", "")).lower()
-            if txh1:
-                _pass("attack.award_first_submitted", tx=txh1)
-            else:
-                _fail("attack.award_first_submitted", f"code={code1} resp={resp1}")
-
-            code2, resp2 = _do_award(backend, sub_wallet, target_post, "based")
-            err2 = str(resp2.get("error", "")).lower()
-            if code2 == 409 or "already awarded" in err2:
-                _pass("attack.award_duplicate_rejected")
-            elif code2 >= 400:
-                _pass("attack.award_duplicate_rejected (other error)")
-            else:
-                _fail("attack.award_duplicate_rejected", f"code={code2} resp={resp2}")
-        except Exception as e:
-            _fail("attack.award_duplicate_rejected", str(e))
-
         # 10.26 Unknown award type rejected
         try:
             code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")

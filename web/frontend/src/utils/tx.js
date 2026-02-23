@@ -229,6 +229,22 @@ export async function giveAward(targetPostId, awardType) {
     return h.giveAward(targetPostId, awardType);
 }
 
+export async function refreshBalance() {
+    const Storage = (await import('./Storage')).default;
+    const Api = (await import('../lib/api')).default;
+    const publicKey = Storage.load('publicKey', '');
+    if (!publicKey) return;
+    try {
+        const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() });
+        if (data) {
+            const h = await getHandler();
+            h.cacheUserStatus(data);
+        }
+    } catch (e) {
+        console.warn('[tx.refreshBalance] Failed:', e?.message || e);
+    }
+}
+
 export async function upgradeLevel(level, monthlyFeeUmirage) {
     const h = await getHandler();
     return h.upgradeLevel(level, monthlyFeeUmirage);

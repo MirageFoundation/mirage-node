@@ -1120,6 +1120,7 @@ class TransactionHandler {
                 pow_difficulty = 0;
                 last_block_hash = "";
             }
+            console.debug('[TransactionHandler] giveAward.submit', { target, award_type: type, user_level: userLevel });
 
             const tx = {
                 action: 'award',
@@ -4398,7 +4399,7 @@ class TransactionHandler {
             // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
             // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal']);
+            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal', 'award']);
             const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
@@ -4416,6 +4417,10 @@ class TransactionHandler {
                     this._setStatus("submitting");
                     try {
                         await this.handleTransactionResult(0, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
+                    } catch (err) {
+                        const msg = String(err && err.message ? err.message : err);
+                        updateNotification(msg || "Transaction failed", 5, true);
+                        wrapResolve({ success: false, error: msg || "Transaction failed" });
                     } finally {
                         this._setStatus("idle");
                     }
