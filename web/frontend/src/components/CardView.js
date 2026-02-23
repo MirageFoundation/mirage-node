@@ -934,7 +934,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
-    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0 });
+    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
     const feedReasonRef = useRef(null);
     const [timeTooltipOpen, setTimeTooltipOpen] = useState(false);
     const [timeTooltipPosition, setTimeTooltipPosition] = useState({ top: 0, left: 0 });
@@ -1966,9 +1966,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onMouseEnter={() => {
                                             if (post.feed_debug && feedReasonRef.current) {
                                                 const rect = feedReasonRef.current.getBoundingClientRect();
+                                                const tooltipHeight = 320;
+                                                const openDown = rect.top - tooltipHeight - 8 < 0;
                                                 setFeedTooltipPosition({
-                                                    top: rect.top - 8,
-                                                    left: Math.max(10, rect.left)
+                                                    top: openDown ? rect.bottom + 8 : rect.top - 8,
+                                                    left: Math.max(10, rect.left),
+                                                    openDown,
                                                 });
                                                 setFeedTooltipOpen(true);
                                             }
@@ -1989,7 +1992,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     </FeedReasonWrapper>
                                     {feedTooltipOpen && post.feed_debug && ReactDOM.createPortal(
                                         <FeedDebugTooltip
-                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left, transform: 'translateY(-100%)' }}
+                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left, transform: feedTooltipPosition.openDown ? 'none' : 'translateY(-100%)' }}
                                             onMouseEnter={() => setFeedTooltipOpen(true)}
                                             onMouseLeave={() => setFeedTooltipOpen(false)}
                                         >
@@ -2000,7 +2003,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                         <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
                                                             {post.feed_debug.equation ||
                                                                 (post.feed_debug.P !== undefined
-                                                                    ? '(S + V + U + P) × R'
+                                                                    ? '(√S + √V + √U + √P + √A) × R'
                                                                     : post.feed_debug.C !== undefined
                                                                         ? '(V + C) × R'
                                                                         : '(S + V + U) × R')}
@@ -2041,6 +2044,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>P (your prefs):</FeedDebugLabel>
                                                     <FeedDebugValue>{post.feed_debug.P?.toFixed(3) || '0.000'} [t={post.feed_debug.t_pref ?? 0}+a={post.feed_debug.a_pref ?? 0}]</FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
+                                            {/* A for awards */}
+                                            {post.feed_debug.A !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>A (awards):</FeedDebugLabel>
+                                                    <FeedDebugValue>{post.feed_debug.A ?? 0}</FeedDebugValue>
                                                 </FeedDebugRow>
                                             )}
                                             {/* old magic: C for comments */}
