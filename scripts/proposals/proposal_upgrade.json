@@ -4,15 +4,15 @@
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.14.0",
+                "name": "v1.15.0",
                 "height": "T+50",
-                "info": "v1.14.0: MsgDeleteUser — users can permanently delete their account (self-signed or governance). On-chain: releases username, clears profile KV and lists, sweeps spendable balances to community pool. Indexer: soft-deletes profile (deleted_at) for post attribution; username resolution excludes deleted users. Posts from deleted users retain original author display."
+                "info": "v1.15.0: Burn-only awards — MsgAward lets users burn MIRAGE to give awards (Quality Post, Original Content, Based AF, Receipts) to posts and comments. Admins (level >= 100) award for free. Award types and costs are governable via award_configs param. Indexer stores award records; backend aggregates for display and magic feed scoring."
             }
         }
     ],
     "metadata": "",
     "deposit": "auto",
-    "title": "Upgrade: v1.14.0",
-    "summary": "Introduces MsgDeleteUser for account deletion — self-delete (envelope_pubkey) or governance. Clears on-chain state, sweeps funds to community pool, soft-deletes in indexer while preserving post attribution.",
+    "title": "Upgrade: v1.15.0",
+    "summary": "Introduces MsgAward for burn-only awards on posts/comments. Four award types with configurable costs. Free for admins. Unique awarder count feeds into magic scoring algorithm.",
     "expedited": true
 }

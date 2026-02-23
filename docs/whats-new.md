@@ -1,6 +1,6 @@
 # What's New in Mirage
 
-A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.14.0**.
+A summary of the biggest features and improvements shipped from **v1.10.8** through **v1.15.0**.
 
 ---
 
@@ -92,6 +92,14 @@ Across the entire stack, silent fallbacks and recovery paths were stripped out i
 
 ---
 
+### Burn-Only Awards
+
+Give awards to posts and comments by burning MIRAGE tokens. Four award types — Quality Post (🏆, 10k), Original Content (💡, 5k), Based AF (💪, 5k), Receipts (🏷️, 5k) — each with a permanent token burn. One award per account per post; no self-awards. Admins (level >= 100) award for free. Types and costs are governable on-chain parameters.
+
+Awards feed into the Magic scoring algorithm: posts with awards from many distinct users get a ranking boost. Multiple awards of the same type stack (`3x🏆`); different types display as a list (`3x🏆, 💪, 2x🏷️`).
+
+---
+
 ### Full Release Notes
 
 - [v1.10.8](updates/update_v1.10.8.md) — Network charts, gRPC migration, registration hardening
@@ -100,3 +108,4 @@ Across the entire stack, silent fallbacks and recovery paths were stripped out i
 - [v1.12.0](updates/update_v1.12.0.md) — Multi-media posts, gallery component, API timeout fix
 - [v1.13.0](updates/update_v1.13.0.md) — Topic blocking, quality_posts removal, tier-dependent limits
 - [v1.14.0](updates/update_v1.14.0.md) — MsgDeleteUser for account deletion, soft-delete indexing, post attribution preserved
+- [v1.15.0](updates/update_v1.15.0.md) — Burn-only awards, MsgAward, governable award_configs, magic scoring boost

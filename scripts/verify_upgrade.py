@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Verify v1.14.0 chain upgrade — checks ONLY what changed in this release.
+Verify v1.15.0 chain upgrade — checks ONLY what changed in this release.
 
-What v1.14.0 changed:
-- MsgDeleteUser: users can permanently delete their account (self-signed or governance)
-- On-chain: DeleteUserState clears profile KV, lists, username, subscription; sweeps spendable to community pool
-- Indexer: soft_delete_profile (deleted_at column), resolve excludes deleted; post attribution preserved
-- upsert_profile / upsert_profile_full: clear deleted_at on conflict (re-register after delete)
-- Backend routes: deleted_at IS NULL in username resolution, user listings, search
-- No new chain params; no proto param changes
+What v1.15.0 changed:
+- MsgAward: burn MIRAGE to give an award to a post/comment (free for level >= 100)
+- award_configs added to Params (replaces unused award_permissions on TierConfig)
+- Four default award types: quality_post (10k), original_content (5k), based (5k), receipts (5k)
+- Indexer: awards table stores award records (one per owner+target)
+- Backend: /api/core/award endpoint with self-award and duplicate checks
+- Magic scoring: unique_awarders incorporated as sqrt component
 
 This script does NOT submit transactions or mutate chain state.
 """
@@ -25,9 +25,11 @@ from pathlib import Path
 from typing import Any
 
 
-UPGRADE_NAME = "v1.14.0"
-EXPECTED_VERSION = "v1.14.0"
+UPGRADE_NAME = "v1.15.0"
+EXPECTED_VERSION = "v1.15.0"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+EXPECTED_AWARD_TYPES = {"quality_post", "original_content", "based", "receipts"}
 
 
 # ---------------------------------------------------------------------------
@@ -62,12 +64,12 @@ def _run_json(cmd: list[str]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# v1.13.0 specific checks
+# v1.15.0 specific checks
 # ---------------------------------------------------------------------------
 
 
 def check_binary_version(miraged: str, failures: list[str]) -> None:
-    """Binary version must match v1.13.0 (or v1.13.0-*)."""
+    """Binary version must match v1.15.0 (or v1.15.0-*)."""
     print("-> Checking binary version...")
     try:
         p = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
@@ -101,7 +103,7 @@ def check_node_health(miraged: str, rpc: str, failures: list[str]) -> None:
 
 
 def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
-    """Verify core params (v1.14.0 does not change params; sanity checks from prior upgrades)."""
+    """Verify core params — award_configs must be present with expected types."""
     print("\n-> Checking core params...")
     try:
         raw = _run_json([miraged, "q", "core", "params", "--node", rpc, "-o", "json"])
@@ -111,7 +113,31 @@ def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
         failures.append(f"cannot fetch core params: {e}")
         return
 
-    # pow_difficulty_step should be present from v1.11.0
+    # award_configs must be present and non-empty
+    award_configs = params.get("award_configs")
+    if not award_configs or not isinstance(award_configs, list):
+        print("   [FAIL] award_configs missing or empty")
+        failures.append("award_configs missing or empty")
+        return
+
+    names = {ac.get("name") for ac in award_configs}
+    if EXPECTED_AWARD_TYPES <= names:
+        print(f"   [OK] award_configs has all expected types: {sorted(EXPECTED_AWARD_TYPES)}")
+    else:
+        missing = EXPECTED_AWARD_TYPES - names
+        print(f"   [FAIL] award_configs missing types: {sorted(missing)}")
+        failures.append(f"award_configs missing types: {sorted(missing)}")
+
+    for ac in award_configs:
+        name = ac.get("name", "?")
+        cost = ac.get("cost")
+        if cost is None:
+            print(f"   [FAIL] award_configs[{name}]: cost missing")
+            failures.append(f"award_configs[{name}]: cost missing")
+        else:
+            print(f"   [OK] award_configs[{name}]: cost={cost}")
+
+    # pow_difficulty_step should still be present from v1.11.0
     step = params.get("pow_difficulty_step")
     if step is not None:
         try:
@@ -130,8 +156,8 @@ def check_params(miraged: str, rpc: str, failures: list[str]) -> None:
 
 
 def check_source_level(failures: list[str]) -> None:
-    """Source-level checks for v1.14.0 — silently skipped when files aren't present."""
-    print("\n-> Checking v1.14.0 source changes...")
+    """Source-level checks for v1.15.0 — silently skipped when files aren't present."""
+    print("\n-> Checking v1.15.0 source changes...")
 
     found_any = False
 
@@ -152,44 +178,47 @@ def check_source_level(failures: list[str]) -> None:
                 print(f"   [OK] {ok_msg}")
             else:
                 print(f"   [FAIL] {fail_msg}")
-                failures.append(f"v1.14.0: {fail_msg}")
+                failures.append(f"v1.15.0: {fail_msg}")
 
     # --- Blockchain (Go) ---
 
-    # tx.pb.go: MsgDeleteUser / MsgDeleteUserResponse
+    # tx.pb.go: MsgAward / MsgAwardResponse
     _check(
         REPO_ROOT / "blockchain" / "x" / "core" / "types" / "tx.pb.go",
         [
-            ("MsgDeleteUser", "tx.pb.go: MsgDeleteUser defined", "tx.pb.go: MsgDeleteUser missing"),
-            (
-                "MsgDeleteUserResponse",
-                "tx.pb.go: MsgDeleteUserResponse defined",
-                "tx.pb.go: MsgDeleteUserResponse missing",
-            ),
+            ("MsgAward", "tx.pb.go: MsgAward defined", "tx.pb.go: MsgAward missing"),
+            ("MsgAwardResponse", "tx.pb.go: MsgAwardResponse defined", "tx.pb.go: MsgAwardResponse missing"),
         ],
     )
 
-    # codec.go: MsgDeleteUser registered
+    # params.pb.go: AwardConfig
     _check(
-        REPO_ROOT / "blockchain" / "x" / "core" / "types" / "codec.go",
-        [("MsgDeleteUser", "codec.go: MsgDeleteUser registered", "codec.go: MsgDeleteUser registration missing")],
+        REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.pb.go",
+        [("AwardConfig", "params.pb.go: AwardConfig defined", "params.pb.go: AwardConfig missing")],
     )
 
-    # module.go: DeleteUser handler
+    # codec.go: MsgAward registered
+    _check(
+        REPO_ROOT / "blockchain" / "x" / "core" / "types" / "codec.go",
+        [("MsgAward", "codec.go: MsgAward registered", "codec.go: MsgAward registration missing")],
+    )
+
+    # params.go: DefaultAwardConfigs, GetAwardConfig
+    _check(
+        REPO_ROOT / "blockchain" / "x" / "core" / "types" / "params.go",
+        [
+            ("DefaultAwardConfigs", "params.go: DefaultAwardConfigs present", "params.go: DefaultAwardConfigs missing"),
+            ("GetAwardConfig", "params.go: GetAwardConfig present", "params.go: GetAwardConfig missing"),
+            ("!:AwardPermissions", "params.go: AwardPermissions removed", "params.go: AwardPermissions still present"),
+        ],
+    )
+
+    # module.go: Award handler
     _check(
         REPO_ROOT / "blockchain" / "x" / "core" / "module" / "module.go",
         [
-            ("DeleteUser", "module.go: DeleteUser handler present", "module.go: DeleteUser handler missing"),
-            ("DeleteUserState", "module.go: DeleteUserState called", "module.go: DeleteUserState call missing"),
-        ],
-    )
-
-    # keeper: DeleteUserState
-    _check(
-        REPO_ROOT / "blockchain" / "x" / "core" / "keeper" / "keeper.go",
-        [
-            ("DeleteUserState", "keeper.go: DeleteUserState present", "keeper.go: DeleteUserState missing"),
-            ("FundCommunityPool", "keeper.go: FundCommunityPool in DeleteUserState", "keeper.go: fund sweep missing"),
+            ("func (am AppModule) Award(", "module.go: Award handler present", "module.go: Award handler missing"),
+            ("BurnFromAccount", "module.go: BurnFromAccount in Award handler", "module.go: burn call missing"),
         ],
     )
 
@@ -198,66 +227,123 @@ def check_source_level(failures: list[str]) -> None:
         REPO_ROOT / "blockchain" / "app" / "upgrades.go",
         [
             (
-                '"v1.14.0"',
-                "upgrades.go: v1.14.0 upgrade handler registered",
-                "upgrades.go: v1.14.0 upgrade handler missing",
-            )
+                '"v1.15.0"',
+                "upgrades.go: v1.15.0 upgrade handler registered",
+                "upgrades.go: v1.15.0 upgrade handler missing",
+            ),
+        ],
+    )
+
+    # ante_metasig.go: MsgAward case
+    _check(
+        REPO_ROOT / "blockchain" / "app" / "ante_metasig.go",
+        [("MsgAward", "ante_metasig.go: MsgAward relay sig verification", "ante_metasig.go: MsgAward case missing")],
+    )
+
+    # ante_pow.go: MsgAward rejection + canon builder
+    _check(
+        REPO_ROOT / "blockchain" / "app" / "ante_pow.go",
+        [
+            (
+                "MsgAward cannot use PoW",
+                "ante_pow.go: MsgAward PoW rejection",
+                "ante_pow.go: MsgAward PoW rejection missing",
+            ),
+            (
+                "buildCanonForAward",
+                "ante_pow.go: buildCanonForAward present",
+                "ante_pow.go: buildCanonForAward missing",
+            ),
         ],
     )
 
     # --- Python ---
 
-    # Datatypes: MsgDeleteUser
+    # Datatypes: MsgAward, AwardConfig
     _check(
         REPO_ROOT / "shared" / "datatypes.py",
-        [("MsgDeleteUser", "datatypes.py: MsgDeleteUser defined", "datatypes.py: MsgDeleteUser missing")],
+        [
+            ("MsgAward", "datatypes.py: MsgAward defined", "datatypes.py: MsgAward missing"),
+            ("AwardConfig", "datatypes.py: AwardConfig defined", "datatypes.py: AwardConfig missing"),
+            (
+                "!:award_permissions",
+                "datatypes.py: award_permissions removed",
+                "datatypes.py: award_permissions still present",
+            ),
+        ],
     )
 
-    # Indexer: soft_delete_profile, deleted_at
+    # Canon: canon_base_award
+    _check(
+        REPO_ROOT / "shared" / "canon.py",
+        [("canon_base_award", "canon.py: canon_base_award present", "canon.py: canon_base_award missing")],
+    )
+
+    # Indexer: awards table
     _check(
         REPO_ROOT / "indexer" / "database.py",
         [
             (
-                "soft_delete_profile",
-                "database.py: soft_delete_profile present",
-                "database.py: soft_delete_profile missing",
+                "CREATE TABLE IF NOT EXISTS awards",
+                "database.py: awards table defined",
+                "database.py: awards table missing",
             ),
-            ("deleted_at", "database.py: deleted_at column/migration", "database.py: deleted_at missing"),
             (
-                "deleted_at=NULL",
-                "database.py: upsert clears deleted_at on conflict",
-                "database.py: upsert deleted_at clear missing",
+                "uniq_awards_owner_target",
+                "database.py: unique award constraint",
+                "database.py: unique award constraint missing",
             ),
         ],
     )
 
-    # Indexer: _handle_delete_user
+    # Indexer: _handle_award
     _check(
         REPO_ROOT / "indexer" / "message_processor.py",
         [
             (
-                "_handle_delete_user",
-                "message_processor.py: _handle_delete_user present",
-                "message_processor.py: _handle_delete_user missing",
+                "_handle_award",
+                "message_processor.py: _handle_award present",
+                "message_processor.py: _handle_award missing",
             ),
             (
-                "MsgDeleteUser",
-                "message_processor.py: MsgDeleteUser in TYPE_URL_TO_PROTO",
-                "message_processor.py: MsgDeleteUser missing from TYPE_URL_TO_PROTO",
+                "MsgAward",
+                "message_processor.py: MsgAward in TYPE_URL_TO_PROTO",
+                "message_processor.py: MsgAward missing from TYPE_URL_TO_PROTO",
             ),
         ],
     )
 
-    # Backend public: deleted_at in username resolution
+    # Backend: /api/core/award endpoint
+    _check(
+        REPO_ROOT / "web" / "backend" / "routes" / "core.py",
+        [
+            ('"/api/core/award"', "core.py: /api/core/award endpoint", "core.py: /api/core/award endpoint missing"),
+            ("cannot award your own post", "core.py: self-award check", "core.py: self-award check missing"),
+            ("already awarded this post", "core.py: duplicate award check", "core.py: duplicate award check missing"),
+        ],
+    )
+
+    # Backend public: _load_award_aggregates, magic scoring A component
     _check(
         REPO_ROOT / "web" / "backend" / "routes" / "public.py",
         [
             (
-                "deleted_at IS NULL",
-                "public.py: deleted_at filter in username queries",
-                "public.py: deleted_at filter missing in username queries",
-            )
+                "_load_award_aggregates",
+                "public.py: _load_award_aggregates present",
+                "public.py: _load_award_aggregates missing",
+            ),
+            (
+                "unique_awarders",
+                "public.py: unique_awarders in magic scoring",
+                "public.py: unique_awarders missing from magic scoring",
+            ),
         ],
+    )
+
+    # Migration
+    _check(
+        REPO_ROOT / "indexer" / "migrations" / "v2_0_6_awards.py",
+        [("awards", "v2_0_6_awards.py: migration present", "v2_0_6_awards.py: migration missing")],
     )
 
     if not found_any:

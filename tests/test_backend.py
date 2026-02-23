@@ -54,6 +54,7 @@ from shared.client import (  # noqa: E402
     _BASE_DIFFICULTY_FACTOR,
 )
 from shared.canon import (  # noqa: E402
+    canon_base_award as _canon_base_award_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_vote as _canon_base_vote_raw,
     canon_base_edit as _canon_base_edit_raw,
@@ -579,6 +580,41 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/send_tokens", payload)
     return resp
+
+
+def _do_award(
+    backend: str,
+    wallet: LocalWallet,
+    target: str,
+    award_type: str,
+    pow_difficulty: int = 0,
+    pow: int = 0,
+    last_block_hash: str | None = None,
+    timestamp: int | None = None,
+    sig_override: bytes | None = None,
+    pub_override: bytes | None = None,
+) -> Tuple[int, dict]:
+    """Send an award via the backend API (burn-only)."""
+    addr = str(wallet.address())
+    st = get_status(backend, address=addr)
+    lb = last_block_hash or str(st.get("last_block_hash", ""))
+    pub = pub_override or wallet.public_key().public_key_bytes
+    ts = int(timestamp or _now_ms())
+    base = _canon_base_award_raw(pub, _lb_bytes(lb), int(pow_difficulty), ts, target, award_type)
+    signed = canon_signed_with_pow(base, int(pow))
+    sig = sig_override or sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": int(pow_difficulty),
+        "pow": int(pow),
+        "target": target,
+        "award_type": award_type,
+    }
+    code, resp = _post(f"{backend}/api/core/award", payload)
+    return code, resp
 
 
 def setup_test_wallets(backend: str) -> bool:
@@ -1394,6 +1430,19 @@ def test_params(backend: str):
     else:
         _fail("params.get_chain_config valid", f"code={code3}")
 
+    # 1.6a award configs present and include expected defaults
+    award_cfgs = cfg.get("award_configs") if isinstance(cfg, dict) else None
+    expected_awards = {"quality_post", "original_content", "based", "receipts"}
+    if isinstance(award_cfgs, list) and award_cfgs:
+        names = {str(a.get("name", "")).strip() for a in award_cfgs if isinstance(a, dict)}
+        missing = expected_awards - names
+        if not missing:
+            _pass("params.award_configs defaults present", count=len(award_cfgs))
+        else:
+            _fail("params.award_configs defaults present", f"missing={sorted(missing)}")
+    else:
+        _fail("params.award_configs defaults present", "award_configs missing or empty")
+
     # 1.7 get_node_config returns valid
     code3b, ncfg = _get(f"{backend}/api/get_node_config")
     if code3b == 200 and ncfg.get("validator_account_address"):
@@ -1593,6 +1642,36 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
+    # 3.4a Award post (non-self)
+    awarder = WALLETS["sub1"]
+    award_type = "quality_post"
+    _debug(f"award post target={txh} type={award_type}")
+    award_code, award_resp = _do_award(backend, awarder, txh, award_type)
+    award_txh = str(award_resp.get("tx_hash", "")).lower()
+    if award_txh:
+        _pass("post.award submitted", tx=award_txh)
+    else:
+        _fail("post.award submitted", f"code={award_code} resp={award_resp}")
+
+    # 3.4b Award appears in post feed data
+    award_seen = False
+    if award_txh:
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
+            time.sleep(1)
+            code, feed_aw = _get(f"{backend}/api/get_posts", {"limit": 50, "by": "newest"})
+            posts_aw = (feed_aw or {}).get("posts") or []
+            p_aw = next((p for p in posts_aw if str(p.get("post_id", "")).lower() == txh), None)
+            if not p_aw:
+                continue
+            awards = p_aw.get("awards") or []
+            if any(a.get("type") == award_type and int(a.get("count", 0)) >= 1 for a in awards):
+                award_seen = True
+                break
+    if award_seen:
+        _pass("post.award appears in feed")
+    else:
+        _fail("post.award appears in feed")
+
     # 3.5 Vote up (poll up to INDEX_TIMEOUT_SEC)
     vote_resp = _do_vote(backend, wallet, txh, 1)
     if vote_resp and vote_resp.get("error"):
@@ -1709,6 +1788,38 @@ def test_comments(backend: str):
         _pass("comments.appears in get_comments")
     else:
         _fail("comments.appears in get_comments", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
+
+    # 4.2a Award comment (non-self)
+    awarder = WALLETS["sub1"]
+    award_type = "receipts"
+    _debug(f"award comment target={c1_txh} type={award_type}")
+    award_code, award_resp = _do_award(backend, awarder, c1_txh, award_type)
+    award_txh = str(award_resp.get("tx_hash", "")).lower()
+    if award_txh:
+        _pass("comments.award submitted", tx=award_txh)
+    else:
+        _fail("comments.award submitted", f"code={award_code} resp={award_resp}")
+
+    # 4.2b Award appears in get_comments
+    award_seen = False
+    if award_txh:
+        for _ in range(int(INDEX_TIMEOUT_SEC)):
+            time.sleep(1)
+            code, data = _get(f"{backend}/api/get_comments", {"post_id": parent_txh, "limit": 100})
+            if code != 200:
+                continue
+            children = (data or {}).get("children") or []
+            c1 = next((c for c in children if str(c.get("post_id", "")).lower() == c1_txh), None)
+            if not c1:
+                continue
+            awards = c1.get("awards") or []
+            if any(a.get("type") == award_type and int(a.get("count", 0)) >= 1 for a in awards):
+                award_seen = True
+                break
+    if award_seen:
+        _pass("comments.award appears in get_comments")
+    else:
+        _fail("comments.award appears in get_comments")
 
     # 4.3 Nested comment (reply to comment)
     c2_txh = _do_post(backend, wallet, "", "", "Nested reply", target=c1_txh)
@@ -3175,6 +3286,129 @@ def test_security(backend: str):
             _fail("attack.delete_account_invalid_target_rejected", f"code={code}")
     except Exception as e:
         _pass("attack.delete_account_invalid_target_rejected (exception)")
+
+    # ------ Award attacks ------
+    if target_post:
+        # 10.24 Self-award rejected
+        try:
+            code, resp = _do_award(backend, free_wallet, target_post, "quality_post")
+            err = str(resp.get("error", "")).lower()
+            if code >= 400 and ("own post" in err or "self" in err):
+                _pass("attack.award_self_rejected")
+            elif code >= 400:
+                _pass("attack.award_self_rejected (other error)")
+            else:
+                _fail("attack.award_self_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_self_rejected", str(e))
+
+        # 10.25 Duplicate award rejected
+        try:
+            code1, resp1 = _do_award(backend, sub_wallet, target_post, "based")
+            txh1 = str(resp1.get("tx_hash", "")).lower()
+            if txh1:
+                _pass("attack.award_first_submitted", tx=txh1)
+            else:
+                _fail("attack.award_first_submitted", f"code={code1} resp={resp1}")
+
+            code2, resp2 = _do_award(backend, sub_wallet, target_post, "based")
+            err2 = str(resp2.get("error", "")).lower()
+            if code2 == 409 or "already awarded" in err2:
+                _pass("attack.award_duplicate_rejected")
+            elif code2 >= 400:
+                _pass("attack.award_duplicate_rejected (other error)")
+            else:
+                _fail("attack.award_duplicate_rejected", f"code={code2} resp={resp2}")
+        except Exception as e:
+            _fail("attack.award_duplicate_rejected", str(e))
+
+        # 10.26 Unknown award type rejected
+        try:
+            code, resp = _do_award(backend, sub_wallet, target_post, "not_a_real_award")
+            err = str(resp.get("error", "")).lower()
+            if code >= 400 and "unknown award_type" in err:
+                _pass("attack.award_unknown_type_rejected")
+            elif code >= 400:
+                _pass("attack.award_unknown_type_rejected (other error)")
+            else:
+                _fail("attack.award_unknown_type_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_unknown_type_rejected", str(e))
+
+        # 10.27 Invalid target rejected
+        try:
+            code, resp = _do_award(backend, sub_wallet, "not_a_hash", "quality_post")
+            if code >= 400:
+                _pass("attack.award_invalid_target_rejected")
+            else:
+                _fail("attack.award_invalid_target_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_invalid_target_rejected", str(e))
+
+        # 10.28 PoW provided for award rejected
+        try:
+            code, resp = _do_award(backend, sub_wallet, target_post, "quality_post", pow_difficulty=1, pow=1)
+            err = str(resp.get("error", "")).lower()
+            if code >= 400 and "pow" in err:
+                _pass("attack.award_pow_rejected")
+            elif code >= 400:
+                _pass("attack.award_pow_rejected (other error)")
+            else:
+                _fail("attack.award_pow_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_pow_rejected", str(e))
+
+        # 10.29 Signature replay: sign quality_post, send based
+        try:
+            lb, _, _, _, _ = _fetch_params(backend, sub_addr)
+            pub = sub_wallet.public_key().public_key_bytes
+            ts = _now_ms()
+            base = _canon_base_award_raw(pub, _lb_bytes(lb), 0, ts, target_post, "quality_post")
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub_wallet, signed)
+            payload = {
+                "pubkey": _b64(pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "pow": 0,
+                "target": target_post,
+                "award_type": "based",
+            }
+            code, resp = _post(f"{backend}/api/core/award", payload)
+            if code >= 400:
+                _pass("attack.award_signature_replay_rejected")
+            else:
+                _fail("attack.award_signature_replay_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_signature_replay_rejected", str(e))
+
+        # 10.30 Invalid pubkey length rejected
+        try:
+            lb, _, _, _, _ = _fetch_params(backend, sub_addr)
+            bad_pub = b"\x02" * 32
+            ts = _now_ms()
+            base = _canon_base_award_raw(bad_pub, _lb_bytes(lb), 0, ts, target_post, "quality_post")
+            signed = canon_signed_with_pow(base, 0)
+            sig = sign_canonical(sub_wallet, signed)
+            payload = {
+                "pubkey": _b64(bad_pub),
+                "signature": _b64(sig),
+                "last_block_hash": lb,
+                "timestamp": ts,
+                "pow_difficulty": 0,
+                "pow": 0,
+                "target": target_post,
+                "award_type": "quality_post",
+            }
+            code, resp = _post(f"{backend}/api/core/award", payload)
+            if code >= 400:
+                _pass("attack.award_invalid_pubkey_rejected")
+            else:
+                _fail("attack.award_invalid_pubkey_rejected", f"code={code} resp={resp}")
+        except Exception as e:
+            _fail("attack.award_invalid_pubkey_rejected", str(e))
 
     # ------ Operations on deleted posts ------
     del_post = _do_post(backend, free_wallet, "test", f"Del target {_rand_str(4)}", "to be deleted")
