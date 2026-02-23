@@ -4332,11 +4332,14 @@ def get_posts():
             start = (page - 1) * limit
             end = start + limit
             page_posts = candidates[start:end] if start < len(candidates) else []
+            page_pids = [p["post_id"] for p in page_posts]
+            _, award_details = _load_award_aggregates(cur, page_pids)
             result = []
             for post in page_posts:
                 pid = post["post_id"]
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
+                post["awards"] = award_details.get(pid, [])
                 post["children"] = []
                 post["feed_type"] = topic_feed_type
                 post["feed_bucket"] = "newest"
