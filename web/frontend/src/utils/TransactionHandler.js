@@ -583,7 +583,6 @@ class TransactionHandler {
 
     async unblockPost(txhash) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const txhashTrimmed = String(txhash || "").trim().toLowerCase();
             if (!txhashTrimmed) return { success: false, error: "empty txhash" };
             const key = `post:${txhashTrimmed}`;
@@ -667,7 +666,6 @@ class TransactionHandler {
 
     async unblockUser(address) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const addressTrimmed = String(address || "").trim().toLowerCase();
             if (!addressTrimmed) return { success: false, error: "empty address" };
             const key = `user:${addressTrimmed}`;
@@ -762,7 +760,6 @@ class TransactionHandler {
 
     async unblockTopic(topic) {
         try {
-            const publicKey = Storage.load("publicKey", "");
             const topicTrimmed = String(topic || "").trim().toLowerCase();
             if (!topicTrimmed) return { success: false, error: "empty topic" };
             const key = `topic:${topicTrimmed}`;
@@ -1095,6 +1092,59 @@ class TransactionHandler {
     }
 
     /**
+     * Give an award to a post or comment (burn-only).
+     * @param {string} targetPostId - The post/comment tx hash to award
+     * @param {string} awardType - One of the configured award types (e.g. "quality_post")
+     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
+     */
+    async giveAward(targetPostId, awardType) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const target = String(targetPostId || "").trim().toLowerCase();
+            const type = String(awardType || "").trim();
+
+            if (!target || !type) {
+                return { success: false, error: "Missing target or award type" };
+            }
+
+            updateNotification("Giving award");
+
+            const [statusData] = await Promise.all([
+                Api.get('get_parameters', publicKey ? { address: publicKey } : undefined),
+            ]);
+            let last_block_hash = statusData?.last_block_hash || "";
+            let pow_difficulty = requirePowDifficulty(statusData?.pow_difficulty);
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            if (userLevel >= 1) {
+                pow_difficulty = 0;
+                last_block_hash = "";
+            }
+            console.debug('[TransactionHandler] giveAward.submit', { target, award_type: type, user_level: userLevel });
+
+            const tx = {
+                action: 'award',
+                target,
+                award_type: type,
+                last_block_hash,
+                pow_difficulty,
+                pow_base_bits: 0,
+                pow_factor: 0,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = derivePublicKeyFromSeed(seedPhrase);
+            const challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
+    /**
      * Upgrade subscription level (tier)
      * @param {number} level - Target paid subscription level (1-3)
      * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier (unused, kept for API compatibility)
@@ -1401,6 +1451,15 @@ class TransactionHandler {
 
     calculateInitialVotes() {
         return 1;
+    }
+
+    /**
+     * Returns true if the cached chainConfig is missing or older than 4 hours.
+     */
+    needsChainConfigRefresh() {
+        if (!localStorage.getItem('chainConfig')) return true;
+        const cachedAt = parseInt(Storage.load('chain_config_cached_at', '0'));
+        return Date.now() - cachedAt > 4 * 3600 * 1000;
     }
 
     /**
@@ -3133,6 +3192,7 @@ class TransactionHandler {
             else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
             else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
+            else if (action === 'award') msgName = 'MsgAward';
             else throw new Error(`CRITICAL: Missing or invalid transaction.action: "${action}". Transaction must have explicit action field.`);
 
             let endpoint = '';
@@ -3997,6 +4057,70 @@ class TransactionHandler {
                     amount: transaction.amount || 0,
                 };
                 endpoint = 'bridge/burn';
+            } else if (msgName === 'MsgAward') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const uvarint = (n) => {
+                    const out = [];
+                    let v = (n >>> 0);
+                    while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+                    out.push(v);
+                    return Uint8Array.from(out);
+                };
+                const uvarint64 = (n) => {
+                    const out = [];
+                    let v = BigInt(n || 0);
+                    while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+                    out.push(Number(v));
+                    return Uint8Array.from(out);
+                };
+                const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+                const encStr = (s) => { const b = new TextEncoder().encode(s || ""); return new Uint8Array([...uvarint(b.length), ...b]); };
+                const hexToBytes = (hex) => {
+                    const h = (hex || "").replace(/^0x/i, "");
+                    if (!h || h.length % 2) return new Uint8Array(0);
+                    const arr = new Uint8Array(h.length / 2);
+                    for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+                    return arr;
+                };
+                const concat = (...arrs) => {
+                    let total = 0; arrs.forEach(a => total += a.length);
+                    const out = new Uint8Array(total);
+                    let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+                    return out;
+                };
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgAward\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag5 = Uint8Array.from([5]);
+                const tag6 = Uint8Array.from([6]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                const canon = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag5, uvarint(Number(proof)),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(transaction.target || ""),
+                    tag101, encStr(transaction.award_type || ""),
+                );
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp || 0,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                    target: transaction.target || "",
+                    award_type: transaction.award_type || "",
+                };
+                endpoint = 'core/award';
             }
 
             // Submit transaction
@@ -4284,7 +4408,7 @@ class TransactionHandler {
             // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
             // which still requires computing a valid argon2 hash.  Do NOT skip PoW for that.
             const userLevel = Number(Storage.load('user_level', '0')) || 0;
-            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal']);
+            const NO_POW_ACTIONS = new Set(['upgrade_level', 'set_auto_renewal', 'award']);
             const canSkipPow = !forcePow && (userLevel >= 1 || NO_POW_ACTIONS.has(transaction.action));
 
             // Inform UI that we are starting a transaction
@@ -4302,6 +4426,10 @@ class TransactionHandler {
                     this._setStatus("submitting");
                     try {
                         await this.handleTransactionResult(0, transaction, challenge, privateKeyHex, signerAddress, wrapResolve);
+                    } catch (err) {
+                        const msg = String(err && err.message ? err.message : err);
+                        updateNotification(msg || "Transaction failed", 5, true);
+                        wrapResolve({ success: false, error: msg || "Transaction failed" });
                     } finally {
                         this._setStatus("idle");
                     }

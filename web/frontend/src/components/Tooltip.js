@@ -1,29 +1,12 @@
+import React, { useCallback } from 'react';
 import styled, { css } from 'styled-components';
 
-/**
- * Tooltip behavior:
- * - Default: tooltip shown ABOVE the trigger, left-aligned with first letter
- * - Falls back to below if near top of viewport
- * - No cursor change, no underline
- */
-
-// Default position: above the element, left-aligned
-const getPositionStyles = () => css`
-    bottom: 100%;
-    left: 0;
-    margin-bottom: 0.3rem;
-`;
-
-// Mobile: same as desktop (above, left-aligned)
-const getMobilePositionStyles = () => css`
-    bottom: 100%;
-    left: 0;
-    margin-bottom: 0.3rem;
-`;
+const FLIP_THRESHOLD_PX = 80;
 
 /**
- * Shared tooltip styles that can be applied to any element via css`` helper
- * Usage: Apply to a styled component that has data-tooltip attribute
+ * CSS mixin for tooltip behavior via data-tooltip attribute.
+ * Default: above. Flips below when data-tooltip-pos="below" is set.
+ * For auto-detection, use the Tooltip React component instead.
  */
 export const tooltipStyles = () => css`
     position: relative;
@@ -38,7 +21,9 @@ export const tooltipStyles = () => css`
     &::after {
         content: attr(data-tooltip);
         position: absolute;
-        ${getPositionStyles()}
+        bottom: 100%;
+        left: 0;
+        margin-bottom: 0.3rem;
         background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
         border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
         color: ${({ theme }) => theme?.colors?.text || '#eee'};
@@ -59,42 +44,63 @@ export const tooltipStyles = () => css`
         text-transform: none;
     }
 
-    &:hover::after,
-    &:focus::after,
-    &:active::after {
+    &[data-tooltip-pos="below"]::after {
+        bottom: auto;
+        top: 100%;
+        margin-bottom: 0;
+        margin-top: 0.3rem;
+    }
+
+    &[data-tooltip]:not([data-tooltip=""]):hover::after,
+    &[data-tooltip]:not([data-tooltip=""]):focus::after,
+    &[data-tooltip]:not([data-tooltip=""]):active::after {
         opacity: 1;
         pointer-events: auto;
     }
+`;
 
-    @media (max-width: 1000px) {
-        &::after {
-            ${getMobilePositionStyles()}
-        }
+function autoPosition(e) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.top < FLIP_THRESHOLD_PX) {
+        e.currentTarget.setAttribute('data-tooltip-pos', 'below');
+    } else {
+        e.currentTarget.removeAttribute('data-tooltip-pos');
     }
-`;
+}
 
-/**
- * TooltipText - A styled span with tooltip functionality
- * Usage: <TooltipText data-tooltip="Your tooltip text here">Hover me</TooltipText>
- */
-export const TooltipText = styled.span`
+const StyledTooltip = styled.span`
     ${() => tooltipStyles()}
+    ${({ $dotted }) => $dotted && css`
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        white-space: nowrap;
+    `}
+    ${({ $subtle }) => $subtle && css`
+        color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    `}
 `;
 
 /**
- * TooltipLabel - A label with tooltip, commonly used for form labels
- * Same as TooltipText but with label-specific styling (starts with subtle color)
+ * Single tooltip component. Auto-positions above/below based on viewport.
+ *
+ * Props:
+ *   data-tooltip="text"   — the tooltip content
+ *   $dotted               — adds dotted underline to trigger text
+ *   $subtle               — uses subtle text color
  */
-export const TooltipLabel = styled.span`
-    ${() => tooltipStyles()}
-    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
-`;
+export const Tooltip = React.forwardRef(function Tooltip({ onMouseEnter, ...props }, ref) {
+    const handleEnter = useCallback((e) => {
+        autoPosition(e);
+        if (onMouseEnter) onMouseEnter(e);
+    }, [onMouseEnter]);
+
+    return <StyledTooltip ref={ref} onMouseEnter={handleEnter} {...props} />;
+});
 
 /**
- * InfoIcon - A small circular "?" icon with tooltip on hover
- * Usage: <InfoIcon data-tooltip="Explanation text here">?</InfoIcon>
+ * InfoIcon — small "?" circle with tooltip. Same positioning logic.
  */
-export const InfoIcon = styled.span`
+export const InfoIcon = styled(Tooltip)`
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -107,7 +113,6 @@ export const InfoIcon = styled.span`
     flex-shrink: 0;
     margin-left: 0.1rem;
     vertical-align: super;
-    ${tooltipStyles()}
 
     &::after {
         width: 250px;
@@ -116,47 +121,4 @@ export const InfoIcon = styled.span`
     }
 `;
 
-/**
- * Minimal tooltip styles for links/clickable elements.
- * Shows tooltip on hover without changing cursor or adding underline.
- */
-export const linkTooltipStyles = css`
-    position: relative;
-
-    &::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        ${getPositionStyles()}
-        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
-        color: ${({ theme }) => theme?.colors?.text || '#eee'};
-        padding: 0.5rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: normal;
-        white-space: pre-wrap;
-        width: max-content;
-        max-width: 260px;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-        line-height: 1.4;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.15s ease;
-        text-align: left;
-        text-transform: none;
-    }
-
-    &[data-tooltip]:hover::after {
-        opacity: 1;
-        pointer-events: auto;
-    }
-
-    @media (max-width: 1000px) {
-        &::after {
-            ${getMobilePositionStyles()}
-        }
-    }
-`;
-
-export default TooltipText;
+export default Tooltip;

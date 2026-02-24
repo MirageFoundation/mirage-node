@@ -98,6 +98,12 @@ def _build_cache_from_params(p: dict) -> dict[str, Any]:
     vote_weights[100] = vote_weights[len(tiers) - 1]  # admin = highest tier
     result["vote_weights"] = vote_weights
 
+    # Award configs
+    award_configs = p.get("award_configs")
+    if not award_configs or not isinstance(award_configs, list):
+        award_configs = []
+    result["award_configs"] = award_configs
+
     return result
 
 
@@ -193,6 +199,11 @@ def get_vote_weight(level: int) -> float:
     return weights[level]
 
 
+def get_award_configs() -> list:
+    """Get award configs from chain params."""
+    return expect_params().get("award_configs", [])
+
+
 __all__ = [
     "load_params",
     "expect_params",
@@ -205,4 +216,5 @@ __all__ = [
     "get_max_content_size",
     "get_min_content_size",
     "get_vote_weight",
+    "get_award_configs",
 ]

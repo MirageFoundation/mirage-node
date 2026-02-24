@@ -36,6 +36,7 @@ from settings import (
     REGISTRATION_INVITE_CODE_REQUIRED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
+    NEW_USER_HIGHLIGHT_DAYS,
 )
 import time
 import hashlib
@@ -108,6 +109,13 @@ def _query_chain_profile_full(addr: str) -> dict | None:
 
 
 public_bp = Blueprint("public", __name__)
+
+
+def _is_new_user(profile_created_at: int) -> bool:
+    """Check if a profile qualifies for the new-user highlight."""
+    if NEW_USER_HIGHLIGHT_DAYS <= 0 or not profile_created_at:
+        return False
+    return (int(time.time()) - int(profile_created_at)) <= NEW_USER_HIGHLIGHT_DAYS * 86400
 
 
 def _deleted_filter() -> str:
@@ -419,7 +427,7 @@ _INBOX_CACHE_MAX = 10000
 
 
 def _get_new_inbox_count(cur, address: str) -> int:
-    """Count replies + @mentions to user's posts that arrived after their last inbox view.
+    """Count replies + @mentions + awards to user's posts after last inbox view.
     Results are cached in-memory for 60s per address."""
     if not address or address.lower() == "guest":
         return 0
@@ -434,6 +442,7 @@ def _get_new_inbox_count(cur, address: str) -> int:
     last_seen = 0
     reply_count = 0
     mention_count = 0
+    award_count = 0
     try:
         # Count new replies
         cur.execute(
@@ -476,7 +485,24 @@ def _get_new_inbox_count(cur, address: str) -> int:
     except Exception:
         mention_count = 0
 
-    count = reply_count + mention_count
+    try:
+        # Count new awards
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM awards a
+            JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+            WHERE LOWER(p.owner) = %s
+              AND LOWER(a.owner) != %s
+              AND a.created_at > %s
+            """,
+            (viewer, viewer, last_seen),
+        )
+        arow = cur.fetchone()
+        award_count = int(arow[0]) if arow and arow[0] else 0
+    except Exception:
+        award_count = 0
+
+    count = reply_count + mention_count + award_count
 
     # Evict expired entries if cache is too large
     if len(_inbox_cache) >= _INBOX_CACHE_MAX:
@@ -622,7 +648,8 @@ def _load_candidate_posts(
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
-               COALESCE(p.media, '[]') AS media
+               COALESCE(p.media, '[]') AS media,
+               COALESCE(pr.created_at, 0) AS author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -654,6 +681,7 @@ def _load_candidate_posts(
             thumbnail,
             author_level,
             media_raw,
+            author_created_at,
         ) = row
         media = json.loads(media_raw)
         if not isinstance(media, list):
@@ -683,6 +711,7 @@ def _load_candidate_posts(
                 "user_id": author,
                 "username": username or "",
                 "author_level": int(author_level) if author_level else 0,
+                "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": int(ts) if ts else 0,
                 "topic": topic_raw,
                 "topic_lower": topic_lower,
@@ -803,10 +832,6 @@ def _load_following_candidates(
 
     conditions = []
     params: list = []
-    if followed_topics:
-        ph = ",".join(["%s"] * len(followed_topics))
-        conditions.append(f"LOWER(p.topic) IN ({ph})")
-        params.extend(list(followed_topics))
     if followed_users:
         ph = ",".join(["%s"] * len(followed_users))
         conditions.append(f"LOWER(p.owner) IN ({ph})")
@@ -829,7 +854,8 @@ def _load_following_candidates(
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
-               COALESCE(p.media, '[]') AS media
+               COALESCE(p.media, '[]') AS media,
+               COALESCE(pr.created_at, 0) AS author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -870,7 +896,7 @@ def _get_following_feed(
 ) -> dict:
     """
     Following feed:
-    - Candidates: root posts from followed topics/users + your own posts
+    - Candidates: root posts from followed users + your own posts
     - Sorting:
       - magic: same Magic scorer as home feed (unified), but without prefs (P=0)
       - newest: fast chronological path
@@ -921,26 +947,21 @@ def _get_following_feed(
         vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
         )
+        _, award_details = _load_award_aggregates(cur, page_ids)
 
         for post in page_posts:
             pid = post["post_id"]
             author_lower = (post.get("author") or "").strip().lower()
-            topic_lower = (post.get("topic") or "").strip().lower()
             is_own = author_lower == viewer_lower
-            in_topic = topic_lower in followed_topics
-            by_user = author_lower in followed_users
 
             if is_own:
                 reason = "Your post"
-            elif in_topic and by_user:
-                reason = "From a followed topic and user"
-            elif in_topic:
-                reason = "From a followed topic"
             else:
                 reason = "From a followed user"
 
             post["points"] = vote_totals.get(pid, 0.0)
             post["comments"] = comment_counts.get(pid, 0)
+            post["awards"] = award_details.get(pid, [])
             post["children"] = []
             post["feed_type"] = "following"
             post["feed_bucket"] = "newest"
@@ -969,6 +990,7 @@ def _get_following_feed(
     similar_addrs = set(sim_lookup.keys())
     similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
     now_ts = int(time.time())
     topic_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
@@ -979,15 +1001,11 @@ def _get_following_feed(
         comments = int(comment_counts.get(pid, 0) or 0)
 
         author_lower = (post.get("author") or post.get("user_id") or "").strip().lower()
-        topic_lower = (post.get("topic") or "").strip().lower()
         is_own_post = author_lower == viewer_lower
-        in_followed_topic = topic_lower in followed_topics if topic_lower else False
         by_followed_user = author_lower in followed_users if author_lower else False
 
-        if not (is_own_post or in_followed_topic or by_followed_user):
-            raise RuntimeError(
-                f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]} topic={topic_lower}"
-            )
+        if not (is_own_post or by_followed_user):
+            raise RuntimeError(f"following_feed.unexpected_candidate: pid={pid[:12]} author={author_lower[:12]}")
 
         score, debug, should_hide = _score_magic(
             post,
@@ -999,16 +1017,14 @@ def _get_following_feed(
             author_prefs,
             now_ts,
             False,
+            unique_awarders,
+            viewer=viewer_lower,
         )
         if should_hide:
             continue
 
         if is_own_post:
             reason = "Your post"
-        elif in_followed_topic and by_followed_user:
-            reason = "From a followed topic and user"
-        elif in_followed_topic:
-            reason = "From a followed topic"
         else:
             reason = "From a followed user"
 
@@ -1016,6 +1032,7 @@ def _get_following_feed(
         post["points"] = pts
         post["comments"] = comments
         post["unique_commenters"] = unique_commenters.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "following"
         post["feed_bucket"] = debug.get("bucket", "following")
@@ -1131,7 +1148,8 @@ def _get_home_feed_newest(
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
-                   COALESCE(p.media, '[]') AS media"""
+                   COALESCE(p.media, '[]') AS media,
+                   COALESCE(pr.created_at, 0) AS author_created_at"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
@@ -1167,17 +1185,19 @@ def _get_home_feed_newest(
     page_posts = posts[start:end] if start < len(posts) else []
     has_more = len(posts) > end
 
-    # Load vote/comment stats only for the posts we're returning
+    # Load vote/comment/award stats only for the posts we're returning
     page_ids = [p["post_id"] for p in page_posts]
     viewer_lower = (viewer or "").strip().lower()
     vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
+    _, award_details = _load_award_aggregates(cur, page_ids)
 
     for post in page_posts:
         pid = post["post_id"]
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "newest"
@@ -1257,6 +1277,7 @@ def _get_home_feed_magic(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
 
     # 6. Score each post with Magic algorithm
     now_ts = int(time.time())
@@ -1273,16 +1294,20 @@ def _get_home_feed_magic(
             author_prefs,
             now_ts,
             True,
+            unique_awarders,
+            viewer=viewer_lower,
         )
 
         if should_hide:
             continue
 
+        pid = post["post_id"]
         post["_score"] = score
         post["feed_debug"] = debug
-        post["points"] = vote_totals.get(post["post_id"], 0.0)
-        post["comments"] = comment_counts.get(post["post_id"], 0)
-        post["unique_commenters"] = unique_commenters.get(post["post_id"], 0)
+        post["points"] = vote_totals.get(pid, 0.0)
+        post["comments"] = comment_counts.get(pid, 0)
+        post["unique_commenters"] = unique_commenters.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = debug["bucket"]
@@ -1414,15 +1439,18 @@ def _score_magic(
     author_prefs: dict[str, float],
     now_ts: int,
     use_prefs: bool = True,
+    unique_awarders: dict[str, int] | None = None,
+    viewer: str = "",
 ) -> tuple[float, dict, bool]:
     """
-    Magic scoring: (S + V + U + P) × R
+    Magic scoring: (S + V + U + P + A) × R
 
     Components (uniform weighting):
     - S = sqrt(similarity_sum)
     - V = sqrt(net_votes)
     - U = sqrt(unique_commenters)
     - P = sqrt(max(0, topic_pref + author_pref))
+    - A = sqrt(unique_award_givers)
     - R = 1 / (1 + (age_hours/9)^1.585) — decay: 4.5h=0.75, 9h=0.5, 18h=0.25, 36h=0.11
 
     Returns (score, debug_info, should_hide).
@@ -1443,6 +1471,7 @@ def _score_magic(
     author = post["author"]
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
+    is_own = viewer and (author or "").strip().lower() == viewer
 
     if use_prefs:
         # Check user preference - hide severely disliked content
@@ -1450,7 +1479,7 @@ def _score_magic(
         author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
         combined_pref = topic_pref + author_pref
 
-        if combined_pref <= HIDE_THRESHOLD:
+        if combined_pref <= HIDE_THRESHOLD and not is_own:
             return 0.0, {}, True
     else:
         # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
@@ -1466,7 +1495,7 @@ def _score_magic(
 
     # S = Similarity boost (always >= 0)
     upvoters = similar_upvotes.get(pid, [])
-    raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
+    raw_sim = 1.0 if is_own else sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
     S = math.sqrt(max(0.0, raw_sim))
 
     # V = Vote score (signed sqrt: negative votes hurt the score)
@@ -1478,7 +1507,14 @@ def _score_magic(
     U = math.sqrt(max(0.0, float(unique_count)))
 
     # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
+    if is_own:
+        author_pref = PREF_RAW_CAP
+        combined_pref = topic_pref + author_pref
     P = _sqrt_signed(combined_pref)
+
+    # A = Award score (unique awarders, always >= 0)
+    award_count = (unique_awarders or {}).get(pid, 0)
+    A = math.sqrt(max(0.0, float(award_count)))
 
     # R = Recency: inverse polynomial decay (gentler than exponential)
     # 4.5h=0.75, 9h=0.50, 18h=0.25, 36h=0.11
@@ -1486,10 +1522,10 @@ def _score_magic(
     R = 1 / (1 + (age_hours / 9) ** 1.585)
 
     # Final score
-    score = (S + V + U + P) * R
+    score = (S + V + U + P + A) * R
 
     # Determine primary reason based on dominant component
-    components = [("S", S), ("V", V), ("U", U), ("P", P)]
+    components = [("S", S), ("V", V), ("U", U), ("P", P), ("A", A)]
     dominant = max(components, key=lambda x: x[1])
 
     if dominant[0] == "S" and S > 0.3:
@@ -1517,12 +1553,13 @@ def _score_magic(
         "bucket": bucket,
         "reason": reason,
         "score": round(float(score), 4),
-        "equation": "(√S + √V + √U + √P) × R",
+        "equation": "(√S + √V + √U + √P + √A) × R",
         # Raw input values (before sqrt) so the formula makes sense
         "S": round(raw_sim, 3),
         "V": round(net_vote, 3),
         "U": unique_count,
         "P": round(combined_pref, 3),
+        "A": award_count,
         "R": round(R, 4),
         "age_hours": round(age_hours, 1),
         "t_pref": round(topic_pref, 1),
@@ -1596,6 +1633,43 @@ def _load_unique_commenter_counts(
     return result
 
 
+def _load_award_aggregates(
+    cur,
+    post_ids: list[str],
+) -> tuple[dict[str, int], dict[str, list[dict]]]:
+    """
+    Load per-post award data:
+    - unique_awarders: {post_id: count_of_distinct_award_givers}
+    - award_details: {post_id: [{"type": "quality_post", "count": 3}, ...]}
+    """
+    if not post_ids:
+        return {}, {}
+
+    unique_awarders: dict[str, int] = {}
+    award_details: dict[str, list[dict]] = {}
+    id_ph = ",".join(["%s"] * len(post_ids))
+
+    cur.execute(
+        f"SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
+        post_ids,
+    )
+    for tgt, cnt in cur.fetchall():
+        if tgt:
+            unique_awarders[tgt] = int(cnt or 0)
+
+    cur.execute(
+        f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
+            FROM awards WHERE LOWER(target) IN ({id_ph})
+            GROUP BY LOWER(target), award_type""",
+        post_ids,
+    )
+    for tgt, atype, cnt in cur.fetchall():
+        if tgt:
+            award_details.setdefault(tgt, []).append({"type": atype, "count": int(cnt or 0)})
+
+    return unique_awarders, award_details
+
+
 def _load_home_candidates(
     cur,
     viewer: str,
@@ -1620,10 +1694,31 @@ def _load_home_candidates(
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
-                   COALESCE(p.media, '[]') AS media"""
+                   COALESCE(p.media, '[]') AS media,
+                   COALESCE(pr.created_at, 0) AS author_created_at"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
     bt_clause, bt_params = _blocked_topics_sql(blocked_topics or set(), blocked_topic_prefixes or tuple())
+
+    # Source 0: Own posts (always included so the viewer always sees their content)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
+        FROM posts p
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE LOWER(p.owner) = %s
+          AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          {bt_clause}
+        ORDER BY p.created_at DESC
+        LIMIT %s""",
+        [viewer] + bt_params + [max_posts],
+    )
+    for row in cur.fetchall():
+        post = _row_to_post(
+            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes
+        )
+        if post:
+            post["_source"] = "own"
+            results.append(post)
 
     # Source 1: Posts BY similar users (root posts only)
     if similar_addrs:
@@ -1735,8 +1830,26 @@ def _row_to_post(
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
 
-    # Support both 13-column (legacy) and 14-column (v1.12.0 with media) rows
-    if len(row) >= 14:
+    # 15-column rows (with media + author_created_at)
+    if len(row) >= 15:
+        (
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
+            author_level,
+            media_raw,
+            author_created_at,
+        ) = row[:15]
+    elif len(row) >= 14:
         (
             txhash,
             owner,
@@ -1753,6 +1866,7 @@ def _row_to_post(
             author_level,
             media_raw,
         ) = row[:14]
+        author_created_at = 0
     else:
         (
             txhash,
@@ -1770,6 +1884,7 @@ def _row_to_post(
             author_level,
         ) = row
         media_raw = "[]"
+        author_created_at = 0
 
     pid = (txhash or "").lower()
     author = (owner or "").lower()
@@ -1797,6 +1912,7 @@ def _row_to_post(
         "user_id": author,
         "username": username or "",
         "author_level": int(author_level) if author_level else 0,
+        "author_is_new": _is_new_user(int(author_created_at or 0)),
         "timestamp": int(ts) if ts else 0,
         "topic": (topic or "").strip(),
         "root_topic": (root_topic or topic or "").strip(),
@@ -1865,14 +1981,16 @@ def _get_guest_feed(
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # Load vote/comment stats (no viewer for guest)
+    # Load vote/comment/award stats (no viewer for guest)
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    _, award_details = _load_award_aggregates(cur, post_ids)
 
     for post in candidates:
         pid = post["post_id"]
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "guest"
@@ -1932,6 +2050,7 @@ def _get_guest_feed_magic(
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
 
     now_ts = int(time.time())
     sim_lookup: dict[str, float] = {}
@@ -1953,6 +2072,7 @@ def _get_guest_feed_magic(
             author_prefs,
             now_ts,
             False,
+            unique_awarders,
         )
         if should_hide:
             continue
@@ -1962,6 +2082,7 @@ def _get_guest_feed_magic(
         post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
         post["comments"] = int(comment_counts.get(pid, 0) or 0)
         post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = debug["bucket"]
@@ -2239,13 +2360,14 @@ def get_user_status():
         subscription_expiry = 0
         auto_renew = False
         reserve_funds = 0
+        inbox_last_viewed_at = 0
 
         # Query DB for profile
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
             cur.execute(
-                "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                "SELECT username, level, created_at, subscription_expiry, inbox_last_viewed_at FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
                 (addr,),
             )
             row = cur.fetchone()
@@ -2254,6 +2376,7 @@ def get_user_status():
                 user_level = int(row[1]) if row[1] is not None else 0
                 profile_registered_at = int(row[2]) if row[2] is not None else None
                 subscription_expiry = int(row[3]) if row[3] is not None else 0
+                inbox_last_viewed_at = int(row[4]) if len(row) > 4 and row[4] is not None else 0
             conn.close()
         except Exception:
             pass
@@ -2315,6 +2438,7 @@ def get_user_status():
             "reserve_funds": reserve_funds,
             "profile_registered_at": profile_registered_at,
             "recent_votes": recent_votes,
+            "inbox_last_viewed_at": inbox_last_viewed_at,
         }
         log_event(rid, "get_user_status.ok", user_level=user_level)
         return jsonify(resp)
@@ -2575,6 +2699,7 @@ def get_network_stats():
 
         # Compute real 24h earned from node_balance changes in supply_history
         earned_24h = 0
+        burned_24h = 0
         try:
             since_ts = int(time.time()) - 86400
             conn_sh = connect_db(timeout=5.0, busy_timeout_ms=5000)
@@ -2593,6 +2718,8 @@ def get_network_stats():
                 diff = rows_sh[i][0] - rows_sh[i - 1][0]
                 if diff > 0:
                     earned_24h += diff
+                elif diff < 0:
+                    burned_24h += abs(diff)
         except Exception:
             pass
 
@@ -2601,6 +2728,7 @@ def get_network_stats():
             "staked_balance": staked_balance,
             "block_time": block_time,
             "earned_24h": earned_24h,
+            "burned_24h": burned_24h,
             "pow_difficulty": int(diff_info["current_difficulty"]),
             "pow_factor": float(_get_pow_factor()),
             "pow_message_count": int(diff_info.get("pow_message_count", 0)),
@@ -2859,6 +2987,7 @@ def get_chain_config():
             "mint_interval": p["mint_interval"],
             "block_time": _get_block_time_seconds(),
             "tiers": p["tiers"],
+            "award_configs": p["award_configs"],
         }
 
         _CHAIN_CONFIG_CACHE = resp
@@ -2918,6 +3047,7 @@ def get_node_config():
             "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
             "quests_enabled": QUESTS_ENABLED,
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
+            "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
         }
 
         _NODE_CONFIG_CACHE = resp
@@ -3558,6 +3688,7 @@ def search():
                         "username": uname or None,
                         "level": level or 0,
                         "created_at": int(created_at) if created_at else None,
+                        "user_is_new": _is_new_user(int(created_at or 0)),
                         "post_count": int(post_count or 0),
                     }
                 )
@@ -3576,7 +3707,8 @@ def search():
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
-                           COALESCE(p.media, '[]') as media
+                           COALESCE(p.media, '[]') as media,
+                           COALESCE(pr.created_at, 0) as author_created_at
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE LOWER(p.owner) = LOWER(%s)
@@ -3760,6 +3892,7 @@ def search():
                             "username": uname or None,
                             "level": level or 0,
                             "created_at": int(created_at) if created_at else None,
+                            "user_is_new": _is_new_user(int(created_at or 0)),
                             "post_count": int(post_count or 0),
                         }
                     )
@@ -3777,7 +3910,8 @@ def search():
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
-                           COALESCE(p.media, '[]') as media
+                           COALESCE(p.media, '[]') as media,
+                           COALESCE(pr.created_at, 0) as author_created_at
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE COALESCE(p.target, '') = ''
@@ -3907,11 +4041,31 @@ def _format_search_posts(
                 user_votes[tgt] = int(vote) if vote else 0
                 user_weight_map[tgt] = float(weight) if weight else 0.0
 
+    # Load awards for all posts
+    _, award_details = _load_award_aggregates(cur, post_ids) if post_ids else ({}, {})
+
     posts = []
     for row in filtered:
         import json as _json
 
-        if len(row) >= 12:
+        author_created_at = 0
+        if len(row) >= 13:
+            (
+                txhash,
+                owner,
+                ts,
+                topic,
+                title,
+                content,
+                username,
+                target,
+                tag,
+                thumbnail,
+                author_level,
+                media_raw,
+                author_created_at,
+            ) = row[:13]
+        elif len(row) >= 12:
             txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
                 :12
             ]
@@ -3931,6 +4085,7 @@ def _format_search_posts(
                 "user_id": owner,
                 "username": username or None,
                 "author_level": int(author_level) if author_level else 0,
+                "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": int(ts) if ts else None,
                 "topic": topic,
                 "title": title,
@@ -3942,6 +4097,7 @@ def _format_search_posts(
                 "comments": comment_counts.get(pid, 0),
                 "user_vote": user_votes.get(pid, 0),
                 "user_weight": user_weight_map.get(pid, 0.0),
+                "awards": award_details.get(pid, []),
             }
         )
 
@@ -4083,7 +4239,8 @@ def get_posts():
                        COALESCE(p.edited_at, 0) as edited_at,
                       COALESCE(p.thumbnail_url, '') as thumbnail,
                       COALESCE(pr.level, 0) as author_level,
-                      COALESCE(p.media, '[]') as media
+                      COALESCE(p.media, '[]') as media,
+                      COALESCE(pr.created_at, 0) as author_created_at
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
@@ -4107,7 +4264,9 @@ def get_posts():
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
                        COALESCE(p.thumbnail_url, '') as thumbnail,
-                       COALESCE(pr.level, 0) as author_level
+                       COALESCE(pr.level, 0) as author_level,
+                       COALESCE(p.media, '[]') as media,
+                       COALESCE(pr.created_at, 0) as author_created_at
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {bt_clause} {deleted_clause}
@@ -4241,6 +4400,7 @@ def get_posts():
             post_ids = [p["post_id"] for p in candidates]
             similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
+            unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
             topic_prefs: dict[str, float] = {}
             author_prefs: dict[str, float] = {}
             now_ts = int(time.time())
@@ -4257,6 +4417,8 @@ def get_posts():
                     author_prefs,
                     now_ts,
                     False,
+                    unique_awarders,
+                    viewer=address_lower,
                 )
                 if should_hide:
                     continue
@@ -4266,6 +4428,7 @@ def get_posts():
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
                 post["unique_commenters"] = int(unique_commenters.get(pid, 0) or 0)
+                post["awards"] = award_details.get(pid, [])
                 post["children"] = []
                 post["feed_type"] = topic_feed_type
                 post["feed_bucket"] = debug.get("bucket", "discovery")
@@ -4284,11 +4447,14 @@ def get_posts():
             start = (page - 1) * limit
             end = start + limit
             page_posts = candidates[start:end] if start < len(candidates) else []
+            page_pids = [p["post_id"] for p in page_posts]
+            _, award_details = _load_award_aggregates(cur, page_pids)
             result = []
             for post in page_posts:
                 pid = post["post_id"]
                 post["points"] = float(vote_totals.get(pid, 0.0) or 0.0)
                 post["comments"] = int(comment_counts.get(pid, 0) or 0)
+                post["awards"] = award_details.get(pid, [])
                 post["children"] = []
                 post["feed_type"] = topic_feed_type
                 post["feed_bucket"] = "newest"
@@ -4367,7 +4533,8 @@ def get_user_posts():
                    COALESCE(p.edited_at, 0) as edited_at,
                    COALESCE(p.thumbnail_url, '') as thumbnail,
                    COALESCE(pr.level, 0) as author_level,
-                   COALESCE(p.media, '[]') as media
+                   COALESCE(p.media, '[]') as media,
+                   COALESCE(pr.created_at, 0) as author_created_at
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
@@ -4484,7 +4651,25 @@ def get_user_posts():
             import json as _json
 
             media_raw = "[]"
-            if len(row) >= 13:
+            author_created_at = 0
+            if len(row) >= 14:
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                    author_created_at,
+                ) = row[:14]
+            elif len(row) >= 13:
                 (
                     txhash,
                     owner_addr,
@@ -4540,6 +4725,7 @@ def get_user_posts():
                     "user_id": owner_addr,
                     "username": uname,
                     "author_level": int(author_level) if author_level else 0,
+                    "author_is_new": _is_new_user(int(author_created_at or 0)),
                     "timestamp": int(ts) if ts is not None else None,
                     "topic": topic,
                     "title": title,
@@ -4672,7 +4858,8 @@ def _fetch_post(
                COALESCE(p.thumbnail_url, '') as thumbnail,
                COALESCE(pr.level, 0) as author_level,
                COALESCE(p.comment_count, 0) as comment_count,
-               COALESCE(p.media, '[]') as media
+               COALESCE(p.media, '[]') as media,
+               COALESCE(pr.created_at, 0) as author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -4699,6 +4886,7 @@ def _fetch_post(
     author_level_val = int(row[14]) if len(row) > 14 and row[14] else 0
     stored_comment_count = int(row[15]) if len(row) > 15 and row[15] else 0
     media_raw_val = row[16] if len(row) > 16 else "[]"
+    author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
 
     # Parse media JSON array
     try:
@@ -4766,6 +4954,7 @@ def _fetch_post(
         "user_id": owner,
         "username": username_val,
         "author_level": author_level_val,
+        "author_is_new": _is_new_user(author_created_at_val),
         "timestamp": int(created_at) if created_at is not None else None,
         "topic": topic_val,
         "root_topic": root_topic_val,
@@ -4838,7 +5027,8 @@ def _fetch_comment_tree_batch(
                st.edited, st.edited_at, st.depth,
                COALESCE(pr.username, '') as username,
                COALESCE(pr.level, 0) as author_level,
-               st.media
+               st.media,
+               COALESCE(pr.created_at, 0) as author_created_at
         FROM subtree st
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
         ORDER BY st.depth ASC, st.created_at ASC
@@ -4872,6 +5062,7 @@ def _fetch_comment_tree_batch(
         username_val = row[14] or ""
         author_level_val = int(row[15]) if row[15] else 0
         media_raw_val = row[16] if len(row) > 16 else "[]"
+        author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
 
         # Parse media JSON array
         try:
@@ -4904,6 +5095,7 @@ def _fetch_comment_tree_batch(
             "user_id": owner,
             "username": username_val,
             "author_level": author_level_val,
+            "author_is_new": _is_new_user(author_created_at_val),
             "timestamp": int(created_at) if created_at is not None else None,
             "topic": topic_val,
             "root_topic": root_topic_val,
@@ -5127,6 +5319,27 @@ def get_comments():
                 apply_votes(children)
         t_votes_ms = (time.time() - t_votes) * 1000
 
+        # Load awards for root + all children
+        all_ids_for_awards = [root["post_id"]]
+
+        def collect_ids_for_awards(nodes):
+            for n in nodes:
+                all_ids_for_awards.append(n["post_id"])
+                if n.get("children"):
+                    collect_ids_for_awards(n["children"])
+
+        collect_ids_for_awards(children)
+        _, award_details = _load_award_aggregates(cur, all_ids_for_awards)
+        root["awards"] = award_details.get(root["post_id"], [])
+
+        def apply_awards(nodes):
+            for n in nodes:
+                n["awards"] = award_details.get(n["post_id"], [])
+                if n.get("children"):
+                    apply_awards(n["children"])
+
+        apply_awards(children)
+
         resp = {"root": root, "children": children}
 
         conn.close()
@@ -5332,8 +5545,10 @@ def get_inbox():
                         CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
                     ) as root_post_id,
                     COALESCE(pr.level, 0) as actor_level,
+                    '' as item_award_type,
                     'reply' as item_type,
-                    COALESCE(r.root_topic, r.topic, '') as item_topic
+                    COALESCE(r.root_topic, r.topic, '') as item_topic,
+                    COALESCE(pr.created_at, 0) as actor_created_at
                 FROM posts r
                 INNER JOIN posts p ON p.txhash = r.target
                 LEFT JOIN profiles pr ON pr.owner = r.owner
@@ -5366,19 +5581,46 @@ def get_inbox():
                     COALESCE(mpr.username, '') as actor_username,
                     COALESCE(mp.root_post_id, mp.txhash) as root_post_id,
                     COALESCE(mpr.level, 0) as actor_level,
+                    '' as item_award_type,
                     'mention' as item_type,
-                    COALESCE(mp.root_topic, mp.topic, '') as item_topic
+                    COALESCE(mp.root_topic, mp.topic, '') as item_topic,
+                    COALESCE(mpr.created_at, 0) as actor_created_at
                 FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
                 WHERE LOWER(m.mentioned_address) = %s
                   AND LOWER(m.mentioner_address) != %s
+
+                UNION ALL
+
+                SELECT
+                    p.txhash as item_id,
+                    a.owner as actor_owner,
+                    a.created_at as item_timestamp,
+                    COALESCE(p.content, '') as item_content,
+                    p.txhash as context_id,
+                    p.content as context_content,
+                    p.title as context_title,
+                    COALESCE(p.target, '') as context_target,
+                    p.owner as context_owner,
+                    COALESCE(apr.username, '') as actor_username,
+                    COALESCE(p.root_post_id, p.txhash) as root_post_id,
+                    COALESCE(apr.level, 0) as actor_level,
+                    a.award_type as item_award_type,
+                    'award' as item_type,
+                    COALESCE(p.root_topic, p.topic, '') as item_topic,
+                    COALESCE(apr.created_at, 0) as actor_created_at
+                FROM awards a
+                INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+                LEFT JOIN profiles apr ON apr.owner = a.owner
+                WHERE LOWER(p.owner) = %s
+                  AND LOWER(a.owner) != %s
             ) inbox
             ORDER BY inbox.item_timestamp DESC
             LIMIT %s OFFSET %s
         """
 
-        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
+        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
 
         t_query = time.time()
         cur.execute(query, params)
@@ -5397,9 +5639,13 @@ def get_inbox():
                 SELECT COUNT(*) FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 WHERE LOWER(m.mentioned_address) = %s AND LOWER(m.mentioner_address) != %s
+            ) + (
+                SELECT COUNT(*) FROM awards a
+                INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+                WHERE LOWER(p.owner) = %s AND LOWER(a.owner) != %s
             )
         """
-        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower])
+        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower])
         total_row = cur.fetchone()
         total = int(total_row[0]) if total_row and total_row[0] else 0
 
@@ -5419,8 +5665,10 @@ def get_inbox():
             actor_username = row[9] or ""
             root_post_id = (row[10] or "").lower()
             actor_level = int(row[11]) if row[11] else 0
-            item_type = row[12] or "reply"
-            item_topic = (row[13] or "").strip().lower() if len(row) > 13 else ""
+            item_award_type = row[12] or ""
+            item_type = row[13] or "reply"
+            item_topic = (row[14] or "").strip().lower() if len(row) > 14 else ""
+            actor_created_at = int(row[15]) if len(row) > 15 and row[15] else 0
 
             if item_id in blocked_posts or actor_owner in blocked_users:
                 continue
@@ -5436,8 +5684,9 @@ def get_inbox():
                     parent_display_text = context_title or ""
                 else:
                     parent_display_text = context_content or ""
+            elif item_type == "award":
+                parent_display_text = context_title or ""
             else:
-                # For mentions, show a snippet of the post content
                 parent_display_text = context_title or context_content or ""
 
             if len(parent_display_text) > 200:
@@ -5449,12 +5698,14 @@ def get_inbox():
                     "reply_owner": actor_owner,
                     "reply_username": actor_username,
                     "reply_author_level": actor_level,
+                    "reply_author_is_new": _is_new_user(actor_created_at),
                     "reply_content": item_content,
                     "reply_timestamp": item_timestamp,
                     "parent_id": context_id,
                     "parent_content": parent_display_text,
                     "parent_owner": context_owner,
                     "root_post_id": root_post_id,
+                    "award_type": item_award_type,
                     "type": item_type,
                 }
             )

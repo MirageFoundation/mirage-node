@@ -49,6 +49,7 @@ from shared.canon import (
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_unblock_user as _canon_base_unblock_user_raw,
     canon_base_unblock_topic as _canon_base_unblock_topic_raw,
+    canon_base_award as _canon_base_award_raw,
     canon_base_delete as _canon_base_delete_raw,
     canon_base_delete_user as _canon_base_delete_user_raw,
     canon_base_edit as _canon_base_edit_raw,
@@ -67,6 +68,7 @@ from shared.canon import (
     canon_signed_with_pow,
 )
 from shared.datatypes import (
+    MsgAward,
     MsgBlockPost,
     MsgBlockTopic,
     MsgBlockUser,
@@ -569,6 +571,39 @@ def _build_msg_delete_user(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.target = target
+    return msg
+
+
+def _build_msg_award(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    award_type: str,
+    pow_val: int = 0,
+    pub_override: Optional[bytes] = None,
+    sig_override: Optional[bytes] = None,
+    authority_override: Optional[str] = None,
+    lb_override: Optional[str] = None,
+    diff_override: Optional[int] = None,
+) -> MsgAward:
+    pub = wallet.public_key().public_key_bytes
+    d = diff if diff_override is None else diff_override
+    lb_hex = lb_override or lb
+    lb_bytes = _lb_bytes(lb_hex)
+    base = _canon_base_award_raw(pub, lb_bytes, d, ts, target, award_type)
+    sig = sig_override or _sign_relay(wallet, base, pow_val)
+    msg = MsgAward()
+    msg.authority = authority_override or _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub_override or pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(d)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.award_type = award_type
     return msg
 
 
@@ -1088,6 +1123,20 @@ def test_relay_sig(backend: str) -> None:
     _, code, log, _, _ = _submit_tx([(vote, "/mirage.core.v1.MsgVote")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
     _check_reject("relay_sig.cross_message_replay", code, log, "invalid relay signature")
 
+    # 1.8 MsgAward signature tamper (award_type changed after signing)
+    award_target = _rand_hex(64)
+    award_type = "quality_post"
+    _debug(f"award relay target={award_target} type={award_type}")
+    msg = _build_msg_award(wallet, lb, 0, ts, award_target, award_type, pow_val=0)
+    msg.award_type = "based"
+    _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgAward")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
+    _check_reject("relay_sig.award_tamper", code, log, "invalid relay signature")
+
+    # 1.9 MsgAward truncated signature
+    msg = _build_msg_award(wallet, lb, 0, ts, _rand_hex(64), "quality_post", pow_val=0, sig_override=b"\x01" * 32)
+    _, code, log, _, _ = _submit_tx([(msg, "/mirage.core.v1.MsgAward")], DEFAULT_GAS_LIMIT, fee_payer, signer_pub)
+    _check_reject("relay_sig.award_truncated_signature", code, log)
+
 
 def test_pow(backend: str) -> None:
     print(f"\n{_COLOR_BOLD}[2] PoW validation attacks{_COLOR_RESET}")
@@ -1202,6 +1251,18 @@ def test_pow(backend: str) -> None:
         free_wallet.public_key().public_key_bytes,
     )
     _check_reject("pow.pow_on_upgrade_level", code, log)
+
+    # 2.6 PoW on MsgAward (never allowed)
+    award_target = _rand_hex(64)
+    _debug(f"award pow target={award_target}")
+    msg = _build_msg_award(free_wallet, lb, 0, ts, award_target, "quality_post", pow_val=1)
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        free_wallet.public_key().public_key_bytes,
+    )
+    _check_reject("pow.pow_on_award", code, log)
 
 
 def test_authority(backend: str) -> None:
@@ -1908,10 +1969,100 @@ def test_msg_validation(backend: str) -> None:
     )
     _check_deliver_reject("msg.delete_user_empty_target", ccode, dcode, dlog)
 
+    # 6.24 MsgAward — empty target rejected
+    msg = _build_msg_award(w1, lb, 0, ts, "", "quality_post", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.award_empty_target", ccode, dcode, dlog)
+
+    # 6.25 MsgAward — invalid target rejected
+    msg = _build_msg_award(w1, lb, 0, ts, "not_a_hash", "quality_post", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.award_invalid_target", ccode, dcode, dlog)
+
+    # 6.26 MsgAward — empty award_type rejected
+    msg = _build_msg_award(w1, lb, 0, ts, _rand_hex(64), "", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.award_empty_type", ccode, dcode, dlog)
+
+    # 6.27 MsgAward — unknown award_type rejected
+    msg = _build_msg_award(w1, lb, 0, ts, _rand_hex(64), "not_a_real_award", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("msg.award_unknown_type", ccode, dcode, dlog)
+
+    # 6.28 MsgAward — valid award accepted
+    award_target = _rand_hex(64)
+    _debug(f"award validation target={award_target}")
+    msg = _build_msg_award(w1, lb, 0, ts, award_target, "based", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
+
+
+def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
+    """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
+
+    Uses the sub3 wallet (highest residual balance) as the donor.
+    Default: 10,000 MIRAGE per wallet.
+    """
+    donor = WALLETS["sub3"]
+    donor_addr = str(donor.address())
+    fee_payer = _VALIDATOR_ADDR or ""
+    for name in names:
+        w = WALLETS[name]
+        addr = str(w.address())
+        lb, _, _, _ = _get_pow_params(backend, donor_addr)
+        ts = _now_ms()
+        msg = _build_msg_send_tokens(donor, lb, 0, ts, donor_addr, addr, amount, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgSendTokens")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            donor.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        label = f"{amount / 1_000_000:,.0f} MIRAGE"
+        if ccode == 0 and (dcode is None or dcode == 0):
+            _pass(f"topup.{name}", extra=label)
+        else:
+            _fail(f"topup.{name}", f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}")
+
 
 def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
+
+    # Top up wallets before the gas-heavy fill loops
+    _topup_wallets(backend, ["free", "sub1"])
+    time.sleep(3)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -2089,7 +2240,7 @@ def test_follow_limits(backend: str) -> None:
         for i, target_addr in enumerate(batch):
             msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
-        gas_limit = max(FILL_GAS_LIMIT, DEFAULT_GAS_LIMIT * len(msgs))
+        gas_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 1.5))
         _, ccode, _, dcode, dlog = _submit_tx(
             msgs,
             gas_limit,
@@ -2455,6 +2606,29 @@ def test_malicious_inputs(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_reject("malicious.control_in_username", ccode, dcode, dlog)
+
+    # ─── NUL / control chars in award_type ─────────────────────────
+    award_target = _rand_hex(64)
+    _debug(f"award malicious target={award_target}")
+    msg = _build_msg_award(w1, lb, 0, ts, award_target, "quality\x00post", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("malicious.nul_in_award_type", ccode, dcode, dlog)
+
+    msg = _build_msg_award(w1, lb, 0, ts, award_target, "quality\x1bpost", pow_val=0)
+    _, ccode, clog, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAward")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        w1.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("malicious.control_in_award_type", ccode, dcode, dlog)
 
     # ─── NUL / control chars in media URLs ────────────────────────
     media_cases = [

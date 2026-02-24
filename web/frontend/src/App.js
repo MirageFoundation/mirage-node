@@ -424,6 +424,19 @@ class App extends Component {
         // the app has loaded successfully.
         try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch (_) { }
 
+        // On hard refresh (or any full page reload), invalidate cached config timestamps
+        // so views re-fetch chain/node config from the backend.
+        try {
+            const navEntries = performance.getEntriesByType('navigation');
+            const isReload = navEntries.length > 0
+                ? navEntries[0].type === 'reload'
+                : performance.navigation?.type === 1;
+            if (isReload) {
+                Storage.remove('chain_config_cached_at');
+                Storage.remove('node_config_cached_at');
+            }
+        } catch (_) { }
+
         // Security: if user hasn't used the site in 30 days, force logout and clear ALL local storage.
         // (We also clear sessionStorage to avoid restoring stale feed caches.)
         try {
@@ -550,15 +563,33 @@ class App extends Component {
         try { tx.updatePostCallback(this.updatePost); } catch (_) { }
         try { tx.getPostCallback(this.getPost); } catch (_) { }
 
-        // Fetch node config if not cached or stale (> 1h)
+        // Fetch node config if missing, not cached, or stale (> 1h)
         // Chain config is fetched lazily by views that need it (CreatePostView, ViewPostView, SubscriptionView).
         try {
             const nowMs = Date.now();
             const nodeCachedAt = Number(Storage.load('node_config_cached_at', '0') || 0);
-            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000;
+            const nodeConfigCached = Storage.load('nodeConfig', null);
+            const hasNodeConfig = !!(nodeConfigCached && typeof nodeConfigCached === 'object');
+            const nodeStale = !nodeCachedAt || (nowMs - nodeCachedAt) > 3600_000 || !hasNodeConfig;
             if (nodeStale) {
                 Api.get('get_node_config', undefined)
                     .then((cfg) => { if (cfg) try { tx.cacheNodeConfig(cfg); } catch (_) { } })
+                    .catch(() => { })
+                    .finally(() => {
+                        // Always notify listeners a config fetch attempt completed.
+                        // Without this, create-account can stay on "Loading..." forever
+                        // if the request fails before nodeConfig is cached.
+                        try { window.dispatchEvent(new Event('nodeConfigUpdated')); } catch (_) { }
+                    });
+            }
+        } catch (_) { }
+
+        // Refresh user balance on every page load for logged-in users
+        try {
+            const pk = this.state.publicKey || Storage.load('publicKey', '');
+            if (pk) {
+                Api.get('get_user_status', { address: pk, _cb: Date.now() })
+                    .then((data) => { if (data) try { tx.cacheUserStatus(data); } catch (_) { } })
                     .catch(() => { });
             }
         } catch (_) { }

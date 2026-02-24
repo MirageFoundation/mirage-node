@@ -92,23 +92,10 @@ def _load_quest_definitions() -> Dict[str, Any]:
         return {"daily_quests": [], "flash_quest_templates": [], "achievements": []}
 
 
-def _get_user_reward_multiplier(owner: str, ts: int) -> float:
-    """Calculate reward multiplier based on account age (1x to 5x over 30 days)."""
-    with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT created_at FROM profiles WHERE LOWER(owner) = LOWER(%s)", (owner,))
-            row = cur.fetchone()
-            if not row or not row[0]:
-                return 1.0  # Default to 1x for unknown accounts
-
-            created_at = row[0]
-            age_days = (ts - created_at) / 86400
-
-            # Linear ramp from 1x to 5x over 30 days
-            # progress goes from 0.0 (day 0) to 1.0 (day 30+)
-            progress = min(1.0, max(0.0, age_days / 30))
-            multiplier = 1.0 + (progress * 4.0)  # 1x + (0-4x) = 1x to 5x
-            return multiplier
+def _get_user_reward_multiplier(owner: str) -> float:
+    """Calculate reward multiplier based on completed quest count (0x at 0, 5x at 50)."""
+    completed = _get_completed_quest_count(owner)
+    return min(5.0, completed / 10.0)
 
 
 def _is_user_suspended(owner: str, ts: int) -> bool:
@@ -319,6 +306,7 @@ def _deterministic_roll(owner: str, day_utc: int, roll_type: str) -> float:
 def _assign_daily_quests_if_needed(
     owner: str,
     day_utc: int,
+    ts: int,
     daily_defs: Dict[str, Any],
     special_defs: Dict[str, Any] = None,
     use_random_rolls: bool = False,
@@ -420,6 +408,13 @@ def _assign_daily_quests_if_needed(
                     (owner, day_utc, quest_id),
                 )
 
+            # Delay flash quest by at least 1h after daily quests are first assigned
+            min_flash_at = ts + 3600
+            next_flash = _get_next_flash_time(owner)
+            if next_flash < min_flash_at:
+                _set_next_flash_time(owner, min_flash_at)
+                log_event(None, "quest.flash_delayed", owner=owner, min_flash_at=min_flash_at)
+
             return quest_ids
 
 
@@ -487,7 +482,7 @@ def get_rewards_summary():
         all_defs = {**daily_defs, **special_defs}
 
         # ===== DAILY QUESTS =====
-        _assign_daily_quests_if_needed(owner, day_utc, daily_defs, special_defs, use_random_rolls=_is_localhost())
+        _assign_daily_quests_if_needed(owner, day_utc, ts, daily_defs, special_defs, use_random_rolls=_is_localhost())
 
         with connect_db() as conn:
             with conn.cursor() as cur:
@@ -636,7 +631,7 @@ def get_rewards_summary():
                 pending_invite_codes += reward_data.get("amount", 1)
 
         # -- shared multiplier --
-        multiplier = _get_user_reward_multiplier(owner, ts)
+        multiplier = _get_user_reward_multiplier(owner)
         total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
         total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 
@@ -718,7 +713,6 @@ def get_achievements():
                     "target": achievement_def.get("target_count", 1),
                     "unlocked": user_data.get("unlocked_at") is not None,
                     "unlocked_at": user_data.get("unlocked_at"),
-                    "badge_icon": achievement_def.get("badge_icon"),
                     "rewards": achievement_def.get("rewards", []),
                 }
             )

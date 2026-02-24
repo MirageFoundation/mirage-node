@@ -1319,7 +1319,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         const re = new RegExp('^' + pattern.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
         return re.test(topic);
     };
-    const isTopicBlockedLocal = (topicVal) => {
+    const isTopicBlockedLocal = useCallback((topicVal) => {
         const t = String(topicVal || '').trim().toLowerCase();
         if (!t) return false;
         if (blockedTopicsLocal.size === 0) return false;
@@ -1327,7 +1327,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             if (_topicMatchesPattern(t, pat)) return true;
         }
         return false;
-    };
+    }, [blockedTopicsLocal]);
     const location = useLocation();  // Call useLocation at the top level of the component
     const viewerAddress = Storage.load('publicKey', '') || 'guest';
 
@@ -1392,8 +1392,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
 
     const inviteCodesEnabled = Boolean(nodeConfig?.registration_enabled) && Boolean(nodeConfig?.registration_invite_code_required);
     const questsEnabled = Boolean(nodeConfig?.quests_enabled) && Boolean(nodeConfig?.quest_payouts_enabled);
-    // Node is "gated" when registration is disabled or requires invite codes — logged-out users should see zero fetches
-    const isNodeGated = !nodeConfig?.registration_enabled || Boolean(nodeConfig?.registration_invite_code_required);
 
     // Invite code state
     const [inviteCodes, setInviteCodes] = useState([]);
@@ -1844,7 +1842,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         const now = Date.now();
                         const keepOptimistic = [];
                         for (const [id, ts] of optimisticPostIdsRef.current.entries()) {
-                            if (now - Number(ts || 0) > 2 * 60 * 1000) continue;
+                            if (now - Number(ts || 0) > 5 * 1000) continue;
                             if (!sortedOrder.includes(id) && currentOrder.includes(id)) keepOptimistic.push(id);
                             if (sortedOrder.includes(id)) optimisticPostIdsRef.current.delete(id);
                         }
@@ -2195,7 +2193,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         } else if (stored.length > 0) {
             setTopics(stored);
         }
-    }, [isLoggedIn]);
+    }, [isLoggedIn, viewerAddress]);
 
     useEffect(() => {
         window.getPosts = getPosts;  // Expose getPosts globally
@@ -2306,7 +2304,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             : topLevelPosts.filter(post => String(post.topic || '').toLowerCase() === String(urlTopic || '').toLowerCase());
         // Server already returns posts in correct order
         setStableOrder(filtered.map(p => p.post_id));
-    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading]);
+    }, [state.lastFetched, urlTopic, homeSortMode, stableOrder.length, state.posts, viewerAddress, followedTopicsSet, followedAuthorsSet, isLoading, isTopicBlockedLocal]);
 
     // Measure time from posts set to first render of list
     useEffect(() => {
@@ -2961,8 +2959,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             $flash={isFlashing}
                                             style={{
                                                 animationDelay: `${animDelay}ms`,
-                                                zIndex: 1000 - index,
-                                                position: 'relative'
                                             }}
                                         >
                                             <CardView

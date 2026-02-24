@@ -357,6 +357,19 @@ def canon_base_set_auto_renewal(
     )
 
 
+def canon_base_award(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    award_type: str,
+) -> bytes:
+    return canon_shared.canon_base_award(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, award_type
+    )
+
+
 def canon_base_bridge_burn(
     pub_dec: bytes,
     last_block_hash: str,
@@ -505,6 +518,7 @@ __all__ = [
     "canon_base_send_tokens",
     "canon_base_upgrade_level",
     "canon_base_set_auto_renewal",
+    "canon_base_award",
     "canon_base_bridge_burn",
     "check_pow_target",
     "argon2_digest",

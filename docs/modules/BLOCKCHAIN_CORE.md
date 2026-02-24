@@ -280,6 +280,7 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 - `MsgVote`: Upvote or downvote content
 - `MsgEdit`: Edit existing content (within time window)
 - `MsgDelete`: Mark content as deleted (enforced by indexer)
+- `MsgAward`: Give an award to a post/comment (burns MIRAGE, free for admins)
 
 **Profile Messages:**
 - `MsgSetUsername`: Claim or change username

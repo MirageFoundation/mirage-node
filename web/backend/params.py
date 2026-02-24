@@ -94,6 +94,12 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
     # Bridge chains - optional, defaults to empty list
     result["bridge_chains"] = p.get("bridge_chains") or []
 
+    # Award configs - MUST be present and non-empty
+    award_configs = p.get("award_configs")
+    if not award_configs or not isinstance(award_configs, list) or len(award_configs) == 0:
+        raise RuntimeError("missing or empty award_configs in chain params")
+    result["award_configs"] = award_configs
+
     return result
 
 

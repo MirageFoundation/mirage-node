@@ -69,7 +69,7 @@ SSH_USER = "root"
 
 # All production servers (same as deploy_all_prod.sh)
 ALL_SERVERS = [
-    # "mirage.vote",
+    "mirage.vote",
     "146.190.108.140",
     "139.59.9.96",
     "mirage.talk",

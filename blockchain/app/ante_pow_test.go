@@ -220,6 +220,36 @@ func TestBuildCanonForBlockTopic(t *testing.T) {
 	require.Equal(t, expected.buf, got)
 }
 
+func TestBuildCanonForAward(t *testing.T) {
+	pub := bytes.Repeat([]byte{0x03}, 33)
+	blockHash := []byte("blockhash3")
+	difficulty := uint64(5)
+	timestamp := uint64(1710009990001)
+	target := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	awardType := "quality_post"
+
+	msg := &coretypes.MsgAward{
+		EnvelopePubkey:     pub,
+		EnvelopeBlockHash:  blockHash,
+		EnvelopeDifficulty: difficulty,
+		EnvelopeTimestamp:  timestamp,
+		Target:             target,
+		AwardType:          awardType,
+	}
+
+	expected := newCanonWriter("MsgAward")
+	expected.writeBytes(2, pub)
+	expected.writeBytes(3, blockHash)
+	expected.writeUvarint(4, difficulty)
+	expected.writeUvarint(6, timestamp)
+	expected.writeString(100, target)
+	expected.writeString(101, awardType)
+
+	got := buildCanonForAward(msg)
+	t.Logf("[debug] award canon len=%d type=%s", len(got), awardType)
+	require.Equal(t, expected.buf, got)
+}
+
 func TestBuildCanonForUnblockTopic(t *testing.T) {
 	pub := bytes.Repeat([]byte{0x02}, 33)
 	blockHash := []byte("blockhash2")

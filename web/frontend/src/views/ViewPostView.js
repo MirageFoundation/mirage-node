@@ -26,7 +26,9 @@ import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
-import { getTierColor, getTierName } from "../utils/tierColors";
+import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
+import useBalance from "../utils/useBalance";
+import { Tooltip, tooltipStyles } from "../components/Tooltip";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -58,14 +60,7 @@ const PostCard = styled.div`
     }
 
     position: relative;
-    overflow: hidden;
-    
 
-    @keyframes flashOverlay {
-        0% { opacity: 1; }
-        100% { opacity: 0; }
-    }
-    
     @keyframes flashGlow {
         0% { box-shadow: 0 0 50px rgba(255, 255, 255, 0.9), 0 4px 20px rgba(0, 0, 0, 0.1); }
         100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
@@ -236,35 +231,10 @@ const StyledProfileLink = styled(Link)`
     color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.link || '#FFFFFF'} !important;
     text-decoration: none;
     font-weight: bold;
-    position: relative;
+    ${() => tooltipStyles()}
 
     &:hover {
         color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.linkHover || '#CCCCCC'} !important;
-    }
-
-    &::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 0;
-        margin-bottom: 0.3rem;
-        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
-        color: ${({ theme }) => theme?.colors?.text || '#eee'};
-        padding: 0.5rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: normal;
-        white-space: nowrap;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.15s ease;
-    }
-
-    &[data-tooltip]:hover::after {
-        opacity: 1;
     }
 `;
 
@@ -755,22 +725,6 @@ const ActionButton = styled.a`
 
 
 
-const TooltipText = styled.div`
-  visibility: hidden;
-  background-color: black;
-  color: white;
-  text-align: center;
-  border-radius: 6px;
-  padding: 0.1rem 0.25rem;
-  position: absolute;
-  z-index: 9999;
-  bottom: 100%;
-  left: 50%;
-  opacity: 0.5;
-  transition: opacity 0.3s;
-  font-size: inherit;
-  white-space: nowrap;
-`;
 
 const BlockErrorMessage = styled.div`
     background-color: rgba(220, 38, 38, 0.1);
@@ -839,21 +793,6 @@ const ReportInput = styled.input`
     border-radius: 4px;
 `;
 
-const TooltipContainer = styled.div`
-  position: relative;
-  display: inline-block;
-  font-size: inherit;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  white-space: nowrap;          /* keep username intact, never split */
-
-  &:hover ${TooltipText} {
-    visibility: visible;
-    opacity: 1;
-    font-weight: bold;      
-    font-size: 0.6rem;
-  }
-`;
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
 const formatTimeStamp = (utcTimestamp) => {
@@ -909,6 +848,9 @@ function ViewPostView({ state, updatePost }) {
     const [donateAmount, setDonateAmount] = useState("1");
     const [isDonating, setIsDonating] = useState(false);
     const [donateMessages, setDonateMessages] = useState({}); // { postId: { type: 'success'|'error', message: string } }
+    const [confirmAward, setConfirmAward] = useState(null); // { postId }
+    const [isAwarding, setIsAwarding] = useState(false);
+    const [awardMessages, setAwardMessages] = useState({}); // { postId: { type, message } }
     const [confirmReportPost, setConfirmReportPost] = useState(null);
     const [reportReason, setReportReason] = useState("");
     const [isReporting, setIsReporting] = useState(false);
@@ -1018,8 +960,11 @@ function ViewPostView({ state, updatePost }) {
         root.style.setProperty('--card-gap-mobile', gapMobile);
     }, [cardSize]);
 
-    // Scroll to top instantly when navigating to this view
+    // Scroll to top instantly when navigating to this view (skip for focused comment views —
+    // those scroll to the target comment after all context loads)
     useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (params.has('depth')) return;
         window.scrollTo({ top: 0, behavior: 'instant' });
     }, [location.search]);
 
@@ -1243,8 +1188,7 @@ function ViewPostView({ state, updatePost }) {
         window.addEventListener('chainConfigUpdated', handleConfigUpdate);
         window.addEventListener('userStatusUpdated', handleConfigUpdate);
 
-        // Fetch chain config if not cached (e.g. first visit after login)
-        if (!localStorage.getItem('chainConfig')) {
+        if (tx.needsChainConfigRefresh()) {
             Api.get('get_chain_config', undefined)
                 .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
                 .catch(() => { });
@@ -1783,6 +1727,108 @@ function ViewPostView({ state, updatePost }) {
         setConfirmDonate({ userId: userAddress, postId });
         try { if (postId) updatePost(postId, { replyOpen: false }); } catch (_) { }
         setDonateAmount("1"); // Reset to default
+    };
+
+    const { displayBalance: userBalanceUmirage } = useBalance();
+
+    const AWARD_TYPES = [
+        { name: 'quality_post', label: 'Quality Post Award', icon: '\uD83C\uDFC6' },
+        { name: 'original_content', label: 'Original Content Award', icon: '\uD83D\uDCA1' },
+        { name: 'based', label: 'Based AF Award', icon: '\uD83D\uDCAA' },
+        { name: 'receipts', label: 'Receipts Award', icon: '\uD83C\uDFF7\uFE0F' },
+    ];
+
+    const awardConfigs = useMemo(() => {
+        void configUpdateTrigger;
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            return cfg?.award_configs || [];
+        } catch (_) {
+            return [];
+        }
+    }, [configUpdateTrigger]);
+
+    const getAwardCost = (name) => {
+        if (awardConfigs.length === 0) return null;
+        const cfg = awardConfigs.find(c => c.name === name);
+        return cfg ? Number(cfg.cost || 0) : null;
+    };
+
+    const handleGiveAward = (postId) => {
+        setOpenMenuId(null);
+        if (!postId) return;
+        setConfirmDonate(null);
+        setConfirmBlockPost(null);
+        setConfirmBlockUser(null);
+        setConfirmReportPost(null);
+        setConfirmAward({ postId });
+    };
+
+    const friendlyAwardError = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        if (s.includes('already awarded')) return 'You already gave this post an award.';
+        if (s.includes('insufficient') || s.includes('not enough')) return 'Not enough MIRAGE to give this award.';
+        if (s.includes('own post') || s.includes('self-award')) return "You can't award your own post.";
+        return raw || 'Something went wrong. Please try again.';
+    };
+
+    const applyAwardOptimistic = (postId, awardType, revert) => {
+        const addAward = (awards) => {
+            const prev = Array.isArray(awards) ? awards : [];
+            if (revert) return revert;
+            const existing = prev.find(a => a.type === awardType);
+            return existing
+                ? prev.map(a => a.type === awardType ? { ...a, count: (Number(a.count) || 0) + 1 } : a)
+                : [...prev, { type: awardType, count: 1 }];
+        };
+        if (root && root.post_id === postId) {
+            setRoot(prev => ({ ...prev, awards: addAward(prev.awards) }));
+        } else {
+            setChildren(prev => prev.map(c => c.post_id === postId ? { ...c, awards: addAward(c.awards) } : c));
+        }
+        try { updatePost(postId, { awards: addAward((state.posts[postId] || {}).awards) }); } catch (_) { }
+    };
+
+    const confirmAwardAction = async (postId, awardType) => {
+        if (!postId || isAwarding) return;
+        const costUmirage = getAwardCost(awardType);
+        if (costUmirage == null) return;
+        setIsAwarding(true);
+        setConfirmAward(null);
+        const targetPost = (root && root.post_id === postId) ? root : children.find(c => c.post_id === postId);
+        const prevAwards = targetPost?.awards ? [...targetPost.awards] : [];
+
+        // Optimistic: deduct balance + show award immediately
+        if (costUmirage > 0) tx.adjustBalanceOptimistic(-costUmirage);
+        applyAwardOptimistic(postId, awardType, null);
+
+        try {
+            const result = await tx.giveAward(postId, awardType);
+            if (result.success) {
+                const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
+                setAwardMessages(prev => ({ ...prev, [postId]: { type: 'success', message: `${label} given!` } }));
+                setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+                tx.refreshBalance();
+            } else {
+                // Revert optimistic award + balance
+                applyAwardOptimistic(postId, awardType, prevAwards);
+                if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+                tx.refreshBalance();
+                const errMsg = friendlyAwardError(result.error);
+                setAwardMessages(prev => ({ ...prev, [postId]: { type: 'error', message: errMsg } }));
+                setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+            }
+        } catch (error) {
+            // Revert optimistic award + balance
+            applyAwardOptimistic(postId, awardType, prevAwards);
+            if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+            tx.refreshBalance();
+            const errMsg = friendlyAwardError(error.message || String(error));
+            setAwardMessages(prev => ({ ...prev, [postId]: { type: 'error', message: errMsg } }));
+            setTimeout(() => setAwardMessages(prev => { const n = { ...prev }; delete n[postId]; return n; }), 5000);
+        }
+        setIsAwarding(false);
     };
 
     const openEdit = (post) => {
@@ -2622,21 +2668,34 @@ function ViewPostView({ state, updatePost }) {
         return out;
     }, [flattenedComments, state.posts, lastVisitTs]);
 
-    // Scroll to a specific comment if hash is present after comments load
+    // Scroll to focused comment — debounced so it waits for all context (actualRootPost,
+    // parent chain) to finish loading before firing. Each time `annotated` changes (new data
+    // loads above the target), the timer resets. Once stable for 300ms, we scroll once.
+    const scrollToFocusedTimer = React.useRef(null);
+    const scrollToFocusedDone = React.useRef(false);
+    useEffect(() => {
+        if (!focusedCommentId || scrollToFocusedDone.current) return;
+        if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current);
+        const targetId = `comment-${focusedCommentId.toLowerCase()}`;
+        scrollToFocusedTimer.current = setTimeout(() => {
+            const el = document.getElementById(targetId);
+            if (el) {
+                el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                scrollToFocusedDone.current = true;
+            }
+        }, 300);
+        return () => { if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current); };
+    }, [annotated, focusedCommentId]);
+
+    // Scroll to hash-linked comment (non-focused, e.g. direct #comment-xxx link)
     const hasScrolledToHash = React.useRef(false);
     useEffect(() => {
         try {
-            if (hasScrolledToHash.current) return;
+            if (hasScrolledToHash.current || focusedCommentId) return;
             const hash = (typeof window !== 'undefined' && window.location && window.location.hash) ? window.location.hash : '';
-            let targetId = '';
-            if (focusedCommentId && /^[0-9a-f]{64}$/i.test(focusedCommentId)) {
-                targetId = `comment-${focusedCommentId.toLowerCase()}`;
-            } else if (hash && hash.startsWith('#comment-')) {
-                const commentId = hash.slice('#comment-'.length).toLowerCase();
-                targetId = `comment-${commentId}`;
-            }
-            if (!targetId) return;
-            const el = document.getElementById(targetId);
+            if (!hash || !hash.startsWith('#comment-')) return;
+            const commentId = hash.slice('#comment-'.length).toLowerCase();
+            const el = document.getElementById(`comment-${commentId}`);
             if (el) {
                 setTimeout(() => {
                     el.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -2741,8 +2800,8 @@ function ViewPostView({ state, updatePost }) {
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
         const href = trimmedUsername ? `/u/${encodeURIComponent(trimmedUsername)}` : `/u/${encodeURIComponent(ownerAddress)}`;
-        const tierColor = getTierColor(currentPost.author_level);
-        const tierName = getTierName(currentPost.author_level);
+        const tierColor = getAuthorColor(currentPost.author_level, currentPost.author_is_new);
+        const tierName = getAuthorTooltip(currentPost.author_level, currentPost.author_is_new);
         const content = ownerAddress ? (
             <StyledProfileLink to={href} $tierColor={tierColor} data-tooltip={tierName}>{displayWithAt}</StyledProfileLink>
         ) : displayWithAt;
@@ -3056,6 +3115,70 @@ function ViewPostView({ state, updatePost }) {
             );
         }
 
+        if (confirmAward?.postId === post.post_id) {
+            return (
+                <BlockConfirmMessage>
+                    <div style={{ width: '100%' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                            <span style={{ fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap', flexShrink: 0 }}>Give Award</span>
+                            <ConfirmButtons>
+                                <Button variant="ghost" size="sm" onClick={() => setConfirmAward(null)}>Cancel</Button>
+                            </ConfirmButtons>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                            {AWARD_TYPES.map(award => {
+                                const costUmirage = getAwardCost(award.name);
+                                const costMirage = costUmirage != null && costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() + ' MIRAGE' : null;
+                                const canAfford = costUmirage != null && (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
+                                const disabled = isAwarding || !canAfford;
+                                return (
+                                    <button
+                                        key={award.name}
+                                        onClick={() => canAfford && confirmAwardAction(post.post_id, award.name)}
+                                        disabled={disabled}
+                                        style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.4rem',
+                                            padding: '0.45rem 0.6rem',
+                                            background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
+                                            border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                            borderRadius: '8px',
+                                            color: theme?.colors?.text || 'inherit',
+                                            cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
+                                            opacity: disabled ? 0.4 : 1,
+                                            fontSize: '0.78rem',
+                                            transition: 'background 0.15s, opacity 0.15s',
+                                        }}
+                                        onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
+                                        onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                    >
+                                        <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
+                                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                                            <span style={{ fontWeight: 600 }}>{award.label}</span>
+                                            <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
+                                                {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
+                                            </span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {isAwarding && <div style={{ textAlign: 'center', marginTop: '0.4rem', fontSize: '0.75rem', opacity: 0.7 }}>Submitting...</div>}
+                    </div>
+                </BlockConfirmMessage>
+            );
+        }
+
+        const awardMsg = awardMessages[post.post_id];
+        if (awardMsg) {
+            return awardMsg.type === 'error' ? (
+                <BlockErrorMessage><span>⚠</span>{awardMsg.message}</BlockErrorMessage>
+            ) : (
+                <BlockSuccessMessage><span>✓</span>{awardMsg.message}</BlockSuccessMessage>
+            );
+        }
+
         // Show delete-specific messages for this post
         const deleteMsg = deleteMessages[post.post_id];
         if (deleteMsg) {
@@ -3205,6 +3328,7 @@ function ViewPostView({ state, updatePost }) {
                                         ? formatUserStatus(authorAddr)
                                         : (isFollowingThisAuthor ? 'Unfollow user' : 'Follow user')}
                                 </MenuItem>
+                                <MenuItem onClick={() => { setOpenMenuId(null); handleGiveAward(post.post_id); }}>Give Award</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleDonate(post.user_id, post.post_id); }}>Donate</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockUser(post.user_id, post.post_id); }} data-danger="true">Block user</MenuItem>
                                 <MenuItem onClick={() => { setOpenMenuId(null); handleBlockPost(post.post_id); }} data-danger="true">Block post</MenuItem>
@@ -3849,6 +3973,19 @@ function ViewPostView({ state, updatePost }) {
                                                                 <span style={{ fontStyle: 'italic' }}>edited</span>
                                                             </>
                                                         )}
+                                                        {post?.awards?.length > 0 && (
+                                                            <>
+                                                                <MetaSeparator>·</MetaSeparator>
+                                                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                                                    {post.awards.map(a => {
+                                                                        const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                                        if (!def) return null;
+                                                                        const cnt = Number(a.count || 0);
+                                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                                    })}
+                                                                </span>
+                                                            </>
+                                                        )}
                                                     </MobileRootMetaBottom>
                                                 </MobileRootMeta>
                                             )}
@@ -3869,10 +4006,9 @@ function ViewPostView({ state, updatePost }) {
                                                     )}
                                                     {renderAuthorLink(post)}
                                                     <MetaSeparator>·</MetaSeparator>
-                                                    <TooltipContainer>
-                                                        <span>{formatElapsed(post.timestamp)} ago</span>
-                                                        <TooltipText>{formatTimeStamp(post.timestamp)}</TooltipText>
-                                                    </TooltipContainer>
+                                                    <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
+                                                        {formatElapsed(post.timestamp)} ago
+                                                    </Tooltip>
                                                     {/* Only show topic for root posts - comments inherit from root */}
                                                     {isRoot && (() => {
                                                         const topicLabel =
@@ -3906,10 +4042,22 @@ function ViewPostView({ state, updatePost }) {
                                                     {post.edited && (
                                                         <>
                                                             <MetaSeparator>·</MetaSeparator>
-                                                            <TooltipContainer>
-                                                                <span style={{ fontStyle: 'italic' }}>edited {formatElapsed(post.edited_ts)} ago</span>
-                                                                <TooltipText>{formatTimeStamp(post.edited_ts)}</TooltipText>
-                                                            </TooltipContainer>
+                                                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{ fontStyle: 'italic' }}>
+                                                                edited {formatElapsed(post.edited_ts)} ago
+                                                            </Tooltip>
+                                                        </>
+                                                    )}
+                                                    {post?.awards?.length > 0 && (
+                                                        <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                                                {post.awards.map(a => {
+                                                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                                                    if (!def) return null;
+                                                                    const cnt = Number(a.count || 0);
+                                                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                                                })}
+                                                            </span>
                                                         </>
                                                     )}
                                                 </MetaInfoRowLeft>

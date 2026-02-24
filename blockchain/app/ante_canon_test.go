@@ -161,6 +161,11 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForBridgeBurn(v.(*coretypes.MsgBridgeBurn)) },
 		},
 		{
+			name: "MsgAward",
+			obj:  &coretypes.MsgAward{},
+			fn:   func(v interface{}) []byte { return buildCanonForAward(v.(*coretypes.MsgAward)) },
+		},
+		{
 			name: "MsgFollowModerator",
 			obj:  &coretypes.MsgFollowModerator{},
 			fn:   func(v interface{}) []byte { return buildCanonForFollowModerator(v.(*coretypes.MsgFollowModerator)) },

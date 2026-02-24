@@ -81,4 +81,5 @@ func TestUpgradeHandlersRegistered(t *testing.T) {
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.10.0-remove-ibc"), "v1.10.0-remove-ibc upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.13.0"), "v1.13.0 upgrade handler should be registered")
 	require.True(t, app.UpgradeKeeper.HasHandler("v1.14.0"), "v1.14.0 upgrade handler should be registered")
+	require.True(t, app.UpgradeKeeper.HasHandler("v1.15.0"), "v1.15.0 upgrade handler should be registered")
 }

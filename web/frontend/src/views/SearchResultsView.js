@@ -10,7 +10,7 @@ import CardView from '../components/CardView';
 import Storage from '../utils/Storage';
 import Api from '../lib/api';
 import { ContentGrid, ModernPostFeed, PostGrid, AnimatedCard } from '../styled/Layout';
-import { getTierColor, getTierName } from '../utils/tierColors';
+import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
 
 const SectionHeader = styled.div`
     font-size: 0.85rem;
@@ -365,8 +365,8 @@ export default function SearchResultsView({ state }) {
                                             <ItemLeft>
                                                 <ItemLink
                                                     to={`/u/${encodeURIComponent(user.username || user.address)}`}
-                                                    $tierColor={getTierColor(user.level)}
-                                                    data-tooltip={getTierName(user.level)}
+                                                    $tierColor={getAuthorColor(user.level, user.user_is_new)}
+                                                    data-tooltip={getAuthorTooltip(user.level, user.user_is_new)}
                                                 >
                                                     @{user.username}
                                                 </ItemLink>
@@ -436,6 +436,7 @@ export default function SearchResultsView({ state }) {
                                                 user_id: post.user_id,
                                                 username: post.username,
                                                 author_level: post.author_level,
+                                                author_is_new: post.author_is_new,
                                                 timestamp: post.timestamp,
                                                 title: post.title,
                                                 content: post.content,

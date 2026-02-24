@@ -745,7 +745,7 @@ const HelpIconWrapper = styled.span`
     font-weight: 700;
     cursor: help;
     margin-left: 0.35rem;
-    ${tooltipStyles('top')}
+    ${tooltipStyles()}
 `;
 
 const AddressExplanation = styled.div`

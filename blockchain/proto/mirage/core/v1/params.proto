@@ -27,9 +27,6 @@ message TierConfig {
   // double fields
   double vote_weight = 13;
 
-  // uint32 fields
-  uint32 award_permissions = 14;
-
   // bool fields
   bool eligible_for_mod = 15;
   bool can_change_name = 16;
@@ -130,6 +127,20 @@ message Params {
   // Effective factor: 1000 * (1 + step)^difficulty. On busy: difficulty += 1. On calm: difficulty -= 1.
   // Default: 0.25 (25% per step)
   double pow_difficulty_step = 52;
+
+  // award_configs defines available award types and their costs in umirage
+  repeated AwardConfig award_configs = 53;
+}
+
+// AwardConfig defines a single award type and its cost.
+message AwardConfig {
+  option (gogoproto.equal) = true;
+
+  // name is the unique identifier for this award type (e.g., "quality_post")
+  string name = 1;
+
+  // cost is the amount of umirage burned when giving this award (0 for free awards)
+  uint64 cost = 2;
 }
 
 // BridgeChainConfig defines the configuration for a bridgeable chain.

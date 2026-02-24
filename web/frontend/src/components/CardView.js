@@ -13,7 +13,9 @@ import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
-import { getTierColor, getTierName } from "../utils/tierColors";
+import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
+import useBalance from "../utils/useBalance";
+import { Tooltip, tooltipStyles } from "./Tooltip";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -43,8 +45,7 @@ const StyledMainContainer = styled.div`
     }
 
     position: relative;
-    overflow: hidden;
-    
+
     ${(props) => props.isFlash ? `
         animation: flashGlow 0.5s ease-out forwards;
     ` : ``}
@@ -450,25 +451,11 @@ const StyledProfileLink = styled(Link)`
     color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.subtleText || '#CCCCCC'} !important;
     text-decoration: none;
     font-weight: bold;
+    ${() => tooltipStyles()}
 
     &:hover {
         color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.text || '#EEEEEE'} !important;
     }
-`
-
-// Portal-based tooltip for tier names (avoids overflow clipping)
-const TierTooltip = styled.div`
-    position: fixed;
-    z-index: 10000;
-    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
-    border-radius: 6px;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
-    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
 `
 
 
@@ -833,23 +820,6 @@ const StyledFooter = styled.div`
     font-size: 0.5rem;
 `
 
-// Simple tooltip rendered via portal (like FeedDebugTooltip)
-const TimeTooltip = styled.div`
-    position: fixed;
-    z-index: 10000;
-    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
-    border-radius: 6px;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
-    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
-`;
-
-const TimeWrapper = styled.span`
-`;
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
 const formatTimeStamp = (utcTimestamp) => {
@@ -921,6 +891,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [donateAmountRaw, setDonateAmountRaw] = useState("10000");
     const [isDonating, setIsDonating] = useState(false);
     const [donateMessage, setDonateMessage] = useState(null); // { type, message }
+    const [confirmAward, setConfirmAward] = useState(false);
+    const [isAwarding, setIsAwarding] = useState(false);
+    const [awardMessage, setAwardMessage] = useState(null); // { type, message }
     const [shareCopied, setShareCopied] = useState(false);
     const [confirmBlockPost, setConfirmBlockPost] = useState(false);
     const [confirmBlockUser, setConfirmBlockUser] = useState(false);
@@ -934,20 +907,24 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [menuOpen, setMenuOpen] = useState(false);
     const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
-    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0 });
+    const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
     const feedReasonRef = useRef(null);
-    const [timeTooltipOpen, setTimeTooltipOpen] = useState(false);
-    const [timeTooltipPosition, setTimeTooltipPosition] = useState({ top: 0, left: 0 });
-    const timeRef = useRef(null);
-    const [tierTooltipOpen, setTierTooltipOpen] = useState(false);
-    const [tierTooltipPosition, setTierTooltipPosition] = useState({ top: 0, left: 0 });
-    const [tierTooltipText, setTierTooltipText] = useState('');
-    const authorRef = useRef(null);
 
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
         window.addEventListener('nodeConfigUpdated', handler);
-        return () => window.removeEventListener('nodeConfigUpdated', handler);
+        window.addEventListener('chainConfigUpdated', handler);
+        return () => {
+            window.removeEventListener('nodeConfigUpdated', handler);
+            window.removeEventListener('chainConfigUpdated', handler);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!tx.needsChainConfigRefresh()) return;
+        Api.get('get_chain_config', undefined)
+            .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+            .catch(() => { });
     }, []);
 
     const nodeConfig = useMemo(() => {
@@ -1284,6 +1261,100 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const cancelDonate = () => {
         setConfirmDonate(false);
+    };
+
+    const { displayBalance: userBalanceUmirage } = useBalance();
+
+    const AWARD_TYPES = [
+        { name: 'quality_post', label: 'Quality Post Award', icon: '\uD83C\uDFC6' },
+        { name: 'original_content', label: 'Original Content Award', icon: '\uD83D\uDCA1' },
+        { name: 'based', label: 'Based AF Award', icon: '\uD83D\uDCAA' },
+        { name: 'receipts', label: 'Receipts Award', icon: '\uD83C\uDFF7\uFE0F' },
+    ];
+
+    const awardConfigs = useMemo(() => {
+        void nodeConfigTick;
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            const cfg = raw ? JSON.parse(raw) : null;
+            return cfg?.award_configs || [];
+        } catch (_) {
+            return [];
+        }
+    }, [nodeConfigTick]);
+
+    const getAwardCost = (name) => {
+        if (awardConfigs.length === 0) return null;
+        const cfg = awardConfigs.find(c => c.name === name);
+        return cfg ? Number(cfg.cost || 0) : null;
+    };
+
+    const handleGiveAward = () => {
+        setMenuOpen(false);
+        if (!post || !post.post_id) return;
+        setConfirmDonate(false);
+        setConfirmBlockPost(false);
+        setConfirmBlockUser(false);
+        setAwardMessage(null);
+        setConfirmAward(true);
+    };
+
+    const friendlyAwardError = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        if (s.includes('already awarded')) return 'You already gave this post an award.';
+        if (s.includes('insufficient') || s.includes('not enough')) return 'Not enough MIRAGE to give this award.';
+        if (s.includes('own post') || s.includes('self-award')) return "You can't award your own post.";
+        return raw || 'Something went wrong. Please try again.';
+    };
+
+    const confirmAwardAction = async (awardType) => {
+        if (!post || !post.post_id || isAwarding) return;
+        const costUmirage = getAwardCost(awardType);
+        if (costUmirage == null) return;
+        setIsAwarding(true);
+        setConfirmAward(false);
+        const prevAwards = post.awards ? [...post.awards] : [];
+
+        // Optimistic: deduct balance + show award immediately
+        if (costUmirage > 0) tx.adjustBalanceOptimistic(-costUmirage);
+        if (updatePost) {
+            const existing = prevAwards.find(a => a.type === awardType);
+            const nextAwards = existing
+                ? prevAwards.map(a => a.type === awardType ? { ...a, count: (Number(a.count) || 0) + 1 } : a)
+                : [...prevAwards, { type: awardType, count: 1 }];
+            updatePost(post.post_id, { awards: nextAwards });
+        }
+
+        try {
+            const result = await tx.giveAward(post.post_id, awardType);
+            if (result.success) {
+                const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
+                setAwardMessage({ type: 'success', message: `${label} given!` });
+                setTimeout(() => setAwardMessage(null), 5000);
+                tx.refreshBalance();
+            } else {
+                // Revert optimistic award + balance
+                if (updatePost) updatePost(post.post_id, { awards: prevAwards });
+                if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+                tx.refreshBalance();
+                const errMsg = friendlyAwardError(result.error);
+                setAwardMessage({ type: 'error', message: errMsg });
+                setTimeout(() => setAwardMessage(null), 5000);
+            }
+        } catch (error) {
+            // Revert optimistic award + balance
+            if (updatePost) updatePost(post.post_id, { awards: prevAwards });
+            if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+            tx.refreshBalance();
+            const errMsg = friendlyAwardError(error.message || String(error));
+            setAwardMessage({ type: 'error', message: errMsg });
+            setTimeout(() => setAwardMessage(null), 5000);
+        }
+        setIsAwarding(false);
+    };
+
+    const cancelAward = () => {
+        setConfirmAward(false);
     };
 
     const handleBlockPost = () => {
@@ -1660,25 +1731,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
         const href = username ? `/u/${encodeURIComponent(username)}` : `/u/${encodeURIComponent(ownerAddress)}`;
-        const tierColor = getTierColor(post.author_level);
-        const tierName = getTierName(post.author_level);
+        const tierColor = getAuthorColor(post.author_level, post.author_is_new);
+        const tierName = getAuthorTooltip(post.author_level, post.author_is_new);
         const content = ownerAddress ? (
             <StyledProfileLink
                 to={href}
                 $tierColor={tierColor}
-                ref={authorRef}
-                onMouseEnter={() => {
-                    if (tierName && authorRef.current) {
-                        const rect = authorRef.current.getBoundingClientRect();
-                        setTierTooltipPosition({
-                            top: rect.top - 8,
-                            left: rect.left
-                        });
-                        setTierTooltipText(tierName);
-                        setTierTooltipOpen(true);
-                    }
-                }}
-                onMouseLeave={() => setTierTooltipOpen(false)}
+                data-tooltip={tierName || undefined}
             >
                 {display}
             </StyledProfileLink>
@@ -1870,8 +1929,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     <MobileMetaLine>
                         <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
                         {renderAuthorMeta() || <span>@Anonymous</span>}
-                        <span>{elapsed} ago</span>
+                        <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>{elapsed} ago</Tooltip>
                         {post && post.tag ? <TagBadge $tag={post.tag}>{post.tag}</TagBadge> : null}
+                        {post?.awards?.length > 0 && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                {post.awards.map(a => {
+                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                    if (!def) return null;
+                                    const cnt = Number(a.count || 0);
+                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                })}
+                            </span>
+                        )}
                     </MobileMetaLine>
                     {!hasMediaModeContent && <MobileCardWrapper>
                         <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
@@ -1912,52 +1981,28 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <MetaSeparator>·</MetaSeparator>
                             {renderAuthorMeta() || <span>@Anonymous</span>}
                             <MetaSeparator>·</MetaSeparator>
-                            <TimeWrapper
-                                ref={timeRef}
-                                onMouseEnter={() => {
-                                    if (timeRef.current) {
-                                        const rect = timeRef.current.getBoundingClientRect();
-                                        setTimeTooltipPosition({
-                                            top: rect.top - 8,
-                                            left: rect.left
-                                        });
-                                        setTimeTooltipOpen(true);
-                                    }
-                                }}
-                                onMouseLeave={() => setTimeTooltipOpen(false)}
-                            >
+                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                 {elapsed} ago
-                            </TimeWrapper>
-                            {timeTooltipOpen && ReactDOM.createPortal(
-                                <TimeTooltip
-                                    style={{
-                                        top: timeTooltipPosition.top,
-                                        left: timeTooltipPosition.left,
-                                        transform: 'translateY(-100%)'
-                                    }}
-                                >
-                                    {formatTimeStamp(post.timestamp)}
-                                </TimeTooltip>,
-                                document.body
-                            )}
-                            {tierTooltipOpen && tierTooltipText && ReactDOM.createPortal(
-                                <TierTooltip
-                                    style={{
-                                        top: tierTooltipPosition.top,
-                                        left: tierTooltipPosition.left,
-                                        transform: 'translateY(-100%)'
-                                    }}
-                                >
-                                    {tierTooltipText}
-                                </TierTooltip>,
-                                document.body
-                            )}
+                            </Tooltip>
                             {post && post.tag ? (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
                                     <TagBadge $tag={post.tag}>{post.tag}</TagBadge>
                                 </>
                             ) : null}
+                            {post?.awards?.length > 0 && (
+                                <>
+                                    <MetaSeparator>·</MetaSeparator>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                        {post.awards.map(a => {
+                                            const def = AWARD_TYPES.find(t => t.name === a.type);
+                                            if (!def) return null;
+                                            const cnt = Number(a.count || 0);
+                                            return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
+                                        })}
+                                    </span>
+                                </>
+                            )}
                             {post && post.feed_bucket && post.feed_bucket !== 'guest' && (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
@@ -1966,9 +2011,12 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                         onMouseEnter={() => {
                                             if (post.feed_debug && feedReasonRef.current) {
                                                 const rect = feedReasonRef.current.getBoundingClientRect();
+                                                const tooltipHeight = 320;
+                                                const openDown = rect.top - tooltipHeight - 8 < 0;
                                                 setFeedTooltipPosition({
-                                                    top: rect.top - 8,
-                                                    left: Math.max(10, rect.left)
+                                                    top: openDown ? rect.bottom + 8 : rect.top - 8,
+                                                    left: Math.max(10, rect.left),
+                                                    openDown,
                                                 });
                                                 setFeedTooltipOpen(true);
                                             }
@@ -1989,7 +2037,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     </FeedReasonWrapper>
                                     {feedTooltipOpen && post.feed_debug && ReactDOM.createPortal(
                                         <FeedDebugTooltip
-                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left, transform: 'translateY(-100%)' }}
+                                            style={{ top: feedTooltipPosition.top, left: feedTooltipPosition.left, transform: feedTooltipPosition.openDown ? 'none' : 'translateY(-100%)' }}
                                             onMouseEnter={() => setFeedTooltipOpen(true)}
                                             onMouseLeave={() => setFeedTooltipOpen(false)}
                                         >
@@ -2000,7 +2048,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                         <FeedDebugValue style={{ fontFamily: 'monospace', fontSize: '0.8em', opacity: 0.7 }}>
                                                             {post.feed_debug.equation ||
                                                                 (post.feed_debug.P !== undefined
-                                                                    ? '(S + V + U + P) × R'
+                                                                    ? '(√S + √V + √U + √P + √A) × R'
                                                                     : post.feed_debug.C !== undefined
                                                                         ? '(V + C) × R'
                                                                         : '(S + V + U) × R')}
@@ -2041,6 +2089,13 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <FeedDebugRow>
                                                     <FeedDebugLabel>P (your prefs):</FeedDebugLabel>
                                                     <FeedDebugValue>{post.feed_debug.P?.toFixed(3) || '0.000'} [t={post.feed_debug.t_pref ?? 0}+a={post.feed_debug.a_pref ?? 0}]</FeedDebugValue>
+                                                </FeedDebugRow>
+                                            )}
+                                            {/* A for awards */}
+                                            {post.feed_debug.A !== undefined && (
+                                                <FeedDebugRow>
+                                                    <FeedDebugLabel>A (awards):</FeedDebugLabel>
+                                                    <FeedDebugValue>{post.feed_debug.A ?? 0}</FeedDebugValue>
                                                 </FeedDebugRow>
                                             )}
                                             {/* old magic: C for comments */}
@@ -2126,6 +2181,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     </MenuItem>
                                     {!isOwnPost && (
                                         <>
+                                            <MenuItem onClick={(e) => { e.stopPropagation(); handleGiveAward(); }}>Give Award</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleDonate(); }}>Donate to user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockUser(); }} data-danger="true">Block user</MenuItem>
                                             <MenuItem onClick={(e) => { e.stopPropagation(); handleBlockPost(); }} data-danger="true">Block post</MenuItem>
@@ -2467,6 +2523,75 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             {donateMessage.message}
                         </div>
                     )}
+                    {confirmAward && (
+                        <BlockConfirmMessage>
+                            <div style={{ width: '100%' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                    <span style={{ fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap', flexShrink: 0 }}>Give Award</span>
+                                    <ConfirmButtons>
+                                        <Button variant="ghost" size="sm" onClick={cancelAward}>Cancel</Button>
+                                    </ConfirmButtons>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
+                                    {AWARD_TYPES.map(award => {
+                                        const costUmirage = getAwardCost(award.name);
+                                        const costMirage = costUmirage != null && costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() + ' MIRAGE' : null;
+                                        const canAfford = costUmirage != null && (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
+                                        const disabled = isAwarding || !canAfford;
+                                        return (
+                                            <button
+                                                key={award.name}
+                                                onClick={() => canAfford && confirmAwardAction(award.name)}
+                                                disabled={disabled}
+                                                style={{
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '0.4rem',
+                                                    padding: '0.45rem 0.6rem',
+                                                    background: theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)',
+                                                    border: `1px solid ${theme?.colors?.borderSubtle || 'rgba(148,163,184,0.3)'}`,
+                                                    borderRadius: '8px',
+                                                    color: theme?.colors?.text || 'inherit',
+                                                    cursor: disabled ? (isAwarding ? 'wait' : 'not-allowed') : 'pointer',
+                                                    opacity: disabled ? 0.4 : 1,
+                                                    fontSize: '0.78rem',
+                                                    transition: 'background 0.15s, opacity 0.15s',
+                                                }}
+                                                onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = theme?.colors?.hover || 'rgba(255,255,255,0.08)'; }}
+                                                onMouseLeave={e => { e.currentTarget.style.background = theme?.colors?.surface2 || theme?.colors?.panelAlt || 'rgba(0,0,0,0.3)'; }}
+                                            >
+                                                <span style={{ fontSize: '1.1rem' }}>{award.icon}</span>
+                                                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                                                    <span style={{ fontWeight: 600 }}>{award.label}</span>
+                                                    <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
+                                                        {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
+                                                    </span>
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                                {isAwarding && <div style={{ textAlign: 'center', marginTop: '0.4rem', fontSize: '0.75rem', opacity: 0.7 }}>Submitting...</div>}
+                            </div>
+                        </BlockConfirmMessage>
+                    )}
+                    {awardMessage && (
+                        <div style={{
+                            background: awardMessage.type === 'success' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                            border: awardMessage.type === 'success' ? '1px solid #22c55e' : '1px solid #ef4444',
+                            borderRadius: '3px',
+                            padding: '0.75rem 1rem',
+                            margin: '0.5rem 0.5rem 0.5rem 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            color: awardMessage.type === 'success' ? '#16a34a' : '#ef4444',
+                            fontSize: '0.8rem',
+                        }}>
+                            <span>{awardMessage.type === 'success' ? '✓' : '⚠'}</span>
+                            {awardMessage.message}
+                        </div>
+                    )}
                     {showContent && post.content && (
                         <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} />
                     )}
@@ -2500,6 +2625,7 @@ export default memo(CardView, (prevProps, nextProps) => {
         prevPost.deleted === nextPost.deleted &&
         prevPost.collapsed === nextPost.collapsed &&
         prevPost.flash === nextPost.flash &&
+        JSON.stringify(prevPost.awards) === JSON.stringify(nextPost.awards) &&
         prevProps.state?.username === nextProps.state?.username &&
         prevProps.state?.publicKey === nextProps.state?.publicKey
     );

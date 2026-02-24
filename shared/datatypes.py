@@ -379,12 +379,34 @@ def _build_pool():
     add_f(tier_config, "editing_time_mins", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "archive_duration_days", 12, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "vote_weight", 13, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    add_f(tier_config, "award_permissions", 14, descriptor_pb2.FieldDescriptorProto.TYPE_UINT32)
     add_f(tier_config, "eligible_for_mod", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_change_name", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_biography", 17, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+
+    # AwardConfig (used in Params.award_configs)
+    award_config = file_proto.message_type.add()
+    award_config.name = "AwardConfig"
+    add_f(award_config, "name", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(award_config, "cost", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+
+    # MsgAward (give an award to a post/comment, burning MIRAGE)
+    msg_award = file_proto.message_type.add()
+    msg_award.name = "MsgAward"
+    add_f(msg_award, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_award, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_award, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_award, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_award, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_award, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_award, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_award, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_award, "award_type", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgAwardResponse
+    msg_award_resp = file_proto.message_type.add()
+    msg_award_resp.name = "MsgAwardResponse"
 
     # BridgeChainConfig (used in Params.bridge_chains)
     bridge_config = file_proto.message_type.add()
@@ -464,6 +486,13 @@ def _build_pool():
     f_bridge.type_name = ".mirage.core.v1.BridgeChainConfig"
     add_f(msg4, "bridge_attestation_threshold", 51, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "pow_factor", 52, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    # award_configs is a repeated AwardConfig (field 53)
+    f_awards = msg4.field.add()
+    f_awards.name = "award_configs"
+    f_awards.number = 53
+    f_awards.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
+    f_awards.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
+    f_awards.type_name = ".mirage.core.v1.AwardConfig"
 
     # MsgUpdateParams (authority + Params)
     msg5 = file_proto.message_type.add()
@@ -634,6 +663,9 @@ MsgBurnTokens = _get_message_class("mirage.core.v1.MsgBurnTokens")
 MsgBurnTokensResponse = _get_message_class("mirage.core.v1.MsgBurnTokensResponse")
 MsgUpgradeLevel = _get_message_class("mirage.core.v1.MsgUpgradeLevel")
 MsgSetAutoRenewal = _get_message_class("mirage.core.v1.MsgSetAutoRenewal")
+MsgAward = _get_message_class("mirage.core.v1.MsgAward")
+MsgAwardResponse = _get_message_class("mirage.core.v1.MsgAwardResponse")
+AwardConfig = _get_message_class("mirage.core.v1.AwardConfig")
 MsgBridgeBurn = _get_message_class("mirage.core.v1.MsgBridgeBurn")
 MsgBridgeAttestBurned = _get_message_class("mirage.core.v1.MsgBridgeAttestBurned")
 MsgBridgeAttestBurnedResponse = _get_message_class("mirage.core.v1.MsgBridgeAttestBurnedResponse")

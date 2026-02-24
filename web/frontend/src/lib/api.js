@@ -86,9 +86,8 @@ function buildUrl(path, params) {
 function maybeSyncBalance(params, body, data) {
     if (!data || typeof data !== 'object' || data.balance === undefined) return;
     try {
-        const myAddr = localStorage.getItem('publicKey') || '';
+        const myAddr = _lsString('publicKey');
         if (!myAddr) return;
-        // Check address from query params (GET) or body (POST)
         const reqAddr = String(
             (params && (params.address || params.owner)) ||
             (body && (body.address || body.owner)) ||
@@ -118,10 +117,16 @@ function maybeSyncBalance(params, body, data) {
  * @param {any=} body - POST body
  * @param {any} data - parsed response
  */
+function _lsString(key) {
+    const raw = localStorage.getItem(key);
+    if (!raw) return '';
+    try { const v = JSON.parse(raw); return typeof v === 'string' ? v : raw; } catch (_) { return raw; }
+}
+
 function maybeSyncInbox(params, body, data) {
     if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
     try {
-        const myAddr = localStorage.getItem('publicKey') || '';
+        const myAddr = _lsString('publicKey');
         if (!myAddr) return;
         const reqAddr = String(
             (params && (params.address || params.owner)) ||
@@ -140,7 +145,7 @@ function maybeSyncInbox(params, body, data) {
 function withInboxLastViewed(params) {
     if (!params || typeof params !== 'object') return params;
     try {
-        const myAddr = localStorage.getItem('publicKey') || '';
+        const myAddr = _lsString('publicKey');
         if (!myAddr) return params;
         const reqAddr = String((params.address || params.owner) || '').trim();
         if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return params;

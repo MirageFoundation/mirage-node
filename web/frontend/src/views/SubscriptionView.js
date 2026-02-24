@@ -157,7 +157,7 @@ const RenewalTime = styled.div`
 const TimeHighlight = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#EEE'};
     font-weight: 500;
-    ${tooltipStyles('bottom-center')}
+    ${tooltipStyles()}
 `;
 
 const HorizontalDivider = styled.div`
@@ -220,7 +220,7 @@ const BalanceLabel = styled.div`
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    ${tooltipStyles('bottom')}
+    ${tooltipStyles()}
 `;
 
 
@@ -851,21 +851,6 @@ export default function SubscriptionView({ state }) {
             details.push('Profile banner available.');
         } else {
             details.push('Profile banner not available.');
-        }
-
-        const awardPerms = Number(raw.award_permissions ?? 0);
-        if (awardPerms > 0) {
-            if (awardPerms === 1) {
-                details.push('Can give basic awards.');
-            } else if (awardPerms === 2) {
-                details.push('Can give more awards.');
-            } else if (awardPerms >= 3) {
-                details.push('Can give all award types.');
-            } else {
-                details.push(`Can give awards (permission level ${awardPerms}).`);
-            }
-        } else {
-            details.push('Cannot give awards.');
         }
 
         if (tier.level === 0) {

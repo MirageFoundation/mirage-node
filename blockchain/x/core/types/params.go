@@ -23,7 +23,6 @@ func DefaultTiers() []*TierConfig {
 			EditingTimeMins:     10,
 			ArchiveDurationDays: 30,
 			VoteWeight:          1.0,
-			AwardPermissions:    0,
 			EligibleForMod:      false,
 			CanChangeName:       false,
 			CanHaveBiography:    false,
@@ -44,7 +43,6 @@ func DefaultTiers() []*TierConfig {
 			EditingTimeMins:     60,
 			ArchiveDurationDays: 90,
 			VoteWeight:          1.15,
-			AwardPermissions:    1,
 			EligibleForMod:      false,
 			CanChangeName:       true,
 			CanHaveBiography:    true,
@@ -65,7 +63,6 @@ func DefaultTiers() []*TierConfig {
 			EditingTimeMins:     360,
 			ArchiveDurationDays: 180,
 			VoteWeight:          1.30,
-			AwardPermissions:    2,
 			EligibleForMod:      true,
 			CanChangeName:       true,
 			CanHaveBiography:    true,
@@ -86,13 +83,22 @@ func DefaultTiers() []*TierConfig {
 			EditingTimeMins:     720,
 			ArchiveDurationDays: 365,
 			VoteWeight:          1.45,
-			AwardPermissions:    3,
 			EligibleForMod:      true,
 			CanChangeName:       true,
 			CanHaveBiography:    true,
 			CanHaveAvatar:       true,
 			CanHaveBanner:       true,
 		},
+	}
+}
+
+// DefaultAwardConfigs returns the default award type configurations.
+func DefaultAwardConfigs() []*AwardConfig {
+	return []*AwardConfig{
+		{Name: "quality_post", Cost: 10_000_000_000},
+		{Name: "original_content", Cost: 5_000_000_000},
+		{Name: "based", Cost: 5_000_000_000},
+		{Name: "receipts", Cost: 5_000_000_000},
 	}
 }
 
@@ -152,6 +158,9 @@ func DefaultParams() Params {
 		// Bridge parameters
 		BridgeChains:               []*BridgeChainConfig{}, // No chains enabled by default, fee is per-chain
 		BridgeAttestationThreshold: 0.6667,                 // 66.67% of voting power required
+
+		// Award configurations (cost in umirage; 1 MIRAGE = 1,000,000 umirage)
+		AwardConfigs: DefaultAwardConfigs(),
 	}
 }
 
@@ -236,6 +245,30 @@ func (p Params) Validate() error {
 	// Validate bridge params
 	if p.BridgeAttestationThreshold <= 0 || p.BridgeAttestationThreshold > 1 {
 		return fmt.Errorf("bridge_attestation_threshold must be in (0,1]")
+	}
+	// Validate award configs
+	if len(p.AwardConfigs) == 0 {
+		return fmt.Errorf("award_configs must not be empty")
+	}
+	awardNames := make(map[string]bool)
+	for i, ac := range p.AwardConfigs {
+		if ac.Name == "" {
+			return fmt.Errorf("award_configs[%d]: name must not be empty", i)
+		}
+		if awardNames[ac.Name] {
+			return fmt.Errorf("award_configs[%d]: duplicate name %q", i, ac.Name)
+		}
+		awardNames[ac.Name] = true
+	}
+	return nil
+}
+
+// GetAwardConfig returns the award config for the given name, or nil if not found.
+func (p Params) GetAwardConfig(name string) *AwardConfig {
+	for _, ac := range p.AwardConfigs {
+		if ac.Name == name {
+			return ac
+		}
 	}
 	return nil
 }

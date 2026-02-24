@@ -71,10 +71,9 @@ QUESTS_INVITE_RECRUIT_CHANCE = 0.30  # 30% daily chance for invite_recruit quest
 QUESTS_INVITE_EARNER_INTERVAL = 10  # invite_earner quest appears every N completed quests
 QUESTS_INVITE_EARNER_CHANCE = 0.30  # 30% daily chance for invite_earner quest (if eligible)
 
-# Reward multiplier (account age-based)
-REWARD_MULTIPLIER_DAYS = 30  # Days to reach max multiplier
-REWARD_MULTIPLIER_MIN = 1.0  # Minimum multiplier (new accounts get 1x)
-REWARD_MULTIPLIER_MAX = 5.0  # Maximum multiplier (mature accounts get 5x)
+# Reward multiplier (quest-completion-based)
+REWARD_MULTIPLIER_QUESTS = 50  # Completed quests to reach max multiplier
+REWARD_MULTIPLIER_MAX = 5.0  # Maximum multiplier (0 quests = 0x, 50 quests = 5x)
 
 # Daily reward cap (in umirage, 0 = no cap)
 DAILY_REWARD_CAP = 0

@@ -58,7 +58,9 @@ ${DOMAIN:-:80} {
 				window 1s
 			}
 		}
-		reverse_proxy 127.0.0.1:5000
+		reverse_proxy 127.0.0.1:5000 {
+			header_up CF-Connecting-IP {client_ip}
+		}
 	}
 
 	# Chain RPC (CometBFT) - includes WebSocket at /chain/rpc/websocket

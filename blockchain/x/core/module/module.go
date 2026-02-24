@@ -1067,6 +1067,10 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if p.BridgeAttestationThreshold != 0 {
 		cur.BridgeAttestationThreshold = p.BridgeAttestationThreshold
 	}
+	// Award configs - replace entirely if provided
+	if len(p.AwardConfigs) > 0 {
+		cur.AwardConfigs = p.AwardConfigs
+	}
 
 	if err := cur.Validate(); err != nil {
 		return nil, err
@@ -2984,6 +2988,78 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 // ============================================
 
 // BridgeBurn burns MIRAGE for bridging to an external (non-IBC) chain
+// Award handler accepts MsgAward, burns MIRAGE (free for admins level >= 100).
+func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgAwardResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	var userLevel int
+	if authority != govAuthority {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+
+		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+			var core types.ProfileCore
+			_ = json.Unmarshal(bz, &core)
+			userLevel = int(core.Level)
+		}
+	} else {
+		owner = authority
+	}
+
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+	if target == "" {
+		return nil, fmt.Errorf("award target cannot be empty")
+	}
+	if err := validateTxHash(target); err != nil {
+		return nil, err
+	}
+
+	awardType := strings.TrimSpace(req.GetAwardType())
+	if awardType == "" {
+		return nil, fmt.Errorf("award_type cannot be empty")
+	}
+
+	params := am.k.GetParams(sdkCtx)
+	ac := params.GetAwardConfig(awardType)
+	if ac == nil {
+		return nil, fmt.Errorf("unknown award_type: %s", awardType)
+	}
+
+	isAdmin := userLevel >= 100
+	burnAmount := ac.Cost
+	if isAdmin {
+		burnAmount = 0
+	}
+
+	if burnAmount > 0 {
+		if err := am.k.BurnFromAccount(sdkCtx, owner, burnAmount); err != nil {
+			return nil, fmt.Errorf("failed to burn award cost: %w", err)
+		}
+	}
+
+	sdkCtx.Logger().Info("Award",
+		"owner", owner,
+		"target", target,
+		"award_type", awardType,
+		"burned", burnAmount,
+		"admin", isAdmin,
+	)
+
+	if owner != "" && authority != govAuthority {
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	return &types.MsgAwardResponse{}, nil
+}
+
 func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {
 	return bridgeBurn(sdk.UnwrapSDKContext(ctx), am.k, req, am.deductRelayGasFee)
 }
