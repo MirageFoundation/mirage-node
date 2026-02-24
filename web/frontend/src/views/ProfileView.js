@@ -314,6 +314,7 @@ export default function ProfileView({ state }) {
     const [similarUsersError, setSimilarUsersError] = useState('');
     const [showAllTopicPrefs, setShowAllTopicPrefs] = useState(false);
     const [showAllAuthorPrefs, setShowAllAuthorPrefs] = useState(false);
+    const [showAllSimilarUsers, setShowAllSimilarUsers] = useState(false);
     const formatPrefWeight = (w) => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -1095,7 +1096,7 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!similarUsersError && similarUsers.length > 0 && (
                                             <div>
-                                                {similarUsers.map((u) => (
+                                                {(showAllSimilarUsers ? similarUsers : similarUsers.slice(0, 5)).map((u) => (
                                                     <div
                                                         key={u.address}
                                                         style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
@@ -1107,6 +1108,26 @@ export default function ProfileView({ state }) {
                                                         </Mono>
                                                     </div>
                                                 ))}
+                                                {!showAllSimilarUsers && similarUsers.length > 5 && (
+                                                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                        <Mono
+                                                            onClick={() => setShowAllSimilarUsers(true)}
+                                                            style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
+                                                        >
+                                                            show {similarUsers.length - 5} more...
+                                                        </Mono>
+                                                    </div>
+                                                )}
+                                                {showAllSimilarUsers && similarUsers.length > 5 && (
+                                                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                        <Mono
+                                                            onClick={() => setShowAllSimilarUsers(false)}
+                                                            style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
+                                                        >
+                                                            show less
+                                                        </Mono>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </ValueBox>
