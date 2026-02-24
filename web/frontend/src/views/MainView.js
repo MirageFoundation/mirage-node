@@ -2959,8 +2959,6 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                             $flash={isFlashing}
                                             style={{
                                                 animationDelay: `${animDelay}ms`,
-                                                zIndex: 1000 - index,
-                                                position: 'relative'
                                             }}
                                         >
                                             <CardView

@@ -148,6 +148,12 @@ export const AnimatedCard = styled.div`
     opacity: 0;
     transform: translateY(10px);
     animation: slideInUp 0.3s ease-out forwards;
+    border-radius: 12px;
+    position: relative;
+
+    &:hover {
+        z-index: 10;
+    }
 
     @keyframes slideInUp {
         to {
@@ -167,20 +173,17 @@ export const AnimatedCard = styled.div`
 
     @keyframes flashHighlight {
         0% {
-            outline: 3px solid rgba(251, 191, 36, 0.6);
-            outline-offset: -3px;
+            box-shadow: inset 0 0 0 3px rgba(251, 191, 36, 0.6);
         }
         100% {
-            outline: 3px solid transparent;
+            box-shadow: inset 0 0 0 3px transparent;
         }
     }
 
     /* Apply flash animation when flash prop is true */
     ${({ $flash, $hiding }) => ($flash && !$hiding) && `
-        /* Ensure the card is visible even when flashing */
         opacity: 1;
         transform: translateY(0);
-        /* Run slide-in + flash together (flash only affects outline) */
         animation: slideInUp 0.3s ease-out forwards, flashHighlight 1s ease-out forwards;
     `}
 
@@ -190,8 +193,13 @@ export const AnimatedCard = styled.div`
         overflow: hidden;
     `}
 
+    @media (max-width: 1000px) {
+        border-radius: 10px;
+    }
+
     /* Disable animation on mobile to prevent layout shifts interacting with fixed elements */
     @media (max-width: 600px) {
+        border-radius: 4px;
         animation: ${({ $hiding }) => $hiding ? 'slideUpHide 0.25s ease-out forwards' : 'none'};
         opacity: 1;
         transform: none;

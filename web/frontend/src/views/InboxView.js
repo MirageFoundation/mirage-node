@@ -154,7 +154,18 @@ const Separator = styled.div`
     margin: 0.25rem 0;
 `;
 
-// removed unused Actions
+const QuoteBlock = styled.blockquote`
+    margin: 0.25rem 0 0 0;
+    padding: 0.25rem 0.4rem;
+    border-left: 2px solid ${({ theme }) => theme?.colors?.accent || 'rgba(250, 204, 21, 0.6)'};
+    color: ${({ theme }) => theme?.colors?.subtleText || '#AAA'};
+    font-size: 0.55rem;
+    font-style: italic;
+    line-height: 1.4;
+    word-break: break-word;
+    overflow-wrap: break-word;
+`;
+
 const AWARD_LABELS = {
     quality_post: 'Quality Post',
     original_content: 'Original Content',
@@ -166,6 +177,13 @@ const formatAwardLabel = (name) => {
     const key = String(name || '').trim();
     return AWARD_LABELS[key] || key || 'Award';
 };
+
+function truncateWords(text, maxWords) {
+    if (!text) return '';
+    const words = text.split(/\s+/).filter(Boolean);
+    if (words.length <= maxWords) return text.trim();
+    return words.slice(0, maxWords).join(' ') + '…';
+}
 
 export default function InboxView({ state }) {
     const navigate = useNavigate();
@@ -402,16 +420,7 @@ export default function InboxView({ state }) {
                         <ReplyHeaderRow>
                             <ReplyHeader $isUnread={isUnread}>
                                 {isAward ? (
-                                    <>
-                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
-                                        {` gave you a "${awardLabel}" award for your ${awardTarget}`}
-                                        {hasParent && (
-                                            <>
-                                                {': '}
-                                                <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>
-                                            </>
-                                        )}
-                                    </>
+                                    <>Award received</>
                                 ) : (
                                     <>
                                         <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
@@ -430,7 +439,18 @@ export default function InboxView({ state }) {
                             )}
                         </ReplyHeaderRow>
                         <Separator />
-                        {reply.reply_content && <ReplyContentText>{reply.reply_content}</ReplyContentText>}
+                        {isAward ? (
+                            <ReplyContentText>
+                                <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
+                                {` gave you a "${awardLabel}" award for your ${awardTarget}`}
+                                {hasParent && <>{': '}<ParentContent>{reply.parent_content}</ParentContent></>}
+                                {reply.reply_content && (
+                                    <QuoteBlock>{truncateWords(reply.reply_content, 50)}</QuoteBlock>
+                                )}
+                            </ReplyContentText>
+                        ) : (
+                            reply.reply_content && <ReplyContentText>{reply.reply_content}</ReplyContentText>
+                        )}
                     </ReplyItem>
                 );
             })}

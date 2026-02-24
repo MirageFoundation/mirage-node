@@ -50,7 +50,7 @@ const HoverableLabel = styled.div`
     font-weight: 600;
     font-size: 0.85rem;
     white-space: nowrap;
-    ${tooltipStyles('right')}
+    ${tooltipStyles()}
     
     @media (max-width: 1000px) {
         margin-bottom: 0.1rem;

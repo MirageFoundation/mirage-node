@@ -28,7 +28,7 @@ import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
-import { TooltipBelow, DottedTooltip, tooltipStyles } from "../components/Tooltip";
+import { Tooltip, tooltipStyles } from "../components/Tooltip";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -60,14 +60,7 @@ const PostCard = styled.div`
     }
 
     position: relative;
-    overflow: hidden;
-    
 
-    @keyframes flashOverlay {
-        0% { opacity: 1; }
-        100% { opacity: 0; }
-    }
-    
     @keyframes flashGlow {
         0% { box-shadow: 0 0 50px rgba(255, 255, 255, 0.9), 0 4px 20px rgba(0, 0, 0, 0.1); }
         100% { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); }
@@ -1744,6 +1737,7 @@ function ViewPostView({ state, updatePost }) {
     ];
 
     const awardConfigs = useMemo(() => {
+        void configUpdateTrigger;
         try {
             const raw = localStorage.getItem('chainConfig');
             const cfg = raw ? JSON.parse(raw) : null;
@@ -1751,11 +1745,12 @@ function ViewPostView({ state, updatePost }) {
         } catch (_) {
             return [];
         }
-    }, []);
+    }, [configUpdateTrigger]);
 
     const getAwardCost = (name) => {
+        if (awardConfigs.length === 0) return null;
         const cfg = awardConfigs.find(c => c.name === name);
-        return cfg ? Number(cfg.cost || 0) : 0;
+        return cfg ? Number(cfg.cost || 0) : null;
     };
 
     const handleGiveAward = (postId) => {
@@ -1795,10 +1790,10 @@ function ViewPostView({ state, updatePost }) {
 
     const confirmAwardAction = async (postId, awardType) => {
         if (!postId || isAwarding) return;
+        const costUmirage = getAwardCost(awardType);
+        if (costUmirage == null) return;
         setIsAwarding(true);
         setConfirmAward(null);
-
-        const costUmirage = getAwardCost(awardType);
         const targetPost = (root && root.post_id === postId) ? root : children.find(c => c.post_id === postId);
         const prevAwards = targetPost?.awards ? [...targetPost.awards] : [];
 
@@ -3118,8 +3113,8 @@ function ViewPostView({ state, updatePost }) {
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
                             {AWARD_TYPES.map(award => {
                                 const costUmirage = getAwardCost(award.name);
-                                const costMirage = costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() : 'Free';
-                                const canAfford = costUmirage === 0 || (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
+                                const costMirage = costUmirage != null && costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() + ' MIRAGE' : null;
+                                const canAfford = costUmirage != null && (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
                                 const disabled = isAwarding || !canAfford;
                                 return (
                                     <button
@@ -3147,7 +3142,7 @@ function ViewPostView({ state, updatePost }) {
                                         <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
                                             <span style={{ fontWeight: 600 }}>{award.label}</span>
                                             <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
-                                                {!canAfford ? 'Insufficient MIRAGE' : `${costMirage} MIRAGE`}
+                                                {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
                                             </span>
                                         </span>
                                     </button>
@@ -3971,7 +3966,7 @@ function ViewPostView({ state, updatePost }) {
                                                                         const def = AWARD_TYPES.find(t => t.name === a.type);
                                                                         if (!def) return null;
                                                                         const cnt = Number(a.count || 0);
-                                                                        return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                                                        return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
                                                                     })}
                                                                 </span>
                                                             </>
@@ -3996,9 +3991,9 @@ function ViewPostView({ state, updatePost }) {
                                                     )}
                                                     {renderAuthorLink(post)}
                                                     <MetaSeparator>·</MetaSeparator>
-                                                    <DottedTooltip data-tooltip={formatTimeStamp(post.timestamp)}>
+                                                    <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                                         {formatElapsed(post.timestamp)} ago
-                                                    </DottedTooltip>
+                                                    </Tooltip>
                                                     {/* Only show topic for root posts - comments inherit from root */}
                                                     {isRoot && (() => {
                                                         const topicLabel =
@@ -4032,9 +4027,9 @@ function ViewPostView({ state, updatePost }) {
                                                     {post.edited && (
                                                         <>
                                                             <MetaSeparator>·</MetaSeparator>
-                                                            <DottedTooltip data-tooltip={formatTimeStamp(post.edited_ts)} style={{ fontStyle: 'italic' }}>
+                                                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.edited_ts)} style={{ fontStyle: 'italic' }}>
                                                                 edited {formatElapsed(post.edited_ts)} ago
-                                                            </DottedTooltip>
+                                                            </Tooltip>
                                                         </>
                                                     )}
                                                     {post?.awards?.length > 0 && (
@@ -4045,7 +4040,7 @@ function ViewPostView({ state, updatePost }) {
                                                                     const def = AWARD_TYPES.find(t => t.name === a.type);
                                                                     if (!def) return null;
                                                                     const cnt = Number(a.count || 0);
-                                                                    return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
                                                                 })}
                                                             </span>
                                                         </>

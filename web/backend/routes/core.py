@@ -3586,6 +3586,18 @@ def core_award():
             return _tx_error(rid, "core/award", "MsgAward", code, tx_hash, raw_log, extra)
 
         log_event(rid, "award.success", tx_hash=tx_hash, target=target, award_type=award_type)
+
+        try:
+            from routes.public import _inbox_cache
+            recipient = post_owner.lower()
+            cached = _inbox_cache.get(recipient)
+            if cached:
+                _inbox_cache[recipient] = (cached[0] + 1, cached[1], cached[2] if len(cached) > 2 else 0)
+            else:
+                _inbox_cache.pop(recipient, None)
+        except Exception:
+            pass
+
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "award.err", error=str(e))

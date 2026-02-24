@@ -5479,7 +5479,7 @@ def get_inbox():
                     p.txhash as item_id,
                     a.owner as actor_owner,
                     a.created_at as item_timestamp,
-                    '' as item_content,
+                    COALESCE(p.content, '') as item_content,
                     p.txhash as context_id,
                     p.content as context_content,
                     p.title as context_title,
@@ -5566,8 +5566,9 @@ def get_inbox():
                     parent_display_text = context_title or ""
                 else:
                     parent_display_text = context_content or ""
+            elif item_type == "award":
+                parent_display_text = context_title or ""
             else:
-                # For mentions, show a snippet of the post content
                 parent_display_text = context_title or context_content or ""
 
             if len(parent_display_text) > 200:

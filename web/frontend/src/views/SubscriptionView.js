@@ -157,7 +157,7 @@ const RenewalTime = styled.div`
 const TimeHighlight = styled.span`
     color: ${({ theme }) => theme?.colors?.text || '#EEE'};
     font-weight: 500;
-    ${tooltipStyles('bottom-center')}
+    ${tooltipStyles()}
 `;
 
 const HorizontalDivider = styled.div`
@@ -220,7 +220,7 @@ const BalanceLabel = styled.div`
     display: flex;
     align-items: center;
     gap: 0.25rem;
-    ${tooltipStyles('bottom')}
+    ${tooltipStyles()}
 `;
 
 

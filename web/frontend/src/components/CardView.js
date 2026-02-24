@@ -15,7 +15,7 @@ import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
 import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
-import { TooltipBelow, tooltipStyles } from "./Tooltip";
+import { Tooltip, tooltipStyles } from "./Tooltip";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -45,8 +45,7 @@ const StyledMainContainer = styled.div`
     }
 
     position: relative;
-    overflow: hidden;
-    
+
     ${(props) => props.isFlash ? `
         animation: flashGlow 0.5s ease-out forwards;
     ` : ``}
@@ -453,20 +452,6 @@ const StyledProfileLink = styled(Link)`
     text-decoration: none;
     font-weight: bold;
     ${() => tooltipStyles()}
-    &::after {
-        bottom: auto;
-        top: 100%;
-        margin-bottom: 0;
-        margin-top: 0.3rem;
-    }
-    @media (max-width: 1000px) {
-        &::after {
-            bottom: auto;
-            top: 100%;
-            margin-bottom: 0;
-            margin-top: 0.3rem;
-        }
-    }
 
     &:hover {
         color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.text || '#EEEEEE'} !important;
@@ -928,7 +913,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
         window.addEventListener('nodeConfigUpdated', handler);
-        return () => window.removeEventListener('nodeConfigUpdated', handler);
+        window.addEventListener('chainConfigUpdated', handler);
+        return () => {
+            window.removeEventListener('nodeConfigUpdated', handler);
+            window.removeEventListener('chainConfigUpdated', handler);
+        };
+    }, []);
+
+    useEffect(() => {
+        if (localStorage.getItem('chainConfig')) return;
+        Api.get('get_chain_config', undefined)
+            .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
+            .catch(() => { });
     }, []);
 
     const nodeConfig = useMemo(() => {
@@ -1288,8 +1284,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, [nodeConfigTick]);
 
     const getAwardCost = (name) => {
+        if (awardConfigs.length === 0) return null;
         const cfg = awardConfigs.find(c => c.name === name);
-        return cfg ? Number(cfg.cost || 0) : 0;
+        return cfg ? Number(cfg.cost || 0) : null;
     };
 
     const handleGiveAward = () => {
@@ -1312,10 +1309,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
 
     const confirmAwardAction = async (awardType) => {
         if (!post || !post.post_id || isAwarding) return;
+        const costUmirage = getAwardCost(awardType);
+        if (costUmirage == null) return;
         setIsAwarding(true);
         setConfirmAward(false);
-
-        const costUmirage = getAwardCost(awardType);
         const prevAwards = post.awards ? [...post.awards] : [];
 
         // Optimistic: deduct balance + show award immediately
@@ -1932,7 +1929,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     <MobileMetaLine>
                         <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
                         {renderAuthorMeta() || <span>@Anonymous</span>}
-                        <TooltipBelow data-tooltip={formatTimeStamp(post.timestamp)}>{elapsed} ago</TooltipBelow>
+                        <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>{elapsed} ago</Tooltip>
                         {post && post.tag ? <TagBadge $tag={post.tag}>{post.tag}</TagBadge> : null}
                         {post?.awards?.length > 0 && (
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
@@ -1940,7 +1937,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     const def = AWARD_TYPES.find(t => t.name === a.type);
                                     if (!def) return null;
                                     const cnt = Number(a.count || 0);
-                                    return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                    return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
                                 })}
                             </span>
                         )}
@@ -1984,9 +1981,9 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <MetaSeparator>·</MetaSeparator>
                             {renderAuthorMeta() || <span>@Anonymous</span>}
                             <MetaSeparator>·</MetaSeparator>
-                            <TooltipBelow data-tooltip={formatTimeStamp(post.timestamp)}>
+                            <Tooltip $dotted data-tooltip={formatTimeStamp(post.timestamp)}>
                                 {elapsed} ago
-                            </TooltipBelow>
+                            </Tooltip>
                             {post && post.tag ? (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
@@ -2001,7 +1998,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             const def = AWARD_TYPES.find(t => t.name === a.type);
                                             if (!def) return null;
                                             const cnt = Number(a.count || 0);
-                                            return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                            return <Tooltip key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</Tooltip>;
                                         })}
                                     </span>
                                 </>
@@ -2538,8 +2535,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
                                     {AWARD_TYPES.map(award => {
                                         const costUmirage = getAwardCost(award.name);
-                                        const costMirage = costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() : 'Free';
-                                        const canAfford = costUmirage === 0 || (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
+                                        const costMirage = costUmirage != null && costUmirage > 0 ? (costUmirage / 1_000_000).toLocaleString() + ' MIRAGE' : null;
+                                        const canAfford = costUmirage != null && (userBalanceUmirage !== null && userBalanceUmirage >= costUmirage);
                                         const disabled = isAwarding || !canAfford;
                                         return (
                                             <button
@@ -2567,7 +2564,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                                 <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
                                                     <span style={{ fontWeight: 600 }}>{award.label}</span>
                                                     <span style={{ fontSize: '0.68rem', opacity: 0.6, color: !canAfford ? '#ef4444' : 'inherit' }}>
-                                                        {!canAfford ? 'Insufficient MIRAGE' : `${costMirage} MIRAGE`}
+                                                        {costMirage == null ? 'Loading...' : !canAfford ? 'Insufficient MIRAGE' : costMirage}
                                                     </span>
                                                 </span>
                                             </button>
