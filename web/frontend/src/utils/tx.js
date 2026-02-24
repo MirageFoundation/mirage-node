@@ -229,6 +229,33 @@ export async function giveAward(targetPostId, awardType) {
     return h.giveAward(targetPostId, awardType);
 }
 
+const BALANCE_HOLD_KEY = 'user_balance_hold';
+const BALANCE_HOLD_MS = 15000;
+
+export function adjustBalanceOptimistic(deltaUmirage) {
+    try {
+        const Storage = require('./Storage').default;
+        const current = Number(Storage.load('user_balance', '0') || 0);
+        if (!Number.isFinite(current)) return;
+        const next = Math.max(0, current + deltaUmirage);
+        Storage.save('user_balance', String(next));
+        window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: next }));
+        if (deltaUmirage < 0) {
+            const existing = Storage.load(BALANCE_HOLD_KEY, null);
+            const prevMin = Number(existing?.min_balance);
+            const minBalance = Number.isFinite(prevMin) ? Math.min(prevMin, next) : next;
+            const expiresAt = Date.now() + BALANCE_HOLD_MS;
+            Storage.save(BALANCE_HOLD_KEY, {
+                min_balance: minBalance,
+                expires_at_ms: expiresAt,
+            });
+            console.debug('[tx.adjustBalanceOptimistic] hold', { minBalance, expiresAt });
+        } else if (deltaUmirage > 0) {
+            Storage.remove(BALANCE_HOLD_KEY);
+        }
+    } catch (_) { }
+}
+
 export async function refreshBalance() {
     const Storage = (await import('./Storage')).default;
     const Api = (await import('../lib/api')).default;
@@ -237,6 +264,23 @@ export async function refreshBalance() {
     try {
         const data = await Api.get('get_user_status', { address: publicKey, _cb: Date.now() });
         if (data) {
+            const hold = Storage.load(BALANCE_HOLD_KEY, null);
+            if (hold && typeof hold === 'object') {
+                const now = Date.now();
+                const expiresAt = Number(hold.expires_at_ms);
+                const minBalance = Number(hold.min_balance);
+                const raw = data.balance !== undefined ? data.balance : data.user_balance;
+                const serverBalance = Number(raw);
+                if (Number.isFinite(expiresAt) && now < expiresAt
+                    && Number.isFinite(minBalance) && Number.isFinite(serverBalance)
+                    && serverBalance > minBalance) {
+                    const retryIn = Math.min(4000, Math.max(1000, expiresAt - now));
+                    console.debug('[tx.refreshBalance] hold active, skip update', { serverBalance, minBalance, expiresAt, retryIn });
+                    setTimeout(() => { void refreshBalance(); }, retryIn);
+                    return;
+                }
+                Storage.remove(BALANCE_HOLD_KEY);
+            }
             const h = await getHandler();
             h.cacheUserStatus(data);
         }

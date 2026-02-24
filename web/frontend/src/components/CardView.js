@@ -15,7 +15,7 @@ import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
 import { getTierColor, getTierName } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
-import { formatMirage } from "../utils/formatters";
+import { TooltipBelow, tooltipStyles } from "./Tooltip";
 
 const pickCard = (theme, key) => {
     if (theme?.colors?.[key]) return theme.colors[key];
@@ -452,25 +452,25 @@ const StyledProfileLink = styled(Link)`
     color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.subtleText || '#CCCCCC'} !important;
     text-decoration: none;
     font-weight: bold;
+    ${() => tooltipStyles()}
+    &::after {
+        bottom: auto;
+        top: 100%;
+        margin-bottom: 0;
+        margin-top: 0.3rem;
+    }
+    @media (max-width: 1000px) {
+        &::after {
+            bottom: auto;
+            top: 100%;
+            margin-bottom: 0;
+            margin-top: 0.3rem;
+        }
+    }
 
     &:hover {
         color: ${({ $tierColor, theme }) => $tierColor || theme?.colors?.text || '#EEEEEE'} !important;
     }
-`
-
-// Portal-based tooltip for tier names (avoids overflow clipping)
-const TierTooltip = styled.div`
-    position: fixed;
-    z-index: 10000;
-    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
-    border-radius: 6px;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
-    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
 `
 
 
@@ -835,23 +835,6 @@ const StyledFooter = styled.div`
     font-size: 0.5rem;
 `
 
-// Simple tooltip rendered via portal (like FeedDebugTooltip)
-const TimeTooltip = styled.div`
-    position: fixed;
-    z-index: 10000;
-    background: ${({ theme }) => theme?.name === 'light' ? '#ffffff' : '#1a1a1a'};
-    border: 1px solid ${({ theme }) => theme?.name === 'light' ? '#e0e0e0' : '#333'};
-    border-radius: 6px;
-    padding: 0.35rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: 600;
-    white-space: nowrap;
-    box-shadow: ${({ theme }) => theme?.name === 'light' ? '0 4px 12px rgba(0, 0, 0, 0.15)' : '0 4px 12px rgba(0, 0, 0, 0.3)'};
-    color: ${({ theme }) => theme?.colors?.text || '#ccc'};
-`;
-
-const TimeWrapper = styled.span`
-`;
 
 // Returns absolute local timestamp: YYYY-MM-DD HH:MM:SS
 const formatTimeStamp = (utcTimestamp) => {
@@ -941,13 +924,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const [feedTooltipOpen, setFeedTooltipOpen] = useState(false);
     const [feedTooltipPosition, setFeedTooltipPosition] = useState({ top: 0, left: 0, openDown: false });
     const feedReasonRef = useRef(null);
-    const [timeTooltipOpen, setTimeTooltipOpen] = useState(false);
-    const [timeTooltipPosition, setTimeTooltipPosition] = useState({ top: 0, left: 0 });
-    const timeRef = useRef(null);
-    const [tierTooltipOpen, setTierTooltipOpen] = useState(false);
-    const [tierTooltipPosition, setTierTooltipPosition] = useState({ top: 0, left: 0 });
-    const [tierTooltipText, setTierTooltipText] = useState('');
-    const authorRef = useRef(null);
 
     useEffect(() => {
         const handler = () => setNodeConfigTick(prev => prev + 1);
@@ -1294,10 +1270,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     const { displayBalance: userBalanceUmirage } = useBalance();
 
     const AWARD_TYPES = [
-        { name: 'quality_post', label: 'Quality Post', icon: '\uD83C\uDFC6' },
-        { name: 'original_content', label: 'Original Content', icon: '\uD83D\uDCA1' },
-        { name: 'based', label: 'Based AF', icon: '\uD83D\uDCAA' },
-        { name: 'receipts', label: 'Receipts', icon: '\uD83C\uDFF7\uFE0F' },
+        { name: 'quality_post', label: 'Quality Post Award', icon: '\uD83C\uDFC6' },
+        { name: 'original_content', label: 'Original Content Award', icon: '\uD83D\uDCA1' },
+        { name: 'based', label: 'Based AF Award', icon: '\uD83D\uDCAA' },
+        { name: 'receipts', label: 'Receipts Award', icon: '\uD83C\uDFF7\uFE0F' },
     ];
 
     const awardConfigs = useMemo(() => {
@@ -1326,25 +1302,55 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         setConfirmAward(true);
     };
 
+    const friendlyAwardError = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        if (s.includes('already awarded')) return 'You already gave this post an award.';
+        if (s.includes('insufficient') || s.includes('not enough')) return 'Not enough MIRAGE to give this award.';
+        if (s.includes('own post') || s.includes('self-award')) return "You can't award your own post.";
+        return raw || 'Something went wrong. Please try again.';
+    };
+
     const confirmAwardAction = async (awardType) => {
         if (!post || !post.post_id || isAwarding) return;
         setIsAwarding(true);
+        setConfirmAward(false);
+
+        const costUmirage = getAwardCost(awardType);
+        const prevAwards = post.awards ? [...post.awards] : [];
+
+        // Optimistic: deduct balance + show award immediately
+        if (costUmirage > 0) tx.adjustBalanceOptimistic(-costUmirage);
+        if (updatePost) {
+            const existing = prevAwards.find(a => a.type === awardType);
+            const nextAwards = existing
+                ? prevAwards.map(a => a.type === awardType ? { ...a, count: (Number(a.count) || 0) + 1 } : a)
+                : [...prevAwards, { type: awardType, count: 1 }];
+            updatePost(post.post_id, { awards: nextAwards });
+        }
+
         try {
             const result = await tx.giveAward(post.post_id, awardType);
             if (result.success) {
                 const label = AWARD_TYPES.find(a => a.name === awardType)?.label || awardType;
-                setAwardMessage({ type: 'success', message: `${label} award given!` });
-                setConfirmAward(false);
+                setAwardMessage({ type: 'success', message: `${label} given!` });
                 setTimeout(() => setAwardMessage(null), 5000);
                 tx.refreshBalance();
             } else {
-                setConfirmAward(false);
-                setAwardMessage({ type: 'error', message: `Failed: ${result.error || 'Unknown error'}` });
+                // Revert optimistic award + balance
+                if (updatePost) updatePost(post.post_id, { awards: prevAwards });
+                if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+                tx.refreshBalance();
+                const errMsg = friendlyAwardError(result.error);
+                setAwardMessage({ type: 'error', message: errMsg });
                 setTimeout(() => setAwardMessage(null), 5000);
             }
         } catch (error) {
-            setConfirmAward(false);
-            setAwardMessage({ type: 'error', message: `Error: ${error.message || error}` });
+            // Revert optimistic award + balance
+            if (updatePost) updatePost(post.post_id, { awards: prevAwards });
+            if (costUmirage > 0) tx.adjustBalanceOptimistic(costUmirage);
+            tx.refreshBalance();
+            const errMsg = friendlyAwardError(error.message || String(error));
+            setAwardMessage({ type: 'error', message: errMsg });
             setTimeout(() => setAwardMessage(null), 5000);
         }
         setIsAwarding(false);
@@ -1734,19 +1740,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
             <StyledProfileLink
                 to={href}
                 $tierColor={tierColor}
-                ref={authorRef}
-                onMouseEnter={() => {
-                    if (tierName && authorRef.current) {
-                        const rect = authorRef.current.getBoundingClientRect();
-                        setTierTooltipPosition({
-                            top: rect.top - 8,
-                            left: rect.left
-                        });
-                        setTierTooltipText(tierName);
-                        setTierTooltipOpen(true);
-                    }
-                }}
-                onMouseLeave={() => setTierTooltipOpen(false)}
+                data-tooltip={tierName || undefined}
             >
                 {display}
             </StyledProfileLink>
@@ -1938,8 +1932,18 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     <MobileMetaLine>
                         <Link to={post?.topic ? `/t/${post.topic}` : '#'}>{post?.topic ? `#${post.topic}` : '/unknown'}</Link>
                         {renderAuthorMeta() || <span>@Anonymous</span>}
-                        <span>{elapsed} ago</span>
+                        <TooltipBelow data-tooltip={formatTimeStamp(post.timestamp)}>{elapsed} ago</TooltipBelow>
                         {post && post.tag ? <TagBadge $tag={post.tag}>{post.tag}</TagBadge> : null}
+                        {post?.awards?.length > 0 && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                {post.awards.map(a => {
+                                    const def = AWARD_TYPES.find(t => t.name === a.type);
+                                    if (!def) return null;
+                                    const cnt = Number(a.count || 0);
+                                    return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                })}
+                            </span>
+                        )}
                     </MobileMetaLine>
                     {!hasMediaModeContent && <MobileCardWrapper>
                         <MobileCardSquare $gradient={!thumbSrc ? generatePostGradient(post) : undefined}>
@@ -1980,52 +1984,28 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             <MetaSeparator>·</MetaSeparator>
                             {renderAuthorMeta() || <span>@Anonymous</span>}
                             <MetaSeparator>·</MetaSeparator>
-                            <TimeWrapper
-                                ref={timeRef}
-                                onMouseEnter={() => {
-                                    if (timeRef.current) {
-                                        const rect = timeRef.current.getBoundingClientRect();
-                                        setTimeTooltipPosition({
-                                            top: rect.top - 8,
-                                            left: rect.left
-                                        });
-                                        setTimeTooltipOpen(true);
-                                    }
-                                }}
-                                onMouseLeave={() => setTimeTooltipOpen(false)}
-                            >
+                            <TooltipBelow data-tooltip={formatTimeStamp(post.timestamp)}>
                                 {elapsed} ago
-                            </TimeWrapper>
-                            {timeTooltipOpen && ReactDOM.createPortal(
-                                <TimeTooltip
-                                    style={{
-                                        top: timeTooltipPosition.top,
-                                        left: timeTooltipPosition.left,
-                                        transform: 'translateY(-100%)'
-                                    }}
-                                >
-                                    {formatTimeStamp(post.timestamp)}
-                                </TimeTooltip>,
-                                document.body
-                            )}
-                            {tierTooltipOpen && tierTooltipText && ReactDOM.createPortal(
-                                <TierTooltip
-                                    style={{
-                                        top: tierTooltipPosition.top,
-                                        left: tierTooltipPosition.left,
-                                        transform: 'translateY(-100%)'
-                                    }}
-                                >
-                                    {tierTooltipText}
-                                </TierTooltip>,
-                                document.body
-                            )}
+                            </TooltipBelow>
                             {post && post.tag ? (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
                                     <TagBadge $tag={post.tag}>{post.tag}</TagBadge>
                                 </>
                             ) : null}
+                            {post?.awards?.length > 0 && (
+                                <>
+                                    <MetaSeparator>·</MetaSeparator>
+                                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.1rem', fontSize: '0.6rem' }}>
+                                        {post.awards.map(a => {
+                                            const def = AWARD_TYPES.find(t => t.name === a.type);
+                                            if (!def) return null;
+                                            const cnt = Number(a.count || 0);
+                                            return <TooltipBelow key={a.type} data-tooltip={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</TooltipBelow>;
+                                        })}
+                                    </span>
+                                </>
+                            )}
                             {post && post.feed_bucket && post.feed_bucket !== 'guest' && (
                                 <>
                                     <MetaSeparator>·</MetaSeparator>
@@ -2299,19 +2279,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                             </Icon>
                             <ShareText>share</ShareText>
                         </span>
-                        {post?.awards?.length > 0 && (
-                            <>
-                                <MetaSeparatorAction>•</MetaSeparatorAction>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem', fontSize: '0.82rem' }}>
-                                    {post.awards.map(a => {
-                                        const def = AWARD_TYPES.find(t => t.name === a.type);
-                                        if (!def) return null;
-                                        const cnt = Number(a.count || 0);
-                                        return <span key={a.type} title={def.label}>{cnt > 1 ? `${cnt}x` : ''}{def.icon}</span>;
-                                    })}
-                                </span>
-                            </>
-                        )}
                     </MetaRow>
                     {shareCopied && (
                         <ShareSuccessMessage>
@@ -2563,17 +2530,10 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                         <BlockConfirmMessage>
                             <div style={{ width: '100%' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                                    <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Give Award</span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                        {userBalanceUmirage !== null && (
-                                            <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-                                                Balance: {formatMirage(userBalanceUmirage)} MIRAGE
-                                            </span>
-                                        )}
-                                        <ConfirmButtons>
-                                            <Button variant="ghost" size="sm" onClick={cancelAward}>Cancel</Button>
-                                        </ConfirmButtons>
-                                    </div>
+                                    <span style={{ fontWeight: 600, fontSize: '0.85rem', whiteSpace: 'nowrap', flexShrink: 0 }}>Give Award</span>
+                                    <ConfirmButtons>
+                                        <Button variant="ghost" size="sm" onClick={cancelAward}>Cancel</Button>
+                                    </ConfirmButtons>
                                 </div>
                                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.4rem' }}>
                                     {AWARD_TYPES.map(award => {

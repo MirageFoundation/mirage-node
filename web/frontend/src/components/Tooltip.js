@@ -59,9 +59,9 @@ export const tooltipStyles = () => css`
         text-transform: none;
     }
 
-    &:hover::after,
-    &:focus::after,
-    &:active::after {
+    &[data-tooltip]:not([data-tooltip=""]):hover::after,
+    &[data-tooltip]:not([data-tooltip=""]):focus::after,
+    &[data-tooltip]:not([data-tooltip=""]):active::after {
         opacity: 1;
         pointer-events: auto;
     }
@@ -117,46 +117,36 @@ export const InfoIcon = styled.span`
 `;
 
 /**
- * Minimal tooltip styles for links/clickable elements.
- * Shows tooltip on hover without changing cursor or adding underline.
+ * TooltipBelow - Tooltip that appears BELOW the trigger.
+ * Use inside overflow:hidden containers where the default above-position gets clipped.
  */
-export const linkTooltipStyles = css`
-    position: relative;
-
+export const TooltipBelow = styled.span`
+    ${() => tooltipStyles()}
     &::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        ${getPositionStyles()}
-        background: ${({ theme }) => theme?.colors?.panel || '#23272C'};
-        border: 1px solid ${({ theme }) => theme?.colors?.border || '#555'};
-        color: ${({ theme }) => theme?.colors?.text || '#eee'};
-        padding: 0.5rem 0.75rem;
-        border-radius: 4px;
-        font-size: 0.7rem;
-        font-weight: normal;
-        white-space: pre-wrap;
-        width: max-content;
-        max-width: 260px;
-        z-index: 1000;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-        line-height: 1.4;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.15s ease;
-        text-align: left;
-        text-transform: none;
+        bottom: auto;
+        top: 100%;
+        margin-bottom: 0;
+        margin-top: 0.3rem;
     }
-
-    &[data-tooltip]:hover::after {
-        opacity: 1;
-        pointer-events: auto;
-    }
-
     @media (max-width: 1000px) {
         &::after {
-            ${getMobilePositionStyles()}
+            bottom: auto;
+            top: 100%;
+            margin-bottom: 0;
+            margin-top: 0.3rem;
         }
     }
+`;
+
+/**
+ * DottedTooltip - Tooltip with dotted underline on the trigger text.
+ * Used for timestamps and metadata that reveal detail on hover.
+ */
+export const DottedTooltip = styled.span`
+    ${() => tooltipStyles()}
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    white-space: nowrap;
 `;
 
 export default TooltipText;
