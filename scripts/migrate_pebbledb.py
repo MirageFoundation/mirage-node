@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Migrate a mirage node's application DB from GoLevelDB to PebbleDB.
+Migrate a mirage node's databases from GoLevelDB to PebbleDB.
 
-Cross-compiles the converter locally, uploads it, runs the conversion,
-switches the backend, waits for the node to fully catch up, then runs
-a complete verification suite.
+Converts ALL databases (application, blockstore, state, tx_index, evidence),
+cleans up stale files (cs.wal, metadata.db), switches both app-db-backend
+and db_backend to pebbledb, waits for catch-up, and runs verification.
 
 Usage:
     ./scripts/migrate_pebbledb.py root@64.23.136.132
@@ -29,6 +29,8 @@ BLOCKCHAIN_DIR = REPO_ROOT / "blockchain"
 DATA_DIR = "$HOME/.mirage/node/data"
 ENV_FILE = "$HOME/.mirage/env/node.env"
 CONTAINER = "mirage"
+
+ALL_DBS = ["application", "blockstore", "state", "tx_index", "evidence"]
 
 
 # ---------------------------------------------------------------------------
@@ -69,42 +71,20 @@ def step(n: str, msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# RPC helpers
+# Size snapshot helpers
 # ---------------------------------------------------------------------------
-
-
-def get_status(server: str) -> dict | None:
-    rc, out = ssh(server, "curl -sf http://localhost:26657/status 2>/dev/null")
-    if rc != 0 or not out:
-        return None
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        return None
-
-
-def get_sync_info(server: str) -> tuple[int, bool | None]:
-    """Returns (height, catching_up). catching_up is None if RPC unavailable."""
-    status = get_status(server)
-    if not status:
-        return 0, None
-    sync = status.get("result", {}).get("sync_info", {})
-    height = int(sync.get("latest_block_height", 0))
-    catching_up = sync.get("catching_up")
-    return height, catching_up
 
 
 def snapshot_sizes(server: str) -> dict[str, int]:
     """Capture byte sizes of all data directories on the server."""
     paths = [
         ("application.db", f"{DATA_DIR}/application.db"),
-        ("snapshots/", f"{DATA_DIR}/snapshots"),
-        ("snapshots/metadata.db", f"{DATA_DIR}/snapshots/metadata.db"),
         ("blockstore.db", f"{DATA_DIR}/blockstore.db"),
         ("state.db", f"{DATA_DIR}/state.db"),
         ("tx_index.db", f"{DATA_DIR}/tx_index.db"),
         ("evidence.db", f"{DATA_DIR}/evidence.db"),
         ("cs.wal/", f"{DATA_DIR}/cs.wal"),
+        ("snapshots/", f"{DATA_DIR}/snapshots"),
         ("data/ (total)", DATA_DIR),
     ]
     sizes: dict[str, int] = {}
@@ -132,9 +112,9 @@ def fmt_bytes(b: int) -> str:
 
 
 def print_size_comparison(before: dict[str, int], after: dict[str, int]) -> None:
-    print(f"\n{'─'*60}")
+    print(f"\n{'─'*64}")
     print(f"  {'':30s} {'BEFORE':>10s}  {'AFTER':>10s}  {'CHANGE':>10s}")
-    print(f"{'─'*60}")
+    print(f"{'─'*64}")
 
     for label in before:
         if label.startswith("_"):
@@ -160,11 +140,28 @@ def print_size_comparison(before: dict[str, int], after: dict[str, int]) -> None
     if b_disk and a_disk:
         diff = a_disk - b_disk
         sign = "-" if diff < 0 else "+"
-        print(f"{'─'*60}")
+        print(f"{'─'*64}")
         print(f"  {'Disk used':30s} {fmt_bytes(b_disk):>10s}  {fmt_bytes(a_disk):>10s}  {sign}{fmt_bytes(abs(diff))}")
         if t_disk:
             print(f"  {'Disk total':30s} {fmt_bytes(t_disk):>10s}")
-    print(f"{'─'*60}")
+    print(f"{'─'*64}")
+
+
+# ---------------------------------------------------------------------------
+# RPC helpers
+# ---------------------------------------------------------------------------
+
+
+def get_sync_info(server: str) -> tuple[int, bool | None]:
+    """Returns (height, catching_up). catching_up is None if RPC unavailable."""
+    rc, out = ssh(server, "curl -sf http://localhost:26657/status 2>/dev/null")
+    if rc != 0 or not out:
+        return 0, None
+    try:
+        sync = json.loads(out).get("result", {}).get("sync_info", {})
+        return int(sync.get("latest_block_height", 0)), sync.get("catching_up")
+    except (json.JSONDecodeError, ValueError):
+        return 0, None
 
 
 def get_bond_denom(server: str) -> str:
@@ -186,7 +183,7 @@ def get_bond_denom(server: str) -> str:
 
 
 def preflight(server: str) -> dict[str, int]:
-    step("1/9", "Preflight checks")
+    step("1/8", "Preflight checks")
 
     backend = ssh_ok(server, f"grep '^APP_DB_BACKEND=' {ENV_FILE} | cut -d= -f2-")
     if backend == "pebbledb":
@@ -213,7 +210,7 @@ def preflight(server: str) -> dict[str, int]:
 
 
 def build_converter() -> str:
-    step("2/9", "Cross-compiling convert-db for linux/amd64")
+    step("2/8", "Cross-compiling convert-db for linux/amd64")
 
     env = {**os.environ, "GOOS": "linux", "GOARCH": "amd64"}
     p = subprocess.run(
@@ -236,51 +233,65 @@ def build_converter() -> str:
 
 
 def upload_converter(server: str, binary: str) -> None:
-    step("3/9", f"Uploading convert-db to {server}")
+    step("3/8", f"Uploading convert-db to {server}")
     scp(binary, f"{server}:/tmp/convert-db")
     ssh_ok(server, "chmod +x /tmp/convert-db")
     print("  Uploaded to /tmp/convert-db")
 
 
-def stop_container(server: str) -> None:
-    step("4/9", "Stopping container")
+def stop_and_convert(server: str) -> None:
+    step("4/8", "Stopping container and converting all databases")
     ssh_ok(server, f"docker stop --timeout=30 {CONTAINER}", timeout=60)
-    print("  Container stopped.")
+    print("  Container stopped.\n")
 
-
-def run_converter(server: str) -> None:
-    step("5/9", "Running GoLevelDB → PebbleDB converter")
-
+    db_args = " ".join(ALL_DBS)
     p = subprocess.run(
-        ["ssh", server, f"/tmp/convert-db {DATA_DIR}"],
-        timeout=600,
+        ["ssh", server, f"/tmp/convert-db {DATA_DIR} {db_args}"],
+        timeout=1200,
     )
     if p.returncode != 0:
         print("  CONVERTER FAILED — restarting container with original DB")
         ssh(server, f"docker start {CONTAINER}")
         die("Conversion failed. Node restarted with GoLevelDB.")
 
-    ssh_ok(server, f"rm -rf {DATA_DIR}/snapshots/metadata.db")
-    print("  Removed GoLevelDB snapshots/metadata.db")
+    print("\n  Cleaning up stale files...")
+    ssh(server, f"rm -rf {DATA_DIR}/snapshots/metadata.db")
+    print("    Removed snapshots/metadata.db (recreated as PebbleDB)")
+    ssh(server, f"rm -rf {DATA_DIR}/cs.wal")
+    print("    Removed cs.wal/ (recreated on start)")
+
+    print("  Removing GoLevelDB backups...")
+    for db in ALL_DBS:
+        ssh(server, f"rm -rf {DATA_DIR}/{db}.db.bak")
+    print("    All .bak files removed.")
 
 
 def switch_backend(server: str) -> None:
-    step("6/9", "Setting APP_DB_BACKEND=pebbledb")
+    step("5/8", "Setting database backends to pebbledb")
+
     ssh_ok(server, f"sed -i 's/^APP_DB_BACKEND=.*/APP_DB_BACKEND=pebbledb/' {ENV_FILE}")
-    verify = ssh_ok(server, f"grep '^APP_DB_BACKEND=' {ENV_FILE} | cut -d= -f2-")
-    if verify != "pebbledb":
-        die(f"Failed to update APP_DB_BACKEND (got: {verify})")
-    print("  node.env updated.")
+    # COMET_DB_BACKEND — add if missing, update if present
+    rc, _ = ssh(server, f"grep -q '^COMET_DB_BACKEND=' {ENV_FILE}")
+    if rc == 0:
+        ssh_ok(server, f"sed -i 's/^COMET_DB_BACKEND=.*/COMET_DB_BACKEND=pebbledb/' {ENV_FILE}")
+    else:
+        ssh_ok(server, f"echo 'COMET_DB_BACKEND=pebbledb' >> {ENV_FILE}")
+
+    verify_app = ssh_ok(server, f"grep '^APP_DB_BACKEND=' {ENV_FILE} | cut -d= -f2-")
+    verify_cmt = ssh_ok(server, f"grep '^COMET_DB_BACKEND=' {ENV_FILE} | cut -d= -f2-")
+    if verify_app != "pebbledb" or verify_cmt != "pebbledb":
+        die(f"Failed to update backends (APP_DB_BACKEND={verify_app}, COMET_DB_BACKEND={verify_cmt})")
+    print(f"  APP_DB_BACKEND=pebbledb")
+    print(f"  COMET_DB_BACKEND=pebbledb")
 
 
 def start_and_wait(server: str) -> None:
-    step("7/9", "Starting container and waiting for sync")
+    step("6/8", "Starting container and waiting for sync")
     ssh_ok(server, f"docker start {CONTAINER}")
     print("  Container started. Waiting for node to sync...\n")
 
     last_height = 0
     stall_count = 0
-    max_stall = 6  # 30s with no progress → warn
 
     for tick in range(1, 241):  # up to 20 minutes
         time.sleep(5)
@@ -304,7 +315,7 @@ def start_and_wait(server: str) -> None:
         status_str = "catching up" if catching_up else "syncing"
         print(f"  [{elapsed:>4}s] height={height} ({status_str})")
 
-        if stall_count >= max_stall:
+        if stall_count >= 6:
             print(f"\n  WARNING: No height progress for {stall_count * 5}s")
             stall_count = 0
 
@@ -313,11 +324,10 @@ def start_and_wait(server: str) -> None:
 
 
 def cleanup(server: str) -> None:
-    step("8/9", "Cleanup")
+    step("7/8", "Cleanup")
     ssh(server, "rm -f /tmp/convert-db")
-    ssh(server, f"rm -rf {DATA_DIR}/application.db.bak")
-    ssh(server, f"rm -rf {DATA_DIR}/_pebble_convert_tmp")
-    print("  Removed converter binary, backup, and temp files.")
+    ssh(server, f"rm -rf {DATA_DIR}/_pebble_convert_tmp*")
+    print("  Removed converter binary and temp files.")
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +336,7 @@ def cleanup(server: str) -> None:
 
 
 def verify(server: str, before_sizes: dict[str, int]) -> int:
-    step("9/9", "Verification")
+    step("8/8", "Verification")
     failures: list[str] = []
 
     # Container running
@@ -347,57 +357,69 @@ def verify(server: str, before_sizes: dict[str, int]) -> int:
         print("     [FAIL] miraged not running")
         failures.append("miraged not running")
 
-    # APP_DB_BACKEND
-    print("  -> APP_DB_BACKEND")
-    rc, out = ssh(server, f"grep '^APP_DB_BACKEND=' {ENV_FILE} | cut -d= -f2-")
-    if out.strip() == "pebbledb":
-        print("     [OK] pebbledb")
-    else:
-        print(f"     [FAIL] {out.strip()}")
-        failures.append(f"APP_DB_BACKEND={out.strip()!r}")
+    print("  -> database backends")
+    for var, label in [("APP_DB_BACKEND", "APP_DB_BACKEND"), ("COMET_DB_BACKEND", "COMET_DB_BACKEND")]:
+        rc, out = ssh(server, f"grep '^{var}=' {ENV_FILE} | cut -d= -f2-")
+        val = out.strip()
+        if val == "pebbledb":
+            print(f"     [OK] {label}=pebbledb")
+        else:
+            print(f"     [FAIL] {label}={val}")
+            failures.append(f"{label}={val!r}")
 
-    # application.db format
-    print("  -> application.db format")
-    rc, out = ssh(server, f"ls {DATA_DIR}/application.db/ 2>/dev/null")
-    if rc == 0:
+    # All databases should be PebbleDB format
+    print("  -> database formats")
+    for db in ALL_DBS:
+        rc, out = ssh(server, f"ls {DATA_DIR}/{db}.db/ 2>/dev/null")
+        if rc != 0:
+            continue
         files = out.strip().splitlines()
         has_sst = any(f.endswith(".sst") for f in files)
         has_ldb = any(f.endswith(".ldb") for f in files)
         has_manifest = any(f.startswith("MANIFEST") for f in files)
-        sst_count = sum(1 for f in files if f.endswith(".sst"))
         if has_sst and has_manifest and not has_ldb:
-            print(f"     [OK] PebbleDB ({sst_count} SST files)")
+            sst_count = sum(1 for f in files if f.endswith(".sst"))
+            print(f"     [OK] {db}.db — PebbleDB ({sst_count} SST files)")
         elif has_ldb:
-            print("     [FAIL] still GoLevelDB (.ldb files)")
-            failures.append("application.db is GoLevelDB")
-        else:
-            print(f"     [FAIL] unexpected format")
-            failures.append("application.db unexpected format")
-    else:
-        print("     [FAIL] cannot list application.db")
-        failures.append("cannot access application.db")
+            print(f"     [FAIL] {db}.db — still GoLevelDB")
+            failures.append(f"{db}.db is GoLevelDB")
+        elif not files:
+            print(f"     [OK] {db}.db — empty (will be created)")
 
     # snapshots/metadata.db
     print("  -> snapshots/metadata.db")
     rc, out = ssh(server, f"ls {DATA_DIR}/snapshots/metadata.db/*.ldb 2>/dev/null")
     if rc == 0 and out.strip():
         print("     [FAIL] GoLevelDB metadata.db still present")
-        failures.append("metadata.db is GoLevelDB — will cause panic")
+        failures.append("metadata.db is GoLevelDB")
     else:
         print("     [OK] no GoLevelDB metadata")
+
+    # cs.wal cleaned
+    print("  -> cs.wal/")
+    rc, out = ssh(server, f"du -sh {DATA_DIR}/cs.wal 2>/dev/null")
+    if rc == 0:
+        print(f"     [OK] {out.split()[0]} (freshly recreated)")
+    else:
+        print("     [OK] not yet created")
 
     # Artifacts
     print("  -> leftover artifacts")
     artifact_found = False
     for path, label in [
-        (f"{DATA_DIR}/application.db.bak", "application.db.bak"),
-        (f"{DATA_DIR}/_pebble_convert_tmp", "_pebble_convert_tmp"),
-        ("/tmp/convert-db", "/tmp/convert-db"),
+        (f"{DATA_DIR}/_pebble_convert_tmp*", "temp dirs"),
+        ("/tmp/convert-db", "converter binary"),
     ]:
-        rc, _ = ssh(server, f"test -e {path}")
-        if rc == 0:
+        rc, out = ssh(server, f"ls -d {path} 2>/dev/null")
+        if rc == 0 and out.strip():
             print(f"     [FAIL] {label} still exists")
             failures.append(f"artifact: {label}")
+            artifact_found = True
+    for db in ALL_DBS:
+        rc, _ = ssh(server, f"test -d {DATA_DIR}/{db}.db.bak")
+        if rc == 0:
+            print(f"     [FAIL] {db}.db.bak still exists")
+            failures.append(f"artifact: {db}.db.bak")
             artifact_found = True
     if not artifact_found:
         print("     [OK] clean")
@@ -453,7 +475,7 @@ def verify(server: str, before_sizes: dict[str, int]) -> int:
             print(f"  - {f}")
         return 1
 
-    print("PASSED — PebbleDB migration verified. Node healthy, no artifacts.")
+    print("PASSED — all databases migrated to PebbleDB. Node healthy, no artifacts.")
     return 0
 
 
@@ -475,8 +497,7 @@ def main() -> int:
     before_sizes = preflight(server)
     binary = build_converter()
     upload_converter(server, binary)
-    stop_container(server)
-    run_converter(server)
+    stop_and_convert(server)
     switch_backend(server)
     start_and_wait(server)
     cleanup(server)

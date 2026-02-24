@@ -10,101 +10,110 @@ import (
 	dbm "github.com/cosmos/cosmos-db"
 )
 
-const (
-	dbName    = "application"
-	batchSize = 1000
-)
+const batchSize = 1000
 
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <data-dir>\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  Converts %s.db from GoLevelDB to PebbleDB\n", dbName)
+	if len(os.Args) < 3 {
+		fmt.Fprintf(os.Stderr, "Usage: %s <data-dir> <db-name> [db-name ...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  Converts GoLevelDB databases to PebbleDB\n")
+		fmt.Fprintf(os.Stderr, "  Example: %s /root/.mirage/node/data application blockstore state tx_index evidence\n", os.Args[0])
 		os.Exit(1)
 	}
 
 	dataDir := os.Args[1]
-	srcPath := filepath.Join(dataDir, dbName+".db")
+	dbNames := os.Args[2:]
 
+	var failed []string
+	for _, name := range dbNames {
+		if err := convertDB(dataDir, name); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR converting %s: %v\n", name, err)
+			failed = append(failed, name)
+		}
+	}
+
+	if len(failed) > 0 {
+		fmt.Fprintf(os.Stderr, "\nFailed databases: %v\n", failed)
+		os.Exit(1)
+	}
+	fmt.Printf("\nAll %d databases converted successfully.\n", len(dbNames))
+}
+
+func convertDB(dataDir, name string) error {
+	srcPath := filepath.Join(dataDir, name+".db")
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "ERROR: %s does not exist\n", srcPath)
-		os.Exit(1)
+		fmt.Printf("[%s] skipping — %s does not exist\n", name, srcPath)
+		return nil
 	}
 
-	tmpDir := filepath.Join(dataDir, "_pebble_convert_tmp")
+	tmpDir := filepath.Join(dataDir, "_pebble_convert_tmp_"+name)
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: failed to create temp dir: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("create temp dir: %w", err)
 	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
 
-	dstPath := filepath.Join(tmpDir, dbName+".db")
+	dstPath := filepath.Join(tmpDir, name+".db")
 
-	fmt.Printf("Opening GoLevelDB source: %s\n", srcPath)
-	srcDB, err := dbm.NewGoLevelDB(dbName, dataDir, nil)
+	fmt.Printf("\n[%s] Opening GoLevelDB: %s\n", name, srcPath)
+	srcDB, err := dbm.NewGoLevelDB(name, dataDir, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: failed to open source GoLevelDB: %v\n", err)
-		os.Exit(1)
+		cleanup()
+		return fmt.Errorf("open source: %w", err)
 	}
 
-	fmt.Printf("Creating PebbleDB destination: %s\n", dstPath)
+	fmt.Printf("[%s] Creating PebbleDB: %s\n", name, dstPath)
 	dstDB, err := pebble.Open(dstPath, &pebble.Options{
 		MaxConcurrentCompactions: func() int { return 1 },
 	})
 	if err != nil {
 		srcDB.Close()
-		fmt.Fprintf(os.Stderr, "ERROR: failed to create destination PebbleDB: %v\n", err)
-		os.Exit(1)
+		cleanup()
+		return fmt.Errorf("create destination: %w", err)
 	}
 
-	fmt.Println("Starting key-value copy...")
+	fmt.Printf("[%s] Copying keys...\n", name)
 	start := time.Now()
-	copied, err := copyAll(srcDB, dstDB)
+	copied, err := copyAll(name, srcDB, dstDB)
 	elapsed := time.Since(start)
 
 	srcDB.Close()
 
 	if err != nil {
 		dstDB.Close()
-		os.RemoveAll(tmpDir)
-		fmt.Fprintf(os.Stderr, "ERROR: copy failed after %d keys: %v\n", copied, err)
-		os.Exit(1)
+		cleanup()
+		return fmt.Errorf("copy failed after %d keys: %w", copied, err)
 	}
 
-	fmt.Printf("Copied %d keys in %s\n", copied, elapsed.Round(time.Millisecond))
+	fmt.Printf("[%s] Copied %d keys in %s\n", name, copied, elapsed.Round(time.Millisecond))
 
-	fmt.Println("Flushing and closing PebbleDB...")
+	fmt.Printf("[%s] Flushing...\n", name)
 	if err := dstDB.Flush(); err != nil {
 		dstDB.Close()
-		os.RemoveAll(tmpDir)
-		fmt.Fprintf(os.Stderr, "ERROR: PebbleDB flush failed: %v\n", err)
-		os.Exit(1)
+		cleanup()
+		return fmt.Errorf("flush: %w", err)
 	}
 	if err := dstDB.Close(); err != nil {
-		os.RemoveAll(tmpDir)
-		fmt.Fprintf(os.Stderr, "ERROR: PebbleDB close failed: %v\n", err)
-		os.Exit(1)
+		cleanup()
+		return fmt.Errorf("close: %w", err)
 	}
-	fmt.Printf("Conversion complete: %d keys\n", copied)
 
 	bakPath := srcPath + ".bak"
-
-	fmt.Printf("Renaming %s → %s\n", srcPath, bakPath)
+	fmt.Printf("[%s] %s → %s\n", name, srcPath, bakPath)
 	if err := os.Rename(srcPath, bakPath); err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: failed to rename source to backup: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("backup rename: %w", err)
 	}
 
-	fmt.Printf("Renaming %s → %s\n", dstPath, srcPath)
+	fmt.Printf("[%s] %s → %s\n", name, dstPath, srcPath)
 	if err := os.Rename(dstPath, srcPath); err != nil {
-		os.Rename(bakPath, srcPath)
-		fmt.Fprintf(os.Stderr, "ERROR: failed to move new DB into place: %v\n", err)
-		os.Exit(1)
+		os.Rename(bakPath, srcPath) // restore
+		return fmt.Errorf("move new DB: %w", err)
 	}
 
-	os.RemoveAll(tmpDir)
-	fmt.Printf("Done. Backup at %s\n", bakPath)
+	cleanup()
+	fmt.Printf("[%s] Done (%d keys). Backup at %s\n", name, copied, bakPath)
+	return nil
 }
 
-func copyAll(src dbm.DB, dst *pebble.DB) (int64, error) {
+func copyAll(label string, src dbm.DB, dst *pebble.DB) (int64, error) {
 	itr, err := src.Iterator(nil, nil)
 	if err != nil {
 		return 0, fmt.Errorf("creating iterator: %w", err)
@@ -136,7 +145,7 @@ func copyAll(src dbm.DB, dst *pebble.DB) (int64, error) {
 		}
 
 		if time.Since(lastReport) >= 5*time.Second {
-			fmt.Printf("  progress: %d keys copied...\n", total)
+			fmt.Printf("  [%s] %d keys copied...\n", label, total)
 			lastReport = time.Now()
 		}
 	}

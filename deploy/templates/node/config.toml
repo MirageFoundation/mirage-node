@@ -1,5 +1,5 @@
 moniker = "${MONIKER}"
-db_backend = "goleveldb"
+db_backend = "${COMET_DB_BACKEND:-goleveldb}"
 
 [tx_index]
 indexer = "kv"
