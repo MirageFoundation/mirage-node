@@ -83,12 +83,11 @@ scripts/*
 !scripts/restore_from_peer.sh
 !scripts/list_validators.sh
 !scripts/show_balances.py
-!scripts/verify_upgrade.py
+!scripts/migrate_pebbledb.py
 !scripts/submit_proposal.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
-!scripts/migrate_pebbledb.sh
 !scripts/check_persistent_peers.sh
 
 cursor.md
