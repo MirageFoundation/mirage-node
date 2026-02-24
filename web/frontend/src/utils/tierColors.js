@@ -44,3 +44,32 @@ export const getTierName = (level) => {
 export const shouldColorName = (level) => {
     return level !== undefined && level !== null && level > 0;
 };
+
+const NEW_USER_COLOR = '#22C55E';
+const NEW_USER_LABEL = 'New User';
+
+/**
+ * Get the display color for an author. Subscriber tiers take priority over new-user green.
+ * @param {number} level - The user's tier level
+ * @param {boolean} isNewUser - Whether the backend flagged this user as new
+ * @returns {string|null}
+ */
+export const getAuthorColor = (level, isNewUser) => {
+    const tierColor = getTierColor(level);
+    if (tierColor) return tierColor;
+    if (isNewUser) return NEW_USER_COLOR;
+    return null;
+};
+
+/**
+ * Get the tooltip text for an author. Subscriber tier names take priority.
+ * @param {number} level - The user's tier level
+ * @param {boolean} isNewUser - Whether the backend flagged this user as new
+ * @returns {string|null}
+ */
+export const getAuthorTooltip = (level, isNewUser) => {
+    const tierName = getTierName(level);
+    if (tierName) return tierName;
+    if (isNewUser) return NEW_USER_LABEL;
+    return null;
+};

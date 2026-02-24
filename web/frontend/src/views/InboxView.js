@@ -9,7 +9,7 @@ import TopBar from "../components/TopBar";
 import MobileHeader from "../components/MobileHeader";
 import Button from "../components/Button";
 import { ContentGrid, ModernPostFeed, TabbedContainer, ContainerTab, ContainerBody } from "../styled/Layout";
-import { getTierColor, getTierName } from '../utils/tierColors';
+import { getAuthorColor, getAuthorTooltip } from '../utils/tierColors';
 
 const HeaderRow = styled.div`
     display: flex;
@@ -403,7 +403,7 @@ export default function InboxView({ state }) {
                             <ReplyHeader $isUnread={isUnread}>
                                 {isAward ? (
                                     <>
-                                        <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>
+                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
                                         {` gave you a "${awardLabel}" award for your ${awardTarget}`}
                                         {hasParent && (
                                             <>
@@ -414,7 +414,7 @@ export default function InboxView({ state }) {
                                     </>
                                 ) : (
                                     <>
-                                        <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>
+                                        <ReplyUsername $tierColor={getAuthorColor(reply.reply_author_level, reply.reply_author_is_new)} data-tooltip={getAuthorTooltip(reply.reply_author_level, reply.reply_author_is_new)}>{displayUsername}</ReplyUsername>
                                         {isMention ? ' mentioned you in ' : ' replied to '}
                                         <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
                                     </>

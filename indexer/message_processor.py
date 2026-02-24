@@ -427,19 +427,20 @@ class MessageProcessor:
             if previous_vote:
                 _, prev_vote, _ = previous_vote
                 if prev_vote != 0:
-                    reverse_delta = -1.0 if prev_vote > 0 else 1.0
+                    reverse_topic_delta = -0.5 if prev_vote > 0 else 0.5
+                    reverse_author_delta = -1.0 if prev_vote > 0 else 1.0
 
                     # Reverse topic preference - only for root posts, not comments
                     root_topic, root_post_id = self.db.get_root_topic_for_post(target)
                     is_root_post = root_post_id and target == root_post_id
                     if root_topic and owner and is_root_post:
                         try:
-                            self.db.update_preference(owner, "topic", root_topic, reverse_delta, ts)
+                            self.db.update_preference(owner, "topic", root_topic, reverse_topic_delta, ts)
                             logger.debug(
                                 "Reversed topic preference for cleared vote: owner=%s topic=%s delta=%s",
                                 owner,
                                 root_topic,
-                                reverse_delta,
+                                reverse_topic_delta,
                             )
                         except Exception as e:
                             logger.error(
@@ -452,12 +453,12 @@ class MessageProcessor:
                         if post_owner:
                             target_author = post_owner.strip().lower()
                             if target_author and owner.lower() != target_author:
-                                self.db.update_preference(owner, "author", target_author, reverse_delta, ts)
+                                self.db.update_preference(owner, "author", target_author, reverse_author_delta, ts)
                                 logger.debug(
                                     "Reversed author preference for cleared vote: owner=%s author=%s delta=%s",
                                     owner,
                                     target_author,
-                                    reverse_delta,
+                                    reverse_author_delta,
                                 )
                     except Exception as e:
                         logger.error(
@@ -610,12 +611,10 @@ class MessageProcessor:
         is_root_post = root_post_id and target == root_post_id
         if owner and root_topic and is_root_post:
             try:
-                new_delta = 1.0 if raw_direction > 0 else -1.0
+                new_delta = 0.5 if raw_direction > 0 else -0.5
                 # If there was a previous vote and it's different, calculate the net delta
                 if prev_vote != 0 and prev_vote != user_vote:
-                    # Reverse old vote and apply new: e.g., +1 to -1 = -1 (reverse) + -1 (new) = -2 delta
-                    # But with exponential decay, we just apply the difference
-                    old_delta = 1.0 if prev_vote > 0 else -1.0
+                    old_delta = 0.5 if prev_vote > 0 else -0.5
                     # Net effect: reverse old, apply new
                     net_delta = new_delta - old_delta
                     if net_delta != 0:
@@ -907,7 +906,9 @@ class MessageProcessor:
             award_type = str(msg_dict.get("award_type", "")).strip()
 
             if not owner or not target or not award_type:
-                logger.warning("Award %s: missing fields owner=%s target=%s type=%s", tx_hash, owner, target, award_type)
+                logger.warning(
+                    "Award %s: missing fields owner=%s target=%s type=%s", tx_hash, owner, target, award_type
+                )
                 return
 
             user_level = self.db.get_profile_level(owner) or 0
@@ -964,6 +965,7 @@ class MessageProcessor:
         """Get award configs from cached chain params."""
         try:
             from indexer.params import get_award_configs
+
             return get_award_configs()
         except Exception:
             return []

@@ -13,7 +13,7 @@ import { follow, unfollow, isFollowing } from '../utils/FollowUsers';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
 import { buildPhotonUrl, buildWsrvUrl, buildBlurredWsrvUrl, isLikelyImageUrl, isLikelyVideoUrl, redgifsCanonicalWatchUrl } from "../utils/media";
-import { getTierColor, getTierName } from "../utils/tierColors";
+import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
 import { TooltipBelow, tooltipStyles } from "./Tooltip";
 
@@ -1734,8 +1734,8 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         const ownerAddress = (post && post.user_id) ? String(post.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
         const href = username ? `/u/${encodeURIComponent(username)}` : `/u/${encodeURIComponent(ownerAddress)}`;
-        const tierColor = getTierColor(post.author_level);
-        const tierName = getTierName(post.author_level);
+        const tierColor = getAuthorColor(post.author_level, post.author_is_new);
+        const tierName = getAuthorTooltip(post.author_level, post.author_is_new);
         const content = ownerAddress ? (
             <StyledProfileLink
                 to={href}

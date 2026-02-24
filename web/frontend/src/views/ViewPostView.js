@@ -26,7 +26,7 @@ import { getCollapseThreshold, shouldAutoCollapse } from '../utils/Comments';
 import { updateNotification } from '../utils/notifications';
 import { darkColors as fallbackDarkColors } from "../styled/colors/dark";
 import { lightColors as fallbackLightColors } from "../styled/colors/light";
-import { getTierColor, getTierName } from "../utils/tierColors";
+import { getAuthorColor, getAuthorTooltip } from "../utils/tierColors";
 import useBalance from "../utils/useBalance";
 import { TooltipBelow, DottedTooltip, tooltipStyles } from "../components/Tooltip";
 
@@ -2790,8 +2790,8 @@ function ViewPostView({ state, updatePost }) {
         const ownerAddress = currentPost.user_id ? String(currentPost.user_id).trim() : '';
         // New clean URL: prefer username, fallback to address
         const href = trimmedUsername ? `/u/${encodeURIComponent(trimmedUsername)}` : `/u/${encodeURIComponent(ownerAddress)}`;
-        const tierColor = getTierColor(currentPost.author_level);
-        const tierName = getTierName(currentPost.author_level);
+        const tierColor = getAuthorColor(currentPost.author_level, currentPost.author_is_new);
+        const tierName = getAuthorTooltip(currentPost.author_level, currentPost.author_is_new);
         const content = ownerAddress ? (
             <StyledProfileLink to={href} $tierColor={tierColor} data-tooltip={tierName}>{displayWithAt}</StyledProfileLink>
         ) : displayWithAt;

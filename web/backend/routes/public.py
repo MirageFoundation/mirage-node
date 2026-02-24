@@ -3620,6 +3620,7 @@ def search():
                         "username": uname or None,
                         "level": level or 0,
                         "created_at": int(created_at) if created_at else None,
+                        "user_is_new": _is_new_user(int(created_at or 0)),
                         "post_count": int(post_count or 0),
                     }
                 )
@@ -3638,7 +3639,8 @@ def search():
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
-                           COALESCE(p.media, '[]') as media
+                           COALESCE(p.media, '[]') as media,
+                           COALESCE(pr.created_at, 0) as author_created_at
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE LOWER(p.owner) = LOWER(%s)
@@ -3822,6 +3824,7 @@ def search():
                             "username": uname or None,
                             "level": level or 0,
                             "created_at": int(created_at) if created_at else None,
+                            "user_is_new": _is_new_user(int(created_at or 0)),
                             "post_count": int(post_count or 0),
                         }
                     )
@@ -3839,7 +3842,8 @@ def search():
                            COALESCE(p.tag, '') as tag,
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
-                           COALESCE(p.media, '[]') as media
+                           COALESCE(p.media, '[]') as media,
+                           COALESCE(pr.created_at, 0) as author_created_at
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE COALESCE(p.target, '') = ''
@@ -3976,10 +3980,11 @@ def _format_search_posts(
     for row in filtered:
         import json as _json
 
-        if len(row) >= 12:
-            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
-                :12
-            ]
+        author_created_at = 0
+        if len(row) >= 13:
+            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw, author_created_at = row[:13]
+        elif len(row) >= 12:
+            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[:12]
         else:
             txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
             media_raw = "[]"
@@ -3996,6 +4001,7 @@ def _format_search_posts(
                 "user_id": owner,
                 "username": username or None,
                 "author_level": int(author_level) if author_level else 0,
+                "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": int(ts) if ts else None,
                 "topic": topic,
                 "title": title,
@@ -4734,7 +4740,8 @@ def _fetch_post(
                COALESCE(p.thumbnail_url, '') as thumbnail,
                COALESCE(pr.level, 0) as author_level,
                COALESCE(p.comment_count, 0) as comment_count,
-               COALESCE(p.media, '[]') as media
+               COALESCE(p.media, '[]') as media,
+               COALESCE(pr.created_at, 0) as author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -4761,6 +4768,7 @@ def _fetch_post(
     author_level_val = int(row[14]) if len(row) > 14 and row[14] else 0
     stored_comment_count = int(row[15]) if len(row) > 15 and row[15] else 0
     media_raw_val = row[16] if len(row) > 16 else "[]"
+    author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
 
     # Parse media JSON array
     try:
@@ -4828,6 +4836,7 @@ def _fetch_post(
         "user_id": owner,
         "username": username_val,
         "author_level": author_level_val,
+        "author_is_new": _is_new_user(author_created_at_val),
         "timestamp": int(created_at) if created_at is not None else None,
         "topic": topic_val,
         "root_topic": root_topic_val,
@@ -4900,7 +4909,8 @@ def _fetch_comment_tree_batch(
                st.edited, st.edited_at, st.depth,
                COALESCE(pr.username, '') as username,
                COALESCE(pr.level, 0) as author_level,
-               st.media
+               st.media,
+               COALESCE(pr.created_at, 0) as author_created_at
         FROM subtree st
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
         ORDER BY st.depth ASC, st.created_at ASC
@@ -4934,6 +4944,7 @@ def _fetch_comment_tree_batch(
         username_val = row[14] or ""
         author_level_val = int(row[15]) if row[15] else 0
         media_raw_val = row[16] if len(row) > 16 else "[]"
+        author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
 
         # Parse media JSON array
         try:
@@ -4966,6 +4977,7 @@ def _fetch_comment_tree_batch(
             "user_id": owner,
             "username": username_val,
             "author_level": author_level_val,
+            "author_is_new": _is_new_user(author_created_at_val),
             "timestamp": int(created_at) if created_at is not None else None,
             "topic": topic_val,
             "root_topic": root_topic_val,
@@ -5417,7 +5429,8 @@ def get_inbox():
                     COALESCE(pr.level, 0) as actor_level,
                     '' as item_award_type,
                     'reply' as item_type,
-                    COALESCE(r.root_topic, r.topic, '') as item_topic
+                    COALESCE(r.root_topic, r.topic, '') as item_topic,
+                    COALESCE(pr.created_at, 0) as actor_created_at
                 FROM posts r
                 INNER JOIN posts p ON p.txhash = r.target
                 LEFT JOIN profiles pr ON pr.owner = r.owner
@@ -5452,7 +5465,8 @@ def get_inbox():
                     COALESCE(mpr.level, 0) as actor_level,
                     '' as item_award_type,
                     'mention' as item_type,
-                    COALESCE(mp.root_topic, mp.topic, '') as item_topic
+                    COALESCE(mp.root_topic, mp.topic, '') as item_topic,
+                    COALESCE(mpr.created_at, 0) as actor_created_at
                 FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
@@ -5476,7 +5490,8 @@ def get_inbox():
                     COALESCE(apr.level, 0) as actor_level,
                     a.award_type as item_award_type,
                     'award' as item_type,
-                    COALESCE(p.root_topic, p.topic, '') as item_topic
+                    COALESCE(p.root_topic, p.topic, '') as item_topic,
+                    COALESCE(apr.created_at, 0) as actor_created_at
                 FROM awards a
                 INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
                 LEFT JOIN profiles apr ON apr.owner = a.owner
@@ -5535,6 +5550,7 @@ def get_inbox():
             item_award_type = row[12] or ""
             item_type = row[13] or "reply"
             item_topic = (row[14] or "").strip().lower() if len(row) > 14 else ""
+            actor_created_at = int(row[15]) if len(row) > 15 and row[15] else 0
 
             if item_id in blocked_posts or actor_owner in blocked_users:
                 continue
@@ -5563,6 +5579,7 @@ def get_inbox():
                     "reply_owner": actor_owner,
                     "reply_username": actor_username,
                     "reply_author_level": actor_level,
+                    "reply_author_is_new": _is_new_user(actor_created_at),
                     "reply_content": item_content,
                     "reply_timestamp": item_timestamp,
                     "parent_id": context_id,
