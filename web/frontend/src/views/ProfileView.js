@@ -312,6 +312,8 @@ export default function ProfileView({ state }) {
     const [similarUsers, setSimilarUsers] = useState([]);
     const [similarUsersLoading, setSimilarUsersLoading] = useState(false);
     const [similarUsersError, setSimilarUsersError] = useState('');
+    const [showAllTopicPrefs, setShowAllTopicPrefs] = useState(false);
+    const [showAllAuthorPrefs, setShowAllAuthorPrefs] = useState(false);
     const formatPrefWeight = (w) => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -332,6 +334,8 @@ export default function ProfileView({ state }) {
                 if (cancelled) return;
                 setPrefsTopics(Array.isArray(data?.topics) ? data.topics : []);
                 setPrefsAuthors(Array.isArray(data?.authors) ? data.authors : []);
+                setShowAllTopicPrefs(false);
+                setShowAllAuthorPrefs(false);
             } catch (err) {
                 if (!cancelled) {
                     setPrefsError(err?.message || 'Failed to load preferences');
@@ -980,14 +984,46 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!prefsError && prefsTopics.length > 0 && (
                                             <div>
-                                                {prefsTopics.map((t) => (
-                                                    <div key={t.topic} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                                                        <Mono onClick={() => navigate(`/t/${encodeURIComponent(t.topic)}`)} style={{ cursor: 'pointer' }}>#{t.topic}</Mono>
-                                                        <Mono style={{ color: colorForWeight(t.weight) }}>
-                                                            {formatPrefWeight(t.weight)}
+                                                {(() => {
+                                                    const CAP = 5;
+                                                    const needsCollapse = prefsTopics.length > CAP * 2;
+                                                    const visible = needsCollapse && !showAllTopicPrefs
+                                                        ? [...prefsTopics.slice(0, CAP), null, ...prefsTopics.slice(-CAP)]
+                                                        : prefsTopics;
+                                                    return visible.map((t, i) => {
+                                                        if (t === null) {
+                                                            const hidden = prefsTopics.length - CAP * 2;
+                                                            return (
+                                                                <div key="__expand" style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                                    <Mono
+                                                                        onClick={() => setShowAllTopicPrefs(true)}
+                                                                        style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
+                                                                    >
+                                                                        show {hidden} more...
+                                                                    </Mono>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        return (
+                                                            <div key={t.topic} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                                                                <Mono onClick={() => navigate(`/t/${encodeURIComponent(t.topic)}`)} style={{ cursor: 'pointer' }}>#{t.topic}</Mono>
+                                                                <Mono style={{ color: colorForWeight(t.weight) }}>
+                                                                    {formatPrefWeight(t.weight)}
+                                                                </Mono>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                                {showAllTopicPrefs && prefsTopics.length > 10 && (
+                                                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                        <Mono
+                                                            onClick={() => setShowAllTopicPrefs(false)}
+                                                            style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
+                                                        >
+                                                            show less
                                                         </Mono>
                                                     </div>
-                                                ))}
+                                                )}
                                             </div>
                                         )}
                                     </ValueBox>
@@ -1001,21 +1037,51 @@ export default function ProfileView({ state }) {
                                         )}
                                         {!prefsError && prefsAuthors.length > 0 && (
                                             <div>
-                                                {prefsAuthors.map((u) => {
-                                                    const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
-                                                    return (
-                                                        <div
-                                                            key={u.user}
-                                                            style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
-                                                            onClick={() => navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`)}
+                                                {(() => {
+                                                    const CAP = 5;
+                                                    const needsCollapse = prefsAuthors.length > CAP * 2;
+                                                    const visible = needsCollapse && !showAllAuthorPrefs
+                                                        ? [...prefsAuthors.slice(0, CAP), null, ...prefsAuthors.slice(-CAP)]
+                                                        : prefsAuthors;
+                                                    return visible.map((u, i) => {
+                                                        if (u === null) {
+                                                            const hidden = prefsAuthors.length - CAP * 2;
+                                                            return (
+                                                                <div key="__expand" style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                                    <Mono
+                                                                        onClick={() => setShowAllAuthorPrefs(true)}
+                                                                        style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
+                                                                    >
+                                                                        show {hidden} more...
+                                                                    </Mono>
+                                                                </div>
+                                                            );
+                                                        }
+                                                        const uname = prefAuthorUsernames[String(u.user || '').toLowerCase()];
+                                                        return (
+                                                            <div
+                                                                key={u.user}
+                                                                style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', cursor: 'pointer' }}
+                                                                onClick={() => navigate(`/u/${encodeURIComponent(prefAuthorUsernames[u.user] || u.user)}?tab=posts`)}
+                                                            >
+                                                                <Mono>{uname && uname !== u.user ? uname : shortenAddress(u.user)}</Mono>
+                                                                <Mono style={{ color: colorForWeight(u.weight) }}>
+                                                                    {formatPrefWeight(u.weight)}
+                                                                </Mono>
+                                                            </div>
+                                                        );
+                                                    });
+                                                })()}
+                                                {showAllAuthorPrefs && prefsAuthors.length > 10 && (
+                                                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                                                        <Mono
+                                                            onClick={() => setShowAllAuthorPrefs(false)}
+                                                            style={{ cursor: 'pointer', color: '#888', fontStyle: 'italic', fontSize: '0.6rem' }}
                                                         >
-                                                            <Mono>{uname && uname !== u.user ? uname : shortenAddress(u.user)}</Mono>
-                                                            <Mono style={{ color: colorForWeight(u.weight) }}>
-                                                                {formatPrefWeight(u.weight)}
-                                                            </Mono>
-                                                        </div>
-                                                    );
-                                                })}
+                                                            show less
+                                                        </Mono>
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </ValueBox>

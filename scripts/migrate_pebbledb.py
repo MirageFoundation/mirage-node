@@ -327,7 +327,8 @@ def cleanup(server: str) -> None:
     step("7/8", "Cleanup")
     ssh(server, "rm -f /tmp/convert-db")
     ssh(server, f"rm -rf {DATA_DIR}/_pebble_convert_tmp*")
-    print("  Removed converter binary and temp files.")
+    ssh(server, "rm -rf $HOME/.mirage/main")
+    print("  Removed converter binary, temp files, and stale .mirage/main.")
 
 
 # ---------------------------------------------------------------------------
