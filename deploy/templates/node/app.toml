@@ -27,7 +27,7 @@ pruning-interval = "${PRUNING_INTERVAL}"
 min-retain-blocks = ${RETENTION_BLOCKS}
 
 # Application database backend (goleveldb or pebbledb)
-app-db-backend = "goleveldb"
+app-db-backend = "${APP_DB_BACKEND:-goleveldb}"
 
 [api]
 enable = true
