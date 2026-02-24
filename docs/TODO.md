@@ -31,7 +31,11 @@
 ### Node DB Compaction Strategy (goleveldb problem)
 - **Problem:** goleveldb pruning deletes IAVL versions but disk never shrinks — compaction is lazy and there's no online `CompactRange` hook. The only way to reclaim space is offline `miraged prune` (causes downtime) or a full state-sync rebuild.
 - **Current approach:** Stay on goleveldb. Run offline prune periodically or state-sync rebuild when disk gets too large.
-- **PebbleDB (potential fix):** Already compiled into the binary (pure Go, no build changes needed). PebbleDB does continuous background compaction and would solve the disk bloat problem. However, a prior migration attempt (Jan 2026, 8 commits of fixes) was abandoned and the script removed. Failure cause unclear — likely state-sync flakiness or runtime incompatibility with our IAVL/CometBFT versions. Needs testing on a non-critical node before any production switch.
+- **PebbleDB (potential fix):** Already compiled into the binary (pure Go, no build changes needed). Would solve the disk bloat via continuous background compaction. Prior migration attempt (Jan 2026) failed for two reasons:
+  1. CometBFT's `db_backend` does NOT support pebbledb (only `goleveldb`/`memdb`). Only the Cosmos SDK `app-db-backend` can use it.
+  2. With `app-db-backend = "pebbledb"` + `db_backend = "goleveldb"`, state-sync snapshot restore corrupted staking params (`bond_denom` came back empty), causing a panic at the next block. Root cause never identified — could be a cosmos-db bug in the PebbleDB snapshot restore path.
+  - **Untested path:** PebbleDB was never tested without state-sync (e.g., peer-restore with `restore_from_peer.sh` or syncing from genesis). The failure was specifically in snapshot restore, not normal block processing.
+  - **Next step if revisiting:** Test `app-db-backend = "pebbledb"` on a non-critical node using peer-restore (not state-sync) to isolate whether the issue is PebbleDB itself or PebbleDB + snapshot restore.
 - **RocksDB: Not viable without build changes.** Binary is built without CGO / `-tags rocksdb`. Would require Dockerfile changes, librocksdb install, and full rebuild pipeline update.
 
 ## Short-term cleanup (remove after March)

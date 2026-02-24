@@ -1,5 +1,6 @@
 // Lightweight facade that lazily loads the heavy TransactionHandler only on demand
 let handlerPromise = null;
+let _chainConfigFetchClaimed = false;
 
 function getHandler() {
     if (!handlerPromise) {
@@ -119,12 +120,20 @@ export async function getPendingDeletes() {
 }
 
 export function needsChainConfigRefresh() {
-    if (!localStorage.getItem('chainConfig')) return true;
-    const cachedAt = parseInt(localStorage.getItem('chain_config_cached_at') || '0');
-    return Date.now() - cachedAt > 4 * 3600 * 1000;
+    if (_chainConfigFetchClaimed) return false;
+    let stale = false;
+    if (!localStorage.getItem('chainConfig')) {
+        stale = true;
+    } else {
+        const cachedAt = parseInt(localStorage.getItem('chain_config_cached_at') || '0');
+        stale = Date.now() - cachedAt > 4 * 3600 * 1000;
+    }
+    if (stale) _chainConfigFetchClaimed = true;
+    return stale;
 }
 
 export async function cacheChainConfig(data) {
+    _chainConfigFetchClaimed = false;
     const h = await getHandler();
     return h.cacheChainConfig(data);
 }

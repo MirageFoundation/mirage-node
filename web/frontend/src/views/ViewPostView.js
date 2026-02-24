@@ -964,9 +964,9 @@ function ViewPostView({ state, updatePost }) {
     // those scroll to the target comment after all context loads)
     useEffect(() => {
         const params = new URLSearchParams(location.search);
-        if (highlightPostId || params.has('depth')) return;
+        if (params.has('depth')) return;
         window.scrollTo({ top: 0, behavior: 'instant' });
-    }, [location.search, highlightPostId]);
+    }, [location.search]);
 
     // If this post wasn't opened from the feed, clear any stale "came from feed" flag.
     // We only want feed restoration for browser-back when the user navigated feed -> post view.
