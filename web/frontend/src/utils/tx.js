@@ -118,6 +118,12 @@ export async function getPendingDeletes() {
     return h.getPendingDeletes();
 }
 
+export function needsChainConfigRefresh() {
+    if (!localStorage.getItem('chainConfig')) return true;
+    const cachedAt = parseInt(localStorage.getItem('chain_config_cached_at') || '0');
+    return Date.now() - cachedAt > 4 * 3600 * 1000;
+}
+
 export async function cacheChainConfig(data) {
     const h = await getHandler();
     return h.cacheChainConfig(data);
