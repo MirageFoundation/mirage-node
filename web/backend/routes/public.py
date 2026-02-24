@@ -1042,13 +1042,6 @@ def _get_following_feed(
 
     candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
 
-    # Pin own posts to the front so they always appear on page 1
-    own = [p for p in candidates if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower]
-    if own:
-        own_ids = {p["post_id"] for p in own}
-        rest = [p for p in candidates if p["post_id"] not in own_ids]
-        candidates = own + rest
-
     start = (page - 1) * limit
     end = start + limit
     page_posts = candidates[start:end] if start < len(candidates) else []
@@ -1324,14 +1317,6 @@ def _get_home_feed_magic(
 
     # 8. Interleave fresh/random picks with ranked posts, then paginate
     interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
-
-    # 8b. Pin own posts to the front so they always appear on page 1
-    own = [p for p in interleaved_posts if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower]
-    if own:
-        own_ids = {p["post_id"] for p in own}
-        rest = [p for p in interleaved_posts if p["post_id"] not in own_ids]
-        interleaved_posts = own + rest
-
     start = (page - 1) * limit
     end = start + limit
     page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
@@ -1507,7 +1492,7 @@ def _score_magic(
 
     # S = Similarity boost (always >= 0)
     upvoters = similar_upvotes.get(pid, [])
-    raw_sim = sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
+    raw_sim = 1.0 if is_own else sum(float(sim_lookup.get(v, 0.0) or 0.0) for v in upvoters)
     S = math.sqrt(max(0.0, raw_sim))
 
     # V = Vote score (signed sqrt: negative votes hurt the score)
@@ -1519,6 +1504,9 @@ def _score_magic(
     U = math.sqrt(max(0.0, float(unique_count)))
 
     # P = Preference boost (signed sqrt: disliked topics/authors hurt the score)
+    if is_own:
+        author_pref = PREF_RAW_CAP
+        combined_pref = topic_pref + author_pref
     P = _sqrt_signed(combined_pref)
 
     # A = Award score (unique awarders, always >= 0)

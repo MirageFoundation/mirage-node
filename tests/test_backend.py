@@ -3164,9 +3164,10 @@ def test_security(backend: str):
             time.sleep(3)
             _pass("attack.edit_foreign_post submitted (chain may reject)")
 
-    # 10.5 Edit foreign comment — create comment by free, sub1 tries to edit it
+    # 10.5 Edit foreign comment — create comment by sub2, sub1 tries to edit it
     if target_post:
-        comment_txh = _do_post(backend, free_wallet, "", "", "Comment by free", target=target_post)
+        sub2_wallet = WALLETS["sub2"]
+        comment_txh = _do_post(backend, sub2_wallet, "", "", "Comment by sub2", target=target_post, skip_pow=True)
         if comment_txh:
             _wait_comment_indexed(backend, target_post, comment_txh)
             resp = _do_edit(
