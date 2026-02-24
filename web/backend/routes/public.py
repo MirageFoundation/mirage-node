@@ -1017,6 +1017,7 @@ def _get_following_feed(
             now_ts,
             False,
             unique_awarders,
+            viewer=viewer_lower,
         )
         if should_hide:
             continue
@@ -1040,6 +1041,13 @@ def _get_following_feed(
         post["feed_debug"] = debug
 
     candidates.sort(key=lambda p: -float(p.get("_score", 0.0)))
+
+    # Pin own posts to the front so they always appear on page 1
+    own = [p for p in candidates if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower]
+    if own:
+        own_ids = {p["post_id"] for p in own}
+        rest = [p for p in candidates if p["post_id"] not in own_ids]
+        candidates = own + rest
 
     start = (page - 1) * limit
     end = start + limit
@@ -1291,6 +1299,7 @@ def _get_home_feed_magic(
             now_ts,
             True,
             unique_awarders,
+            viewer=viewer_lower,
         )
 
         if should_hide:
@@ -1315,6 +1324,14 @@ def _get_home_feed_magic(
 
     # 8. Interleave fresh/random picks with ranked posts, then paginate
     interleaved_posts = _interleave_fresh_ranked(scored_posts, seed, now_ts)
+
+    # 8b. Pin own posts to the front so they always appear on page 1
+    own = [p for p in interleaved_posts if (p.get("author") or p.get("user_id") or "").strip().lower() == viewer_lower]
+    if own:
+        own_ids = {p["post_id"] for p in own}
+        rest = [p for p in interleaved_posts if p["post_id"] not in own_ids]
+        interleaved_posts = own + rest
+
     start = (page - 1) * limit
     end = start + limit
     page_posts = interleaved_posts[start:end] if start < len(interleaved_posts) else []
@@ -1435,6 +1452,7 @@ def _score_magic(
     now_ts: int,
     use_prefs: bool = True,
     unique_awarders: dict[str, int] | None = None,
+    viewer: str = "",
 ) -> tuple[float, dict, bool]:
     """
     Magic scoring: (S + V + U + P + A) × R
@@ -1465,6 +1483,7 @@ def _score_magic(
     author = post["author"]
     topic_lower = (post.get("topic") or "").strip().lower()
     timestamp = post.get("timestamp", 0)
+    is_own = viewer and (author or "").strip().lower() == viewer
 
     if use_prefs:
         # Check user preference - hide severely disliked content
@@ -1472,7 +1491,7 @@ def _score_magic(
         author_pref = _clamp_pref_raw(float(author_prefs.get(author, 0) or 0.0))
         combined_pref = topic_pref + author_pref
 
-        if combined_pref <= HIDE_THRESHOLD:
+        if combined_pref <= HIDE_THRESHOLD and not is_own:
             return 0.0, {}, True
     else:
         # Non-home feeds: preferences are not part of the score (P=0) and we do not hide.
@@ -1690,6 +1709,26 @@ def _load_home_candidates(
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
     bt_clause, bt_params = _blocked_topics_sql(blocked_topics or set(), blocked_topic_prefixes or tuple())
 
+    # Source 0: Own posts (always included so the viewer always sees their content)
+    cur.execute(
+        f"""SELECT {_POST_COLS}
+        FROM posts p
+        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+        WHERE LOWER(p.owner) = %s
+          AND {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+          {bt_clause}
+        ORDER BY p.created_at DESC
+        LIMIT %s""",
+        [viewer] + bt_params + [max_posts],
+    )
+    for row in cur.fetchall():
+        post = _row_to_post(
+            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes
+        )
+        if post:
+            post["_source"] = "own"
+            results.append(post)
+
     # Source 1: Posts BY similar users (root posts only)
     if similar_addrs:
         similar_list = list(similar_addrs)
@@ -1803,21 +1842,54 @@ def _row_to_post(
     # 15-column rows (with media + author_created_at)
     if len(row) >= 15:
         (
-            txhash, owner, ts, topic, title, content, tag,
-            root_topic, root_post_id, username, edited_at, thumbnail,
-            author_level, media_raw, author_created_at,
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
+            author_level,
+            media_raw,
+            author_created_at,
         ) = row[:15]
     elif len(row) >= 14:
         (
-            txhash, owner, ts, topic, title, content, tag,
-            root_topic, root_post_id, username, edited_at, thumbnail,
-            author_level, media_raw,
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
+            author_level,
+            media_raw,
         ) = row[:14]
         author_created_at = 0
     else:
         (
-            txhash, owner, ts, topic, title, content, tag,
-            root_topic, root_post_id, username, edited_at, thumbnail,
+            txhash,
+            owner,
+            ts,
+            topic,
+            title,
+            content,
+            tag,
+            root_topic,
+            root_post_id,
+            username,
+            edited_at,
+            thumbnail,
             author_level,
         ) = row
         media_raw = "[]"
@@ -2295,13 +2367,14 @@ def get_user_status():
         subscription_expiry = 0
         auto_renew = False
         reserve_funds = 0
+        inbox_last_viewed_at = 0
 
         # Query DB for profile
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
             cur.execute(
-                "SELECT username, level, created_at, subscription_expiry FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
+                "SELECT username, level, created_at, subscription_expiry, inbox_last_viewed_at FROM profiles WHERE LOWER(owner)=LOWER(%s) LIMIT 1",
                 (addr,),
             )
             row = cur.fetchone()
@@ -2310,6 +2383,7 @@ def get_user_status():
                 user_level = int(row[1]) if row[1] is not None else 0
                 profile_registered_at = int(row[2]) if row[2] is not None else None
                 subscription_expiry = int(row[3]) if row[3] is not None else 0
+                inbox_last_viewed_at = int(row[4]) if len(row) > 4 and row[4] is not None else 0
             conn.close()
         except Exception:
             pass
@@ -2371,6 +2445,7 @@ def get_user_status():
             "reserve_funds": reserve_funds,
             "profile_registered_at": profile_registered_at,
             "recent_votes": recent_votes,
+            "inbox_last_viewed_at": inbox_last_viewed_at,
         }
         log_event(rid, "get_user_status.ok", user_level=user_level)
         return jsonify(resp)
@@ -3982,9 +4057,25 @@ def _format_search_posts(
 
         author_created_at = 0
         if len(row) >= 13:
-            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw, author_created_at = row[:13]
+            (
+                txhash,
+                owner,
+                ts,
+                topic,
+                title,
+                content,
+                username,
+                target,
+                tag,
+                thumbnail,
+                author_level,
+                media_raw,
+                author_created_at,
+            ) = row[:13]
         elif len(row) >= 12:
-            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[:12]
+            txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
+                :12
+            ]
         else:
             txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
             media_raw = "[]"
@@ -4334,6 +4425,7 @@ def get_posts():
                     now_ts,
                     False,
                     unique_awarders,
+                    viewer=address_lower,
                 )
                 if should_hide:
                     continue
@@ -4569,18 +4661,51 @@ def get_user_posts():
             author_created_at = 0
             if len(row) >= 14:
                 (
-                    txhash, owner_addr, ts, topic, title, content, uname, target,
-                    edited, edited_at, thumbnail, author_level, media_raw, author_created_at,
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                    author_created_at,
                 ) = row[:14]
             elif len(row) >= 13:
                 (
-                    txhash, owner_addr, ts, topic, title, content, uname, target,
-                    edited, edited_at, thumbnail, author_level, media_raw,
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
                 ) = row[:13]
             elif len(row) >= 12:
                 (
-                    txhash, owner_addr, ts, topic, title, content, uname, target,
-                    edited, edited_at, thumbnail, author_level,
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
                 ) = row
             elif len(row) >= 11:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row

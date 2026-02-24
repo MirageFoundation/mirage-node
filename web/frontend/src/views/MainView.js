@@ -1842,7 +1842,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                         const now = Date.now();
                         const keepOptimistic = [];
                         for (const [id, ts] of optimisticPostIdsRef.current.entries()) {
-                            if (now - Number(ts || 0) > 2 * 60 * 1000) continue;
+                            if (now - Number(ts || 0) > 5 * 1000) continue;
                             if (!sortedOrder.includes(id) && currentOrder.includes(id)) keepOptimistic.push(id);
                             if (sortedOrder.includes(id)) optimisticPostIdsRef.current.delete(id);
                         }

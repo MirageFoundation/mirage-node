@@ -253,7 +253,8 @@ class DatabaseManager:
                         is_moderator BOOLEAN NOT NULL DEFAULT FALSE,
                         biography TEXT NOT NULL DEFAULT '',
                         avatar TEXT NOT NULL DEFAULT '',
-                        banner TEXT NOT NULL DEFAULT ''
+                        banner TEXT NOT NULL DEFAULT '',
+                        inbox_last_viewed_at BIGINT NOT NULL DEFAULT 0
                     )
                     """
                 )
