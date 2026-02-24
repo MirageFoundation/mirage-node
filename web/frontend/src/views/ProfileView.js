@@ -1103,8 +1103,8 @@ export default function ProfileView({ state }) {
                                                         onClick={() => navigate(`/u/${encodeURIComponent(u.username || u.address)}?tab=posts`)}
                                                     >
                                                         <Mono>{u.username || shortenAddress(u.address)}</Mono>
-                                                        <Mono style={{ color: '#22c55e' }}>
-                                                            {(u.similarity * 100).toFixed(0)}% ({u.shared_dimensions} shared)
+                                                        <Mono style={{ color: u.similarity >= 0 ? '#22c55e' : '#ef4444' }}>
+                                                            {u.similarity >= 0 ? '+' : ''}{Math.round(u.similarity * 100)}% ({u.shared_dimensions} shared)
                                                         </Mono>
                                                     </div>
                                                 ))}
