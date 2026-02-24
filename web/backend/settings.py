@@ -46,3 +46,7 @@ IGNORE_MOD_BLOCKED_POSTS = False
 
 # Show all content from users, even if blocked by followed moderators (only apply your own blocks)
 IGNORE_MOD_BLOCKED_USERS = False
+
+# New-user highlight: number of days after registration to show green "New User" badge.
+# Set to 0 to disable the feature entirely.
+NEW_USER_HIGHLIGHT_DAYS = int(os.environ.get("NEW_USER_HIGHLIGHT_DAYS", "7"))

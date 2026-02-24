@@ -36,6 +36,7 @@ from settings import (
     REGISTRATION_INVITE_CODE_REQUIRED,
     QUESTS_ENABLED,
     QUESTS_PAYOUTS_ENABLED,
+    NEW_USER_HIGHLIGHT_DAYS,
 )
 import time
 import hashlib
@@ -108,6 +109,13 @@ def _query_chain_profile_full(addr: str) -> dict | None:
 
 
 public_bp = Blueprint("public", __name__)
+
+
+def _is_new_user(profile_created_at: int) -> bool:
+    """Check if a profile qualifies for the new-user highlight."""
+    if NEW_USER_HIGHLIGHT_DAYS <= 0 or not profile_created_at:
+        return False
+    return (int(time.time()) - int(profile_created_at)) <= NEW_USER_HIGHLIGHT_DAYS * 86400
 
 
 def _deleted_filter() -> str:
@@ -419,7 +427,7 @@ _INBOX_CACHE_MAX = 10000
 
 
 def _get_new_inbox_count(cur, address: str) -> int:
-    """Count replies + @mentions to user's posts that arrived after their last inbox view.
+    """Count replies + @mentions + awards to user's posts after last inbox view.
     Results are cached in-memory for 60s per address."""
     if not address or address.lower() == "guest":
         return 0
@@ -434,6 +442,7 @@ def _get_new_inbox_count(cur, address: str) -> int:
     last_seen = 0
     reply_count = 0
     mention_count = 0
+    award_count = 0
     try:
         # Count new replies
         cur.execute(
@@ -476,7 +485,24 @@ def _get_new_inbox_count(cur, address: str) -> int:
     except Exception:
         mention_count = 0
 
-    count = reply_count + mention_count
+    try:
+        # Count new awards
+        cur.execute(
+            """
+            SELECT COUNT(*) FROM awards a
+            JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+            WHERE LOWER(p.owner) = %s
+              AND LOWER(a.owner) != %s
+              AND a.created_at > %s
+            """,
+            (viewer, viewer, last_seen),
+        )
+        arow = cur.fetchone()
+        award_count = int(arow[0]) if arow and arow[0] else 0
+    except Exception:
+        award_count = 0
+
+    count = reply_count + mention_count + award_count
 
     # Evict expired entries if cache is too large
     if len(_inbox_cache) >= _INBOX_CACHE_MAX:
@@ -622,7 +648,8 @@ def _load_candidate_posts(
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
-               COALESCE(p.media, '[]') AS media
+               COALESCE(p.media, '[]') AS media,
+               COALESCE(pr.created_at, 0) AS author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -654,6 +681,7 @@ def _load_candidate_posts(
             thumbnail,
             author_level,
             media_raw,
+            author_created_at,
         ) = row
         media = json.loads(media_raw)
         if not isinstance(media, list):
@@ -683,6 +711,7 @@ def _load_candidate_posts(
                 "user_id": author,
                 "username": username or "",
                 "author_level": int(author_level) if author_level else 0,
+                "author_is_new": _is_new_user(int(author_created_at or 0)),
                 "timestamp": int(ts) if ts else 0,
                 "topic": topic_raw,
                 "topic_lower": topic_lower,
@@ -825,7 +854,8 @@ def _load_following_candidates(
                COALESCE(p.edited_at, 0) AS edited_at,
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
-               COALESCE(p.media, '[]') AS media
+               COALESCE(p.media, '[]') AS media,
+               COALESCE(pr.created_at, 0) AS author_created_at
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -1116,7 +1146,8 @@ def _get_home_feed_newest(
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
-                   COALESCE(p.media, '[]') AS media"""
+                   COALESCE(p.media, '[]') AS media,
+                   COALESCE(pr.created_at, 0) AS author_created_at"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
@@ -1653,7 +1684,8 @@ def _load_home_candidates(
     _POST_COLS = """p.txhash, p.owner, p.created_at, p.topic, p.title, p.content, p.tag,
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
-                   COALESCE(p.media, '[]') AS media"""
+                   COALESCE(p.media, '[]') AS media,
+                   COALESCE(pr.created_at, 0) AS author_created_at"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
     bt_clause, bt_params = _blocked_topics_sql(blocked_topics or set(), blocked_topic_prefixes or tuple())
@@ -1768,41 +1800,28 @@ def _row_to_post(
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
 
-    # Support both 13-column (legacy) and 14-column (v1.12.0 with media) rows
-    if len(row) >= 14:
+    # 15-column rows (with media + author_created_at)
+    if len(row) >= 15:
         (
-            txhash,
-            owner,
-            ts,
-            topic,
-            title,
-            content,
-            tag,
-            root_topic,
-            root_post_id,
-            username,
-            edited_at,
-            thumbnail,
-            author_level,
-            media_raw,
+            txhash, owner, ts, topic, title, content, tag,
+            root_topic, root_post_id, username, edited_at, thumbnail,
+            author_level, media_raw, author_created_at,
+        ) = row[:15]
+    elif len(row) >= 14:
+        (
+            txhash, owner, ts, topic, title, content, tag,
+            root_topic, root_post_id, username, edited_at, thumbnail,
+            author_level, media_raw,
         ) = row[:14]
+        author_created_at = 0
     else:
         (
-            txhash,
-            owner,
-            ts,
-            topic,
-            title,
-            content,
-            tag,
-            root_topic,
-            root_post_id,
-            username,
-            edited_at,
-            thumbnail,
+            txhash, owner, ts, topic, title, content, tag,
+            root_topic, root_post_id, username, edited_at, thumbnail,
             author_level,
         ) = row
         media_raw = "[]"
+        author_created_at = 0
 
     pid = (txhash or "").lower()
     author = (owner or "").lower()
@@ -1830,6 +1849,7 @@ def _row_to_post(
         "user_id": author,
         "username": username or "",
         "author_level": int(author_level) if author_level else 0,
+        "author_is_new": _is_new_user(int(author_created_at or 0)),
         "timestamp": int(ts) if ts else 0,
         "topic": (topic or "").strip(),
         "root_topic": (root_topic or topic or "").strip(),
@@ -2959,6 +2979,7 @@ def get_node_config():
             "registration_invite_code_required": REGISTRATION_INVITE_CODE_REQUIRED,
             "quests_enabled": QUESTS_ENABLED,
             "quest_payouts_enabled": QUESTS_PAYOUTS_ENABLED,
+            "new_user_highlight_days": NEW_USER_HIGHLIGHT_DAYS,
         }
 
         _NODE_CONFIG_CACHE = resp
@@ -4128,7 +4149,8 @@ def get_posts():
                        COALESCE(p.edited_at, 0) as edited_at,
                       COALESCE(p.thumbnail_url, '') as thumbnail,
                       COALESCE(pr.level, 0) as author_level,
-                      COALESCE(p.media, '[]') as media
+                      COALESCE(p.media, '[]') as media,
+                      COALESCE(pr.created_at, 0) as author_created_at
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
@@ -4152,7 +4174,9 @@ def get_posts():
                        COALESCE(pr.username, '') as username,
                        COALESCE(p.edited_at, 0) as edited_at,
                        COALESCE(p.thumbnail_url, '') as thumbnail,
-                       COALESCE(pr.level, 0) as author_level
+                       COALESCE(pr.level, 0) as author_level,
+                       COALESCE(p.media, '[]') as media,
+                       COALESCE(pr.created_at, 0) as author_created_at
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {bt_clause} {deleted_clause}
@@ -4418,7 +4442,8 @@ def get_user_posts():
                    COALESCE(p.edited_at, 0) as edited_at,
                    COALESCE(p.thumbnail_url, '') as thumbnail,
                    COALESCE(pr.level, 0) as author_level,
-                   COALESCE(p.media, '[]') as media
+                   COALESCE(p.media, '[]') as media,
+                   COALESCE(pr.created_at, 0) as author_created_at
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
@@ -4535,36 +4560,21 @@ def get_user_posts():
             import json as _json
 
             media_raw = "[]"
-            if len(row) >= 13:
+            author_created_at = 0
+            if len(row) >= 14:
                 (
-                    txhash,
-                    owner_addr,
-                    ts,
-                    topic,
-                    title,
-                    content,
-                    uname,
-                    target,
-                    edited,
-                    edited_at,
-                    thumbnail,
-                    author_level,
-                    media_raw,
+                    txhash, owner_addr, ts, topic, title, content, uname, target,
+                    edited, edited_at, thumbnail, author_level, media_raw, author_created_at,
+                ) = row[:14]
+            elif len(row) >= 13:
+                (
+                    txhash, owner_addr, ts, topic, title, content, uname, target,
+                    edited, edited_at, thumbnail, author_level, media_raw,
                 ) = row[:13]
             elif len(row) >= 12:
                 (
-                    txhash,
-                    owner_addr,
-                    ts,
-                    topic,
-                    title,
-                    content,
-                    uname,
-                    target,
-                    edited,
-                    edited_at,
-                    thumbnail,
-                    author_level,
+                    txhash, owner_addr, ts, topic, title, content, uname, target,
+                    edited, edited_at, thumbnail, author_level,
                 ) = row
             elif len(row) >= 11:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row
@@ -4591,6 +4601,7 @@ def get_user_posts():
                     "user_id": owner_addr,
                     "username": uname,
                     "author_level": int(author_level) if author_level else 0,
+                    "author_is_new": _is_new_user(int(author_created_at or 0)),
                     "timestamp": int(ts) if ts is not None else None,
                     "topic": topic,
                     "title": title,
@@ -5404,6 +5415,7 @@ def get_inbox():
                         CASE WHEN COALESCE(p10.target, '') = '' THEN p10.txhash ELSE NULL END
                     ) as root_post_id,
                     COALESCE(pr.level, 0) as actor_level,
+                    '' as item_award_type,
                     'reply' as item_type,
                     COALESCE(r.root_topic, r.topic, '') as item_topic
                 FROM posts r
@@ -5438,6 +5450,7 @@ def get_inbox():
                     COALESCE(mpr.username, '') as actor_username,
                     COALESCE(mp.root_post_id, mp.txhash) as root_post_id,
                     COALESCE(mpr.level, 0) as actor_level,
+                    '' as item_award_type,
                     'mention' as item_type,
                     COALESCE(mp.root_topic, mp.topic, '') as item_topic
                 FROM mentions m
@@ -5445,12 +5458,36 @@ def get_inbox():
                 LEFT JOIN profiles mpr ON mpr.owner = m.mentioner_address
                 WHERE LOWER(m.mentioned_address) = %s
                   AND LOWER(m.mentioner_address) != %s
+
+                UNION ALL
+
+                SELECT
+                    p.txhash as item_id,
+                    a.owner as actor_owner,
+                    a.created_at as item_timestamp,
+                    '' as item_content,
+                    p.txhash as context_id,
+                    p.content as context_content,
+                    p.title as context_title,
+                    COALESCE(p.target, '') as context_target,
+                    p.owner as context_owner,
+                    COALESCE(apr.username, '') as actor_username,
+                    COALESCE(p.root_post_id, p.txhash) as root_post_id,
+                    COALESCE(apr.level, 0) as actor_level,
+                    a.award_type as item_award_type,
+                    'award' as item_type,
+                    COALESCE(p.root_topic, p.topic, '') as item_topic
+                FROM awards a
+                INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+                LEFT JOIN profiles apr ON apr.owner = a.owner
+                WHERE LOWER(p.owner) = %s
+                  AND LOWER(a.owner) != %s
             ) inbox
             ORDER BY inbox.item_timestamp DESC
             LIMIT %s OFFSET %s
         """
 
-        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
+        params = [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, limit, offset]
 
         t_query = time.time()
         cur.execute(query, params)
@@ -5469,9 +5506,13 @@ def get_inbox():
                 SELECT COUNT(*) FROM mentions m
                 INNER JOIN posts mp ON mp.txhash = m.post_txhash AND mp.deleted = FALSE
                 WHERE LOWER(m.mentioned_address) = %s AND LOWER(m.mentioner_address) != %s
+            ) + (
+                SELECT COUNT(*) FROM awards a
+                INNER JOIN posts p ON p.txhash = a.target AND p.deleted = FALSE
+                WHERE LOWER(p.owner) = %s AND LOWER(a.owner) != %s
             )
         """
-        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower])
+        cur.execute(count_query, [viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower, viewer_lower])
         total_row = cur.fetchone()
         total = int(total_row[0]) if total_row and total_row[0] else 0
 
@@ -5491,8 +5532,9 @@ def get_inbox():
             actor_username = row[9] or ""
             root_post_id = (row[10] or "").lower()
             actor_level = int(row[11]) if row[11] else 0
-            item_type = row[12] or "reply"
-            item_topic = (row[13] or "").strip().lower() if len(row) > 13 else ""
+            item_award_type = row[12] or ""
+            item_type = row[13] or "reply"
+            item_topic = (row[14] or "").strip().lower() if len(row) > 14 else ""
 
             if item_id in blocked_posts or actor_owner in blocked_users:
                 continue
@@ -5527,6 +5569,7 @@ def get_inbox():
                     "parent_content": parent_display_text,
                     "parent_owner": context_owner,
                     "root_post_id": root_post_id,
+                    "award_type": item_award_type,
                     "type": item_type,
                 }
             )

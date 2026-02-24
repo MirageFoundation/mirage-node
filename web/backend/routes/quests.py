@@ -92,23 +92,10 @@ def _load_quest_definitions() -> Dict[str, Any]:
         return {"daily_quests": [], "flash_quest_templates": [], "achievements": []}
 
 
-def _get_user_reward_multiplier(owner: str, ts: int) -> float:
-    """Calculate reward multiplier based on account age (1x to 5x over 30 days)."""
-    with connect_db() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT created_at FROM profiles WHERE LOWER(owner) = LOWER(%s)", (owner,))
-            row = cur.fetchone()
-            if not row or not row[0]:
-                return 1.0  # Default to 1x for unknown accounts
-
-            created_at = row[0]
-            age_days = (ts - created_at) / 86400
-
-            # Linear ramp from 1x to 5x over 30 days
-            # progress goes from 0.0 (day 0) to 1.0 (day 30+)
-            progress = min(1.0, max(0.0, age_days / 30))
-            multiplier = 1.0 + (progress * 4.0)  # 1x + (0-4x) = 1x to 5x
-            return multiplier
+def _get_user_reward_multiplier(owner: str) -> float:
+    """Calculate reward multiplier based on completed quest count (0x at 0, 5x at 50)."""
+    completed = _get_completed_quest_count(owner)
+    return min(5.0, completed / 10.0)
 
 
 def _is_user_suspended(owner: str, ts: int) -> bool:
@@ -644,7 +631,7 @@ def get_rewards_summary():
                 pending_invite_codes += reward_data.get("amount", 1)
 
         # -- shared multiplier --
-        multiplier = _get_user_reward_multiplier(owner, ts)
+        multiplier = _get_user_reward_multiplier(owner)
         total_mirage = total_mirage_with_multiplier + total_mirage_no_multiplier
         total_mirage_after_multiplier = int(total_mirage_with_multiplier * multiplier) + total_mirage_no_multiplier
 

@@ -527,20 +527,15 @@ class RewardDistributor:
         return result
 
     def _get_multiplier(self, owner: str, ts: int) -> float:
-        """Calculate reward multiplier based on account age (1x to 5x over 30 days)."""
+        """Calculate reward multiplier based on completed quest count (0x at 0, 5x at 50)."""
         with connect_db() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT created_at FROM profiles WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                row = cur.fetchone()
-                if not row or not row[0]:
-                    return 1.0  # Default to 1x for unknown accounts
-
-                created_at = row[0]
-                age_days = (ts - created_at) / 86400
-
-                # Linear ramp from 1x to 5x over 30 days
-                progress = min(1.0, max(0.0, age_days / 30))
-                return 1.0 + (progress * 4.0)  # 1x to 5x
+                cur.execute(
+                    "SELECT COUNT(*) FROM user_daily_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL",
+                    (owner,),
+                )
+                completed = (cur.fetchone() or [0])[0]
+                return min(5.0, completed / 10.0)
 
     def void_pending_rewards(self, owner: str) -> int:
         """

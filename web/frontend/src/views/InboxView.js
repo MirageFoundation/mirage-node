@@ -155,6 +155,17 @@ const Separator = styled.div`
 `;
 
 // removed unused Actions
+const AWARD_LABELS = {
+    quality_post: 'Quality Post',
+    original_content: 'Original Content',
+    based: 'Based AF',
+    receipts: 'Receipts',
+};
+
+const formatAwardLabel = (name) => {
+    const key = String(name || '').trim();
+    return AWARD_LABELS[key] || key || 'Award';
+};
 
 export default function InboxView({ state }) {
     const navigate = useNavigate();
@@ -368,11 +379,15 @@ export default function InboxView({ state }) {
                 const isUnread = !viewedReplyIds.includes(reply.reply_id);
                 const displayUsername = `@${reply.reply_username || shortenAddress(reply.reply_owner)}`;
                 const isMention = reply.type === 'mention';
+                const isAward = reply.type === 'award';
+                const awardLabel = isAward ? formatAwardLabel(reply.award_type) : '';
+                const awardTarget = isAward && reply.root_post_id && reply.root_post_id === reply.reply_id ? 'post' : 'comment';
+                const hasParent = Boolean(reply.parent_content);
                 // Use new clean URL with depth=1 for reply with parent context
                 const replyUrl = `/p/${reply.reply_id}?depth=1`;
                 return (
                     <ReplyItem
-                        key={reply.reply_id + (isMention ? '_m' : '_r')}
+                        key={`${reply.reply_id}_${reply.type || 'reply'}`}
                         href={replyUrl}
                         $isUnread={isUnread}
                         $isActive={activeReplyId === reply.reply_id}
@@ -386,7 +401,24 @@ export default function InboxView({ state }) {
                     >
                         <ReplyHeaderRow>
                             <ReplyHeader $isUnread={isUnread}>
-                                <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>{isMention ? ' mentioned you in ' : ' replied to '}<ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
+                                {isAward ? (
+                                    <>
+                                        <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>
+                                        {` gave you a "${awardLabel}" award for your ${awardTarget}`}
+                                        {hasParent && (
+                                            <>
+                                                {': '}
+                                                <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>
+                                            </>
+                                        )}
+                                    </>
+                                ) : (
+                                    <>
+                                        <ReplyUsername $tierColor={getTierColor(reply.reply_author_level)} data-tooltip={getTierName(reply.reply_author_level)}>{displayUsername}</ReplyUsername>
+                                        {isMention ? ' mentioned you in ' : ' replied to '}
+                                        <ParentContent title={reply.parent_content}>{reply.parent_content}</ParentContent>:
+                                    </>
+                                )}
                             </ReplyHeader>
                             {isUnread && (
                                 <MarkReadButton
@@ -398,7 +430,7 @@ export default function InboxView({ state }) {
                             )}
                         </ReplyHeaderRow>
                         <Separator />
-                        <ReplyContentText>{reply.reply_content}</ReplyContentText>
+                        {reply.reply_content && <ReplyContentText>{reply.reply_content}</ReplyContentText>}
                     </ReplyItem>
                 );
             })}

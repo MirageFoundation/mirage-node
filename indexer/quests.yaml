@@ -153,6 +153,24 @@ daily_quests:
       - type: mirage
         amount: 500
 
+  - id: award_winner
+    title: "Award Winner"
+    description: "Receive any award on one of your posts or comments"
+    action_type: award_received
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 800
+
+  - id: quality_award_winner
+    title: "Quality Recognized"
+    description: "Receive a Quality Post award on one of your posts or comments"
+    action_type: quality_award_received
+    target_count: 1
+    rewards:
+      - type: mirage
+        amount: 1500
+
 flash_quest_templates:
   # Easy quests (small payouts, quick to complete)
   - id: quick_vote

@@ -950,6 +950,13 @@ class MessageProcessor:
                     "admin": is_admin,
                 },
             )
+
+            # Track quest progress for the post/comment author (not the award giver)
+            target_author = self.db.get_post_owner(target)
+            if target_author:
+                self.quest_tracker.update_progress(target_author, "award_received", ts, target=target)
+                if award_type == "quality_post":
+                    self.quest_tracker.update_progress(target_author, "quality_award_received", ts, target=target)
         except Exception as e:
             logger.error("Error handling MsgAward %s: %s", tx_hash, e, exc_info=True)
 
