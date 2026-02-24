@@ -947,12 +947,12 @@ def _get_following_feed(
         vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
         )
+        _, award_details = _load_award_aggregates(cur, page_ids)
 
         for post in page_posts:
             pid = post["post_id"]
             author_lower = (post.get("author") or "").strip().lower()
             is_own = author_lower == viewer_lower
-            by_user = author_lower in followed_users
 
             if is_own:
                 reason = "Your post"
@@ -961,6 +961,7 @@ def _get_following_feed(
 
             post["points"] = vote_totals.get(pid, 0.0)
             post["comments"] = comment_counts.get(pid, 0)
+            post["awards"] = award_details.get(pid, [])
             post["children"] = []
             post["feed_type"] = "following"
             post["feed_bucket"] = "newest"
@@ -1184,17 +1185,19 @@ def _get_home_feed_newest(
     page_posts = posts[start:end] if start < len(posts) else []
     has_more = len(posts) > end
 
-    # Load vote/comment stats only for the posts we're returning
+    # Load vote/comment/award stats only for the posts we're returning
     page_ids = [p["post_id"] for p in page_posts]
     viewer_lower = (viewer or "").strip().lower()
     vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
+    _, award_details = _load_award_aggregates(cur, page_ids)
 
     for post in page_posts:
         pid = post["post_id"]
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "newest"
@@ -1978,14 +1981,16 @@ def _get_guest_feed(
     if not candidates:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # Load vote/comment stats (no viewer for guest)
+    # Load vote/comment/award stats (no viewer for guest)
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
+    _, award_details = _load_award_aggregates(cur, post_ids)
 
     for post in candidates:
         pid = post["post_id"]
         post["points"] = vote_totals.get(pid, 0.0)
         post["comments"] = comment_counts.get(pid, 0)
+        post["awards"] = award_details.get(pid, [])
         post["children"] = []
         post["feed_type"] = "home"
         post["feed_bucket"] = "guest"
