@@ -385,7 +385,7 @@ function TopBar({ state }) {
         const handleInboxCount = (e) => {
             if (!mountedRef.current) return;
             const count = typeof e.detail === 'number' ? Math.max(0, e.detail) : 0;
-            console.debug('[TopBar] inboxCount event received', { count, publicKey: !!publicKey });
+
             setInboxCount(count);
         };
 
