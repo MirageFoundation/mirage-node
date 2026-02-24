@@ -88,6 +88,8 @@ scripts/*
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
+!scripts/migrate_pebbledb.sh
+!scripts/check_persistent_peers.sh
 
 cursor.md
 .cursor/

@@ -1,6 +1,7 @@
 BRANCH := $(shell git rev-parse --abbrev-ref HEAD)
 COMMIT := $(shell git log -1 --format='%H')
 APPNAME := mirage
+BUILD_TAGS := pebbledb
 
 # do not override user values
 ifeq (,$(VERSION))
@@ -18,7 +19,7 @@ ldflags = -X github.com/cosmos/cosmos-sdk/version.Name=$(APPNAME) \
 	-X github.com/cosmos/cosmos-sdk/version.Version=$(VERSION) \
 	-X github.com/cosmos/cosmos-sdk/version.Commit=$(COMMIT)
 
-BUILD_FLAGS := -ldflags '$(ldflags)'
+BUILD_FLAGS := -tags $(BUILD_TAGS) -ldflags '$(ldflags)'
 
 ##############
 ###  Test  ###
@@ -71,7 +72,12 @@ build-orchestrator:
 	@mkdir -p ./bin
 	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/orchestrator ./cmd/orchestrator
 
-build-all: test-fast build build-orchestrator
+build-convert-db:
+	@echo "--> building convert-db"
+	@mkdir -p ./bin
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/convert-db ./cmd/convert-db
+
+build-all: test-fast build build-orchestrator build-convert-db
 
 # Build a specific version for upgrades (version embedded via ldflags; binary is always miraged)
 build-version:
@@ -81,7 +87,7 @@ build-version:
 	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
 	@echo "--> Binary created: ./bin/$(APPNAME)d"
 
-.PHONY: all install build build-version build-orchestrator build-all
+.PHONY: all install build build-version build-orchestrator build-convert-db build-all
 
 ##################
 ###  Protobuf  ###
