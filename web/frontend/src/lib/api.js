@@ -122,19 +122,26 @@ function maybeSyncInbox(params, body, data) {
     if (!data || typeof data !== 'object' || typeof data.new_inbox_items !== 'number') return;
     try {
         const myAddr = localStorage.getItem('publicKey') || '';
-        if (!myAddr) return;
+        if (!myAddr) { console.debug('[inbox-sync] skip: no publicKey in localStorage'); return; }
         const reqAddr = String(
             (params && (params.address || params.owner)) ||
             (body && (body.address || body.owner)) ||
             ''
         );
-        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return;
+        if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) {
+            console.debug('[inbox-sync] skip: addr mismatch', { reqAddr, myAddr });
+            return;
+        }
         const setAt = parseInt(localStorage.getItem('inbox_count_set_at'), 10);
-        if (setAt && (Date.now() - setAt) < 5000) return;
+        if (setAt && (Date.now() - setAt) < 5000) {
+            console.debug('[inbox-sync] skip: cooldown active', { setAt, age: Date.now() - setAt });
+            return;
+        }
         const count = Math.max(0, data.new_inbox_items);
+        console.debug('[inbox-sync] updating badge', { count, from: localStorage.getItem('inbox_count') });
         localStorage.setItem('inbox_count', String(count));
         window.dispatchEvent(new CustomEvent('inboxCount', { detail: count }));
-    } catch (_) { }
+    } catch (err) { console.warn('[inbox-sync] error', err); }
 }
 
 function withInboxLastViewed(params) {
