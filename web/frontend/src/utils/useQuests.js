@@ -119,7 +119,7 @@ export function useRewards() {
             });
 
             setSecondsUntilReset(res.seconds_until_reset || 0);
-            setRewardMultiplier(res.reward_multiplier || 0);
+            setRewardMultiplier(res.reward_multiplier || 1);
 
             // --- flash quest (merge) ---
             const newFlash = res.flash_quest;

@@ -93,9 +93,9 @@ def _load_quest_definitions() -> Dict[str, Any]:
 
 
 def _get_user_reward_multiplier(owner: str) -> float:
-    """Calculate reward multiplier based on completed quest count (0x at 0, 5x at 50)."""
+    """Calculate reward multiplier based on completed quest count (1x at 0, 5x at 50)."""
     completed = _get_completed_quest_count(owner)
-    return min(5.0, completed / 10.0)
+    return 1.0 + min(4.0, completed * 4.0 / 50.0)
 
 
 def _is_user_suspended(owner: str, ts: int) -> bool:
