@@ -960,10 +960,13 @@ function ViewPostView({ state, updatePost }) {
         root.style.setProperty('--card-gap-mobile', gapMobile);
     }, [cardSize]);
 
-    // Scroll to top instantly when navigating to this view
+    // Scroll to top instantly when navigating to this view (skip for focused comment views —
+    // those scroll to the target comment after all context loads)
     useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        if (highlightPostId || params.has('depth')) return;
         window.scrollTo({ top: 0, behavior: 'instant' });
-    }, [location.search]);
+    }, [location.search, highlightPostId]);
 
     // If this post wasn't opened from the feed, clear any stale "came from feed" flag.
     // We only want feed restoration for browser-back when the user navigated feed -> post view.
@@ -1185,8 +1188,7 @@ function ViewPostView({ state, updatePost }) {
         window.addEventListener('chainConfigUpdated', handleConfigUpdate);
         window.addEventListener('userStatusUpdated', handleConfigUpdate);
 
-        // Fetch chain config if not cached (e.g. first visit after login)
-        if (!localStorage.getItem('chainConfig')) {
+        if (tx.needsChainConfigRefresh()) {
             Api.get('get_chain_config', undefined)
                 .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
                 .catch(() => { });
@@ -2666,21 +2668,34 @@ function ViewPostView({ state, updatePost }) {
         return out;
     }, [flattenedComments, state.posts, lastVisitTs]);
 
-    // Scroll to a specific comment if hash is present after comments load
+    // Scroll to focused comment — debounced so it waits for all context (actualRootPost,
+    // parent chain) to finish loading before firing. Each time `annotated` changes (new data
+    // loads above the target), the timer resets. Once stable for 300ms, we scroll once.
+    const scrollToFocusedTimer = React.useRef(null);
+    const scrollToFocusedDone = React.useRef(false);
+    useEffect(() => {
+        if (!focusedCommentId || scrollToFocusedDone.current) return;
+        if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current);
+        const targetId = `comment-${focusedCommentId.toLowerCase()}`;
+        scrollToFocusedTimer.current = setTimeout(() => {
+            const el = document.getElementById(targetId);
+            if (el) {
+                el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                scrollToFocusedDone.current = true;
+            }
+        }, 300);
+        return () => { if (scrollToFocusedTimer.current) clearTimeout(scrollToFocusedTimer.current); };
+    }, [annotated, focusedCommentId]);
+
+    // Scroll to hash-linked comment (non-focused, e.g. direct #comment-xxx link)
     const hasScrolledToHash = React.useRef(false);
     useEffect(() => {
         try {
-            if (hasScrolledToHash.current) return;
+            if (hasScrolledToHash.current || focusedCommentId) return;
             const hash = (typeof window !== 'undefined' && window.location && window.location.hash) ? window.location.hash : '';
-            let targetId = '';
-            if (focusedCommentId && /^[0-9a-f]{64}$/i.test(focusedCommentId)) {
-                targetId = `comment-${focusedCommentId.toLowerCase()}`;
-            } else if (hash && hash.startsWith('#comment-')) {
-                const commentId = hash.slice('#comment-'.length).toLowerCase();
-                targetId = `comment-${commentId}`;
-            }
-            if (!targetId) return;
-            const el = document.getElementById(targetId);
+            if (!hash || !hash.startsWith('#comment-')) return;
+            const commentId = hash.slice('#comment-'.length).toLowerCase();
+            const el = document.getElementById(`comment-${commentId}`);
             if (el) {
                 setTimeout(() => {
                     el.scrollIntoView({ block: 'start', behavior: 'smooth' });

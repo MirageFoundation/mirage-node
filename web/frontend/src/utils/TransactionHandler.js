@@ -1454,6 +1454,15 @@ class TransactionHandler {
     }
 
     /**
+     * Returns true if the cached chainConfig is missing or older than 4 hours.
+     */
+    needsChainConfigRefresh() {
+        if (!localStorage.getItem('chainConfig')) return true;
+        const cachedAt = parseInt(Storage.load('chain_config_cached_at', '0'));
+        return Date.now() - cachedAt > 4 * 3600 * 1000;
+    }
+
+    /**
      * Cache chain governance params (from get_chain_config).
      * Stored in localStorage as 'chainConfig'.
      */

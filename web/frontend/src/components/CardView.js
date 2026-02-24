@@ -921,7 +921,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
     }, []);
 
     useEffect(() => {
-        if (localStorage.getItem('chainConfig')) return;
+        if (!tx.needsChainConfigRefresh()) return;
         Api.get('get_chain_config', undefined)
             .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
             .catch(() => { });

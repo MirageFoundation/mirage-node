@@ -424,6 +424,19 @@ class App extends Component {
         // the app has loaded successfully.
         try { sessionStorage.removeItem(CHUNK_RELOAD_KEY); } catch (_) { }
 
+        // On hard refresh (or any full page reload), invalidate cached config timestamps
+        // so views re-fetch chain/node config from the backend.
+        try {
+            const navEntries = performance.getEntriesByType('navigation');
+            const isReload = navEntries.length > 0
+                ? navEntries[0].type === 'reload'
+                : performance.navigation?.type === 1;
+            if (isReload) {
+                Storage.remove('chain_config_cached_at');
+                Storage.remove('node_config_cached_at');
+            }
+        } catch (_) { }
+
         // Security: if user hasn't used the site in 30 days, force logout and clear ALL local storage.
         // (We also clear sessionStorage to avoid restoring stale feed caches.)
         try {

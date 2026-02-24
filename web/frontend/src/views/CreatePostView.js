@@ -393,9 +393,8 @@ function CreatePostView({ state, setPosts, updatePost }) {
         };
     }, []);
 
-    // Fetch chain config lazily if not cached (e.g. first visit after login)
     useEffect(() => {
-        if (localStorage.getItem('chainConfig')) return;
+        if (!tx.needsChainConfigRefresh()) return;
         Api.get('get_chain_config', undefined)
             .then((cfg) => { if (cfg) try { tx.cacheChainConfig(cfg); } catch (_) { } })
             .catch(() => { });
