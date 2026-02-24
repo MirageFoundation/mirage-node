@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cockroachdb/pebble"
 	dbm "github.com/cosmos/cosmos-db"
 )
 
@@ -34,7 +35,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "ERROR: failed to create temp dir: %v\n", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(tmpDir)
+
+	dstPath := filepath.Join(tmpDir, dbName+".db")
 
 	fmt.Printf("Opening GoLevelDB source: %s\n", srcPath)
 	srcDB, err := dbm.NewGoLevelDB(dbName, dataDir, nil)
@@ -43,8 +45,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Creating PebbleDB destination in: %s\n", tmpDir)
-	dstDB, err := dbm.NewPebbleDB(dbName, tmpDir, nil)
+	fmt.Printf("Creating PebbleDB destination: %s\n", dstPath)
+	dstDB, err := pebble.Open(dstPath, &pebble.Options{
+		MaxConcurrentCompactions: func() int { return 1 },
+	})
 	if err != nil {
 		srcDB.Close()
 		fmt.Fprintf(os.Stderr, "ERROR: failed to create destination PebbleDB: %v\n", err)
@@ -56,38 +60,32 @@ func main() {
 	copied, err := copyAll(srcDB, dstDB)
 	elapsed := time.Since(start)
 
+	srcDB.Close()
+
 	if err != nil {
-		srcDB.Close()
 		dstDB.Close()
+		os.RemoveAll(tmpDir)
 		fmt.Fprintf(os.Stderr, "ERROR: copy failed after %d keys: %v\n", copied, err)
 		os.Exit(1)
 	}
 
 	fmt.Printf("Copied %d keys in %s\n", copied, elapsed.Round(time.Millisecond))
 
-	fmt.Println("Verifying destination key count...")
-	dstCount, err := countKeys(dstDB)
-	if err != nil {
-		srcDB.Close()
+	fmt.Println("Flushing and closing PebbleDB...")
+	if err := dstDB.Flush(); err != nil {
 		dstDB.Close()
-		fmt.Fprintf(os.Stderr, "ERROR: failed to count destination keys: %v\n", err)
+		os.RemoveAll(tmpDir)
+		fmt.Fprintf(os.Stderr, "ERROR: PebbleDB flush failed: %v\n", err)
 		os.Exit(1)
 	}
-
-	if dstCount != copied {
-		srcDB.Close()
-		dstDB.Close()
-		fmt.Fprintf(os.Stderr, "ERROR: count mismatch — copied %d but destination has %d\n", copied, dstCount)
+	if err := dstDB.Close(); err != nil {
+		os.RemoveAll(tmpDir)
+		fmt.Fprintf(os.Stderr, "ERROR: PebbleDB close failed: %v\n", err)
 		os.Exit(1)
 	}
-
-	fmt.Printf("Verified: %d keys in destination\n", dstCount)
-
-	srcDB.Close()
-	dstDB.Close()
+	fmt.Printf("Conversion complete: %d keys\n", copied)
 
 	bakPath := srcPath + ".bak"
-	dstPath := filepath.Join(tmpDir, dbName+".db")
 
 	fmt.Printf("Renaming %s → %s\n", srcPath, bakPath)
 	if err := os.Rename(srcPath, bakPath); err != nil {
@@ -97,16 +95,16 @@ func main() {
 
 	fmt.Printf("Renaming %s → %s\n", dstPath, srcPath)
 	if err := os.Rename(dstPath, srcPath); err != nil {
-		// Try to restore the original
 		os.Rename(bakPath, srcPath)
 		fmt.Fprintf(os.Stderr, "ERROR: failed to move new DB into place: %v\n", err)
 		os.Exit(1)
 	}
 
+	os.RemoveAll(tmpDir)
 	fmt.Printf("Done. Backup at %s\n", bakPath)
 }
 
-func copyAll(src, dst dbm.DB) (int64, error) {
+func copyAll(src dbm.DB, dst *pebble.DB) (int64, error) {
 	itr, err := src.Iterator(nil, nil)
 	if err != nil {
 		return 0, fmt.Errorf("creating iterator: %w", err)
@@ -121,7 +119,7 @@ func copyAll(src, dst dbm.DB) (int64, error) {
 	)
 
 	for ; itr.Valid(); itr.Next() {
-		if err := batch.Set(itr.Key(), itr.Value()); err != nil {
+		if err := batch.Set(itr.Key(), itr.Value(), nil); err != nil {
 			batch.Close()
 			return total, fmt.Errorf("batch set: %w", err)
 		}
@@ -130,8 +128,8 @@ func copyAll(src, dst dbm.DB) (int64, error) {
 		total++
 
 		if batchCount >= batchSize {
-			if err := batch.Write(); err != nil {
-				return total, fmt.Errorf("batch write: %w", err)
+			if err := batch.Commit(pebble.NoSync); err != nil {
+				return total, fmt.Errorf("batch commit: %w", err)
 			}
 			batch = dst.NewBatch()
 			batchCount = 0
@@ -149,27 +147,12 @@ func copyAll(src, dst dbm.DB) (int64, error) {
 	}
 
 	if batchCount > 0 {
-		if err := batch.Write(); err != nil {
-			return total, fmt.Errorf("final batch write: %w", err)
+		if err := batch.Commit(pebble.NoSync); err != nil {
+			return total, fmt.Errorf("final batch commit: %w", err)
 		}
+	} else {
+		batch.Close()
 	}
 
 	return total, nil
-}
-
-func countKeys(db dbm.DB) (int64, error) {
-	itr, err := db.Iterator(nil, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer itr.Close()
-
-	var count int64
-	for ; itr.Valid(); itr.Next() {
-		count++
-	}
-	if err := itr.Error(); err != nil {
-		return 0, err
-	}
-	return count, nil
 }

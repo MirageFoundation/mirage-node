@@ -86,6 +86,10 @@ if ! run "/tmp/convert-db $DATA_DIR"; then
   die "Conversion failed. Node restarted with GoLevelDB."
 fi
 
+log "Step 5b: Removing GoLevelDB snapshots/metadata.db (will be recreated as PebbleDB)"
+run "rm -rf $DATA_DIR/snapshots/metadata.db"
+echo "    metadata.db removed."
+
 log "Step 6/10: Setting APP_DB_BACKEND=pebbledb"
 run "sed -i 's/^APP_DB_BACKEND=.*/APP_DB_BACKEND=pebbledb/' $ENV_FILE"
 verify=$(run "grep '^APP_DB_BACKEND=' $ENV_FILE | cut -d= -f2-")
@@ -125,7 +129,7 @@ if [ $elapsed -ge $HEALTH_TIMEOUT ]; then
 fi
 
 log "Step 9/10: Validating bond_denom"
-bond_denom=$(run "curl -sf 'http://localhost:1317/cosmos/staking/v1beta1/params' 2>/dev/null" | jq -r '.params.bond_denom // empty' || echo "")
+bond_denom=$(run "docker exec $CONTAINER curl -sf 'http://localhost:1317/cosmos/staking/v1beta1/params' 2>/dev/null" | jq -r '.params.bond_denom // empty' || echo "")
 if [ "$bond_denom" = "umirage" ]; then
   echo "    bond_denom=umirage OK"
 elif [ -z "$bond_denom" ]; then
