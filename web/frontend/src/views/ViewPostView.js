@@ -2680,7 +2680,7 @@ function ViewPostView({ state, updatePost }) {
         scrollToFocusedTimer.current = setTimeout(() => {
             const el = document.getElementById(targetId);
             if (el) {
-                el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                el.scrollIntoView({ block: 'start', behavior: 'instant' });
                 scrollToFocusedDone.current = true;
             }
         }, 300);
@@ -2698,7 +2698,7 @@ function ViewPostView({ state, updatePost }) {
             const el = document.getElementById(`comment-${commentId}`);
             if (el) {
                 setTimeout(() => {
-                    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                    el.scrollIntoView({ block: 'start', behavior: 'instant' });
                     hasScrolledToHash.current = true;
                 }, 100);
             }
@@ -3816,7 +3816,7 @@ function ViewPostView({ state, updatePost }) {
                         <MobileHeader />
                         {/* Topic Hero Card */}
                         {(() => {
-                            const displayTopic = mergedRoot?.topic || root?.topic || '';
+                            const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
                             const topicLower = displayTopic.toLowerCase();
                             const isTopicFollowing = isSubscribedTopic(topicLower);
                             const isTopicInProgress = isTopicPending(topicLower);
