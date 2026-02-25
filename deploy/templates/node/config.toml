@@ -1,5 +1,5 @@
 moniker = "${MONIKER}"
-db_backend = "goleveldb"
+db_backend = "${COMET_DB_BACKEND:-goleveldb}"
 
 [tx_index]
 indexer = "kv"
@@ -22,10 +22,10 @@ create_empty_blocks_interval = "${CREATE_EMPTY_BLOCKS_INTERVAL:-600s}"
 timeout_commit = "${TIMEOUT_COMMIT:-3s}"
 
 [statesync]
-enable = false
-rpc_servers = ""
-trust_height = 0
-trust_hash = ""
+enable = ${STATESYNC_ENABLE:-false}
+rpc_servers = "${STATESYNC_RPC_SERVERS:-}"
+trust_height = ${STATESYNC_TRUST_HEIGHT:-0}
+trust_hash = "${STATESYNC_TRUST_HASH:-}"
 trust_period = "168h0m0s"
 
 

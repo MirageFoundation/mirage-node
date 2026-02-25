@@ -1024,7 +1024,7 @@ export default function QuestHeroCard({ collapsed = false, onToggleCollapse, siz
                         <div>
                             <LoyaltyBonusText
                                 as="div"
-                                title="Loyalty multiplier increases from 0x to 5x over your first 50 completed quests"
+                                title="Loyalty multiplier increases from 1.0x to 5.0x over your first 50 completed quests"
                                 style={{ marginTop: 0, fontSize: '0.55rem', fontWeight: 600 }}
                             >
                                 {rewardMultiplier.toFixed(2)}x loyalty multiplier
