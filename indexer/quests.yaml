@@ -53,9 +53,9 @@ daily_quests:
 
   - id: community_curator
     title: "Community Curator"
-    description: "Vote on 15 different posts across 3+ topics, each at least 20 minutes apart"
+    description: "Vote on 5 different posts across 3+ topics, each at least 20 minutes apart"
     action_type: vote
-    target_count: 15
+    target_count: 5
     time_spacing_minutes: 20
     unique_target: true
     unique_topics_min: 3
