@@ -96,7 +96,29 @@ function maybeSyncBalance(params, body, data) {
         if (!reqAddr || reqAddr.toLowerCase() !== myAddr.toLowerCase()) return;
         const bal = Number(data.balance);
         if (!Number.isFinite(bal)) return;
-        localStorage.setItem('user_balance', String(Math.max(0, Math.trunc(bal))));
+        const truncated = Math.max(0, Math.trunc(bal));
+
+        // Respect balance hold from optimistic deductions (e.g. awards).
+        // If the server hasn't processed the tx yet, its balance will be stale
+        // (higher than the optimistic minimum) — skip the write to avoid
+        // flashing the old balance back.
+        const holdRaw = localStorage.getItem('user_balance_hold');
+        if (holdRaw) {
+            try {
+                const hold = JSON.parse(holdRaw);
+                if (hold && typeof hold === 'object') {
+                    const expiresAt = Number(hold.expires_at_ms);
+                    const minBalance = Number(hold.min_balance);
+                    if (Number.isFinite(expiresAt) && Date.now() < expiresAt
+                        && Number.isFinite(minBalance)) {
+                        if (truncated > minBalance) return;
+                        localStorage.removeItem('user_balance_hold');
+                    }
+                }
+            } catch (_) { }
+        }
+
+        localStorage.setItem('user_balance', String(truncated));
         window.dispatchEvent(new CustomEvent('balanceUpdated', { detail: bal }));
     } catch (_) { }
 }

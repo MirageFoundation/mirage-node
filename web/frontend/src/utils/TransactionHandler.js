@@ -121,6 +121,23 @@ class TransactionHandler {
 
     _persistUserBalance(balanceVal, { normalizeStorage = false, updateLastOnchain = true } = {}) {
         if (balanceVal === undefined || balanceVal === null) return;
+
+        // Respect balance hold from optimistic deductions (e.g. awards).
+        // adjustBalanceOptimistic() writes directly to localStorage and sets a
+        // hold — all server-sourced writes must honour that hold so we don't
+        // flash the old (higher) balance back to the user.
+        const hold = Storage.load('user_balance_hold', null);
+        if (hold && typeof hold === 'object') {
+            const expiresAt = Number(hold.expires_at_ms);
+            const minBalance = Number(hold.min_balance);
+            if (Number.isFinite(expiresAt) && Date.now() < expiresAt
+                && Number.isFinite(minBalance)) {
+                const incoming = Number(balanceVal);
+                if (Number.isFinite(incoming) && incoming > minBalance) return;
+                Storage.remove('user_balance_hold');
+            }
+        }
+
         if (normalizeStorage) {
             const balanceNum = Number(balanceVal);
             const normalized = Number.isFinite(balanceNum) ? Math.max(0, Math.trunc(balanceNum)) : 0;
