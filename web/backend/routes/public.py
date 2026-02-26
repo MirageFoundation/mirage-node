@@ -1412,6 +1412,9 @@ def _interleave_fresh_ranked(scored_posts: list[dict], seed: int, now_ts: int) -
                 debug = picked.setdefault("feed_debug", {})
                 debug["interleave"] = "fresh"
                 debug["fresh_band"] = f"{band_start}h-{band_end}h"
+                debug["bucket"] = "fresh"
+                debug["reason"] = "Discover"
+                picked["feed_bucket"] = "fresh"
                 interleaved.append(picked)
                 continue
 
