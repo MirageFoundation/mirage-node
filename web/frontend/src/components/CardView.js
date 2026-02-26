@@ -2031,7 +2031,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'popular' && 'popular'}
                                             {post.feed_bucket === 'discussion' && 'discussed'}
                                             {post.feed_bucket === 'second_chance' && 'second chance'}
-                                            {post.feed_bucket === 'fresh' && 'fresh pick'}
+                                            {post.feed_bucket === 'fresh' && 'discover'}
                                             {post.feed_bucket === 'newest' && 'newest'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>
