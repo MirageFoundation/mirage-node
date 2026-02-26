@@ -1763,6 +1763,10 @@ function ViewPostView({ state, updatePost }) {
         setConfirmBlockUser(null);
         setConfirmReportPost(null);
         setConfirmAward({ postId });
+        setTimeout(() => {
+            const el = document.getElementById(`comment-${postId.toLowerCase()}`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
     };
 
     const friendlyAwardError = (raw) => {
