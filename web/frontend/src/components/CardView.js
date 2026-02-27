@@ -1501,9 +1501,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             await follow(viewerAddress, authorAddress);
             setFollowOverride(true);
-            if (updatePost) {
-                updatePost(post.post_id, {});
-            }
         } catch (err) {
             alert(`Error following user: ${err.message || 'Unknown error'}`);
         }
@@ -1520,9 +1517,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             await unfollow(viewerAddress, authorAddress);
             setFollowOverride(false);
-            if (updatePost) {
-                updatePost(post.post_id, {});
-            }
         } catch (err) {
             alert(`Error unfollowing user: ${err.message || 'Unknown error'}`);
         }
@@ -2031,7 +2025,7 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                             {post.feed_bucket === 'popular' && 'popular'}
                                             {post.feed_bucket === 'discussion' && 'discussed'}
                                             {post.feed_bucket === 'second_chance' && 'second chance'}
-                                            {post.feed_bucket === 'fresh' && 'fresh pick'}
+                                            {post.feed_bucket === 'fresh' && 'discover'}
                                             {post.feed_bucket === 'newest' && 'newest'}
                                         </FeedReasonInline>
                                     </FeedReasonWrapper>

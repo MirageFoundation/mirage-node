@@ -862,7 +862,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                             }}
                                         />
                                         {!isSubmitting && (
-                                            <CharCounter $warn={getByteLength(titleValue) > limits.maxTitle * 0.9}>
+                                            <CharCounter $warn={getByteLength(titleValue) >= limits.maxTitle}>
                                                 {getByteLength(titleValue)} / {limits.maxTitle} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                             </CharCounter>
                                         )}
@@ -1079,7 +1079,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                         />
                                         <ContentActionsRow>
                                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto', alignSelf: 'flex-start' }}>
-                                                <ContentCounter $warn={contentValue.length > limits.maxContent * 0.9}>
+                                                <ContentCounter $warn={contentValue.length >= limits.maxContent}>
                                                     {contentValue.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                                 </ContentCounter>
                                             </div>

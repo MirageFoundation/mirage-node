@@ -1763,6 +1763,10 @@ function ViewPostView({ state, updatePost }) {
         setConfirmBlockUser(null);
         setConfirmReportPost(null);
         setConfirmAward({ postId });
+        setTimeout(() => {
+            const el = document.getElementById(`comment-${postId.toLowerCase()}`);
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 50);
     };
 
     const friendlyAwardError = (raw) => {
@@ -2680,7 +2684,7 @@ function ViewPostView({ state, updatePost }) {
         scrollToFocusedTimer.current = setTimeout(() => {
             const el = document.getElementById(targetId);
             if (el) {
-                el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                el.scrollIntoView({ block: 'start', behavior: 'instant' });
                 scrollToFocusedDone.current = true;
             }
         }, 300);
@@ -2698,7 +2702,7 @@ function ViewPostView({ state, updatePost }) {
             const el = document.getElementById(`comment-${commentId}`);
             if (el) {
                 setTimeout(() => {
-                    el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                    el.scrollIntoView({ block: 'start', behavior: 'instant' });
                     hasScrolledToHash.current = true;
                 }, 100);
             }
@@ -3675,7 +3679,7 @@ function ViewPostView({ state, updatePost }) {
                         </div>
                         <ReplyActionsRow>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto', alignSelf: 'flex-start' }}>
-                                <ReplyCounter $warn={replyText.length > limits.maxContent * 0.9}>
+                                <ReplyCounter $warn={replyText.length >= limits.maxContent}>
                                     {replyText.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                 </ReplyCounter>
                             </div>
@@ -3816,7 +3820,7 @@ function ViewPostView({ state, updatePost }) {
                         <MobileHeader />
                         {/* Topic Hero Card */}
                         {(() => {
-                            const displayTopic = mergedRoot?.topic || root?.topic || '';
+                            const displayTopic = mergedRoot?.topic || mergedRoot?.root_topic || root?.topic || root?.root_topic || actualRootPost?.topic || '';
                             const topicLower = displayTopic.toLowerCase();
                             const isTopicFollowing = isSubscribedTopic(topicLower);
                             const isTopicInProgress = isTopicPending(topicLower);

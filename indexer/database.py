@@ -9,6 +9,8 @@ import psycopg
 
 logger = logging.getLogger(__name__)
 
+INDEXER_LIST_CAP = 100_000
+
 
 class DatabaseManager:
     """Manages all database operations for the indexer."""
@@ -870,6 +872,29 @@ class DatabaseManager:
         return None, None
 
     @staticmethod
+    def _evict_oldest(cur, table: str, value_col: str, owner: str) -> None:
+        """Delete the oldest rows beyond INDEXER_LIST_CAP for an owner, ordered by position."""
+        cur.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE LOWER(owner) = LOWER(%s)",
+            (owner,),
+        )
+        count = cur.fetchone()[0]
+        excess = count - INDEXER_LIST_CAP
+        if excess > 0:
+            cur.execute(
+                f"""
+                DELETE FROM {table}
+                WHERE (owner, {value_col}) IN (
+                    SELECT owner, {value_col} FROM {table}
+                    WHERE LOWER(owner) = LOWER(%s)
+                    ORDER BY position ASC
+                    LIMIT %s
+                )
+                """,
+                (owner, excess),
+            )
+
+    @staticmethod
     def _strip_nul(val: Optional[str]) -> Optional[str]:
         """PostgreSQL text fields cannot contain NUL (0x00) bytes."""
         if val is None:
@@ -1647,7 +1672,7 @@ class DatabaseManager:
                     )
 
     def follow_user(self, owner: str, target: str) -> None:
-        """Follow a user (add to followed_users with next position)."""
+        """Follow a user (add to followed_users with next position, evict oldest beyond cap)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1663,6 +1688,7 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
+                self._evict_oldest(cur, "followed_users", "target", owner)
 
     def unfollow_user(self, owner: str, target: str) -> None:
         """Unfollow a user (remove from followed_users)."""
@@ -1674,7 +1700,7 @@ class DatabaseManager:
                 )
 
     def follow_topic(self, owner: str, topic: str) -> None:
-        """Follow a topic (add to followed_topics with next position)."""
+        """Follow a topic (add to followed_topics with next position, evict oldest beyond cap)."""
         topic = self._strip_nul(topic) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1691,6 +1717,7 @@ class DatabaseManager:
                     """,
                     (owner, topic, pos),
                 )
+                self._evict_oldest(cur, "followed_topics", "topic", owner)
 
     def unfollow_topic(self, owner: str, topic: str) -> None:
         """Unfollow a topic (remove from followed_topics)."""
@@ -1722,7 +1749,7 @@ class DatabaseManager:
                 return int(cur.rowcount or 0)
 
     def block_post(self, owner: str, target: str) -> None:
-        """Block a post (add to blocked_posts with next position)."""
+        """Block a post (add to blocked_posts with next position, evict oldest beyond cap)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1738,6 +1765,7 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
+                self._evict_oldest(cur, "blocked_posts", "target", owner)
 
     def unblock_post(self, owner: str, target: str) -> None:
         """Unblock a post (remove from blocked_posts)."""
@@ -1749,7 +1777,7 @@ class DatabaseManager:
                 )
 
     def block_user(self, owner: str, target: str) -> None:
-        """Block a user (add to blocked_users with next position)."""
+        """Block a user (add to blocked_users with next position, evict oldest beyond cap)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -1765,6 +1793,7 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
+                self._evict_oldest(cur, "blocked_users", "target", owner)
 
     def unblock_user(self, owner: str, target: str) -> None:
         """Unblock a user (remove from blocked_users)."""
@@ -1776,7 +1805,7 @@ class DatabaseManager:
                 )
 
     def block_topic(self, owner: str, target: str) -> None:
-        """Block a topic (add to blocked_topics with next position)."""
+        """Block a topic (add to blocked_topics with next position, evict oldest beyond cap)."""
         target = self._strip_nul(target) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1793,6 +1822,7 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
+                self._evict_oldest(cur, "blocked_topics", "target", owner)
 
     def unblock_topic(self, owner: str, target: str) -> None:
         """Unblock a topic (remove from blocked_topics)."""

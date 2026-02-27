@@ -15,7 +15,7 @@ import time
 logger = logging.getLogger(__name__)
 
 CACHE_TTL = 7200  # 2 hours
-MIN_SHARED = 5
+MIN_SHARED = 25
 MIN_SIMILARITY = 0.05
 MAX_SIMILAR_USERS = 30
 ACTIVE_DAYS = 30
