@@ -531,8 +531,13 @@ class RewardDistributor:
         with connect_db() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT COUNT(*) FROM user_daily_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL",
-                    (owner,),
+                    """
+                    SELECT
+                        (SELECT COUNT(*) FROM user_daily_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
+                      + (SELECT COUNT(*) FROM user_flash_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
+                      + (SELECT COUNT(*) FROM user_achievements WHERE LOWER(owner) = LOWER(%s) AND unlocked_at IS NOT NULL)
+                    """,
+                    (owner, owner, owner),
                 )
                 completed = (cur.fetchone() or [0])[0]
                 return min(5.0, completed / 10.0)
