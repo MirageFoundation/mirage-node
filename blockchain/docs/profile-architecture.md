@@ -73,20 +73,19 @@ This allows backfilling profiles from external sources (like the indexer DB) whe
 
 ## Indexer Database
 
-The indexer DB (PostgreSQL) stores a subset of profile data for API queries:
+The indexer DB (PostgreSQL) stores the full history of profile list data (up to 100k per user per list via `INDEXER_LIST_CAP`). This is the long-term storage layer; the chain keeps only a small deque window per tier.
 
 | Table | Description |
 |-------|-------------|
 | `profiles` | Core profile data |
 | `followed_mods` | Followed moderators |
+| `followed_users` | Followed users |
+| `followed_topics` | Followed topics |
 | `blocked_users` | Blocked users |
 | `blocked_posts` | Blocked posts |
+| `blocked_topics` | Blocked topics |
 
-**NOT in indexer DB** (chain-only):
-- `followed_users`
-- `followed_topics`
-
-When the reset script backfills profiles from the indexer DB, these missing lists will be empty arrays. This is correct behavior since they can be restored from a proper chain export.
+The `get_profile` API returns scalar fields from the chain and list fields from the indexer. Feed filtering also reads from the indexer. This means users see their full block/follow history even after the chain evicts old entries from its deque.
 
 ## Adding New Profile Fields
 

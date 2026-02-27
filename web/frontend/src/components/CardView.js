@@ -1501,9 +1501,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             await follow(viewerAddress, authorAddress);
             setFollowOverride(true);
-            if (updatePost) {
-                updatePost(post.post_id, {});
-            }
         } catch (err) {
             alert(`Error following user: ${err.message || 'Unknown error'}`);
         }
@@ -1520,9 +1517,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
         try {
             await unfollow(viewerAddress, authorAddress);
             setFollowOverride(false);
-            if (updatePost) {
-                updatePost(post.post_id, {});
-            }
         } catch (err) {
             alert(`Error unfollowing user: ${err.message || 'Unknown error'}`);
         }

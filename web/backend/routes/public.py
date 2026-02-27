@@ -15,9 +15,12 @@ Endpoints:
 """
 
 import json
+import logging
 import os
 import re
 from db import connect_db
+
+logger = logging.getLogger(__name__)
 
 from typing import Any, Dict, List, Optional
 
@@ -542,9 +545,59 @@ def get_blocked_users():
         return safe_error(e)
 
 
+def _get_profile_lists_from_indexer(addr: str) -> dict:
+    """Fetch a user's own profile lists from the indexer DB (full history, not chain-limited)."""
+    addr_lower = addr.lower()
+    lists = {
+        "followed_moderators": [],
+        "followed_users": [],
+        "followed_topics": [],
+        "blocked_users": [],
+        "blocked_posts": [],
+        "blocked_topics": [],
+    }
+    try:
+        conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT moderator FROM followed_mods WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["followed_moderators"] = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["followed_users"] = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT topic FROM followed_topics WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["followed_topics"] = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT target FROM blocked_users WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["blocked_users"] = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT target FROM blocked_posts WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["blocked_posts"] = [r[0] for r in cur.fetchall()]
+        cur.execute(
+            "SELECT target FROM blocked_topics WHERE LOWER(owner) = %s ORDER BY position",
+            (addr_lower,),
+        )
+        lists["blocked_topics"] = [r[0] for r in cur.fetchall()]
+        conn.close()
+    except Exception as e:
+        logger.warning("Failed to load profile lists from indexer for %s: %s", addr, e)
+    return lists
+
+
 @public_bp.route("/api/get_profile")
 def get_profile():
-    """Get full profile from blockchain including all lists (followed_users, followed_topics, etc.)."""
+    """Get profile: scalar fields from chain, list fields from indexer (full history)."""
     address = request.args.get("address", default="", type=str)
     if not address:
         return jsonify({"error": "address is required"}), 400
@@ -554,17 +607,14 @@ def get_profile():
             return jsonify({"error": "node_catching_up"}), 503
 
         profile = _query_chain_profile_full(address.lower())
+        lists = _get_profile_lists_from_indexer(address)
+
         if not profile:
             resp = {
                 "owner": address.lower(),
                 "username": "",
                 "level": 0,
-                "followed_users": [],
-                "followed_topics": [],
-                "followed_moderators": [],
-                "blocked_users": [],
-                "blocked_posts": [],
-                "blocked_topics": [],
+                **lists,
             }
             return jsonify(_inject_balance(resp, address))
 
@@ -580,14 +630,7 @@ def get_profile():
             "biography": profile.get("biography", ""),
             "avatar": profile.get("avatar", ""),
             "banner": profile.get("banner", ""),
-            "followed_users": profile.get("followed_users", []) or profile.get("followedUsers", []) or [],
-            "followed_topics": profile.get("followed_topics", []) or profile.get("followedTopics", []) or [],
-            "followed_moderators": profile.get("followed_moderators", [])
-            or profile.get("followedModerators", [])
-            or [],
-            "blocked_users": profile.get("blocked_users", []) or profile.get("blockedUsers", []) or [],
-            "blocked_posts": profile.get("blocked_posts", []) or profile.get("blockedPosts", []) or [],
-            "blocked_topics": profile.get("blocked_topics", []) or profile.get("blockedTopics", []) or [],
+            **lists,
         }
         return jsonify(_inject_balance(resp, address))
     except Exception as e:

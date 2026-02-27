@@ -2468,14 +2468,10 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
             handler();
         };
         window.addEventListener('mirageRefreshFeed', handler);
-        window.addEventListener('followedTopicsUpdated', handler);
-        window.addEventListener('followedUsersUpdated', handler);
         window.addEventListener('topicBlocked', onTopicBlocked);
         window.addEventListener('topicUnblocked', onTopicUnblocked);
         return () => {
             window.removeEventListener('mirageRefreshFeed', handler);
-            window.removeEventListener('followedTopicsUpdated', handler);
-            window.removeEventListener('followedUsersUpdated', handler);
             window.removeEventListener('topicBlocked', onTopicBlocked);
             window.removeEventListener('topicUnblocked', onTopicUnblocked);
         };

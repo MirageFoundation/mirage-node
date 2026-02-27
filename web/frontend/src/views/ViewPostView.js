@@ -3679,7 +3679,7 @@ function ViewPostView({ state, updatePost }) {
                         </div>
                         <ReplyActionsRow>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0, flex: '1 1 auto', alignSelf: 'flex-start' }}>
-                                <ReplyCounter $warn={replyText.length > limits.maxContent * 0.9}>
+                                <ReplyCounter $warn={replyText.length >= limits.maxContent}>
                                     {replyText.length} / {limits.maxContent} {limits.willPayFee ? '(paid tier)' : '(free tier)'}
                                 </ReplyCounter>
                             </div>
