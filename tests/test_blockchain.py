@@ -57,8 +57,8 @@ from shared.canon import (
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
     canon_base_follow_topic as _canon_base_follow_topic_raw,
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
-    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
-    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
+    canon_base_enable_agent as _canon_base_enable_agent_raw,
+    canon_base_disable_agent as _canon_base_disable_agent_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
@@ -76,7 +76,7 @@ from shared.datatypes import (
     MsgDelete,
     MsgDeleteUser,
     MsgEdit,
-    MsgFollowModerator,
+    MsgEnableAgent,
     MsgFollowTopic,
     MsgFollowUser,
     MsgMintTokens,
@@ -88,7 +88,7 @@ from shared.datatypes import (
     MsgUnblockPost,
     MsgUnblockTopic,
     MsgUnblockUser,
-    MsgUnfollowModerator,
+    MsgDisableAgent,
     MsgUnfollowTopic,
     MsgUnfollowUser,
     MsgUpgradeLevel,
@@ -261,11 +261,13 @@ def _get_chain_params() -> dict:
 
 
 def _get_tier_config(level: int) -> dict:
+    """Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2."""
     params = _get_chain_params()
     tiers = params.get("tiers") or []
-    idx = int(level)
+    idx_map = {0: 0, 1: 1, 10: 2}
+    idx = idx_map.get(int(level), 2 if int(level) >= 100 else -1)
     if idx < 0 or idx >= len(tiers):
-        raise RuntimeError(f"tier index {idx} not in params")
+        raise RuntimeError(f"tier index {idx} (level={level}) not in params")
     return tiers[idx]
 
 
@@ -846,20 +848,20 @@ def _build_msg_unfollow_topic(
     return msg
 
 
-def _build_msg_follow_moderator(
+def _build_msg_enable_agent(
     wallet: LocalWallet,
     lb: str,
     diff: int,
     ts: int,
     target: str,
-    moderator: str,
+    agent: str,
     pow_val: int = 0,
-) -> MsgFollowModerator:
+) -> MsgEnableAgent:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_follow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    base = _canon_base_enable_agent_raw(pub, lb_bytes, diff, ts, target, agent)
     sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgFollowModerator()
+    msg = MsgEnableAgent()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -868,24 +870,24 @@ def _build_msg_follow_moderator(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.target = target
-    msg.moderator = moderator
+    msg.agent = agent
     return msg
 
 
-def _build_msg_unfollow_moderator(
+def _build_msg_disable_agent(
     wallet: LocalWallet,
     lb: str,
     diff: int,
     ts: int,
     target: str,
-    moderator: str,
+    agent: str,
     pow_val: int = 0,
-) -> MsgUnfollowModerator:
+) -> MsgDisableAgent:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_unfollow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    base = _canon_base_disable_agent_raw(pub, lb_bytes, diff, ts, target, agent)
     sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgUnfollowModerator()
+    msg = MsgDisableAgent()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -894,7 +896,7 @@ def _build_msg_unfollow_moderator(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.target = target
-    msg.moderator = moderator
+    msg.agent = agent
     return msg
 
 
@@ -2102,6 +2104,7 @@ def test_follow_limits(backend: str) -> None:
         _pass(f"follow.user_fill ({max_followed_users} followed)")
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
@@ -2115,11 +2118,7 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.user_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
-        expected = (followed_user_targets + [over_addr.lower()])[-max_followed_users:]
-        _assert_capped_deque("follow.user_overflow_deque", got, expected)
+        _check_deliver_reject("follow.user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
@@ -2151,6 +2150,7 @@ def test_follow_limits(backend: str) -> None:
         _pass(f"follow.topic_fill ({max_followed_topics} followed)")
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_topic = f"ft{_rand_str(4)}over"
@@ -2164,71 +2164,65 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.topic_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_topics") or [])]
-        expected = (followed_topic_targets + [over_topic.lower()])[-max_followed_topics:]
-        _assert_capped_deque("follow.topic_overflow_deque", got, expected)
+        _check_deliver_reject("follow.topic_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.3 Fill free-tier max_followed_mods + overflow
-    max_followed_mods = _tier_int(tier0, "max_followed_mods")
-    _debug(f"free-tier max_followed_mods={max_followed_mods}")
+    # 8.3 Fill free-tier max_enabled_agents + overflow
+    max_enabled_agents = _tier_int(tier0, "max_enabled_agents")
+    _debug(f"free-tier max_enabled_agents={max_enabled_agents}")
     fill_ok = True
-    followed_mod_targets: list[str] = []
-    for i in range(max_followed_mods):
+    enabled_agent_targets: list[str] = []
+    for i in range(max_enabled_agents):
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
-        mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        followed_mod_targets.append(mod_addr.lower())
-        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, mod_addr)
+        agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        enabled_agent_targets.append(agent_addr.lower())
+        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, mod_addr, pow_val=proof)
+        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof)
         _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowModerator")],
+            [(msg, "/mirage.core.v1.MsgEnableAgent")],
             FILL_GAS_LIMIT,
             fee_payer,
             fw_pub,
             wait_deliver=True,
         )
         if ccode != 0 or dcode != 0:
-            _fail("follow.mod_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.agent_fill", f"index={i} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     else:
-        _pass(f"follow.mod_fill ({max_followed_mods} followed)")
+        _pass(f"follow.agent_fill ({max_enabled_agents} enabled)")
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
-        over_mod = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_mod)
+        over_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_agent)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, over_mod, pow_val=proof)
+        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, over_agent, pow_val=proof)
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowModerator")],
+            [(msg, "/mirage.core.v1.MsgEnableAgent")],
             FILL_GAS_LIMIT,
             fee_payer,
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.mod_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_moderators") or [])]
-        expected = (followed_mod_targets + [over_mod.lower()])[-max_followed_mods:]
-        _assert_capped_deque("follow.mod_overflow_deque", got, expected)
+        _check_deliver_reject("follow.agent_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.3b Subscriber bulk fill (no PoW): submit many follow-user messages in
-    # multi-message tx chunks, then verify tier-1 deque capping behavior.
+    # 8.3b Subscriber bulk fill (no PoW): submit follow-user messages up to
+    # the tier limit, then verify overflow is rejected (hard cap).
     sub = WALLETS["sub1"]
     sub_addr = str(sub.address())
     sub_pub = sub.public_key().public_key_bytes
     sub_tier = _get_tier_config(1)
     sub_max_followed_users = _tier_int(sub_tier, "max_followed_users")
-    bulk_targets = [
-        str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(sub_max_followed_users + 1)
-    ]
     before_profile = _get_profile_full(backend, sub_addr)
     before_followed = [str(v).lower() for v in (before_profile.get("followed_users") or [])]
+    remaining = sub_max_followed_users - len(before_followed)
+    bulk_targets = [
+        str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)
+    ]
     chunk_size = 25
     bulk_ok = True
     _debug(f"subscriber tier1 bulk follow users: total={len(bulk_targets)} chunk_size={chunk_size}")
@@ -2256,11 +2250,20 @@ def test_follow_limits(backend: str) -> None:
             bulk_ok = False
             break
     if bulk_ok:
-        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} in chunks)")
-        profile = _get_profile_full(backend, sub_addr)
-        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
-        expected = (before_followed + bulk_targets)[-sub_max_followed_users:]
-        _assert_capped_deque("follow.subscriber_bulk_user_overflow_deque", got, expected)
+        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} filled to limit)")
+        # Now verify overflow is REJECTED
+        lb, _, _, _ = _get_pow_params(backend, sub_addr)
+        ts = _now_ms()
+        over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_user(sub, lb, 0, ts, sub_addr, over_addr, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            sub_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_reject("follow.subscriber_bulk_user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
     w_mx = WALLETS["sub3"]
@@ -2664,7 +2667,7 @@ def test_tier_enforcement(backend: str) -> None:
 
     fee_payer = _VALIDATOR_ADDR or ""
 
-    for level, wallet_name in [(0, "free"), (1, "sub1"), (2, "sub2"), (3, "sub3")]:
+    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2"), (10, "sub3")]:
         w = WALLETS[wallet_name]
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(w.address()))
         ts = _now_ms()
@@ -2810,7 +2813,7 @@ def test_governance_reject(backend: str) -> None:
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = b"\x00" * 64
     msg.target = w1_addr
-    msg.level = 2
+    msg.level = 10
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetLevel")],
         DEFAULT_GAS_LIMIT,
@@ -2869,7 +2872,7 @@ def test_governance_reject(backend: str) -> None:
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = b"\x00" * 64
     msg.target = w1_addr
-    msg.level = 2
+    msg.level = 10
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetLevel")],
         DEFAULT_GAS_LIMIT,
@@ -2996,6 +2999,332 @@ def test_direct_bank(backend: str) -> None:
         _pass("direct_bank.msg_send_blocked")
 
 
+def test_hard_cap_vs_deque(backend: str) -> None:
+    """Test that follow/enable lists use hard cap while block lists use deque."""
+    print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
+
+    _topup_wallets(backend, ["free", "sub3"])
+    time.sleep(3)
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # ── 13.1 blocked_users deque: block more than limit, oldest evicted ──
+    bw = WALLETS["free"]
+    bw_addr = str(bw.address())
+    bw_pub = bw.public_key().public_key_bytes
+    tier0 = _get_tier_config(0)
+    max_blocked_users = _tier_int(tier0, "max_blocked_users")
+    _debug(f"free-tier max_blocked_users={max_blocked_users}")
+
+    # Fill blocked_users to max + 2 (deque should keep only the newest max)
+    blocked_targets: list[str] = []
+    total_to_block = max_blocked_users + 2
+    for i in range(total_to_block):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        blocked_targets.append(target_addr.lower())
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockUser")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_user_deque_fill", f"i={i} ccode={ccode} dcode={dcode}")
+            break
+    else:
+        _pass(f"hardcap.blocked_user_deque_fill ({total_to_block} blocked, no rejection)")
+
+    profile = _get_profile_full(backend, bw_addr)
+    chain_blocked = [str(v).lower() for v in (profile.get("blocked_users") or [])]
+    if len(chain_blocked) <= max_blocked_users:
+        _pass(f"hardcap.blocked_user_deque_capped (len={len(chain_blocked)} <= {max_blocked_users})")
+    else:
+        _fail(f"hardcap.blocked_user_deque_capped", f"len={len(chain_blocked)} > {max_blocked_users}")
+
+    # ── 13.2 blocked_posts deque ──
+    max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
+    blocked_post_targets: list[str] = []
+    total_to_block_posts = max_blocked_posts + 2
+    for i in range(total_to_block_posts):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        fake_hash = _rand_hex(64)
+        blocked_post_targets.append(fake_hash.lower())
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockPost")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_post_deque_fill", f"i={i}")
+            break
+    else:
+        _pass(f"hardcap.blocked_post_deque_fill ({total_to_block_posts} blocked, no rejection)")
+
+    # ── 13.3 blocked_topics deque ──
+    max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
+    total_to_block_topics = max_blocked_topics + 2
+    for i in range(total_to_block_topics):
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts = _now_ms()
+        topic = f"bt{_rand_str(4)}{i}"
+        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgBlockTopic")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            bw_pub,
+            wait_deliver=True,
+        )
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_topic_deque_fill", f"i={i}")
+            break
+    else:
+        _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
+
+    # ── 13.4 Enable agent then disable to verify recovery ──
+    aw = WALLETS["sub3"]
+    aw_addr = str(aw.address())
+    aw_pub = aw.public_key().public_key_bytes
+    tier10 = _get_tier_config(10)
+    # Use a smaller test: enable 2 agents, disable 1, enable 1 new one
+    agent1 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    agent2 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    agent3 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+
+    for agent in [agent1, agent2]:
+        lb, _, _, _ = _get_pow_params(backend, aw_addr)
+        ts = _now_ms()
+        msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgEnableAgent")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            aw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(f"hardcap.enable_agent_{agent[:8]}", ccode, dcode, dlog)
+
+    # Disable agent1
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_disable_agent(aw, lb, 0, ts, aw_addr, agent1, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgDisableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.disable_agent_recovery", ccode, dcode, dlog)
+
+    # Enable agent3 (should work since we freed a slot)
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent3, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.enable_after_disable", ccode, dcode, dlog)
+
+
+def test_upgrade_level_validation(backend: str) -> None:
+    """Test that only levels 1 and 10 can be self-upgraded to."""
+    print(f"\n{_COLOR_BOLD}[14] Upgrade level validation{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+    fw = WALLETS["free"]
+    fw_addr = str(fw.address())
+    fw_pub = fw.public_key().public_key_bytes
+
+    # 14.1 Invalid levels should be rejected
+    for invalid_level in [0, 2, 3, 4, 5, 6, 7, 8, 9, 11, 50, 99, 100]:
+        lb, _, _, _ = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
+        msg = _build_msg_upgrade_level(fw, lb, 0, ts, invalid_level, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgUpgradeLevel")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            fw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_reject(f"upgrade.invalid_level_{invalid_level}", ccode, dcode, dlog)
+
+
+def test_tier_features(backend: str) -> None:
+    """Test tier-specific features: can_remove_anon, content limits."""
+    print(f"\n{_COLOR_BOLD}[15] Tier feature enforcement{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # 15.1 Verify all tier configs are accessible and have correct values
+    for level in [0, 1, 10]:
+        tier = _get_tier_config(level)
+        max_enabled = _tier_int(tier, "max_enabled_agents")
+        max_fu = _tier_int(tier, "max_followed_users")
+        max_ft = _tier_int(tier, "max_followed_topics")
+        max_bu = _tier_int(tier, "max_blocked_users")
+        max_bp = _tier_int(tier, "max_blocked_posts")
+        max_bt = _tier_int(tier, "max_blocked_topics")
+        max_title = _tier_int(tier, "max_title_length")
+        max_content = _tier_int(tier, "max_content_length")
+        editing = _tier_int(tier, "editing_time_mins")
+
+        if level == 0:
+            if max_enabled == 25 and max_fu == 25 and max_ft == 25:
+                _pass(f"tierfeature.level{level}_list_limits_25")
+            else:
+                _fail(f"tierfeature.level{level}_list_limits_25", f"agents={max_enabled} fu={max_fu} ft={max_ft}")
+            if max_bu == 25 and max_bp == 25 and max_bt == 25:
+                _pass(f"tierfeature.level{level}_blocked_limits_25")
+            else:
+                _fail(f"tierfeature.level{level}_blocked_limits_25", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+            if max_title == 150:
+                _pass(f"tierfeature.level{level}_max_title_150")
+            else:
+                _fail(f"tierfeature.level{level}_max_title_150", f"got={max_title}")
+            if max_content == 1000:
+                _pass(f"tierfeature.level{level}_max_content_1000")
+            else:
+                _fail(f"tierfeature.level{level}_max_content_1000", f"got={max_content}")
+            if editing == 10:
+                _pass(f"tierfeature.level{level}_editing_10m")
+            else:
+                _fail(f"tierfeature.level{level}_editing_10m", f"got={editing}")
+        else:
+            if max_enabled == 500 and max_fu == 500 and max_ft == 500:
+                _pass(f"tierfeature.level{level}_list_limits_500")
+            else:
+                _fail(f"tierfeature.level{level}_list_limits_500", f"agents={max_enabled} fu={max_fu} ft={max_ft}")
+            if max_bu == 500 and max_bp == 500 and max_bt == 500:
+                _pass(f"tierfeature.level{level}_blocked_limits_500")
+            else:
+                _fail(f"tierfeature.level{level}_blocked_limits_500", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+            if max_title == 300:
+                _pass(f"tierfeature.level{level}_max_title_300")
+            else:
+                _fail(f"tierfeature.level{level}_max_title_300", f"got={max_title}")
+            if max_content == 20000:
+                _pass(f"tierfeature.level{level}_max_content_20000")
+            else:
+                _fail(f"tierfeature.level{level}_max_content_20000", f"got={max_content}")
+            if editing == 360:
+                _pass(f"tierfeature.level{level}_editing_360m")
+            else:
+                _fail(f"tierfeature.level{level}_editing_360m", f"got={editing}")
+
+    # 15.2 Verify boolean flags
+    tier0 = _get_tier_config(0)
+    tier1 = _get_tier_config(1)
+    tier10 = _get_tier_config(10)
+
+    can_be_agent_0 = tier0.get("can_be_agent", False)
+    can_be_agent_1 = tier1.get("can_be_agent", False)
+    can_be_agent_10 = tier10.get("can_be_agent", False)
+    if not can_be_agent_0 and not can_be_agent_1 and can_be_agent_10:
+        _pass("tierfeature.can_be_agent_only_level10")
+    else:
+        _fail("tierfeature.can_be_agent_only_level10",
+              f"t0={can_be_agent_0} t1={can_be_agent_1} t10={can_be_agent_10}")
+
+    can_remove_anon_0 = tier0.get("can_remove_anon", False)
+    can_remove_anon_1 = tier1.get("can_remove_anon", False)
+    can_remove_anon_10 = tier10.get("can_remove_anon", False)
+    if not can_remove_anon_0 and can_remove_anon_1 and can_remove_anon_10:
+        _pass("tierfeature.can_remove_anon")
+    else:
+        _fail("tierfeature.can_remove_anon",
+              f"t0={can_remove_anon_0} t1={can_remove_anon_1} t10={can_remove_anon_10}")
+
+    for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
+        v0 = tier0.get(flag, False)
+        v1 = tier1.get(flag, False)
+        v10 = tier10.get(flag, False)
+        if not v0 and v1 and v10:
+            _pass(f"tierfeature.{flag}")
+        else:
+            _fail(f"tierfeature.{flag}", f"t0={v0} t1={v1} t10={v10}")
+
+    # 15.3 vote_weight
+    vw0 = float(tier0.get("vote_weight", 0))
+    vw1 = float(tier1.get("vote_weight", 0))
+    vw10 = float(tier10.get("vote_weight", 0))
+    if abs(vw0 - 1.0) < 0.01 and abs(vw1 - 1.33) < 0.01 and abs(vw10 - 1.33) < 0.01:
+        _pass("tierfeature.vote_weights")
+    else:
+        _fail("tierfeature.vote_weights", f"vw0={vw0} vw1={vw1} vw10={vw10}")
+
+    # 15.4 period_fee
+    pf0 = int(tier0.get("period_fee", -1))
+    pf1 = int(tier1.get("period_fee", -1))
+    pf10 = int(tier10.get("period_fee", -1))
+    if pf0 == 0 and pf1 == 100_000_000_000 and pf10 == 200_000_000_000:
+        _pass("tierfeature.period_fees")
+    else:
+        _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1} pf10={pf10}")
+
+    # 15.5 Only 3 tiers exist
+    params = _get_chain_params()
+    num_tiers = len(params.get("tiers") or [])
+    if num_tiers == 3:
+        _pass("tierfeature.exactly_3_tiers")
+    else:
+        _fail("tierfeature.exactly_3_tiers", f"got {num_tiers}")
+
+    # 15.6 Free user content limit is enforced at chain
+    fw = WALLETS["free"]
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
+    ts = _now_ms()
+    topic = f"tf{_rand_str(4)}"
+    over_content = "x" * 1050
+    pub = fw.public_key().public_key_bytes
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [])
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    msg = _build_msg_post(fw, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof))
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("tierfeature.free_content_over_1000_rejected", ccode, dcode, dlog)
+
+    # 15.7 Subscriber can post content > 1000
+    sw = WALLETS["sub1"]
+    lb, _, _, _ = _get_pow_params(backend, str(sw.address()))
+    ts = _now_ms()
+    topic2 = f"tf{_rand_str(4)}"
+    long_content = "x" * 1050
+    msg = _build_msg_post(sw, lb, 0, ts, topic2, "Title", long_content, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sw.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("tierfeature.sub_content_1050_accepted", ccode, dcode, dlog)
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -3013,6 +3342,9 @@ ALL_CATEGORIES = {
     "tier_enforcement": test_tier_enforcement,
     "auto_renewal": test_chain_auto_renewal,
     "governance": test_governance_reject,
+    "hard_cap_vs_deque": test_hard_cap_vs_deque,
+    "upgrade_validation": test_upgrade_level_validation,
+    "tier_features": test_tier_features,
 }
 
 

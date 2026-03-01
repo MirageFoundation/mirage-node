@@ -14,8 +14,16 @@ import MobileHeader from '../components/MobileHeader';
 import { ContentGrid, ModernPostFeed, TabbedContainer, TabsRow, ClickableTab, ContainerBody } from '../styled/Layout';
 import { tooltipStyles } from '../components/Tooltip';
 
-const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];
-const TIER_COLORS = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
+const TIER_NAMES = {
+    0: 'Free',
+    1: 'Subscriber',
+    10: 'Agent'
+};
+const TIER_COLORS = {
+    0: '#6B7280',
+    1: '#F59E0B',
+    10: '#EF4444'
+};
 const ADMIN_COLOR = '#EF4444';
 
 const getTierName = (level) => {
@@ -390,37 +398,38 @@ const TIER_METADATA = [
     },
     {
         level: 1,
-        name: 'Trusted',
+        name: 'Subscriber',
         features: [
-            'Change username',
-            'Profile biography & avatar',
-            'Give basic awards'
+            'Remove anonymous prefix',
+            'Profile biography, avatar & banner',
+            'Higher vote weight'
         ]
     },
     {
-        level: 2,
-        name: 'Established',
+        level: 10,
+        name: 'Agent',
         features: [
-            'Eligible for moderator',
-            'Profile banner',
-            'Give more awards'
-        ]
-    },
-    {
-        level: 3,
-        name: 'Distinguished',
-        features: [
-            'Maximum vote weight',
-            'All profile features',
-            'Give all award types'
+            'Eligible to be an agent',
+            'All subscriber features',
+            'Profile flair'
         ]
     }
 ];
 
+// Map user level to tier array index (chain stores 3 tiers at indices 0,1,2)
+const levelToTierIndex = (level) => {
+    if (level === 0) return 0;
+    if (level === 1) return 1;
+    if (level === 10) return 2;
+    if (level >= 100) return 2;
+    return -1;
+};
+
 // Build tier display info from chain tiers and static metadata
 const buildTierConfig = (chainTiers) => {
     return TIER_METADATA.map((meta, idx) => {
-        const chainTier = chainTiers[idx] || {};
+        const tierIdx = levelToTierIndex(meta.level);
+        const chainTier = (tierIdx >= 0 && tierIdx < chainTiers.length) ? chainTiers[tierIdx] : {};
         const periodFeeUmirage = Number(chainTier.period_fee || 0);
         const maxContent = Number(chainTier.max_content_length || 0);
         const maxTopics = Number(chainTier.max_followed_topics || 0);
@@ -751,11 +760,11 @@ export default function SubscriptionView({ state }) {
             return Number.isFinite(v) && v > 0 ? v : 0;
         };
 
-        const maxMods = num('max_followed_mods');
-        if (maxMods) {
-            details.push(`Follow up to ${maxMods} moderators.`);
+        const maxAgents = num('max_enabled_agents');
+        if (maxAgents) {
+            details.push(`Enable up to ${maxAgents} agents.`);
         } else {
-            details.push('Cannot follow moderators.');
+            details.push('Cannot enable agents.');
         }
 
         const maxUsers = num('max_followed_users');
@@ -814,12 +823,6 @@ export default function SubscriptionView({ state }) {
             details.push('Cannot edit posts after publishing.');
         }
 
-        const archiveDays = num('archive_duration_days');
-        if (archiveDays) {
-            details.push(`Posts are archived after approximately ${archiveDays} days.`);
-        } else {
-            details.push('Posts are not archived.');
-        }
 
         if (typeof raw.vote_weight === 'number' && raw.vote_weight > 0) {
             details.push(`Vote weight: ${raw.vote_weight.toFixed(2)}x.`);
@@ -827,15 +830,15 @@ export default function SubscriptionView({ state }) {
             details.push('Standard vote weight.');
         }
 
-        if (raw.eligible_for_mod) {
-            details.push('Eligible to be moderator.');
+        if (raw.can_be_agent) {
+            details.push('Eligible to be agent.');
         } else {
-            details.push('Ineligible to be moderator.');
+            details.push('Ineligible to be agent.');
         }
-        if (raw.can_change_name) {
-            details.push('Can change username.');
+        if (raw.can_remove_anon) {
+            details.push('Can remove anonymous prefix.');
         } else {
-            details.push('Cannot change username.');
+            details.push('Username has anonymous prefix.');
         }
         if (raw.can_have_biography) {
             details.push('Profile biography available.');
@@ -995,7 +998,7 @@ export default function SubscriptionView({ state }) {
                                     </InfoText>
                                     <TiersGrid>
                                         {tierConfig.map((tier, idx) => {
-                                            const color = TIER_COLORS[idx];
+                                            const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
                                             return (
                                                 <TierCard key={tier.level} $isActive={false} $color={color}>
                                                     <TierHeader>
@@ -1143,7 +1146,7 @@ Not directly spendable and will get burned if not used.`}>
                                             <TiersGrid>
                                                 {tierConfig.map((tier, idx) => {
                                                     const isActive = tier.level === userLevel;
-                                                    const color = TIER_COLORS[idx];
+                                                    const color = TIER_COLORS[tier.level] || TIER_COLORS[0];
                                                     const affordable = tier.level === 0 || canAfford(tier);
 
                                                     return (

@@ -1600,7 +1600,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
         'Join me on Mirage: no arbitrary bans, no shadow banning.',
         'Join me on Mirage: speak freely, permanently.',
         'Join me on Mirage: censorship-resistant social media.',
-        'Join me on Mirage: your posts can\'t be erased by moderators.',
+        'Join me on Mirage: your posts can\'t be erased by agents.',
         'Join me on Mirage: where deplatforming isn\'t possible.',
         'Join me on Mirage: true freedom of expression.',
         'Join me on Mirage: your speech doesn\'t need approval.',

@@ -514,8 +514,8 @@ def broadcast_tx(tx_bytes: bytes) -> Tuple[str, int, int, str]:
 | `POST /api/core/unfollow_user` | MsgUnfollowUser |
 | `POST /api/core/follow_topic` | MsgFollowTopic |
 | `POST /api/core/unfollow_topic` | MsgUnfollowTopic |
-| `POST /api/core/follow_moderator` | MsgFollowModerator |
-| `POST /api/core/unfollow_moderator` | MsgUnfollowModerator |
+| `POST /api/core/enable_agent` | MsgEnableAgent |
+| `POST /api/core/disable_agent` | MsgDisableAgent |
 | `POST /api/core/block_post` | MsgBlockPost |
 | `POST /api/core/block_user` | MsgBlockUser |
 | `POST /api/core/delete` | MsgDelete |

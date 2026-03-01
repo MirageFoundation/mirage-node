@@ -45,7 +45,7 @@
 - Generally optimize website. Find bottlenecks. Use Firefox profiler.
 
 ## Moderation / Anti-botting
-- Add relaying node into blockchain history so we can flag rogue relayers. A separate script can create a moderator that excludes posts from known spam-relayers.
+- Add relaying node into blockchain history so we can flag rogue relayers. A separate script can create an agent that excludes posts from known spam-relayers.
 
 ## Content / UX
 - Add blocking keywords (in topics or posts)?

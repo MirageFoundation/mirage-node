@@ -109,14 +109,14 @@ const Mono = styled.span`
     overflow-wrap: anywhere;
 `;
 
-const ModeratorsList = styled.div`
+const AgentsList = styled.div`
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
 `;
 
-const ModeratorTag = styled.div`
+const AgentTag = styled.div`
     background-color: ${({ theme }) => theme?.colors?.accent || '#2E3238'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     border-radius: 20px;
@@ -130,7 +130,7 @@ const ModeratorTag = styled.div`
     transition: opacity 0.2s ease;
 `;
 
-const RemoveModeratorButton = styled.button`
+const RemoveAgentButton = styled.button`
     background: none;
     border: none;
     color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
@@ -144,7 +144,7 @@ const RemoveModeratorButton = styled.button`
     }
 `;
 
-const ModeratorInput = styled.input`
+const AgentInput = styled.input`
     background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
     border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
     border-radius: 8px;
@@ -161,7 +161,7 @@ const ModeratorInput = styled.input`
     }
 `;
 
-const ModeratorInputRow = styled.div`
+const AgentInputRow = styled.div`
     display: flex;
     margin-top: 0.5rem;
     align-items: center;
@@ -172,7 +172,7 @@ const ModeratorInputRow = styled.div`
     }
 `;
 
-const ModeratorErrorMessage = styled.div`
+const AgentErrorMessage = styled.div`
     background-color: rgba(220, 38, 38, 0.1);
     border: 1px solid #dc2626;
     border-radius: 3px;
@@ -185,7 +185,7 @@ const ModeratorErrorMessage = styled.div`
     gap: 0.5rem;
 `;
 
-const ModeratorSuccessMessage = styled.div`
+const AgentSuccessMessage = styled.div`
     background-color: rgba(34, 197, 94, 0.1);
     border: 1px solid #22c55e;
     border-radius: 3px;
@@ -226,16 +226,16 @@ export default function FollowsView({ state }) {
 
     const [followedUsers, setFollowedUsers] = useState([]);
     const [followedTopics, setFollowedTopics] = useState([]);
-    const [moderators, setModerators] = useState([]);
-    const [moderatorUsernames, setModeratorUsernames] = useState({});
+    const [enabledAgents, setEnabledAgents] = useState([]);
+    const [agentUsernames, setAgentUsernames] = useState({});
     const [followedUsernames, setFollowedUsernames] = useState({});
     const [listsLoading, setListsLoading] = useState(false);
     const [listsError, setListsError] = useState('');
-    const [newModeratorInput, setNewModeratorInput] = useState('');
-    const [moderatorError, setModeratorError] = useState('');
-    const [moderatorSuccess, setModeratorSuccess] = useState('');
-    const [isAddingModerator, setIsAddingModerator] = useState(false);
-    const [isRemovingModerator, setIsRemovingModerator] = useState('');
+    const [newAgentInput, setNewAgentInput] = useState('');
+    const [agentError, setAgentError] = useState('');
+    const [agentSuccess, setAgentSuccess] = useState('');
+    const [isAddingAgent, setIsAddingAgent] = useState(false);
+    const [isRemovingAgent, setIsRemovingAgent] = useState('');
 
     const {
         isTopicPending: isFollowTopicPending,
@@ -255,8 +255,8 @@ export default function FollowsView({ state }) {
                 if (cancelled) return;
                 setFollowedUsers(data?.followed_users || []);
                 setFollowedTopics(data?.followed_topics || []);
-                setModerators(data?.followed_moderators || []);
-                Storage.save('followed_moderators', data?.followed_moderators || []);
+                setEnabledAgents(data?.enabled_agents || []);
+                Storage.save('enabled_agents', data?.enabled_agents || []);
             } catch (err) {
                 if (!cancelled) {
                     setListsError(err?.message || 'Failed to load follows');
@@ -272,11 +272,11 @@ export default function FollowsView({ state }) {
     }, [address]);
 
     useEffect(() => {
-        const combined = [...moderators, ...followedUsers]
+        const combined = [...enabledAgents, ...followedUsers]
             .map(a => String(a || '').trim())
             .filter(Boolean);
         if (combined.length === 0) {
-            setModeratorUsernames({});
+            setAgentUsernames({});
             setFollowedUsernames({});
             return;
         }
@@ -295,7 +295,7 @@ export default function FollowsView({ state }) {
                     }
                     return result;
                 };
-                setModeratorUsernames(buildMap(moderators));
+                setAgentUsernames(buildMap(enabledAgents));
                 setFollowedUsernames(buildMap(followedUsers));
             } catch {
                 if (cancelled) return;
@@ -304,41 +304,41 @@ export default function FollowsView({ state }) {
                     addresses.forEach(a => { result[a] = a; });
                     return result;
                 };
-                setModeratorUsernames(buildFallback(moderators));
+                setAgentUsernames(buildFallback(enabledAgents));
                 setFollowedUsernames(buildFallback(followedUsers));
             }
         };
         resolveAll();
         return () => { cancelled = true; };
-    }, [moderators, followedUsers]);
+    }, [enabledAgents, followedUsers]);
 
     const clearMessages = () => {
-        setModeratorError('');
-        setModeratorSuccess('');
+        setAgentError('');
+        setAgentSuccess('');
     };
 
     const showError = (message) => {
-        setModeratorError(message);
-        setModeratorSuccess('');
-        setTimeout(() => setModeratorError(''), 5000);
+        setAgentError(message);
+        setAgentSuccess('');
+        setTimeout(() => setAgentError(''), 5000);
     };
 
     const showSuccess = (message) => {
-        setModeratorSuccess(message);
-        setModeratorError('');
-        setTimeout(() => setModeratorSuccess(''), 3000);
+        setAgentSuccess(message);
+        setAgentError('');
+        setTimeout(() => setAgentSuccess(''), 3000);
     };
 
-    const addModerator = async () => {
-        const trimmed = newModeratorInput.trim();
+    const addAgent = async () => {
+        const trimmed = newAgentInput.trim();
         if (!trimmed) return;
 
         clearMessages();
-        setIsAddingModerator(true);
+        setIsAddingAgent(true);
 
         if (!/^[A-Za-z0-9-]+$/.test(trimmed)) {
             showError('Invalid username format. Only letters, numbers, and hyphens are allowed.');
-            setIsAddingModerator(false);
+            setIsAddingAgent(false);
             return;
         }
 
@@ -346,22 +346,22 @@ export default function FollowsView({ state }) {
             const response = await Api.get('get_address_from_username', { username: trimmed }, { timeoutMs: 5000 });
             if (!response || !response.exists || !response.address) {
                 showError(`Username "${trimmed}" not found. Make sure the username exists on-chain.`);
-                setIsAddingModerator(false);
+                setIsAddingAgent(false);
                 return;
             }
 
-            const modAddress = response.address;
+            const agentAddress = response.address;
 
-            if (moderators.map(m => m.toLowerCase()).includes(modAddress.toLowerCase())) {
-                showError('This moderator is already in your list.');
-                setIsAddingModerator(false);
+            if (enabledAgents.map(a => a.toLowerCase()).includes(agentAddress.toLowerCase())) {
+                showError('This agent is already in your list.');
+                setIsAddingAgent(false);
                 return;
             }
 
             const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
             if (!paramsData) {
                 showError('Unable to fetch network parameters. Please try again.');
-                setIsAddingModerator(false);
+                setIsAddingAgent(false);
                 return;
             }
 
@@ -370,19 +370,19 @@ export default function FollowsView({ state }) {
 
             if (!lastBlockHash) {
                 showError('Unable to get last block hash from server. Please try again.');
-                setIsAddingModerator(false);
+                setIsAddingAgent(false);
                 return;
             }
 
             if (!seedPhrase) {
                 showError('Seed phrase not available. Please sign in again.');
-                setIsAddingModerator(false);
+                setIsAddingAgent(false);
                 return;
             }
 
             const transaction = {
-                action: 'follow_moderator',
-                moderator: modAddress,
+                action: 'enable_agent',
+                agent: agentAddress,
                 last_block_hash: lastBlockHash,
                 pow_difficulty: powDifficulty,
                 difficulty: powDifficulty,
@@ -397,33 +397,33 @@ export default function FollowsView({ state }) {
             );
 
             if (result.success) {
-                const updated = [...moderators.filter(m => m !== modAddress), modAddress];
+                const updated = [...enabledAgents.filter(a => a !== agentAddress), agentAddress];
                 if (updated.length > 3) updated.shift();
-                setModerators(updated);
-                Storage.save('followed_moderators', updated);
-                setNewModeratorInput('');
-                showSuccess(`Successfully added moderator "${trimmed}"`);
+                setEnabledAgents(updated);
+                Storage.save('enabled_agents', updated);
+                setNewAgentInput('');
+                showSuccess(`Successfully enabled agent "${trimmed}"`);
             } else {
-                showError(`Failed to add moderator: ${result.error || 'Unknown error'}`);
+                showError(`Failed to enable agent: ${result.error || 'Unknown error'}`);
             }
         } catch (error) {
             showError(`Error checking username: ${error.message || 'Network error'}`);
         } finally {
-            setIsAddingModerator(false);
+            setIsAddingAgent(false);
         }
     };
 
-    const removeModerator = async (modAddress) => {
-        setIsRemovingModerator(modAddress);
+    const removeAgent = async (agentAddress) => {
+        setIsRemovingAgent(agentAddress);
         clearMessages();
 
         try {
-            const updated = moderators.filter(m => m !== modAddress);
+            const updated = enabledAgents.filter(a => a !== agentAddress);
 
             const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
             if (!paramsData) {
                 showError('Unable to fetch network parameters. Please try again.');
-                setIsRemovingModerator('');
+                setIsRemovingAgent('');
                 return;
             }
 
@@ -432,20 +432,20 @@ export default function FollowsView({ state }) {
 
             if (!lastBlockHash) {
                 showError('Unable to fetch last block hash. Please try again.');
-                setIsRemovingModerator('');
+                setIsRemovingAgent('');
                 return;
             }
 
             const currentSeed = seedVault.getSeed() || '';
             if (!currentSeed) {
                 showError('No seed phrase found. Please sign in again.');
-                setIsRemovingModerator('');
+                setIsRemovingAgent('');
                 return;
             }
 
             const transaction = {
-                action: 'unfollow_moderator',
-                moderator: modAddress,
+                action: 'disable_agent',
+                agent: agentAddress,
                 last_block_hash: lastBlockHash,
                 pow_difficulty: powDifficulty >>> 0,
             };
@@ -457,25 +457,25 @@ export default function FollowsView({ state }) {
             const result = await tx.performTransaction(transaction, challenge, privateKeyHex, derivedAddress, false);
 
             if (result && result.success) {
-                setModerators(updated);
-                Storage.save('followed_moderators', updated);
-                const uname = moderatorUsernames[modAddress] || modAddress;
-                showSuccess(`Removed moderator "${uname}"`);
+                setEnabledAgents(updated);
+                Storage.save('enabled_agents', updated);
+                const uname = agentUsernames[agentAddress] || agentAddress;
+                showSuccess(`Disabled agent "${uname}"`);
             } else {
-                showError(`Failed to remove moderator: ${result?.error || 'Unknown error'}`);
+                showError(`Failed to disable agent: ${result?.error || 'Unknown error'}`);
             }
         } catch (error) {
-            console.error('Remove moderator error:', error);
-            showError(`Failed to remove moderator: ${error.message || error}`);
+            console.error('Remove agent error:', error);
+            showError(`Failed to disable agent: ${error.message || error}`);
         } finally {
-            setIsRemovingModerator('');
+            setIsRemovingAgent('');
         }
     };
 
-    const handleModeratorKeyDown = (e) => {
+    const handleAgentKeyDown = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            addModerator();
+            addAgent();
         }
     };
 
@@ -524,70 +524,70 @@ export default function FollowsView({ state }) {
                             <ClickableTab $active>Follows</ClickableTab>
                         </TabsRow>
                         <ContainerBody>
-                            <SectionTitle $first>Moderators</SectionTitle>
+                            <SectionTitle $first>Enabled Agents</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                {!listsLoading && !listsError && moderators.length === 0 && (
-                                    <Mono style={{ color: '#888' }}>No moderators set. Add up to 3 moderators whose block lists will be applied to your feed.</Mono>
+                                {!listsLoading && !listsError && enabledAgents.length === 0 && (
+                                    <Mono style={{ color: '#888' }}>No agents enabled. Add up to 3 agents whose block lists will be applied to your feed.</Mono>
                                 )}
-                                {!listsLoading && !listsError && moderators.length > 0 && (
-                                    <ModeratorsList>
-                                        {moderators.map((modAddr) => (
-                                            <ModeratorTag key={modAddr} $isRemoving={isRemovingModerator === modAddr}>
+                                {!listsLoading && !listsError && enabledAgents.length > 0 && (
+                                    <AgentsList>
+                                        {enabledAgents.map((agentAddr) => (
+                                            <AgentTag key={agentAddr} $isRemoving={isRemovingAgent === agentAddr}>
                                                 <Mono
                                                     style={{ cursor: 'pointer' }}
-                                                    onClick={() => navigate(`/u/${encodeURIComponent(moderatorUsernames[modAddr] || modAddr)}?tab=posts`)}
+                                                    onClick={() => navigate(`/u/${encodeURIComponent(agentUsernames[agentAddr] || agentAddr)}?tab=posts`)}
                                                 >
-                                                    {moderatorUsernames[modAddr] && moderatorUsernames[modAddr] !== modAddr
-                                                        ? moderatorUsernames[modAddr]
-                                                        : shortenAddress(modAddr)}
+                                                    {agentUsernames[agentAddr] && agentUsernames[agentAddr] !== agentAddr
+                                                        ? agentUsernames[agentAddr]
+                                                        : shortenAddress(agentAddr)}
                                                 </Mono>
-                                                <RemoveModeratorButton
-                                                    onClick={() => removeModerator(modAddr)}
+                                                <RemoveAgentButton
+                                                    onClick={() => removeAgent(agentAddr)}
                                                     title="Remove"
-                                                    disabled={isRemovingModerator === modAddr}
+                                                    disabled={isRemovingAgent === agentAddr}
                                                 >
-                                                    {isRemovingModerator === modAddr ? <LoadingSpinner /> : '×'}
-                                                </RemoveModeratorButton>
-                                            </ModeratorTag>
+                                                    {isRemovingAgent === agentAddr ? <LoadingSpinner /> : '×'}
+                                                </RemoveAgentButton>
+                                            </AgentTag>
                                         ))}
-                                    </ModeratorsList>
+                                    </AgentsList>
                                 )}
                                 {!listsLoading && (
                                     <>
-                                        <ModeratorInputRow>
-                                            <ModeratorInput
+                                        <AgentInputRow>
+                                            <AgentInput
                                                 type="text"
-                                                placeholder="Add a moderator by username"
-                                                value={newModeratorInput}
+                                                placeholder="Add an agent by username"
+                                                value={newAgentInput}
                                                 onChange={(e) => {
-                                                    setNewModeratorInput(e.target.value);
-                                                    setModeratorError('');
-                                                    setModeratorSuccess('');
+                                                    setNewAgentInput(e.target.value);
+                                                    setAgentError('');
+                                                    setAgentSuccess('');
                                                 }}
-                                                onKeyDown={handleModeratorKeyDown}
-                                                disabled={isAddingModerator}
+                                                onKeyDown={handleAgentKeyDown}
+                                                disabled={isAddingAgent}
                                             />
                                             <Button
-                                                onClick={addModerator}
-                                                disabled={isAddingModerator || !newModeratorInput.trim()}
-                                                loading={isAddingModerator}
+                                                onClick={addAgent}
+                                                disabled={isAddingAgent || !newAgentInput.trim()}
+                                                loading={isAddingAgent}
                                                 size="sm"
                                             >
                                                 Add
                                             </Button>
-                                        </ModeratorInputRow>
-                                        {moderatorError && (
-                                            <ModeratorErrorMessage>
+                                        </AgentInputRow>
+                                        {agentError && (
+                                            <AgentErrorMessage>
                                                 <span>⚠</span>
-                                                {moderatorError}
-                                            </ModeratorErrorMessage>
+                                                {agentError}
+                                            </AgentErrorMessage>
                                         )}
-                                        {moderatorSuccess && (
-                                            <ModeratorSuccessMessage>
+                                        {agentSuccess && (
+                                            <AgentSuccessMessage>
                                                 <span>✓</span>
-                                                {moderatorSuccess}
-                                            </ModeratorSuccessMessage>
+                                                {agentSuccess}
+                                            </AgentSuccessMessage>
                                         )}
                                     </>
                                 )}

@@ -311,7 +311,6 @@ CREATE TABLE profiles (
     created_at BIGINT NOT NULL DEFAULT 0,
     subscription_expiry BIGINT NOT NULL DEFAULT 0,
     auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
-    is_moderator BOOLEAN NOT NULL DEFAULT FALSE,
     biography TEXT NOT NULL DEFAULT '',
     avatar TEXT NOT NULL DEFAULT '',
     banner TEXT NOT NULL DEFAULT ''
@@ -537,7 +536,7 @@ def _sync_profiles_from_chain(self):
 - Indexer database could have stale data from delayed processing
 - Profile updates via governance proposals might not emit events
 - Ensures consistency after indexer downtime
-- Lists (followed users/topics/mods) are NOT synced (tracked via messages)
+- Lists (followed users/topics/agents) are NOT synced (tracked via messages)
 
 ### Subscription Event Handling
 

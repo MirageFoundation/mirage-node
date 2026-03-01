@@ -704,7 +704,7 @@ Returns governance parameters including tier limits:
   "tiers": [
     {
       "period_fee": 0,
-      "max_followed_mods": 50,
+      "max_enabled_agents": 50,
       "max_followed_users": 50,
       "max_followed_topics": 50,
       "max_blocked_users": 50,
@@ -713,13 +713,13 @@ Returns governance parameters including tier limits:
       "max_title_length": 200,
       "max_content_length": 5000,
       "editing_time_mins": 30,
-      "archive_duration_days": 7,
       "vote_weight": 1.0,
-      "eligible_for_mod": false,
-      "can_change_name": false,
+      "can_be_agent": false,
+      "can_remove_anon": false,
       "can_have_biography": false,
       "can_have_avatar": false,
-      "can_have_banner": false
+      "can_have_banner": false,
+      "can_have_flair": false
     }
   ]
 }
@@ -767,8 +767,8 @@ Cached 24 hours. Not needed for posting.
 | Unfollow User | `MsgUnfollowUser` | `/core/unfollow_user` | 100=target (own addr), 101=user |
 | Follow Topic | `MsgFollowTopic` | `/core/follow_topic` | 100=target (own addr), 101=topic |
 | Unfollow Topic | `MsgUnfollowTopic` | `/core/unfollow_topic` | 100=target (own addr), 101=topic |
-| Follow Moderator | `MsgFollowModerator` | `/core/follow_moderator` | 100=target (own addr), 101=moderator |
-| Unfollow Moderator | `MsgUnfollowModerator` | `/core/unfollow_moderator` | 100=target (own addr), 101=moderator |
+| Enable Agent | `MsgEnableAgent` | `/core/enable_agent` | 100=target (own addr), 101=agent |
+| Disable Agent | `MsgDisableAgent` | `/core/disable_agent` | 100=target (own addr), 101=agent |
 | Block Post | `MsgBlockPost` | `/core/block_post` | 100=target (post_id) |
 | Unblock Post | `MsgUnblockPost` | `/core/unblock_post` | 100=target (post_id) |
 | Block User | `MsgBlockUser` | `/core/block_user` | 100=target (address) |

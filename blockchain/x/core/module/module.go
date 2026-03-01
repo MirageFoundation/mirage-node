@@ -489,8 +489,8 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 		}
 
 		// Store all list fields separately (only if not empty)
-		if len(ip.FollowedModerators) > 0 {
-			_ = am.k.SetProfileFollowedMods(sdkCtx, owner, ip.FollowedModerators)
+		if len(ip.EnabledAgents) > 0 {
+			_ = am.k.SetProfileEnabledAgents(sdkCtx, owner, ip.EnabledAgents)
 		}
 		if len(ip.FollowedUsers) > 0 {
 			_ = am.k.SetProfileFollowedUsers(sdkCtx, owner, ip.FollowedUsers)
@@ -732,7 +732,14 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				),
 			)
 		} else {
-			tierConfig := params.Tiers[int(core.Level)]
+			tierConfig := params.GetTierConfig(int(core.Level))
+			if tierConfig == nil {
+				sdkCtx.Logger().Error("processSubscriptions: invalid level, downgrading to free",
+					"address", sub.Address, "level", core.Level)
+				core.Level = 0
+				core.SubscriptionExpiry = 0
+				goto saveProfile
+			}
 			periodFee := tierConfig.PeriodFee
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
@@ -894,11 +901,11 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 		SubscriptionExpiry: profile.SubscriptionExpiry,
 		AutoRenew:          profile.AutoRenew,
 		ReserveFunds:       profile.ReserveFunds,
-		IsModerator:        profile.IsModerator,
 		Biography:          profile.Biography,
 		Avatar:             profile.Avatar,
 		Banner:             profile.Banner,
-		FollowedModerators: profile.FollowedModerators,
+		Flair:              profile.Flair,
+		EnabledAgents:      profile.EnabledAgents,
 		FollowedUsers:      profile.FollowedUsers,
 		FollowedTopics:     profile.FollowedTopics,
 		BlockedUsers:       profile.BlockedUsers,
@@ -934,7 +941,7 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 		}
 
 		// Load all lists for this profile
-		mods, _ := am.k.GetProfileFollowedMods(sdkCtx, core.Owner)
+		agents, _ := am.k.GetProfileEnabledAgents(sdkCtx, core.Owner)
 		users, _ := am.k.GetProfileFollowedUsers(sdkCtx, core.Owner)
 		topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, core.Owner)
 		blockedUsers, _ := am.k.GetProfileBlockedUsers(sdkCtx, core.Owner)
@@ -949,11 +956,11 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			SubscriptionExpiry: core.SubscriptionExpiry,
 			AutoRenew:          core.AutoRenew,
 			ReserveFunds:       core.ReserveFunds,
-			IsModerator:        core.IsModerator,
 			Biography:          core.Biography,
 			Avatar:             core.Avatar,
 			Banner:             core.Banner,
-			FollowedModerators: mods,
+			Flair:              core.Flair,
+			EnabledAgents:      agents,
 			FollowedUsers:      users,
 			FollowedTopics:     topics,
 			BlockedUsers:       blockedUsers,
@@ -1372,7 +1379,7 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 }
 
 // updateProfileCore is a helper that loads, updates, validates, and persists core profile data only.
-// Lists (FollowedModerators, etc.) are stored separately and should be updated via keeper methods.
+// Lists (EnabledAgents, etc.) are stored separately and should be updated via keeper methods.
 func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn func(*types.ProfileCore) error) error {
 	params := am.k.GetParams(sdkCtx)
 
@@ -1393,18 +1400,18 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 		return err
 	}
 
-	// Validate core fields (need to get mods count for validation)
-	mods, _ := am.k.GetProfileFollowedMods(sdkCtx, owner)
+	// Validate core fields (need to get agents count for validation)
+	agents, _ := am.k.GetProfileEnabledAgents(sdkCtx, owner)
 	tierConfig := params.GetTierConfig(int(core.Level))
-	maxMods := uint64(5)
+	maxAgents := uint64(25)
 	if tierConfig != nil {
-		maxMods = tierConfig.MaxFollowedMods
+		maxAgents = tierConfig.MaxEnabledAgents
 	}
 
 	// Build a temporary Profile for validation
 	tempProf := core.ToProfile()
-	tempProf.FollowedModerators = mods
-	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize, maxMods); err != nil {
+	tempProf.EnabledAgents = agents
+	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize, maxAgents); err != nil {
 		return err
 	}
 
@@ -1436,8 +1443,8 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	prof := core.ToProfile()
 
 	// Load lists
-	if mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner); err == nil {
-		prof.FollowedModerators = mods
+	if agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner); err == nil {
+		prof.EnabledAgents = agents
 	}
 	if users, err := am.k.GetProfileFollowedUsers(sdkCtx, owner); err == nil {
 		prof.FollowedUsers = users
@@ -1511,10 +1518,10 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	}
 
 	tierConfig := params.GetTierConfig(userLevel)
-	canChangeName := isGov || (tierConfig != nil && tierConfig.CanChangeName)
+	canRemoveAnon := isGov || (tierConfig != nil && tierConfig.CanRemoveAnon)
 
-	// Username normalization: if user can't change name (free tier), force "Anon-" prefix
-	if !canChangeName {
+	// Username normalization: if user can't remove anon (free tier), force "Anon-" prefix
+	if !canRemoveAnon {
 		for strings.HasPrefix(strings.ToLower(username), "anon-") {
 			username = username[len("anon-"):]
 		}
@@ -1549,9 +1556,9 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	// Log successful username change
 	sdkCtx.Logger().Info(logDelimiter)
 	if prevUsername != "" && prevUsername != username {
-		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username, "can_change_name", canChangeName)
+		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username, "can_remove_anon", canRemoveAnon)
 	} else {
-		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username, "can_change_name", canChangeName)
+		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username, "can_remove_anon", canRemoveAnon)
 	}
 	sdkCtx.Logger().Info(logDelimiter)
 
@@ -1563,14 +1570,14 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	return &types.MsgSetUsernameResponse{}, nil
 }
 
-// FollowModerator adds a moderator to the user's followed list (capped deque)
-func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowModerator) (*types.MsgFollowModeratorResponse, error) {
+// EnableAgent adds an agent to the user's enabled agents list (capped deque)
+func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) (*types.MsgEnableAgentResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	moderator := strings.ToLower(strings.TrimSpace(req.GetModerator()))
+	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
 
 	var owner string
 	if authority == govAuthority {
@@ -1581,7 +1588,7 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 	} else {
 		if len(req.GetEnvelopePubkey()) != 33 {
 			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("FollowModerator: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Error("EnableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
 			sdkCtx.Logger().Info(logDelimiter)
 			return nil, fmt.Errorf("invalid envelope_pubkey length")
 		}
@@ -1596,15 +1603,13 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 		owner = target
 	}
 
-	// Validate moderator address
-	if _, err := sdk.AccAddressFromBech32(moderator); err != nil {
+	if _, err := sdk.AccAddressFromBech32(agent); err != nil {
 		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("FollowModerator: invalid moderator address", "address", moderator)
+		sdkCtx.Logger().Error("EnableAgent: invalid agent address", "address", agent)
 		sdkCtx.Logger().Info(logDelimiter)
-		return nil, fmt.Errorf("invalid moderator address: %s", moderator)
+		return nil, fmt.Errorf("invalid agent address: %s", agent)
 	}
 
-	// Get user's tier for max mods limit
 	var userLevel int
 	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
 		var core types.ProfileCore
@@ -1612,67 +1617,60 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
-	maxMods := 5 // fallback
+	maxAgents := 25
 	if tierConfig != nil {
-		maxMods = int(tierConfig.MaxFollowedMods)
+		maxAgents = int(tierConfig.MaxEnabledAgents)
 	}
 
-	// Get current followed mods list
-	mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner)
+	agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner)
 	if err != nil {
-		mods = []string{}
+		agents = []string{}
 	}
 
-	// Check if already following
-	for _, m := range mods {
-		if m == moderator {
-			// Already following, no-op
-			return &types.MsgFollowModeratorResponse{}, nil
+	for _, a := range agents {
+		if a == agent {
+			return &types.MsgEnableAgentResponse{}, nil
 		}
 	}
 
-	// Add to deque, cap based on tier
-	mods = append(mods, moderator)
-	if len(mods) > maxMods {
-		mods = mods[len(mods)-maxMods:]
+	if len(agents) >= maxAgents {
+		return nil, fmt.Errorf("enabled agents limit reached (%d); disable an agent first", maxAgents)
 	}
 
-	// Save updated list
-	if err := am.k.SetProfileFollowedMods(sdkCtx, owner, mods); err != nil {
+	agents = append(agents, agent)
+	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, agents); err != nil {
 		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("FollowModerator: failed to save followed mods", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Error("EnableAgent: failed to save enabled agents", "owner", owner, "err", err.Error())
 		sdkCtx.Logger().Info(logDelimiter)
 		return nil, err
 	}
 
-	// Ensure profile core exists (create if needed)
 	if _, found, _ := am.k.GetProfileCore(sdkCtx, owner); !found {
 		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
 			return nil
 		}); err != nil {
-			sdkCtx.Logger().Error("FollowModerator: failed to create profile", "owner", owner, "err", err.Error())
+			sdkCtx.Logger().Error("EnableAgent: failed to create profile", "owner", owner, "err", err.Error())
 		}
 	}
 
 	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("FollowModerator: moderator followed", "owner", owner, "moderator", moderator)
+	sdkCtx.Logger().Info("EnableAgent: agent enabled", "owner", owner, "agent", agent)
 	sdkCtx.Logger().Info(logDelimiter)
 
-	// Deduct gas fee from paid users
 	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
 		return nil, err
 	}
 
-	return &types.MsgFollowModeratorResponse{}, nil
+	return &types.MsgEnableAgentResponse{}, nil
 }
 
-// UnfollowModerator removes a moderator from the user's followed list
-func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollowModerator) (*types.MsgUnfollowModeratorResponse, error) {
+// DisableAgent removes an agent from the user's enabled agents list
+func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent) (*types.MsgDisableAgentResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	moderator := strings.ToLower(strings.TrimSpace(req.GetModerator()))
+	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
 
 	var owner string
 	if authority == govAuthority {
@@ -1683,7 +1681,7 @@ func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollo
 	} else {
 		if len(req.GetEnvelopePubkey()) != 33 {
 			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("UnfollowModerator: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Error("DisableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
 			sdkCtx.Logger().Info(logDelimiter)
 			return nil, fmt.Errorf("invalid envelope_pubkey length")
 		}
@@ -1698,7 +1696,6 @@ func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollo
 		owner = target
 	}
 
-	// Get user level for gas fee deduction
 	var userLevel int
 	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
 		var core types.ProfileCore
@@ -1706,37 +1703,34 @@ func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollo
 		userLevel = int(core.Level)
 	}
 
-	// Get current followed mods list and remove the moderator
-	mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner)
+	agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner)
 	if err != nil {
-		mods = []string{}
+		agents = []string{}
 	}
 
-	newMods := make([]string, 0, len(mods))
-	for _, m := range mods {
-		if m != moderator {
-			newMods = append(newMods, m)
+	newAgents := make([]string, 0, len(agents))
+	for _, a := range agents {
+		if a != agent {
+			newAgents = append(newAgents, a)
 		}
 	}
 
-	// Save updated list
-	if err := am.k.SetProfileFollowedMods(sdkCtx, owner, newMods); err != nil {
+	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, newAgents); err != nil {
 		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("UnfollowModerator: failed to save followed mods", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Error("DisableAgent: failed to save enabled agents", "owner", owner, "err", err.Error())
 		sdkCtx.Logger().Info(logDelimiter)
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("UnfollowModerator: moderator unfollowed", "owner", owner, "moderator", moderator)
+	sdkCtx.Logger().Info("DisableAgent: agent disabled", "owner", owner, "agent", agent)
 	sdkCtx.Logger().Info(logDelimiter)
 
-	// Deduct gas fee from paid users
 	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
 		return nil, err
 	}
 
-	return &types.MsgUnfollowModeratorResponse{}, nil
+	return &types.MsgDisableAgentResponse{}, nil
 }
 
 // BlockPost blocks a post txhash (persisted on-chain)
@@ -2189,10 +2183,10 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 			return &types.MsgFollowUserResponse{}, nil
 		}
 	}
-	users = append(users, user)
-	if uint64(len(users)) > maxUsers {
-		users = users[len(users)-int(maxUsers):]
+	if uint64(len(users)) >= maxUsers {
+		return nil, fmt.Errorf("followed users limit reached (%d); unfollow a user first", maxUsers)
 	}
+	users = append(users, user)
 	if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, users); err != nil {
 		return nil, err
 	}
@@ -2344,10 +2338,10 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 			return &types.MsgFollowTopicResponse{}, nil
 		}
 	}
-	topics = append(topics, topic)
-	if uint64(len(topics)) > maxTopics {
-		topics = topics[len(topics)-int(maxTopics):]
+	if uint64(len(topics)) >= maxTopics {
+		return nil, fmt.Errorf("followed topics limit reached (%d); unfollow a topic first", maxTopics)
 	}
+	topics = append(topics, topic)
 	if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, topics); err != nil {
 		return nil, err
 	}
@@ -2796,9 +2790,10 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 
 	requestedLevel := int(req.GetLevel())
 
-	// Validate level is 1-3 (admin levels require governance via MsgSetLevel; level 0 uses MsgSetAutoRenewal)
-	if requestedLevel < 1 || requestedLevel > 3 {
-		return nil, fmt.Errorf("invalid level: must be 1-3 (admin levels require governance; use MsgSetAutoRenewal to change auto-renewal)")
+	// Only levels 1 (Subscriber) and 10 (Agent) can be self-upgraded to.
+	// Admin levels require governance via MsgSetLevel; level 0 is free (downgrade via MsgSetAutoRenewal).
+	if !types.ValidSubscriptionLevels[requestedLevel] {
+		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber) or %d (Agent)", requestedLevel, types.LevelSubscriber, types.LevelAgent)
 	}
 
 	// Get or create profile core
@@ -2816,10 +2811,10 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 	}
 
 	// Get tier config for requested level
-	if requestedLevel >= len(params.Tiers) {
-		return nil, fmt.Errorf("tier %d not configured", requestedLevel)
+	tierConfig := params.GetTierConfig(requestedLevel)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", requestedLevel)
 	}
-	tierConfig := params.Tiers[requestedLevel]
 
 	// Burn any existing reserve from module account before charging new fee
 	if core.ReserveFunds > 0 {

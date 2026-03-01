@@ -11,8 +11,16 @@ import { InfoIcon as TooltipInfoIcon } from "../components/Tooltip";
 import { useTabs } from "../utils/useTabs";
 
 // Tier names and colors (same as SubscriptionView)
-const TIER_NAMES = ['Free', 'Trusted', 'Established', 'Distinguished'];
-const TIER_COLORS = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
+const TIER_NAMES = {
+    0: 'Free',
+    1: 'Subscriber',
+    10: 'Agent'
+};
+const TIER_COLORS = {
+    0: '#6B7280',
+    1: '#F59E0B',
+    10: '#EF4444'
+};
 
 const Row = styled.div`
     display: grid;
@@ -191,13 +199,13 @@ const Badge = styled.span`
     font-size: 0.65rem;
     font-weight: 600;
     background: ${({ $variant, theme }) => {
-        if ($variant === 'subscriber') return '#3B82F620';
-        if ($variant === 'moderator') return '#F59E0B20';
+        if ($variant === 'subscriber') return '#F59E0B20';
+        if ($variant === 'agent') return '#EF444420';
         return theme?.colors?.panelAlt || '#1f2328';
     }};
     color: ${({ $variant }) => {
-        if ($variant === 'subscriber') return '#3B82F6';
-        if ($variant === 'moderator') return '#F59E0B';
+        if ($variant === 'subscriber') return '#F59E0B';
+        if ($variant === 'agent') return '#EF4444';
         return '#888';
     }};
     margin-left: 0.25rem;
@@ -416,7 +424,7 @@ export default function StatsView() {
                             </div>
                         )}
                         {user.is_subscriber && <Badge $variant="subscriber">SUB</Badge>}
-                        {user.is_moderator && <Badge $variant="moderator">MOD</Badge>}
+                        {user.flair && <Badge $variant="agent">{user.flair}</Badge>}
                     </div>
                 </UserCell>
             </Td>
@@ -441,7 +449,7 @@ export default function StatsView() {
                         ) : (
                             <span style={{ fontWeight: 500 }}>{user.username || 'Anonymous'}</span>
                         )}
-                        {user.is_moderator && <Badge $variant="moderator">MOD</Badge>}
+                        {user.flair && <Badge $variant="agent">{user.flair}</Badge>}
                     </div>
                 </UserCell>
             </Td>
@@ -659,19 +667,11 @@ export default function StatsView() {
                                         </ValueBox>
                                     </Row>
                                     <Row style={{ paddingLeft: '1rem' }}>
-                                        <Label style={{ fontSize: '0.9em', color: TIER_COLORS[2] }}>
-                                            {TIER_NAMES[2]}
+                                        <Label style={{ fontSize: '0.9em', color: TIER_COLORS[10] }}>
+                                            {TIER_NAMES[10]}
                                         </Label>
                                         <ValueBox>
-                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_2 || 0)}</Mono>
-                                        </ValueBox>
-                                    </Row>
-                                    <Row style={{ paddingLeft: '1rem' }}>
-                                        <Label style={{ fontSize: '0.9em', color: TIER_COLORS[3] }}>
-                                            {TIER_NAMES[3]}
-                                        </Label>
-                                        <ValueBox>
-                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_3 || 0)}</Mono>
+                                            <Mono style={{ fontSize: '0.9em' }}>{formatNumber(mergedStats.subscribers_tier_10 || 0)}</Mono>
                                         </ValueBox>
                                     </Row>
 
@@ -1047,12 +1047,8 @@ export default function StatsView() {
                                             <SummaryLabel>Total Subscribers</SummaryLabel>
                                         </SummaryItem>
                                         <SummaryItem>
-                                            <SummaryValue $color={TIER_COLORS[3]}>{formatNumber(subscribersData.count_tier_3 || 0)}</SummaryValue>
-                                            <SummaryLabel>{TIER_NAMES[3]}</SummaryLabel>
-                                        </SummaryItem>
-                                        <SummaryItem>
-                                            <SummaryValue $color={TIER_COLORS[2]}>{formatNumber(subscribersData.count_tier_2 || 0)}</SummaryValue>
-                                            <SummaryLabel>{TIER_NAMES[2]}</SummaryLabel>
+                                            <SummaryValue $color={TIER_COLORS[10]}>{formatNumber(subscribersData.count_tier_10 || 0)}</SummaryValue>
+                                            <SummaryLabel>{TIER_NAMES[10]}</SummaryLabel>
                                         </SummaryItem>
                                         <SummaryItem>
                                             <SummaryValue $color={TIER_COLORS[1]}>{formatNumber(subscribersData.count_tier_1 || 0)}</SummaryValue>
@@ -1060,25 +1056,16 @@ export default function StatsView() {
                                         </SummaryItem>
                                     </SummaryBox>
 
-                                    {/* Tier 3 - Distinguished */}
+                                    {/* Tier 10 - Agent */}
                                     <TierSection>
-                                        <TierHeader $color={TIER_COLORS[3]}>
-                                            <TierBadge $color={TIER_COLORS[3]}>{TIER_NAMES[3]}</TierBadge>
-                                            <TierCount>({formatNumber(subscribersData.count_tier_3 || 0)})</TierCount>
+                                        <TierHeader $color={TIER_COLORS[10]}>
+                                            <TierBadge $color={TIER_COLORS[10]}>{TIER_NAMES[10]}</TierBadge>
+                                            <TierCount>({formatNumber(subscribersData.count_tier_10 || 0)})</TierCount>
                                         </TierHeader>
-                                        {renderSubscriberTable(subscribersData.tier_3, TIER_COLORS[3])}
+                                        {renderSubscriberTable(subscribersData.tier_10, TIER_COLORS[10])}
                                     </TierSection>
 
-                                    {/* Tier 2 - Established */}
-                                    <TierSection>
-                                        <TierHeader $color={TIER_COLORS[2]}>
-                                            <TierBadge $color={TIER_COLORS[2]}>{TIER_NAMES[2]}</TierBadge>
-                                            <TierCount>({formatNumber(subscribersData.count_tier_2 || 0)})</TierCount>
-                                        </TierHeader>
-                                        {renderSubscriberTable(subscribersData.tier_2, TIER_COLORS[2])}
-                                    </TierSection>
-
-                                    {/* Tier 1 - Trusted */}
+                                    {/* Tier 1 - Subscriber */}
                                     <TierSection>
                                         <TierHeader $color={TIER_COLORS[1]}>
                                             <TierBadge $color={TIER_COLORS[1]}>{TIER_NAMES[1]}</TierBadge>

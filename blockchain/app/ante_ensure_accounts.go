@@ -47,9 +47,9 @@ func (d EnsureAccountsDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate
 			addrStr = mm.Authority
 		case *coretypes.MsgSetUsername:
 			addrStr = mm.Authority
-		case *coretypes.MsgFollowModerator:
+		case *coretypes.MsgEnableAgent:
 			addrStr = mm.Authority
-		case *coretypes.MsgUnfollowModerator:
+		case *coretypes.MsgDisableAgent:
 			addrStr = mm.Authority
 		case *coretypes.MsgBlockPost:
 			addrStr = mm.Authority

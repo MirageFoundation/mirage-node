@@ -144,7 +144,7 @@ MsgPost, MsgEdit, MsgVote, MsgDelete
 MsgSetUsername, MsgSendTokens
 MsgFollowUser, MsgUnfollowUser
 MsgFollowTopic, MsgUnfollowTopic
-MsgFollowModerator, MsgUnfollowModerator
+MsgEnableAgent, MsgDisableAgent
 MsgBlockPost, MsgUnblockPost
 MsgBlockUser, MsgUnblockUser
 

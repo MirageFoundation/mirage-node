@@ -166,14 +166,14 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForAward(v.(*coretypes.MsgAward)) },
 		},
 		{
-			name: "MsgFollowModerator",
-			obj:  &coretypes.MsgFollowModerator{},
-			fn:   func(v interface{}) []byte { return buildCanonForFollowModerator(v.(*coretypes.MsgFollowModerator)) },
+			name: "MsgEnableAgent",
+			obj:  &coretypes.MsgEnableAgent{},
+			fn:   func(v interface{}) []byte { return buildCanonForEnableAgent(v.(*coretypes.MsgEnableAgent)) },
 		},
 		{
-			name: "MsgUnfollowModerator",
-			obj:  &coretypes.MsgUnfollowModerator{},
-			fn:   func(v interface{}) []byte { return buildCanonForUnfollowModerator(v.(*coretypes.MsgUnfollowModerator)) },
+			name: "MsgDisableAgent",
+			obj:  &coretypes.MsgDisableAgent{},
+			fn:   func(v interface{}) []byte { return buildCanonForDisableAgent(v.(*coretypes.MsgDisableAgent)) },
 		},
 		{
 			name: "MsgFollowUser",

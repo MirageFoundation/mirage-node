@@ -632,7 +632,7 @@ class Indexer:
     def _sync_profiles_from_chain(self):
         """
         Full KV reload for profiles from the blockchain at startup.
-        Only profiles (not list tables like followed_mods/blocked_*).
+        Only profiles (not list tables like enabled_agents/blocked_*).
         """
         logger.info("KV Sync: Fetching profiles subspace from chain...")
         profiles = self.chain.list_profiles_subspace()
@@ -647,10 +647,10 @@ class Indexer:
             created_at = int(p.get("created_at", 0) or 0)
             subscription_expiry = int(p.get("subscription_expiry", 0) or 0)
             auto_renew = bool(p.get("auto_renew", False))
-            is_moderator = bool(p.get("is_moderator", False))
             biography = str(p.get("biography", "") or "")
             avatar = str(p.get("avatar", "") or "")
             banner = str(p.get("banner", "") or "")
+            flair = str(p.get("flair", "") or "")
             self.db.upsert_profile_full(
                 owner,
                 username,
@@ -658,10 +658,10 @@ class Indexer:
                 created_at,
                 subscription_expiry,
                 auto_renew,
-                is_moderator,
                 biography,
                 avatar,
                 banner,
+                flair,
                 now,
             )
             num += 1

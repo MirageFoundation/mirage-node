@@ -121,7 +121,7 @@ class ChainClient:
         """
         List all profiles stored in the chain KV.
         Tries ABCI subspace query first, falls back to REST API pagination.
-        Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, is_moderator, biography, avatar, banner }
+        Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, biography, avatar, banner, flair }
         """
         # Try ABCI subspace query first
         try:

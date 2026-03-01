@@ -58,7 +58,7 @@ curl "${API_BASE}/get_profile?address=mirage1abc123..."
 
 ### Get user followed
 
-Lists of users, topics, and moderators an address follows.
+Lists of users, topics, and agents an address has enabled.
 
 ```bash
 curl "${API_BASE}/get_user_followed?address=mirage1abc123..."
@@ -334,16 +334,16 @@ python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC
   | curl -X POST "${API_BASE}/core/delete_post" -H "Content-Type: application/json" -d @-
 ```
 
-### Follow / unfollow moderator
+### Enable / disable agent
 
 ```bash
-python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC}" follow-moderator \
-  --moderator "mirage1mod..." \
-  | curl -X POST "${API_BASE}/core/follow_moderator" -H "Content-Type: application/json" -d @-
+python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC}" enable-agent \
+  --agent "mirage1agent..." \
+  | curl -X POST "${API_BASE}/core/enable_agent" -H "Content-Type: application/json" -d @-
 
-python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC}" unfollow-moderator \
-  --moderator "mirage1mod..." \
-  | curl -X POST "${API_BASE}/core/unfollow_moderator" -H "Content-Type: application/json" -d @-
+python3 scripts/curl_examples.py --api-base "${API_BASE}" --mnemonic "${MNEMONIC}" disable-agent \
+  --agent "mirage1agent..." \
+  | curl -X POST "${API_BASE}/core/disable_agent" -H "Content-Type: application/json" -d @-
 ```
 
 ### Follow / unfollow user

@@ -424,20 +424,20 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			}
 			ctx.Logger().Debug("PoW: skipped for MsgBridgeBurn", "owner", deriveAddrFromPubKey(m.EnvelopePubkey), "dest_chain", m.DestinationChain)
 
-		case *coretypes.MsgFollowModerator:
+		case *coretypes.MsgEnableAgent:
 			if m.Authority == govAuthority {
 				continue
 			}
 			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
 				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgFollowModerator", "err", err.Error())
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgEnableAgent", "err", err.Error())
 					return ctx, err
 				}
 				continue
 			}
-			canon := buildCanonForFollowModerator(m)
+			canon := buildCanonForEnableAgent(m)
 			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgFollowModerator", "err", err.Error())
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
 			if ctx.Priority() <= 0 {
@@ -449,20 +449,20 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
-		case *coretypes.MsgUnfollowModerator:
+		case *coretypes.MsgDisableAgent:
 			if m.Authority == govAuthority {
 				continue
 			}
 			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
 				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
-					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgUnfollowModerator", "err", err.Error())
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgDisableAgent", "err", err.Error())
 					return ctx, err
 				}
 				continue
 			}
-			canon := buildCanonForUnfollowModerator(m)
+			canon := buildCanonForDisableAgent(m)
 			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
-				ctx.Logger().Error("PoW: validation failed", "msg", "MsgUnfollowModerator", "err", err.Error())
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDisableAgent", "err", err.Error())
 				return ctx, err
 			}
 			if ctx.Priority() <= 0 {
@@ -838,27 +838,25 @@ func buildCanonForBridgeBurn(m *coretypes.MsgBridgeBurn) []byte {
 	return cw.buf
 }
 
-func buildCanonForFollowModerator(m *coretypes.MsgFollowModerator) []byte {
-	cw := newCanonWriter("MsgFollowModerator")
+func buildCanonForEnableAgent(m *coretypes.MsgEnableAgent) []byte {
+	cw := newCanonWriter("MsgEnableAgent")
 	cw.writeBytes(2, m.EnvelopePubkey)
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
-	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeString(100, m.Target)
-	cw.writeString(101, m.Moderator)
+	cw.writeString(101, m.Agent)
 	return cw.buf
 }
 
-func buildCanonForUnfollowModerator(m *coretypes.MsgUnfollowModerator) []byte {
-	cw := newCanonWriter("MsgUnfollowModerator")
+func buildCanonForDisableAgent(m *coretypes.MsgDisableAgent) []byte {
+	cw := newCanonWriter("MsgDisableAgent")
 	cw.writeBytes(2, m.EnvelopePubkey)
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
-	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeString(100, m.Target)
-	cw.writeString(101, m.Moderator)
+	cw.writeString(101, m.Agent)
 	return cw.buf
 }
 

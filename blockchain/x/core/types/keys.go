@@ -26,7 +26,7 @@ const (
 	SubscriptionsPrefix = "subs/"
 
 	// Profile list prefixes - stored separately from core profile for performance
-	ProfileFollowedModsPrefix   = "plist_mods/"    // address -> JSON array of moderator addresses
+	ProfileEnabledAgentsPrefix  = "plist_agents/"  // address -> JSON array of agent addresses
 	ProfileFollowedUsersPrefix  = "plist_users/"   // address -> JSON array of user addresses
 	ProfileFollowedTopicsPrefix = "plist_topics/"  // address -> JSON array of topic strings
 	ProfileBlockedUsersPrefix   = "plist_blocked/" // address -> JSON array of blocked user addresses

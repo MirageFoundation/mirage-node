@@ -33,8 +33,8 @@ from node import require_runtime, find_local_operator_address, find_local_consen
 from params import load_params, expect_params
 from settings import (
     IGNORE_DELETIONS,
-    IGNORE_MOD_BLOCKED_POSTS,
-    IGNORE_MOD_BLOCKED_USERS,
+    IGNORE_AGENT_BLOCKED_POSTS,
+    IGNORE_AGENT_BLOCKED_USERS,
     REGISTRATION_ENABLED,
     REGISTRATION_INVITE_CODE_REQUIRED,
     QUESTS_ENABLED,
@@ -286,16 +286,16 @@ def reload_params():
         return safe_error(e)
 
 
-def _get_followed_moderators(cur, address: str) -> list[str]:
-    """Get list of moderator addresses followed by the viewer."""
+def _get_enabled_agents(cur, address: str) -> list[str]:
+    """Get list of agent addresses enabled by the viewer."""
     if not address:
         return []
-    cur.execute("SELECT moderator FROM followed_mods WHERE owner = %s", (address.lower(),))
+    cur.execute("SELECT agent FROM enabled_agents WHERE owner = %s", (address.lower(),))
     return [row[0].lower() for row in cur.fetchall()]
 
 
 def _get_blocked_posts(cur, address: str) -> set[str]:
-    """Get all post txhashes blocked by the viewer and their followed moderators."""
+    """Get all post txhashes blocked by the viewer and their enabled agents."""
     if not address:
         return set()
 
@@ -305,18 +305,18 @@ def _get_blocked_posts(cur, address: str) -> set[str]:
     cur.execute("SELECT target FROM blocked_posts WHERE owner = %s", (address.lower(),))
     blocked_posts.update(row[0].lower() for row in cur.fetchall())
 
-    # Get blocked posts from followed moderators (unless IGNORE_MOD_BLOCKED_POSTS is enabled)
-    if not IGNORE_MOD_BLOCKED_POSTS:
-        moderators = _get_followed_moderators(cur, address)
-        for mod_address in moderators:
-            cur.execute("SELECT target FROM blocked_posts WHERE owner = %s", (mod_address.lower(),))
+    # Get blocked posts from enabled agents (unless IGNORE_AGENT_BLOCKED_POSTS is enabled)
+    if not IGNORE_AGENT_BLOCKED_POSTS:
+        agents = _get_enabled_agents(cur, address)
+        for agent_address in agents:
+            cur.execute("SELECT target FROM blocked_posts WHERE owner = %s", (agent_address.lower(),))
             blocked_posts.update(row[0].lower() for row in cur.fetchall())
 
     return blocked_posts
 
 
 def _get_blocked_users(cur, address: str) -> set[str]:
-    """Get all user addresses blocked by the viewer and their followed moderators."""
+    """Get all user addresses blocked by the viewer and their enabled agents."""
     if not address:
         return set()
 
@@ -326,18 +326,18 @@ def _get_blocked_users(cur, address: str) -> set[str]:
     cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (address.lower(),))
     blocked_users.update(row[0].lower() for row in cur.fetchall())
 
-    # Get blocked users from followed moderators (unless IGNORE_MOD_BLOCKED_USERS is enabled)
-    if not IGNORE_MOD_BLOCKED_USERS:
-        moderators = _get_followed_moderators(cur, address)
-        for mod_address in moderators:
-            cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (mod_address.lower(),))
+    # Get blocked users from enabled agents (unless IGNORE_AGENT_BLOCKED_USERS is enabled)
+    if not IGNORE_AGENT_BLOCKED_USERS:
+        agents = _get_enabled_agents(cur, address)
+        for agent_address in agents:
+            cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (agent_address.lower(),))
             blocked_users.update(row[0].lower() for row in cur.fetchall())
 
     return blocked_users
 
 
 def _get_blocked_topics(cur, address: str) -> set[str]:
-    """Get all topics blocked by the viewer and their followed moderators."""
+    """Get all topics blocked by the viewer and their enabled agents."""
     if not address:
         return set()
 
@@ -347,10 +347,10 @@ def _get_blocked_topics(cur, address: str) -> set[str]:
     cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (address.lower(),))
     blocked_topics.update(row[0].lower() for row in cur.fetchall())
 
-    # Get blocked topics from followed moderators
-    moderators = _get_followed_moderators(cur, address)
-    for mod_address in moderators:
-        cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (mod_address.lower(),))
+    # Get blocked topics from enabled agents
+    agents = _get_enabled_agents(cur, address)
+    for agent_address in agents:
+        cur.execute("SELECT target FROM blocked_topics WHERE owner = %s", (agent_address.lower(),))
         blocked_topics.update(row[0].lower() for row in cur.fetchall())
 
     return blocked_topics
@@ -535,7 +535,7 @@ def get_blocked_users():
         conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
         cur = conn.cursor()
 
-        # Get only the user's own blocked users (not moderators')
+        # Get only the user's own blocked users (not agents')
         cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (address.lower(),))
         blocked_users = [row[0] for row in cur.fetchall()]
 
@@ -549,7 +549,7 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
     """Fetch a user's own profile lists from the indexer DB (full history, not chain-limited)."""
     addr_lower = addr.lower()
     lists = {
-        "followed_moderators": [],
+        "enabled_agents": [],
         "followed_users": [],
         "followed_topics": [],
         "blocked_users": [],
@@ -560,10 +560,10 @@ def _get_profile_lists_from_indexer(addr: str) -> dict:
         conn = connect_db(timeout=5.0, busy_timeout_ms=10000)
         cur = conn.cursor()
         cur.execute(
-            "SELECT moderator FROM followed_mods WHERE LOWER(owner) = %s ORDER BY position",
+            "SELECT agent FROM enabled_agents WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
         )
-        lists["followed_moderators"] = [r[0] for r in cur.fetchall()]
+        lists["enabled_agents"] = [r[0] for r in cur.fetchall()]
         cur.execute(
             "SELECT target FROM followed_users WHERE LOWER(owner) = %s ORDER BY position",
             (addr_lower,),
@@ -626,7 +626,7 @@ def get_profile():
             "subscription_expiry": int(profile.get("subscription_expiry", 0) or profile.get("subscriptionExpiry", 0)),
             "auto_renew": bool(profile.get("auto_renew", False) or profile.get("autoRenew", False)),
             "reserve_funds": int(profile.get("reserve_funds", 0) or profile.get("reserveFunds", 0)),
-            "is_moderator": bool(profile.get("is_moderator", False) or profile.get("isModerator", False)),
+            "flair": profile.get("flair", ""),
             "biography": profile.get("biography", ""),
             "avatar": profile.get("avatar", ""),
             "banner": profile.get("banner", ""),
@@ -2495,7 +2495,7 @@ def get_user_status():
 
 @public_bp.route("/api/get_user_followed")
 def get_user_followed():
-    """Get user's follow lists (moderators, topics, users)."""
+    """Get user's follow lists (agents, topics, users)."""
     rid = next_request_id()
     addr = request.args.get("address", default=None, type=str)
     log_event(rid, "get_user_followed.begin", address=addr)
@@ -2503,16 +2503,16 @@ def get_user_followed():
         if not addr:
             return jsonify({"error": "address required"}), 400
 
-        followed_moderators = []
+        enabled_agents = []
         followed_topics = []
         followed_users = []
 
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
-            # Followed moderators
-            cur.execute("SELECT moderator FROM followed_mods WHERE LOWER(owner)=LOWER(%s)", (addr,))
-            followed_moderators = [row[0] for row in cur.fetchall()]
+            # Enabled agents
+            cur.execute("SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s)", (addr,))
+            enabled_agents = [row[0] for row in cur.fetchall()]
             # Followed topics
             cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))
             followed_topics = [row[0] for row in cur.fetchall()]
@@ -2527,14 +2527,14 @@ def get_user_followed():
             pass
 
         resp = {
-            "followed_moderators": followed_moderators,
+            "enabled_agents": enabled_agents,
             "followed_topics": followed_topics,
             "followed_users": followed_users,
         }
         log_event(
             rid,
             "get_user_followed.ok",
-            mods=len(followed_moderators),
+            agents=len(enabled_agents),
             topics=len(followed_topics),
             users=len(followed_users),
         )
@@ -6627,7 +6627,6 @@ def _get_stats_subscribers(rid: int):
                     p.level,
                     p.subscription_expiry,
                     p.created_at,
-                    p.is_moderator,
                     (SELECT COUNT(*) FROM posts WHERE LOWER(owner) = LOWER(p.owner) AND COALESCE(target,'') = '' AND deleted = FALSE) as post_count,
                     (SELECT COUNT(*) FROM posts WHERE LOWER(owner) = LOWER(p.owner) AND LENGTH(COALESCE(target,'')) > 0 AND deleted = FALSE) as comment_count,
                     (SELECT COUNT(*) FROM votes WHERE LOWER(owner) = LOWER(p.owner)) as vote_count,
@@ -6641,7 +6640,7 @@ def _get_stats_subscribers(rid: int):
             rows = cur.fetchall()
 
             # Group by tier
-            by_tier: dict[int, list] = {1: [], 2: [], 3: []}
+            by_tier: dict[int, list] = {1: [], 10: []}
             for row in rows:
                 (
                     owner,
@@ -6650,20 +6649,18 @@ def _get_stats_subscribers(rid: int):
                     level,
                     sub_expiry,
                     created_at,
-                    is_moderator,
                     post_count,
                     comment_count,
                     vote_count,
                     follower_count,
                 ) = row
-                tier = level if level in (1, 2, 3) else 1
+                tier = level if level in (1, 10) else 1
                 by_tier[tier].append(
                     {
                         "address": owner,
                         "username": username or None,
                         "avatar": avatar or None,
                         "level": level or 0,
-                        "is_moderator": is_moderator or False,
                         "created_at": created_at or 0,
                         "post_count": post_count or 0,
                         "comment_count": comment_count or 0,
@@ -6682,12 +6679,10 @@ def _get_stats_subscribers(rid: int):
         return jsonify(
             {
                 "tier_1": by_tier[1],
-                "tier_2": by_tier[2],
-                "tier_3": by_tier[3],
+                "tier_10": by_tier[10],
                 "total_subscribers": total_subscribers,
                 "count_tier_1": len(by_tier[1]),
-                "count_tier_2": len(by_tier[2]),
-                "count_tier_3": len(by_tier[3]),
+                "count_tier_10": len(by_tier[10]),
             }
         )
     except Exception as e:
@@ -7031,8 +7026,7 @@ def get_stats():
             subscribers_by_tier = {row[0]: row[1] for row in cur.fetchall()}
             stats["subscribers"] = sum(subscribers_by_tier.values())
             stats["subscribers_tier_1"] = subscribers_by_tier.get(1, 0)
-            stats["subscribers_tier_2"] = subscribers_by_tier.get(2, 0)
-            stats["subscribers_tier_3"] = subscribers_by_tier.get(3, 0)
+            stats["subscribers_tier_10"] = subscribers_by_tier.get(10, 0)
 
             seven_days_ago = now - (7 * 86400)
             cur.execute(

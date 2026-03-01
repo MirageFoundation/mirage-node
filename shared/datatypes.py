@@ -99,9 +99,9 @@ def _build_pool():
     add_f(msg3, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg3, "username", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgFollowModerator
+    # MsgEnableAgent
     msg_follow = file_proto.message_type.add()
-    msg_follow.name = "MsgFollowModerator"
+    msg_follow.name = "MsgEnableAgent"
     add_f(msg_follow, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_follow, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_follow, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
@@ -110,11 +110,11 @@ def _build_pool():
     add_f(msg_follow, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_follow, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_follow, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_follow, "moderator", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_follow, "agent", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgUnfollowModerator
+    # MsgDisableAgent
     msg_unfollow = file_proto.message_type.add()
-    msg_unfollow.name = "MsgUnfollowModerator"
+    msg_unfollow.name = "MsgDisableAgent"
     add_f(msg_unfollow, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_unfollow, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_unfollow, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
@@ -123,7 +123,7 @@ def _build_pool():
     add_f(msg_unfollow, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_unfollow, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_unfollow, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_unfollow, "moderator", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_unfollow, "agent", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # MsgFollowUser
     msg_follow_user = file_proto.message_type.add()
@@ -368,7 +368,7 @@ def _build_pool():
     tier_config = file_proto.message_type.add()
     tier_config.name = "TierConfig"
     add_f(tier_config, "period_fee", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_followed_mods", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_enabled_agents", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_followed_users", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_followed_topics", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_users", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -377,13 +377,13 @@ def _build_pool():
     add_f(tier_config, "max_title_length", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_content_length", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "editing_time_mins", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "archive_duration_days", 12, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "vote_weight", 13, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    add_f(tier_config, "eligible_for_mod", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(tier_config, "can_change_name", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_be_agent", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_remove_anon", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_biography", 17, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_have_flair", 20, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
 
     # AwardConfig (used in Params.award_configs)
     award_config = file_proto.message_type.add()
@@ -641,8 +641,8 @@ MsgPost = _get_message_class("mirage.core.v1.MsgPost")
 MsgEdit = _get_message_class("mirage.core.v1.MsgEdit")
 MsgVote = _get_message_class("mirage.core.v1.MsgVote")
 MsgSetUsername = _get_message_class("mirage.core.v1.MsgSetUsername")
-MsgFollowModerator = _get_message_class("mirage.core.v1.MsgFollowModerator")
-MsgUnfollowModerator = _get_message_class("mirage.core.v1.MsgUnfollowModerator")
+MsgEnableAgent = _get_message_class("mirage.core.v1.MsgEnableAgent")
+MsgDisableAgent = _get_message_class("mirage.core.v1.MsgDisableAgent")
 MsgFollowUser = _get_message_class("mirage.core.v1.MsgFollowUser")
 MsgUnfollowUser = _get_message_class("mirage.core.v1.MsgUnfollowUser")
 MsgFollowTopic = _get_message_class("mirage.core.v1.MsgFollowTopic")

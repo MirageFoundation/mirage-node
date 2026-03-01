@@ -253,15 +253,41 @@ class DatabaseManager:
                         updated_at BIGINT NOT NULL DEFAULT 0,
                         subscription_expiry BIGINT NOT NULL DEFAULT 0,
                         auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
-                        is_moderator BOOLEAN NOT NULL DEFAULT FALSE,
                         biography TEXT NOT NULL DEFAULT '',
                         avatar TEXT NOT NULL DEFAULT '',
                         banner TEXT NOT NULL DEFAULT '',
+                        flair TEXT NOT NULL DEFAULT '',
                         inbox_last_viewed_at BIGINT NOT NULL DEFAULT 0
                     )
                     """
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_profiles_owner_lower ON profiles(LOWER(owner))")
+
+                # Migration: add flair, remove is_moderator (moderator->agent refactor)
+                cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS flair TEXT NOT NULL DEFAULT ''")
+                cur.execute(
+                    """
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'profiles' AND column_name = 'is_moderator') THEN
+                            ALTER TABLE profiles DROP COLUMN is_moderator;
+                        END IF;
+                    END $$;
+                    """
+                )
+
+                # Level remap: old tiers 0=Free,1=Trusted,2=Established,3=Distinguished
+                # -> new levels 0=Free, 1=Subscriber, 10=Agent
+                cur.execute(
+                    """
+                    UPDATE profiles SET level = CASE
+                        WHEN level = 2 THEN 1
+                        WHEN level = 3 THEN 10
+                        ELSE level
+                    END
+                    WHERE level IN (2, 3)
+                    """
+                )
 
                 # v1.14.0: soft-delete support for MsgDeleteUser
                 cur.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS deleted_at BIGINT")
@@ -271,20 +297,35 @@ class DatabaseManager:
                     "ON profiles(LOWER(username)) WHERE deleted_at IS NULL"
                 )
 
-                # followed_mods (with position for order)
+                # enabled_agents (was followed_mods; moderator->agent refactor)
+                # Migration first: rename followed_mods -> enabled_agents if it exists
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS followed_mods (
+                    DO $$
+                    BEGIN
+                        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'followed_mods')
+                           AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'enabled_agents') THEN
+                            ALTER TABLE followed_mods RENAME TO enabled_agents;
+                            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'enabled_agents' AND column_name = 'moderator') THEN
+                                ALTER TABLE enabled_agents RENAME COLUMN moderator TO agent;
+                            END IF;
+                        END IF;
+                    END $$;
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS enabled_agents (
                         owner TEXT NOT NULL,
-                        moderator TEXT NOT NULL,
+                        agent TEXT NOT NULL,
                         position INTEGER NOT NULL DEFAULT 0,
-                        PRIMARY KEY (owner, moderator)
+                        PRIMARY KEY (owner, agent)
                     )
                     """
                 )
-                cur.execute("ALTER TABLE followed_mods ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE enabled_agents ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
                 cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_followed_mods_moderator_lower ON followed_mods(LOWER(moderator))"
+                    "CREATE INDEX IF NOT EXISTS idx_enabled_agents_agent_lower ON enabled_agents(LOWER(agent))"
                 )
 
                 # followed_users (for v1.5 social graph)
@@ -1590,10 +1631,10 @@ class DatabaseManager:
         created_at: int,
         subscription_expiry: int,
         auto_renew: bool,
-        is_moderator: bool,
         biography: str,
         avatar: str,
         banner: str,
+        flair: str,
         updated_at: int,
     ) -> None:
         """Insert or update a profile with all fields."""
@@ -1601,12 +1642,13 @@ class DatabaseManager:
         biography = self._strip_nul(biography) or ""
         avatar = self._strip_nul(avatar) or ""
         banner = self._strip_nul(banner) or ""
+        flair = self._strip_nul(flair) or ""
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO profiles(owner, username, level, created_at, subscription_expiry,
-                                         auto_renew, is_moderator, biography, avatar, banner, updated_at)
+                                         auto_renew, biography, avatar, banner, flair, updated_at)
                     VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(owner) DO UPDATE SET
                       username=EXCLUDED.username,
@@ -1618,10 +1660,10 @@ class DatabaseManager:
                       END,
                       subscription_expiry=EXCLUDED.subscription_expiry,
                       auto_renew=EXCLUDED.auto_renew,
-                      is_moderator=EXCLUDED.is_moderator,
                       biography=EXCLUDED.biography,
                       avatar=EXCLUDED.avatar,
                       banner=EXCLUDED.banner,
+                      flair=EXCLUDED.flair,
                       updated_at=EXCLUDED.updated_at,
                       deleted_at=NULL
                     """,
@@ -1632,10 +1674,10 @@ class DatabaseManager:
                         int(created_at),
                         int(subscription_expiry),
                         bool(auto_renew),
-                        bool(is_moderator),
                         biography or "",
                         avatar or "",
                         banner or "",
+                        flair or "",
                         int(updated_at),
                     ),
                 )
@@ -1660,15 +1702,45 @@ class DatabaseManager:
                 )
                 return cur.rowcount
 
-    def set_moderators(self, owner: str, moderators: list[str]) -> None:
-        """Set moderators for an owner."""
+    def set_enabled_agents(self, owner: str, agents: list[str]) -> None:
+        """Set enabled agents for an owner (full replace from chain state)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM followed_mods WHERE LOWER(owner) = LOWER(%s)", (owner,))
-                for mod_addr in moderators:
+                cur.execute("DELETE FROM enabled_agents WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                for pos, agent_addr in enumerate(agents):
                     cur.execute(
-                        "INSERT INTO followed_mods(owner, moderator) VALUES(%s, %s) ON CONFLICT DO NOTHING",
-                        (owner, mod_addr),
+                        "INSERT INTO enabled_agents(owner, agent, position) VALUES(%s, %s, %s) ON CONFLICT DO NOTHING",
+                        (owner, agent_addr, pos),
+                    )
+
+    def set_followed_users(self, owner: str, users: list[str]) -> None:
+        """Set followed users for an owner (full replace from chain state)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM followed_users WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                for pos, user_addr in enumerate(users):
+                    cur.execute(
+                        """
+                        INSERT INTO followed_users(owner, target, position)
+                        VALUES(%s, %s, %s)
+                        ON CONFLICT(owner, target) DO NOTHING
+                        """,
+                        (owner, user_addr, pos),
+                    )
+
+    def set_followed_topics(self, owner: str, topics: list[str]) -> None:
+        """Set followed topics for an owner (full replace from chain state)."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM followed_topics WHERE LOWER(owner) = LOWER(%s)", (owner,))
+                for pos, topic in enumerate(topics):
+                    cur.execute(
+                        """
+                        INSERT INTO followed_topics(owner, topic, position)
+                        VALUES(%s, %s, %s)
+                        ON CONFLICT(owner, topic) DO NOTHING
+                        """,
+                        (owner, topic, pos),
                     )
 
     def follow_user(self, owner: str, target: str) -> None:
@@ -1688,8 +1760,6 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
-                self._evict_oldest(cur, "followed_users", "target", owner)
-
     def unfollow_user(self, owner: str, target: str) -> None:
         """Unfollow a user (remove from followed_users)."""
         with self._connect() as conn:
@@ -1717,8 +1787,6 @@ class DatabaseManager:
                     """,
                     (owner, topic, pos),
                 )
-                self._evict_oldest(cur, "followed_topics", "topic", owner)
-
     def unfollow_topic(self, owner: str, topic: str) -> None:
         """Unfollow a topic (remove from followed_topics)."""
         with self._connect() as conn:

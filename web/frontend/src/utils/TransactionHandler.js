@@ -1163,7 +1163,7 @@ class TransactionHandler {
 
     /**
      * Upgrade subscription level (tier)
-     * @param {number} level - Target paid subscription level (1-3)
+     * @param {number} level - Target paid subscription level (1=Subscriber, 10=Agent)
      * @param {number} monthlyFeeUmirage - The monthly fee in umirage for the target tier (unused, kept for API compatibility)
      * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
      */
@@ -1172,8 +1172,8 @@ class TransactionHandler {
             const seedPhrase = seedVault.getSeed() || "";
             const targetLevel = Number(level);
 
-            if (targetLevel < 1 || targetLevel > 3) {
-                return { success: false, error: "Invalid level (must be 1-3)" };
+            if (targetLevel !== 1 && targetLevel !== 10) {
+                return { success: false, error: "Invalid level (must be 1 or 10)" };
             }
 
             updateNotification("Upgrading subscription");
@@ -2292,9 +2292,8 @@ class TransactionHandler {
         );
     }
 
-    // Build canonical bytes for MsgSetModerators (must match chain ante)
-    // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
-    canonicalSetModerators({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, moderators }) {
+    // Build canonical bytes for MsgEnableAgent
+    canonicalEnableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2327,70 +2326,7 @@ class TransactionHandler {
             let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
             return out;
         };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetModerators\x00");
-        const tag2 = Uint8Array.from([2]);    // envelope_pubkey (bytes)
-        const tag3 = Uint8Array.from([3]);    // envelope_block_hash (string)
-        const tag4 = Uint8Array.from([4]);    // envelope_difficulty (uvarint)
-        const tag5 = Uint8Array.from([5]);    // envelope_pow (uvarint)
-        const tag6 = Uint8Array.from([6]);    // envelope_timestamp (uvarint)
-        const tag100 = Uint8Array.from([100]); // target (string)
-        const tag101 = Uint8Array.from([101]); // moderators (repeated string)
-
-        // Build envelope first
-        const parts = [
-            prefix,
-            tag2, encBytes(pub_bytes || new Uint8Array()),
-            tag3, encBytes(hexToBytes(last_block_hash)),
-            tag4, uvarint(difficulty >>> 0),
-            tag5, uvarint(proof >>> 0),
-            tag6, uvarint64(timestamp || 0),
-            tag100, encStr(target || ""),
-        ];
-
-        // Add repeated moderators field
-        for (const mod of (moderators || [])) {
-            parts.push(tag101);
-            parts.push(encStr(mod));
-        }
-
-        return concat(...parts);
-    }
-
-    // Build canonical bytes for MsgFollowModerator
-    canonicalFollowModerator({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, moderator }) {
-        const uvarint = (n) => {
-            const out = [];
-            let v = (n >>> 0);
-            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
-            out.push(v);
-            return Uint8Array.from(out);
-        };
-        const uvarint64 = (n) => {
-            const out = [];
-            let v = BigInt(n || 0);
-            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
-            out.push(Number(v));
-            return Uint8Array.from(out);
-        };
-        const encStr = (s) => {
-            const b = new TextEncoder().encode(s || "");
-            return new Uint8Array([...uvarint(b.length), ...b]);
-        };
-        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
-        const hexToBytes = (hex) => {
-            const h = (hex || "").replace(/^0x/i, "");
-            if (!h || h.length % 2) return new Uint8Array(0);
-            const arr = new Uint8Array(h.length / 2);
-            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
-            return arr;
-        };
-        const concat = (...arrs) => {
-            let total = 0; arrs.forEach(a => total += a.length);
-            const out = new Uint8Array(total);
-            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
-            return out;
-        };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgFollowModerator\x00");
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgEnableAgent\x00");
         const tag2 = Uint8Array.from([2]);
         const tag3 = Uint8Array.from([3]);
         const tag4 = Uint8Array.from([4]);
@@ -2406,12 +2342,12 @@ class TransactionHandler {
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
             tag100, encStr(target || ""),
-            tag101, encStr(moderator || ""),
+            tag101, encStr(agent || ""),
         );
     }
 
-    // Build canonical bytes for MsgUnfollowModerator
-    canonicalUnfollowModerator({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, moderator }) {
+    // Build canonical bytes for MsgDisableAgent
+    canonicalDisableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2444,7 +2380,7 @@ class TransactionHandler {
             let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
             return out;
         };
-        const prefix = new TextEncoder().encode("mirage.core.v1:MsgUnfollowModerator\x00");
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgDisableAgent\x00");
         const tag2 = Uint8Array.from([2]);
         const tag3 = Uint8Array.from([3]);
         const tag4 = Uint8Array.from([4]);
@@ -2460,7 +2396,7 @@ class TransactionHandler {
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
             tag100, encStr(target || ""),
-            tag101, encStr(moderator || ""),
+            tag101, encStr(agent || ""),
         );
     }
 
@@ -3188,8 +3124,8 @@ class TransactionHandler {
             let msgName = '';
             if (action === 'create_vote') msgName = 'MsgVote';
             else if (action === 'create_post' || action === 'create_comment') msgName = 'MsgPost';
-            else if (action === 'follow_moderator') msgName = 'MsgFollowModerator';
-            else if (action === 'unfollow_moderator') msgName = 'MsgUnfollowModerator';
+            else if (action === 'enable_agent') msgName = 'MsgEnableAgent';
+            else if (action === 'disable_agent') msgName = 'MsgDisableAgent';
             else if (action === 'follow_user') msgName = 'MsgFollowUser';
             else if (action === 'unfollow_user') msgName = 'MsgUnfollowUser';
             else if (action === 'follow_topic') msgName = 'MsgFollowTopic';
@@ -3254,44 +3190,18 @@ class TransactionHandler {
                     }
                 } catch (e) { console.error('[Referral] Error reading referrer:', e); }
                 endpoint = 'core/set_username';
-            } else if (msgName === 'MsgSetModerators') {
-                // Sign relay for set moderators (must match chain ante)
-                const difficulty = resolveTxDifficulty(transaction);
-                const canon = this.canonicalSetModerators({
-                    pub_bytes: pubBytes,
-                    last_block_hash: transaction.last_block_hash,
-                    difficulty: difficulty,
-                    proof: Number(proof),
-                    timestamp: transaction.timestamp,
-                    target: signerAddress,
-                    moderators: transaction.moderators || [],
-                });
-                const digest = __CosmSha256(canon);
-                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
-                const sigFixed = sigCompact.toFixedLength();
-                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
-                toRelay = {
-                    pubkey: pubB64,
-                    signature: sigB64,
-                    timestamp: transaction.timestamp,
-                    moderators: transaction.moderators || [],
-                    last_block_hash: transaction.last_block_hash,
-                    pow_difficulty: difficulty,
-                    pow: Number(proof),
-                };
-                endpoint = 'core/set_moderators';
-            } else if (msgName === 'MsgFollowModerator') {
+            } else if (msgName === 'MsgEnableAgent') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
-                const modLower = (transaction.moderator || "").toLowerCase();
-                const canon = this.canonicalFollowModerator({
+                const agentLower = (transaction.agent || "").toLowerCase();
+                const canon = this.canonicalEnableAgent({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: targetLower,
-                    moderator: modLower,
+                    agent: agentLower,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3301,24 +3211,24 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    moderator: modLower,
+                    agent: agentLower,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                 };
-                endpoint = 'core/follow_moderator';
-            } else if (msgName === 'MsgUnfollowModerator') {
+                endpoint = 'core/enable_agent';
+            } else if (msgName === 'MsgDisableAgent') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
-                const modLower = (transaction.moderator || "").toLowerCase();
-                const canon = this.canonicalUnfollowModerator({
+                const agentLower = (transaction.agent || "").toLowerCase();
+                const canon = this.canonicalDisableAgent({
                     pub_bytes: pubBytes,
                     last_block_hash: transaction.last_block_hash,
                     difficulty: difficulty,
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: targetLower,
-                    moderator: modLower,
+                    agent: agentLower,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3328,12 +3238,12 @@ class TransactionHandler {
                     pubkey: pubB64,
                     signature: sigB64,
                     timestamp: transaction.timestamp,
-                    moderator: modLower,
+                    agent: agentLower,
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
                 };
-                endpoint = 'core/unfollow_moderator';
+                endpoint = 'core/disable_agent';
             } else if (msgName === 'MsgFollowUser') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
@@ -4568,35 +4478,11 @@ class TransactionHandler {
                     tag104, encStr(transaction.tag || ""),
                     ...mediaParts,
                 );
-            } else if (action === 'set_moderators') {
-                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetModerators\x00");
-                const tag2 = Uint8Array.from([2]);
-                const tag3 = Uint8Array.from([3]);
-                const tag4 = Uint8Array.from([4]);
-                const tag100 = Uint8Array.from([100]);
-                const tag101 = Uint8Array.from([101]);
-
-                // Build repeated moderators field
-                const modsParts = [];
-                for (const mod of (transaction.moderators || [])) {
-                    modsParts.push(tag101);
-                    modsParts.push(encStr(mod));
-                }
-
-                baseBytes = concat(
-                    prefix,
-                    tag2, encBytes(pubBytes),
-                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
-                    tag4, uvarint(difficulty),
-                    tag6, uvarint64(transaction.timestamp || 0),
-                    tag100, encStr(signerAddress),
-                    ...modsParts,
-                );
-            } else if (action === 'follow_moderator' || action === 'unfollow_moderator') {
+            } else if (action === 'enable_agent' || action === 'disable_agent') {
                 const prefix = new TextEncoder().encode(
-                    action === 'follow_moderator'
-                        ? "mirage.core.v1:MsgFollowModerator\x00"
-                        : "mirage.core.v1:MsgUnfollowModerator\x00"
+                    action === 'enable_agent'
+                        ? "mirage.core.v1:MsgEnableAgent\x00"
+                        : "mirage.core.v1:MsgDisableAgent\x00"
                 );
                 const tag2 = Uint8Array.from([2]);
                 const tag3 = Uint8Array.from([3]);
@@ -4610,7 +4496,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
                     tag100, encStr(signerAddress.toLowerCase()),
-                    tag101, encStr((transaction.moderator || "").toLowerCase()),
+                    tag101, encStr((transaction.agent || "").toLowerCase()),
                 );
             } else if (action === 'set_username') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetUsername\x00");
@@ -4895,7 +4781,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_moderators, set_username, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

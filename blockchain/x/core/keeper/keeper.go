@@ -48,8 +48,8 @@ func (k Keeper) relayCreditKey(valoper string) []byte {
 }
 
 // Profile list key functions
-func (k Keeper) profileFollowedModsKey(addr string) []byte {
-	return []byte(types.ProfileFollowedModsPrefix + addr)
+func (k Keeper) profileEnabledAgentsKey(addr string) []byte {
+	return []byte(types.ProfileEnabledAgentsPrefix + addr)
 }
 func (k Keeper) profileFollowedUsersKey(addr string) []byte {
 	return []byte(types.ProfileFollowedUsersPrefix + addr)
@@ -98,32 +98,32 @@ func (k Keeper) GetProfile(ctx sdk.Context, addr string) ([]byte, bool, error) {
 
 // Profile list getters/setters
 
-func (k Keeper) SetProfileFollowedMods(ctx sdk.Context, addr string, mods []string) error {
+func (k Keeper) SetProfileEnabledAgents(ctx sdk.Context, addr string, agents []string) error {
 	store := k.storeService.OpenKVStore(ctx)
-	if len(mods) == 0 {
-		return store.Delete(k.profileFollowedModsKey(addr))
+	if len(agents) == 0 {
+		return store.Delete(k.profileEnabledAgentsKey(addr))
 	}
-	bz, err := json.Marshal(mods)
+	bz, err := json.Marshal(agents)
 	if err != nil {
 		return err
 	}
-	return store.Set(k.profileFollowedModsKey(addr), bz)
+	return store.Set(k.profileEnabledAgentsKey(addr), bz)
 }
 
-func (k Keeper) GetProfileFollowedMods(ctx sdk.Context, addr string) ([]string, error) {
+func (k Keeper) GetProfileEnabledAgents(ctx sdk.Context, addr string) ([]string, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	bz, err := store.Get(k.profileFollowedModsKey(addr))
+	bz, err := store.Get(k.profileEnabledAgentsKey(addr))
 	if err != nil {
 		return nil, err
 	}
 	if len(bz) == 0 {
 		return []string{}, nil
 	}
-	var mods []string
-	if err := json.Unmarshal(bz, &mods); err != nil {
+	var agents []string
+	if err := json.Unmarshal(bz, &agents); err != nil {
 		return nil, err
 	}
-	return mods, nil
+	return agents, nil
 }
 
 func (k Keeper) SetProfileFollowedUsers(ctx sdk.Context, addr string, users []string) error {
@@ -1241,7 +1241,7 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 	_ = store.Delete(k.profileKey(addr))
 
 	// Delete all profile list keys
-	_ = store.Delete(k.profileFollowedModsKey(addr))
+	_ = store.Delete(k.profileEnabledAgentsKey(addr))
 	_ = store.Delete(k.profileFollowedUsersKey(addr))
 	_ = store.Delete(k.profileFollowedTopicsKey(addr))
 	_ = store.Delete(k.profileBlockedUsersKey(addr))

@@ -17,17 +17,18 @@ message ProfileCore {
   int64 subscription_expiry = 5;
   bool auto_renew = 6;
   uint64 reserve_funds = 7;
-  bool is_moderator = 8;
+  reserved 8;
   string biography = 9;
   string avatar = 10;
   string banner = 11;
+  string flair = 12;
 }
 
 // InitialProfile is used in genesis to bootstrap profiles.
 // It wraps ProfileCore and includes all list fields (stored separately at runtime).
 message InitialProfile {
   ProfileCore core = 1;
-  repeated string followed_moderators = 2;
+  repeated string enabled_agents = 2;
   repeated string followed_users = 3;
   repeated string followed_topics = 4;
   repeated string blocked_users = 5;

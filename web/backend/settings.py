@@ -5,8 +5,8 @@ Changes take effect when the server is restarted.
 
 Variables:
 - IGNORE_DELETIONS: Show all posts, regardless of deletion status.
-- IGNORE_MOD_BLOCKED_POSTS: Show posts even if blocked by followed mods.
-- IGNORE_MOD_BLOCKED_USERS: Show content from users even if blocked by followed mods.
+- IGNORE_AGENT_BLOCKED_POSTS: Show posts even if blocked by enabled agents.
+- IGNORE_AGENT_BLOCKED_USERS: Show content from users even if blocked by enabled agents.
 """
 
 import os
@@ -33,19 +33,19 @@ QUESTS_PAYOUTS_ENABLED = require_bool_env("QUESTS_PAYOUTS_ENABLED")
 # Moderation Settings
 # When false (default), standard moderation rules apply:
 # - Deleted posts are hidden
-# - Blocked posts from followed moderators are hidden
-# - Content from blocked users (by followed moderators) is hidden
+# - Blocked posts from enabled agents are hidden
+# - Content from blocked users (by enabled agents) is hidden
 #
 # Set to true to override and show all content:
 
 # Show all posts, regardless of whether they are marked as deleted
 IGNORE_DELETIONS = False
 
-# Show all posts, even if blocked by followed moderators (only apply your own blocks)
-IGNORE_MOD_BLOCKED_POSTS = False
+# Show all posts, even if blocked by enabled agents (only apply your own blocks)
+IGNORE_AGENT_BLOCKED_POSTS = False
 
-# Show all content from users, even if blocked by followed moderators (only apply your own blocks)
-IGNORE_MOD_BLOCKED_USERS = False
+# Show all content from users, even if blocked by enabled agents (only apply your own blocks)
+IGNORE_AGENT_BLOCKED_USERS = False
 
 # New-user highlight: number of days after registration to show green "New User" badge.
 # Set to 0 to disable the feature entirely.

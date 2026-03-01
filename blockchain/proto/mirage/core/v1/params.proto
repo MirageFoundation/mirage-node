@@ -12,7 +12,7 @@ message TierConfig {
 
   // uint64 fields
   uint64 period_fee = 1;
-  uint64 max_followed_mods = 2;
+  uint64 max_enabled_agents = 2;
   uint64 max_followed_users = 3;
   uint64 max_followed_topics = 4;
   uint64 max_blocked_users = 5;
@@ -21,18 +21,18 @@ message TierConfig {
   uint64 max_title_length = 8;
   uint64 max_content_length = 9;
   uint64 editing_time_mins = 10;
-  // tag 11 reserved
-  uint64 archive_duration_days = 12;
+  reserved 11, 12;
 
   // double fields
   double vote_weight = 13;
 
   // bool fields
-  bool eligible_for_mod = 15;
-  bool can_change_name = 16;
+  bool can_be_agent = 15;
+  bool can_remove_anon = 16;
   bool can_have_biography = 17;
   bool can_have_avatar = 18;
   bool can_have_banner = 19;
+  bool can_have_flair = 20;
 }
 
 // Params defines the parameters for the module.
@@ -93,7 +93,7 @@ message Params {
   // subscription_period is the renewal period in minutes; 0 = one-time payment, 43200 = 30 days
   uint64 subscription_period = 40;
 
-  // tiers defines the tier configurations; index 0 = free, 1-3 = paid tiers
+  // tiers defines the tier configurations; index 0 = free, 1 = subscriber, 2 = agent
   repeated TierConfig tiers = 41;
 
   // subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]

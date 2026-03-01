@@ -162,7 +162,7 @@ func (app *App) RegisterUpgradeHandlers() {
 					field  string
 					setter func(sdk.Context, string, []string) error
 				}{
-					{"followed_moderators", app.CoreKeeper.SetProfileFollowedMods},
+					{"followed_moderators", app.CoreKeeper.SetProfileEnabledAgents},
 					{"followed_users", app.CoreKeeper.SetProfileFollowedUsers},
 					{"followed_topics", app.CoreKeeper.SetProfileFollowedTopics},
 					{"blocked_users", app.CoreKeeper.SetProfileBlockedUsers},
@@ -1329,6 +1329,121 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.15.0 complete - MsgAward + award_configs")
+			return toVM, nil
+		},
+	)
+
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.16.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.16.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Migrate KV prefix plist_mods/* -> plist_agents/*
+			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
+			oldPrefix := []byte("plist_mods/")
+			newPrefix := []byte("plist_agents/")
+			it, err := store.Iterator(oldPrefix, storetypes.PrefixEndBytes(oldPrefix))
+			if err != nil {
+				return nil, fmt.Errorf("failed to iterate plist_mods: %w", err)
+			}
+			var keys [][]byte
+			var vals [][]byte
+			for ; it.Valid(); it.Next() {
+				keys = append(keys, append([]byte(nil), it.Key()...))
+				vals = append(vals, append([]byte(nil), it.Value()...))
+			}
+			it.Close()
+
+			migrated := 0
+			for i, oldKey := range keys {
+				suffix := oldKey[len(oldPrefix):]
+				newKey := make([]byte, len(newPrefix)+len(suffix))
+				copy(newKey, newPrefix)
+				copy(newKey[len(newPrefix):], suffix)
+				if err := store.Set(newKey, vals[i]); err != nil {
+					return nil, fmt.Errorf("failed to set new key: %w", err)
+				}
+				if err := store.Delete(oldKey); err != nil {
+					return nil, fmt.Errorf("failed to delete old key: %w", err)
+				}
+				migrated++
+			}
+			sdkCtx.Logger().Info("v1.16.0: migrated plist_mods -> plist_agents", "count", migrated)
+
+			// Set new tier defaults (Free=0, Subscriber=1, Agent=10)
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			params.Tiers = coretypes.DefaultTiers()
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				return nil, fmt.Errorf("failed to set new tier params: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10)")
+
+			// Migrate existing profile JSON:
+			// 1. Strip is_moderator field
+			// 2. Remap user levels: old 0->0, 1->1, 2->1, 3->10
+			profiles, pErr := app.CoreKeeper.GetAllProfiles(sdkCtx)
+			if pErr == nil {
+				migrated := 0
+				for _, bz := range profiles {
+					var m map[string]interface{}
+					if err := json.Unmarshal(bz, &m); err != nil {
+						continue
+					}
+					changed := false
+					if _, ok := m["is_moderator"]; ok {
+						delete(m, "is_moderator")
+						changed = true
+					}
+					// Remap level: old tiers 0=Free, 1=Trusted, 2=Established, 3=Distinguished
+					// New tiers: 0=Free, 1=Subscriber, 10=Agent
+					if lvl, ok := m["level"]; ok {
+						var oldLevel int
+						switch v := lvl.(type) {
+						case float64:
+							oldLevel = int(v)
+						case int:
+							oldLevel = v
+						}
+						var newLevel int
+						switch oldLevel {
+						case 0:
+							newLevel = 0
+						case 1, 2:
+							newLevel = 1
+						case 3:
+							newLevel = 10
+						default:
+							if oldLevel >= 100 {
+								newLevel = oldLevel // preserve admin levels
+							} else {
+								newLevel = 0
+							}
+						}
+						if newLevel != oldLevel {
+							m["level"] = newLevel
+							changed = true
+						}
+					}
+					if changed {
+						owner, _ := m["owner"].(string)
+						newBz, err := json.Marshal(m)
+						if err != nil || owner == "" {
+							continue
+						}
+						_ = app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz)
+						migrated++
+					}
+				}
+				sdkCtx.Logger().Info("v1.16.0: migrated profiles (is_moderator removal + level remap)", "count", migrated)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.16.0 complete")
 			return toVM, nil
 		},
 	)

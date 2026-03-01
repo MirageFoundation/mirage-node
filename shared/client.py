@@ -453,7 +453,7 @@ def get_user_level(backend: str, address: str, use_cache: bool = True) -> int:
     Returns:
         0 = free user
         1+ = subscriber (paid tier)
-        100+ = admin/moderator
+        100+ = admin
 
     Uses a local cache (30s TTL) to avoid hammering the backend.
     Set use_cache=False to force a fresh fetch.

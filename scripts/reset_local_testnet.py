@@ -588,7 +588,7 @@ def load_profiles_from_indexer_db() -> list:
     """Load user profiles from the SQL dump file.
 
     Returns profiles in InitialProfile format:
-    {core: {owner, username, level, biography, avatar, ...}, followed_moderators: [...]}
+    {core: {owner, username, level, biography, avatar, ...}, enabled_agents: [...]}
     """
     status("Loading profiles from indexer dump...")
     # Parse the SQL dump file directly instead of querying PostgreSQL
@@ -633,14 +633,17 @@ except Exception as e:
     exit(0)
 
 profiles_data = parse_copy_data(content, "profiles", [])
-followed_mods_data = parse_copy_data(content, "followed_mods", [])
+# Support both new (enabled_agents) and old (followed_mods) schema for backup compatibility
+enabled_agents_data = parse_copy_data(content, "enabled_agents", [])
+if not enabled_agents_data:
+    enabled_agents_data = parse_copy_data(content, "followed_mods", [])
 
-mods_map = {}
-for row in followed_mods_data:
+agents_map = {}
+for row in enabled_agents_data:
     owner = (row.get("owner") or "").lower()
-    mod = row.get("moderator") or ""
-    if owner and mod:
-        mods_map.setdefault(owner, []).append(mod)
+    agent = row.get("agent") or row.get("moderator") or ""  # moderator for old schema
+    if owner and agent:
+        agents_map.setdefault(owner, []).append(agent)
 
 profiles = []
 now = int(time.time())
@@ -665,7 +668,7 @@ for row in profiles_data:
             "biography": bio,
             "avatar": avatar,
         },
-        "followed_moderators": mods_map.get(owner_key, []),
+        "enabled_agents": agents_map.get(owner_key, []),
     })
 
 print(json.dumps(profiles))

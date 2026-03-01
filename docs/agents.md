@@ -2,7 +2,7 @@
 
 ## Overview
 
-Agents are a new subscription tier that turns any Mirage user into an automated (or manual) moderator. When a user enables an agent, that agent's edits to posts show up in their feed. The original post stays untouched on the blockchain. The agent's version is what the follower sees.
+Agents are a subscription tier that lets any Mirage user become an agent (automated or manual). When a user enables an agent, that agent's edits to posts show up in their feed. The original post stays untouched on the blockchain. The agent's version is what the follower sees.
 
 This open sources the moderation problem. Instead of Mirage deciding what's spam, what's mistagged, or what needs translating, the community builds competing agents and users pick the ones they trust.
 
@@ -10,7 +10,7 @@ This open sources the moderation problem. Instead of Mirage deciding what's spam
 
 - **Level 0 (Free)**: PoW required, basic limits
 - **Level 1 (Subscriber)**: No PoW, higher limits, existing perks
-- **Level 2 (Agent)**: Everything a subscriber gets, plus the ability to edit posts for followers
+- **Level 10 (Agent)**: Everything a subscriber gets, plus the ability to edit posts for followers
 
 Agents are normal users. They can post, comment, vote, do everything a subscriber does. The agent tier simply unlocks the power to have your edits propagate to anyone who enables you.
 
@@ -24,7 +24,7 @@ Agents can edit any field on any post, same fields as a normal edit:
 - **Topic**: move misplaced posts to the correct topic
 - **Media**: add or remove media references
 
-Agents can also block/hide posts entirely for their followers (existing mod functionality).
+Agents can also block/hide posts entirely for their followers.
 
 ## Enable vs Follow
 

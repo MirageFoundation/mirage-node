@@ -338,7 +338,7 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	_ = mk.ClaimUsername(ctx, "listuser", owner)
 
 	// Populate all profile list KV entries
-	_ = mk.SetProfileFollowedMods(ctx, owner, []string{"mod1", "mod2"})
+	_ = mk.SetProfileEnabledAgents(ctx, owner, []string{"agent1", "agent2"})
 	_ = mk.SetProfileFollowedUsers(ctx, owner, []string{"user1"})
 	_ = mk.SetProfileFollowedTopics(ctx, owner, []string{"topic1"})
 	_ = mk.SetProfileBlockedUsers(ctx, owner, []string{"blocked1"})
@@ -357,8 +357,8 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	}()
 
 	// All lists should be cleaned up
-	mods, _ := mk.GetProfileFollowedMods(ctx, owner)
-	require.Empty(t, mods, "followed mods should be empty")
+	agents, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	require.Empty(t, agents, "enabled agents should be empty")
 
 	users, _ := mk.GetProfileFollowedUsers(ctx, owner)
 	require.Empty(t, users, "followed users should be empty")

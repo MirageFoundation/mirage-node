@@ -15,7 +15,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	msgTypes := []sdk.Msg{
 		&MsgUpdateParams{},
 		&MsgPost{}, &MsgEdit{}, &MsgVote{}, &MsgSetUsername{},
-		&MsgFollowModerator{}, &MsgUnfollowModerator{},
+		&MsgEnableAgent{}, &MsgDisableAgent{},
 		&MsgFollowUser{}, &MsgUnfollowUser{},
 		&MsgFollowTopic{}, &MsgUnfollowTopic{},
 		&MsgBlockPost{}, &MsgUnblockPost{},
@@ -36,7 +36,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	msgResponseTypes := []proto.Message{
 		&MsgUpdateParamsResponse{},
 		&MsgPostResponse{}, &MsgEditResponse{}, &MsgVoteResponse{}, &MsgSetUsernameResponse{},
-		&MsgFollowModeratorResponse{}, &MsgUnfollowModeratorResponse{},
+		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{},
 		&MsgFollowUserResponse{}, &MsgUnfollowUserResponse{},
 		&MsgFollowTopicResponse{}, &MsgUnfollowTopicResponse{},
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},
@@ -54,8 +54,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
 
-	// Register legacy message types for backwards compatibility (decoding old gov proposals)
-	// MsgMintTo was renamed to MsgMintTokens - we need to decode old proposals that used it
+	// Register legacy message types for backwards compatibility (decoding old transactions)
 	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgMintTo{})
+	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgFollowModerator{}, &MsgUnfollowModerator{})
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }

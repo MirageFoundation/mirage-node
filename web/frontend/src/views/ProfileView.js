@@ -644,13 +644,13 @@ export default function ProfileView({ state }) {
     };
 
     const getTierName = (level) => {
-        const names = ['Free', 'Trusted', 'Established', 'Distinguished'];
+        const names = { 0: 'Free', 1: 'Subscriber', 10: 'Agent' };
         if (level >= 100) return 'Admin';
         return names[level] || 'Free';
     };
 
     const getTierColor = (level) => {
-        const colors = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
+        const colors = { 0: '#6B7280', 1: '#F59E0B', 10: '#EF4444' };
         if (level >= 100) return '#EF4444';
         return colors[level] || colors[0];
     };

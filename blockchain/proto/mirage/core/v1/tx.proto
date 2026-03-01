@@ -29,11 +29,11 @@ service Msg {
   // SetUsername persists a username for the signer.
   rpc SetUsername(MsgSetUsername) returns (MsgSetUsernameResponse);
 
-  // FollowModerator adds a moderator to the signer's followed list (capped deque).
-  rpc FollowModerator(MsgFollowModerator) returns (MsgFollowModeratorResponse);
+  // EnableAgent adds an agent to the signer's enabled agents list (capped deque).
+  rpc EnableAgent(MsgEnableAgent) returns (MsgEnableAgentResponse);
 
-  // UnfollowModerator removes a moderator from the signer's followed list.
-  rpc UnfollowModerator(MsgUnfollowModerator) returns (MsgUnfollowModeratorResponse);
+  // DisableAgent removes an agent from the signer's enabled agents list.
+  rpc DisableAgent(MsgDisableAgent) returns (MsgDisableAgentResponse);
 
   // FollowUser adds a user to the signer's followed users list (capped deque).
   rpc FollowUser(MsgFollowUser) returns (MsgFollowUserResponse);
@@ -228,8 +228,8 @@ message MsgSetUsername {
 
 message MsgSetUsernameResponse {}
 
-// MsgFollowModerator adds a moderator to the followed list
-message MsgFollowModerator {
+// MsgEnableAgent adds an agent to the enabled agents list
+message MsgEnableAgent {
   option (cosmos.msg.v1.signer) = "authority";
 
   // REQUIRED: address of the signer (node or governance)
@@ -246,13 +246,13 @@ message MsgFollowModerator {
 
   // Payload
   string target = 100;
-  string moderator = 101;
+  string agent = 101;
 }
 
-message MsgFollowModeratorResponse {}
+message MsgEnableAgentResponse {}
 
-// MsgUnfollowModerator removes a moderator from the followed list
-message MsgUnfollowModerator {
+// MsgDisableAgent removes an agent from the enabled agents list
+message MsgDisableAgent {
   option (cosmos.msg.v1.signer) = "authority";
 
   // REQUIRED: address of the signer (node or governance)
@@ -269,10 +269,10 @@ message MsgUnfollowModerator {
 
   // Payload
   string target = 100;
-  string moderator = 101;
+  string agent = 101;
 }
 
-message MsgUnfollowModeratorResponse {}
+message MsgDisableAgentResponse {}
 
 // MsgFollowUser adds a user to the followed list
 message MsgFollowUser {

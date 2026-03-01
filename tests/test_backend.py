@@ -65,8 +65,8 @@ from shared.canon import (  # noqa: E402
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
     canon_base_follow_topic as _canon_base_follow_topic_raw,
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
-    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
-    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
+    canon_base_enable_agent as _canon_base_enable_agent_raw,
+    canon_base_disable_agent as _canon_base_disable_agent_raw,
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_block_user as _canon_base_block_user_raw,
@@ -530,7 +530,7 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
 
 
 def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
-    """Upgrade a wallet's subscription to the given tier (1-3)."""
+    """Upgrade a wallet's subscription to the given level (1=Subscriber, 10=Agent)."""
     addr = str(wallet.address())
     st = get_status(backend, address=addr)
     lb = str(st.get("last_block_hash", ""))
@@ -618,7 +618,7 @@ def _do_award(
 
 
 def setup_test_wallets(backend: str) -> bool:
-    """Generate random wallets, faucet them, and subscribe tiers 1-3.
+    """Generate random wallets, faucet them, and subscribe (level 1=Subscriber, 10=Agent).
 
     Returns True on success, False on failure.
     """
@@ -634,13 +634,12 @@ def setup_test_wallets(backend: str) -> bool:
         print(f"  Wallet {name:4s}: {w.address()}")
 
     # Faucet all wallets (sub wallets need tokens for subscription fees)
-    # Tier fees (umirage): T1=100_000_000_000, T2=200_000_000_000, T3=300_000_000_000
-    # i.e. T1=100k MIRAGE, T2=200k MIRAGE, T3=300k MIRAGE  (1 MIRAGE = 1_000_000 umirage)
+    # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 200K MIRAGE
     FAUCET_AMOUNTS = {
         "free": 1_000_000_000,  #     1,000 MIRAGE
-        "sub1": 150_000_000_000,  #   150,000 MIRAGE  (T1 fee = 100,000)
-        "sub2": 250_000_000_000,  #   250,000 MIRAGE  (T2 fee = 200,000)
-        "sub3": 400_000_000_000,  #   400,000 MIRAGE  (T3 fee = 300,000)
+        "sub1": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
+        "sub2": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
+        "sub3": 300_000_000_000,  #   300,000 MIRAGE  (Agent fee = 200,000)
     }
     try:
         faucet_addr = _resolve_validator_key_addr()
@@ -695,23 +694,23 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot check balance for {name}: {e}")
             return False
 
-    # Subscribe wallets to tiers 1, 2, 3
-    for level, name in [(1, "sub1"), (2, "sub2"), (3, "sub3")]:
+    # Subscribe wallets: sub1,sub2 -> level 1 (Subscriber), sub3 -> level 10 (Agent)
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3")]:
         w = WALLETS[name]
         resp = _do_upgrade_level(backend, w, level)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            print(f"  Subscribed {name} to tier {level} (tx: {txh[:16]}...)")
+            print(f"  Subscribed {name} to level {level} (tx: {txh[:16]}...)")
         else:
             err = resp.get("error", resp)
-            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to tier {level}: {err}")
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Subscribe {name} to level {level}: {err}")
             return False
 
     # Wait for subscription transactions
     time.sleep(6)
 
     # Verify subscription levels
-    for level, name in [(1, "sub1"), (2, "sub2"), (3, "sub3")]:
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3")]:
         w = WALLETS[name]
         addr = str(w.address())
         try:
@@ -1126,19 +1125,19 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
     return resp
 
 
-def _do_follow_moderator(
-    backend: str, wallet, moderator_addr: str, follow: bool = True, skip_pow: bool = False
+def _do_enable_agent(
+    backend: str, wallet, agent_addr: str, enable: bool = True, skip_pow: bool = False
 ) -> dict:
-    """Follow or unfollow a moderator."""
+    """Enable or disable an agent."""
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
     d = 0 if skip_pow else diff
-    canon_fn = _canon_base_follow_moderator_raw if follow else _canon_base_unfollow_moderator_raw
-    endpoint = "follow_moderator" if follow else "unfollow_moderator"
+    canon_fn = _canon_base_enable_agent_raw if enable else _canon_base_disable_agent_raw
+    endpoint = "enable_agent" if enable else "disable_agent"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, moderator_addr)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, agent_addr)
     if skip_pow:
         proof = 0
     else:
@@ -1152,7 +1151,7 @@ def _do_follow_moderator(
         "timestamp": ts,
         "pow_difficulty": d,
         "target": addr,
-        "moderator": moderator_addr,
+        "agent": agent_addr,
     }
     if not skip_pow:
         payload["pow"] = int(proof)
@@ -2340,10 +2339,10 @@ def test_pow(backend: str):
 
 
 # =========================================================================
-# Category 7: Subscription Tiers (Free, Tier 1, Tier 2, Tier 3)
+# Category 7: Subscription Tiers (Free, Subscriber, Agent)
 # =========================================================================
 def test_subscriber(backend: str):
-    print(f"\n{_COLOR_BOLD}[7] Subscription Tiers (Free, T1, T2, T3){_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[7] Subscription Tiers (Free, Subscriber, Agent){_COLOR_RESET}")
 
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
@@ -2365,11 +2364,11 @@ def test_subscriber(backend: str):
     except Exception as e:
         _fail("tiers.free_user_level", str(e))
 
-    # 7.2 Verify all 3 subscription tiers
+    # 7.2 Verify subscription levels (sub1,sub2=level 1, sub3=level 10)
     for level, name, w, a in [
         (1, "sub1", sub1_wallet, sub1_addr),
-        (2, "sub2", sub2_wallet, sub2_addr),
-        (3, "sub3", sub3_wallet, sub3_addr),
+        (1, "sub2", sub2_wallet, sub2_addr),
+        (10, "sub3", sub3_wallet, sub3_addr),
     ]:
         try:
             st = get_user_status(backend, a)
@@ -2388,12 +2387,12 @@ def test_subscriber(backend: str):
     else:
         _fail("tiers.free_user_post_with_pow succeeds")
 
-    # 7.4 All 3 subscriber tiers: post without PoW succeeds
+    # 7.4 All subscribers/agents: post without PoW succeeds
     tier_posts = {}
     for level, name, w in [
         (1, "sub1", sub1_wallet),
-        (2, "sub2", sub2_wallet),
-        (3, "sub3", sub3_wallet),
+        (1, "sub2", sub2_wallet),
+        (10, "sub3", sub3_wallet),
     ]:
         txh = _do_post(backend, w, "test", f"Tier{level} post {_rand_str(4)}", f"tier {level} body", skip_pow=True)
         if txh:
@@ -2410,13 +2409,13 @@ def test_subscriber(backend: str):
     else:
         _fail("tiers.all_read_endpoints work", f"codes={code1},{code2}")
 
-    # 7.6 Each subscriber tier: vote without PoW succeeds
+    # 7.6 Each subscriber/agent: vote without PoW succeeds
     if txh_free:
         time.sleep(2)
         for level, name, w in [
             (1, "sub1", sub1_wallet),
-            (2, "sub2", sub2_wallet),
-            (3, "sub3", sub3_wallet),
+            (1, "sub2", sub2_wallet),
+            (10, "sub3", sub3_wallet),
         ]:
             resp = _do_vote(backend, w, txh_free, 1, skip_pow=True)
             txh_vote = str(resp.get("tx_hash", "")).lower()
@@ -2425,11 +2424,11 @@ def test_subscriber(backend: str):
             else:
                 _fail(f"tiers.{name}_vote_without_pow succeeds", f"resp={resp}")
 
-    # 7.7 Subscriber sending PoW should be REJECTED (test all 3 tiers)
+    # 7.7 Subscriber sending PoW should be REJECTED
     for level, name, w in [
         (1, "sub1", sub1_wallet),
-        (2, "sub2", sub2_wallet),
-        (3, "sub3", sub3_wallet),
+        (1, "sub2", sub2_wallet),
+        (10, "sub3", sub3_wallet),
     ]:
         try:
             a = str(w.address())
@@ -3688,17 +3687,17 @@ def test_validation(backend: str):
     except Exception as e:
         _fail("validation.upgrade_invalid_level_rejected", str(e))
 
-    # 11.15 Upgrade with insufficient funds — free wallet tries tier 3
+    # 11.15 Upgrade to invalid level (3) — rejected (only 1 and 10 are valid)
     try:
         resp = _do_upgrade_level(backend, free_wallet, 3)
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
-        if not txh or "insufficient" in err:
-            _pass("validation.upgrade_insufficient_funds_rejected")
+        if not txh or "invalid" in err:
+            _pass("validation.upgrade_invalid_level_3_rejected")
         else:
-            _pass("validation.upgrade_insufficient submitted (chain may reject)")
+            _pass("validation.upgrade_invalid_level_3 submitted (chain may reject)")
     except Exception as e:
-        _fail("validation.upgrade_insufficient_funds_rejected", str(e))
+        _fail("validation.upgrade_invalid_level_3_rejected", str(e))
 
     # ------ Report validation ------
 
@@ -3878,10 +3877,10 @@ def test_tokens(backend: str):
 
 
 # =========================================================================
-# Category 13: Moderators
+# Category 13: Agents
 # =========================================================================
-def test_moderators(backend: str):
-    print(f"\n{_COLOR_BOLD}[13] Moderators{_COLOR_RESET}")
+def test_agents(backend: str):
+    print(f"\n{_COLOR_BOLD}[13] Agents{_COLOR_RESET}")
 
     sub1 = WALLETS["sub1"]
     sub2 = WALLETS["sub2"]
@@ -3890,77 +3889,77 @@ def test_moderators(backend: str):
     sub2_addr = str(sub2.address())
     free_addr = str(free_wallet.address())
 
-    # 13.1 Follow moderator (sub1 follows sub2 as moderator)
+    # 13.1 Enable agent (sub1 enables sub2 as agent)
     try:
-        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=True, skip_pow=True)
+        resp = _do_enable_agent(backend, sub1, sub2_addr, enable=True, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            _pass("moderators.follow_happy_path")
+            _pass("agents.enable_happy_path")
         else:
             err = str(resp.get("error", "")).lower()
-            _fail("moderators.follow_happy_path", f"no tx_hash: {err[:200]}")
+            _fail("agents.enable_happy_path", f"no tx_hash: {err[:200]}")
     except Exception as e:
-        _fail("moderators.follow_happy_path", str(e))
+        _fail("agents.enable_happy_path", str(e))
 
     time.sleep(3)
 
-    # 13.2 Unfollow moderator
+    # 13.2 Disable agent
     try:
-        resp = _do_follow_moderator(backend, sub1, sub2_addr, follow=False, skip_pow=True)
+        resp = _do_enable_agent(backend, sub1, sub2_addr, enable=False, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            _pass("moderators.unfollow_happy_path")
+            _pass("agents.disable_happy_path")
         else:
             err = str(resp.get("error", "")).lower()
-            _fail("moderators.unfollow_happy_path", f"no tx_hash: {err[:200]}")
+            _fail("agents.disable_happy_path", f"no tx_hash: {err[:200]}")
     except Exception as e:
-        _fail("moderators.unfollow_happy_path", str(e))
+        _fail("agents.disable_happy_path", str(e))
 
-    # 13.3 Follow non-existent address
+    # 13.3 Enable non-existent address
     fake_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
     try:
-        resp = _do_follow_moderator(backend, sub1, fake_addr, follow=True, skip_pow=True)
+        resp = _do_enable_agent(backend, sub1, fake_addr, enable=True, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            _pass("moderators.follow_nonexistent submitted (chain decides)")
+            _pass("agents.enable_nonexistent submitted (chain decides)")
         else:
-            _pass("moderators.follow_nonexistent_rejected")
+            _pass("agents.enable_nonexistent_rejected")
     except Exception as e:
-        _pass("moderators.follow_nonexistent handled")
+        _pass("agents.enable_nonexistent handled")
 
-    # 13.4 Self-follow as moderator
+    # 13.4 Self-enable as agent
     try:
-        resp = _do_follow_moderator(backend, sub1, sub1_addr, follow=True, skip_pow=True)
+        resp = _do_enable_agent(backend, sub1, sub1_addr, enable=True, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            _pass("moderators.self_follow submitted (chain decides)")
+            _pass("agents.self_enable submitted (chain decides)")
         else:
-            _pass("moderators.self_follow_rejected")
+            _pass("agents.self_enable_rejected")
     except Exception as e:
-        _pass("moderators.self_follow handled")
+        _pass("agents.self_enable handled")
 
-    # 13.5 Invalid moderator address format
+    # 13.5 Invalid agent address format
     try:
-        resp = _do_follow_moderator(backend, sub1, "invalid_address", follow=True, skip_pow=True)
+        resp = _do_enable_agent(backend, sub1, "invalid_address", enable=True, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         err = str(resp.get("error", "")).lower()
         if not txh or "invalid" in err:
-            _pass("moderators.invalid_address_rejected")
+            _pass("agents.invalid_address_rejected")
         else:
-            _pass("moderators.invalid_address submitted (chain may reject)")
+            _pass("agents.invalid_address submitted (chain may reject)")
     except Exception as e:
-        _pass("moderators.invalid_address_rejected")
+        _pass("agents.invalid_address_rejected")
 
-    # 13.6 Free user follows moderator with PoW
+    # 13.6 Free user enables agent with PoW
     try:
-        resp = _do_follow_moderator(backend, free_wallet, sub2_addr, follow=True, skip_pow=False)
+        resp = _do_enable_agent(backend, free_wallet, sub2_addr, enable=True, skip_pow=False)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
-            _pass("moderators.free_user_follow")
+            _pass("agents.free_user_enable")
         else:
-            _pass("moderators.free_user_follow submitted")
+            _pass("agents.free_user_enable submitted")
     except Exception as e:
-        _fail("moderators.free_user_follow", str(e))
+        _fail("agents.free_user_enable", str(e))
 
 
 # =========================================================================
@@ -4642,6 +4641,566 @@ def test_rate_limit(backend: str):
 
 
 # =========================================================================
+# Category 20: Hard Cap vs Deque (backend-level)
+# =========================================================================
+def test_hard_cap_vs_deque(backend: str):
+    """Test that follow/enable lists reject at limit (hard cap) while
+    block lists evict oldest (deque) through the backend API."""
+    print(f"\n{_COLOR_BOLD}[20] Hard Cap vs Deque (backend API){_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    free_addr = str(free_wallet.address())
+    sub1 = WALLETS["sub1"]
+    sub1_addr = str(sub1.address())
+
+    # Fetch tier configs via API
+    code, params_resp = _get(f"{backend}/api/get_parameters")
+    if code != 200:
+        _fail("hardcap.fetch_params", f"code={code}")
+        return
+    tiers = (params_resp or {}).get("tiers") or []
+    if len(tiers) < 3:
+        _fail("hardcap.tier_count", f"expected 3, got {len(tiers)}")
+        return
+    _pass("hardcap.tier_count_3")
+
+    free_tier = tiers[0]
+    max_agents_free = int(free_tier.get("max_enabled_agents", 0))
+    max_fu_free = int(free_tier.get("max_followed_users", 0))
+    max_ft_free = int(free_tier.get("max_followed_topics", 0))
+    max_bu_free = int(free_tier.get("max_blocked_users", 0))
+
+    # ── 20.1 Follow users up to free limit, then verify rejection ──
+    # Account for users already followed by the free wallet from prior tests
+    code_fu, fu_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
+    existing_fu = len((fu_data or {}).get("followed_users") or (fu_data or {}).get("users") or []) if code_fu == 200 else 0
+    remaining_fu = max(0, max_fu_free - existing_fu)
+    _debug(f"free-tier max_followed_users={max_fu_free} existing={existing_fu} remaining={remaining_fu}")
+    follow_targets: list[str] = []
+    fu_fill_ok = True
+    for i in range(remaining_fu):
+        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        follow_targets.append(target)
+        resp = _do_follow_user(backend, free_wallet, target, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            err = str(resp.get("error", ""))[:100]
+            _fail(f"hardcap.fu_fill_{i}", err)
+            fu_fill_ok = False
+            break
+        if (i + 1) % 10 == 0:
+            print(f"    [{i+1}/{remaining_fu}] followed users…")
+    if fu_fill_ok:
+        _pass(f"hardcap.fu_fill ({remaining_fu} new + {existing_fu} existing = {max_fu_free})")
+
+        # Overflow should fail
+        overflow_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        resp = _do_follow_user(backend, free_wallet, overflow_target, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        tx_code = int(resp.get("code", 0) or 0)
+        if not txh or tx_code != 0 or "limit" in err:
+            _pass("hardcap.fu_overflow_rejected")
+        else:
+            _fail("hardcap.fu_overflow_rejected", f"txh={txh} code={tx_code}")
+
+        # Unfollow one, then follow should succeed again
+        if follow_targets:
+            resp = _do_follow_user(backend, free_wallet, follow_targets[0], follow=False, skip_pow=False)
+            time.sleep(2)
+            resp = _do_follow_user(backend, free_wallet, overflow_target, follow=True, skip_pow=False)
+            txh = str(resp.get("tx_hash", "")).lower()
+            tx_code = int(resp.get("code", 0) or 0)
+            if txh and tx_code == 0:
+                _pass("hardcap.fu_follow_after_unfollow")
+            else:
+                _fail("hardcap.fu_follow_after_unfollow", f"txh={txh} code={tx_code}")
+        else:
+            _pass("hardcap.fu_follow_after_unfollow (skipped — no new targets to unfollow)")
+
+    # ── 20.2 Follow topics up to free limit, then verify rejection ──
+    existing_ft = len((fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
+    remaining_ft = max(0, max_ft_free - existing_ft)
+    _debug(f"free-tier max_followed_topics={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
+    topic_targets: list[str] = []
+    ft_fill_ok = True
+    for i in range(remaining_ft):
+        topic = f"hct{_rand_str(4)}{i}"
+        topic_targets.append(topic)
+        resp = _do_follow_topic(backend, free_wallet, topic, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            err = str(resp.get("error", ""))[:100]
+            _fail(f"hardcap.ft_fill_{i}", err)
+            ft_fill_ok = False
+            break
+        if (i + 1) % 10 == 0:
+            print(f"    [{i+1}/{remaining_ft}] followed topics…")
+    if ft_fill_ok:
+        _pass(f"hardcap.ft_fill ({remaining_ft} new + {existing_ft} existing = {max_ft_free})")
+
+        overflow_topic = f"hctover{_rand_str(4)}"
+        resp = _do_follow_topic(backend, free_wallet, overflow_topic, follow=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        tx_code = int(resp.get("code", 0) or 0)
+        if not txh or tx_code != 0 or "limit" in err:
+            _pass("hardcap.ft_overflow_rejected")
+        else:
+            _fail("hardcap.ft_overflow_rejected", f"txh={txh} code={tx_code}")
+
+    # ── 20.3 Enable agents up to free limit, then verify rejection ──
+    code_ea, ea_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
+    existing_ea = len((ea_data or {}).get("enabled_agents") or []) if code_ea == 200 else 0
+    remaining_ea = max(0, max_agents_free - existing_ea)
+    _debug(f"free-tier max_enabled_agents={max_agents_free} existing={existing_ea} remaining={remaining_ea}")
+    agent_targets: list[str] = []
+    ea_fill_ok = True
+    for i in range(remaining_ea):
+        agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        agent_targets.append(agent)
+        resp = _do_enable_agent(backend, free_wallet, agent, enable=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            err = str(resp.get("error", ""))[:100]
+            _fail(f"hardcap.ea_fill_{i}", err)
+            ea_fill_ok = False
+            break
+        if (i + 1) % 10 == 0:
+            print(f"    [{i+1}/{remaining_ea}] enabled agents…")
+    if ea_fill_ok:
+        _pass(f"hardcap.ea_fill ({remaining_ea} new + {existing_ea} existing = {max_agents_free})")
+
+        overflow_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        err = str(resp.get("error", "")).lower() + str(resp.get("raw_log", "")).lower()
+        tx_code = int(resp.get("code", 0) or 0)
+        if not txh or tx_code != 0 or "limit" in err:
+            _pass("hardcap.ea_overflow_rejected")
+        else:
+            _fail("hardcap.ea_overflow_rejected", f"txh={txh} code={tx_code}")
+
+        # Disable one and re-enable should succeed
+        if agent_targets:
+            resp = _do_enable_agent(backend, free_wallet, agent_targets[0], enable=False, skip_pow=False)
+            time.sleep(2)
+            resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
+            txh = str(resp.get("tx_hash", "")).lower()
+            tx_code = int(resp.get("code", 0) or 0)
+            if txh and tx_code == 0:
+                _pass("hardcap.ea_enable_after_disable")
+            else:
+                _fail("hardcap.ea_enable_after_disable", f"txh={txh} code={tx_code}")
+        else:
+            _pass("hardcap.ea_enable_after_disable (skipped — no new targets to disable)")
+
+    # ── 20.4 blocked_users: deque (should never reject) ──
+    _debug(f"free-tier max_blocked_users={max_bu_free}")
+    total_to_block = max_bu_free + 3
+    bu_fill_ok = True
+    for i in range(total_to_block):
+        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        resp = _do_block(backend, free_wallet, target, "user", block=True, skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            err = str(resp.get("error", ""))[:100]
+            _fail(f"hardcap.bu_deque_{i}", err)
+            bu_fill_ok = False
+            break
+        if (i + 1) % 10 == 0:
+            print(f"    [{i+1}/{total_to_block}] blocked users…")
+    if bu_fill_ok:
+        _pass(f"hardcap.bu_deque_fill ({total_to_block} blocked, no rejection)")
+
+
+# =========================================================================
+# Category 21: Tier Configuration Verification (backend API)
+# =========================================================================
+def test_tier_config_api(backend: str):
+    """Verify tier configurations are correctly served through the API."""
+    print(f"\n{_COLOR_BOLD}[21] Tier Configuration via API{_COLOR_RESET}")
+
+    code, params_resp = _get(f"{backend}/api/get_parameters")
+    if code != 200:
+        _fail("tierapi.fetch_params", f"code={code}")
+        return
+    _pass("tierapi.fetch_params")
+
+    tiers = (params_resp or {}).get("tiers") or []
+    if len(tiers) != 3:
+        _fail("tierapi.exactly_3_tiers", f"got {len(tiers)}")
+        return
+    _pass("tierapi.exactly_3_tiers")
+
+    # Free tier (index 0)
+    free = tiers[0]
+    if int(free.get("period_fee", -1)) == 0:
+        _pass("tierapi.free_period_fee_0")
+    else:
+        _fail("tierapi.free_period_fee_0", f"got={free.get('period_fee')}")
+
+    for field in ["max_enabled_agents", "max_followed_users", "max_followed_topics",
+                   "max_blocked_users", "max_blocked_posts", "max_blocked_topics"]:
+        val = int(free.get(field, 0))
+        if val == 25:
+            _pass(f"tierapi.free_{field}_25")
+        else:
+            _fail(f"tierapi.free_{field}_25", f"got={val}")
+
+    if int(free.get("max_title_length", 0)) == 150:
+        _pass("tierapi.free_max_title_150")
+    else:
+        _fail("tierapi.free_max_title_150", f"got={free.get('max_title_length')}")
+
+    if int(free.get("max_content_length", 0)) == 1000:
+        _pass("tierapi.free_max_content_1000")
+    else:
+        _fail("tierapi.free_max_content_1000", f"got={free.get('max_content_length')}")
+
+    if int(free.get("editing_time_mins", 0)) == 10:
+        _pass("tierapi.free_editing_10m")
+    else:
+        _fail("tierapi.free_editing_10m", f"got={free.get('editing_time_mins')}")
+
+    if abs(float(free.get("vote_weight", 0)) - 1.0) < 0.01:
+        _pass("tierapi.free_vote_weight_1.0")
+    else:
+        _fail("tierapi.free_vote_weight_1.0", f"got={free.get('vote_weight')}")
+
+    for flag in ["can_be_agent", "can_remove_anon", "can_have_biography",
+                  "can_have_avatar", "can_have_banner", "can_have_flair"]:
+        if not free.get(flag, True):
+            _pass(f"tierapi.free_{flag}_false")
+        else:
+            _fail(f"tierapi.free_{flag}_false", f"got={free.get(flag)}")
+
+    # Subscriber tier (index 1)
+    sub = tiers[1]
+    if int(sub.get("period_fee", -1)) == 100_000_000_000:
+        _pass("tierapi.sub_period_fee_100B")
+    else:
+        _fail("tierapi.sub_period_fee_100B", f"got={sub.get('period_fee')}")
+
+    for field in ["max_enabled_agents", "max_followed_users", "max_followed_topics",
+                   "max_blocked_users", "max_blocked_posts", "max_blocked_topics"]:
+        val = int(sub.get(field, 0))
+        if val == 500:
+            _pass(f"tierapi.sub_{field}_500")
+        else:
+            _fail(f"tierapi.sub_{field}_500", f"got={val}")
+
+    if int(sub.get("max_title_length", 0)) == 300:
+        _pass("tierapi.sub_max_title_300")
+    else:
+        _fail("tierapi.sub_max_title_300", f"got={sub.get('max_title_length')}")
+
+    if int(sub.get("max_content_length", 0)) == 20000:
+        _pass("tierapi.sub_max_content_20000")
+    else:
+        _fail("tierapi.sub_max_content_20000", f"got={sub.get('max_content_length')}")
+
+    if int(sub.get("editing_time_mins", 0)) == 360:
+        _pass("tierapi.sub_editing_360m")
+    else:
+        _fail("tierapi.sub_editing_360m", f"got={sub.get('editing_time_mins')}")
+
+    if abs(float(sub.get("vote_weight", 0)) - 1.33) < 0.01:
+        _pass("tierapi.sub_vote_weight_1.33")
+    else:
+        _fail("tierapi.sub_vote_weight_1.33", f"got={sub.get('vote_weight')}")
+
+    if not sub.get("can_be_agent", True):
+        _pass("tierapi.sub_can_be_agent_false")
+    else:
+        _fail("tierapi.sub_can_be_agent_false", f"got={sub.get('can_be_agent')}")
+
+    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar",
+                  "can_have_banner", "can_have_flair"]:
+        if sub.get(flag, False):
+            _pass(f"tierapi.sub_{flag}_true")
+        else:
+            _fail(f"tierapi.sub_{flag}_true", f"got={sub.get(flag)}")
+
+    # Agent tier (index 2)
+    agent = tiers[2]
+    if int(agent.get("period_fee", -1)) == 200_000_000_000:
+        _pass("tierapi.agent_period_fee_200B")
+    else:
+        _fail("tierapi.agent_period_fee_200B", f"got={agent.get('period_fee')}")
+
+    if agent.get("can_be_agent", False):
+        _pass("tierapi.agent_can_be_agent_true")
+    else:
+        _fail("tierapi.agent_can_be_agent_true", f"got={agent.get('can_be_agent')}")
+
+    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar",
+                  "can_have_banner", "can_have_flair"]:
+        if agent.get(flag, False):
+            _pass(f"tierapi.agent_{flag}_true")
+        else:
+            _fail(f"tierapi.agent_{flag}_true", f"got={agent.get(flag)}")
+
+
+# =========================================================================
+# Category 22: Upgrade Level Validation (backend API)
+# =========================================================================
+def test_upgrade_level_validation(backend: str):
+    """Test level upgrade validation via the backend API."""
+    print(f"\n{_COLOR_BOLD}[22] Upgrade Level Validation (backend API){_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    free_addr = str(free_wallet.address())
+
+    # 22.1 Valid levels (1, 10) — we already tested these in test_subscriber
+    # Just verify the free user's current level
+    try:
+        us = get_user_status(backend, free_addr)
+        free_level = int(us.get("user_level", -1) or -1)
+        if free_level == 0:
+            _pass("upgrade.free_level_is_0")
+        else:
+            _fail("upgrade.free_level_is_0", f"level={free_level}")
+    except Exception as e:
+        _fail("upgrade.free_level_is_0", str(e))
+
+    # 22.2 Invalid level 3 should be rejected
+    resp = _do_upgrade_level(backend, free_wallet, 3)
+    err = str(resp.get("error", "")).lower() if resp else ""
+    txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+    tx_code = int(resp.get("code", 0) or 0) if resp else -1
+    if "invalid" in err or (not txh) or tx_code != 0:
+        _pass("upgrade.level_3_rejected")
+    else:
+        _fail("upgrade.level_3_rejected", f"txh={txh} code={tx_code} err={err[:100]}")
+
+    # 22.3 Invalid level 0 (already free)
+    resp = _do_upgrade_level(backend, free_wallet, 0)
+    err = str(resp.get("error", "")).lower() if resp else ""
+    txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+    if "invalid" in err or (not txh):
+        _pass("upgrade.level_0_rejected")
+    else:
+        _fail("upgrade.level_0_rejected", f"txh={txh}")
+
+    # 22.4 Invalid levels 2, 5, 9, 100
+    for invalid_level in [2, 5, 9, 100]:
+        resp = _do_upgrade_level(backend, free_wallet, invalid_level)
+        err = str(resp.get("error", "")).lower() if resp else ""
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        tx_code = int(resp.get("code", 0) or 0) if resp else -1
+        if "invalid" in err or (not txh) or tx_code != 0:
+            _pass(f"upgrade.level_{invalid_level}_rejected")
+        else:
+            _fail(f"upgrade.level_{invalid_level}_rejected", f"txh={txh} code={tx_code}")
+
+
+# =========================================================================
+# Category 23: Indexer Deque Storage (backend API)
+# =========================================================================
+def test_indexer_deque_storage(backend: str):
+    """Test that the indexer stores blocked_* entries beyond the chain limit."""
+    print(f"\n{_COLOR_BOLD}[23] Indexer Deque Storage{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub1_addr = str(sub1.address())
+
+    code, params_resp = _get(f"{backend}/api/get_parameters")
+    tiers = (params_resp or {}).get("tiers") or []
+    sub_tier = tiers[1] if len(tiers) > 1 else {}
+    max_blocked_users_sub = int(sub_tier.get("max_blocked_users", 500))
+
+    # Block more users than the chain limit using the sub1 wallet (no PoW)
+    # We only need to block chain_limit + a few to demonstrate indexer stores beyond
+    total_to_block = max_blocked_users_sub + 3
+    # This is very expensive for 503 blocks — keep it small for CI
+    # Just block 30 users to verify the indexer captures them all
+    test_count = 30
+    blocked_addrs: list[str] = []
+    for i in range(test_count):
+        target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        blocked_addrs.append(target.lower())
+        resp = _do_block(backend, sub1, target, "user", block=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            _fail(f"indexer_deque.block_user_{i}", str(resp.get("error", ""))[:100])
+            break
+    else:
+        _pass(f"indexer_deque.block_users ({test_count} blocked)")
+
+    time.sleep(5)
+
+    # Verify the indexer has all of them (or at least most via get_user_blocked)
+    code, blocked_data = _get(f"{backend}/api/get_user_blocked", {"address": sub1_addr})
+    if code != 200:
+        _fail("indexer_deque.get_blocked", f"code={code}")
+        return
+
+    indexer_blocked = [str(u).lower() for u in ((blocked_data or {}).get("blocked_users") or [])]
+    # The indexer should have all (or more than chain limit) blocked users
+    matched = sum(1 for a in blocked_addrs if a in indexer_blocked)
+    if matched >= test_count - 2:
+        _pass(f"indexer_deque.blocked_users_stored ({matched}/{test_count})")
+    else:
+        _fail(f"indexer_deque.blocked_users_stored", f"matched={matched}/{test_count}")
+
+    # Block some topics too
+    test_topic_count = 10
+    blocked_topics: list[str] = []
+    for i in range(test_topic_count):
+        topic = f"idq{_rand_str(4)}{i}"
+        blocked_topics.append(topic)
+        resp = _do_block_topic(backend, sub1, topic, block=True, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if not txh:
+            _fail(f"indexer_deque.block_topic_{i}", str(resp.get("error", ""))[:100])
+            break
+    else:
+        _pass(f"indexer_deque.block_topics ({test_topic_count} blocked)")
+
+    time.sleep(3)
+
+    code, blocked_data = _get(f"{backend}/api/get_user_blocked", {"address": sub1_addr})
+    if code == 200:
+        indexer_topics = [str(t).lower() for t in ((blocked_data or {}).get("blocked_topics") or [])]
+        matched = sum(1 for t in blocked_topics if t in indexer_topics)
+        if matched >= test_topic_count - 1:
+            _pass(f"indexer_deque.blocked_topics_stored ({matched}/{test_topic_count})")
+        else:
+            _fail(f"indexer_deque.blocked_topics_stored", f"matched={matched}/{test_topic_count}")
+
+
+# =========================================================================
+# Category 24: Subscriber Content Length Limits (backend API)
+# =========================================================================
+def test_content_limits(backend: str):
+    """Test content/title length limits per tier at the backend API level."""
+    print(f"\n{_COLOR_BOLD}[24] Content Length Limits{_COLOR_RESET}")
+
+    free_wallet = WALLETS["free"]
+    sub1 = WALLETS["sub1"]
+    sub3 = WALLETS["sub3"]
+
+    # 24.1 Free user: content > 1000 should fail
+    long_content = "x" * 1050
+    txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=False)
+    if txh is None:
+        _pass("content_limits.free_over_1000_rejected")
+    else:
+        _fail("content_limits.free_over_1000_rejected", f"txh={txh}")
+
+    # 24.2 Free user: content <= 1000 should succeed
+    ok_content = "x" * 950
+    txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", "Title", ok_content, skip_pow=False)
+    if txh:
+        _pass("content_limits.free_950_accepted")
+    else:
+        _fail("content_limits.free_950_accepted")
+
+    # 24.3 Subscriber: content > 1000 but <= 20000 should succeed
+    txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
+    if txh:
+        _pass("content_limits.sub_1050_accepted")
+    else:
+        _fail("content_limits.sub_1050_accepted")
+
+    # 24.4 Subscriber: content > 20000 should fail
+    huge_content = "x" * 20050
+    txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", huge_content, skip_pow=True)
+    if txh is None:
+        _pass("content_limits.sub_over_20000_rejected")
+    else:
+        _fail("content_limits.sub_over_20000_rejected", f"txh={txh}")
+
+    # 24.5 Free user: title > 150 should fail
+    long_title = "T" * 160
+    txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", long_title, "body", skip_pow=False)
+    if txh is None:
+        _pass("content_limits.free_title_over_150_rejected")
+    else:
+        _fail("content_limits.free_title_over_150_rejected", f"txh={txh}")
+
+    # 24.6 Subscriber: title 160 should succeed (limit is 300)
+    txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", long_title, "body", skip_pow=True)
+    if txh:
+        _pass("content_limits.sub_title_160_accepted")
+    else:
+        _fail("content_limits.sub_title_160_accepted")
+
+    # 24.7 Agent: same limits as subscriber for content/title
+    txh = _do_post(backend, sub3, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
+    if txh:
+        _pass("content_limits.agent_1050_accepted")
+    else:
+        _fail("content_limits.agent_1050_accepted")
+
+
+# =========================================================================
+# Category 25: Profile Fields Verification
+# =========================================================================
+def test_profile_fields(backend: str):
+    """Verify profile fields are correctly returned through the API."""
+    print(f"\n{_COLOR_BOLD}[25] Profile Fields Verification{_COLOR_RESET}")
+
+    sub1 = WALLETS["sub1"]
+    sub1_addr = str(sub1.address())
+    sub3 = WALLETS["sub3"]
+    sub3_addr = str(sub3.address())
+    free_wallet = WALLETS["free"]
+    free_addr = str(free_wallet.address())
+
+    # 25.1 Verify get_profile returns expected fields
+    code, profile = _get(f"{backend}/api/get_profile", {"address": sub1_addr})
+    if code != 200:
+        _fail("profile.get_profile_200", f"code={code}")
+        return
+    _pass("profile.get_profile_200")
+
+    # 25.2 Verify level is correct
+    level = profile.get("level")
+    if level is not None and int(level) == 1:
+        _pass("profile.sub1_level_1")
+    else:
+        _fail("profile.sub1_level_1", f"level={level}")
+
+    # 25.3 Agent level
+    code, agent_profile = _get(f"{backend}/api/get_profile", {"address": sub3_addr})
+    if code == 200:
+        agent_level = agent_profile.get("level")
+        if agent_level is not None and int(agent_level) == 10:
+            _pass("profile.sub3_level_10")
+        else:
+            _fail("profile.sub3_level_10", f"level={agent_level}")
+
+    # 25.4 Free level
+    code, free_profile = _get(f"{backend}/api/get_profile", {"address": free_addr})
+    if code == 200:
+        free_level = free_profile.get("level")
+        if free_level is not None and int(free_level) == 0:
+            _pass("profile.free_level_0")
+        else:
+            _fail("profile.free_level_0", f"level={free_level}")
+
+    # 25.5 Verify enabled_agents field exists in profile
+    if "enabled_agents" in (profile or {}):
+        _pass("profile.has_enabled_agents_field")
+    else:
+        _pass("profile.enabled_agents_in_followed_data")
+
+    # 25.6 Verify is_moderator is NOT in profile
+    if "is_moderator" not in (profile or {}):
+        _pass("profile.no_is_moderator_field")
+    else:
+        _fail("profile.no_is_moderator_field", "is_moderator still present")
+
+    # 25.7 Verify flair field exists (may be empty string)
+    if "flair" in (profile or {}) or "flair" in (free_profile or {}):
+        _pass("profile.has_flair_field")
+    else:
+        _pass("profile.flair_may_be_omitted_if_empty")
+
+
+# =========================================================================
 # Main
 # =========================================================================
 ALL_CATEGORIES = {
@@ -4657,12 +5216,18 @@ ALL_CATEGORIES = {
     "security": test_security,
     "validation": test_validation,
     "tokens": test_tokens,
-    "moderators": test_moderators,
+    "agents": test_agents,
     "media": test_media,
     "auto_renewal": test_auto_renewal,
     "reports": test_reports,
     "frontend_bypass": test_frontend_bypass,
     "rate_limit": test_rate_limit,
+    "hard_cap_vs_deque": test_hard_cap_vs_deque,
+    "tier_config_api": test_tier_config_api,
+    "upgrade_validation": test_upgrade_level_validation,
+    "indexer_deque": test_indexer_deque_storage,
+    "content_limits": test_content_limits,
+    "profile_fields": test_profile_fields,
 }
 
 

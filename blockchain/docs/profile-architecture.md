@@ -13,12 +13,11 @@ Defined in `proto/mirage/core/v1/genesis.proto` and auto-generated into `x/core/
 Fields:
 - `owner` (string): Account address, primary key
 - `username` (string): Claimed username
-- `level` (int32): Subscription tier (0=free, 1-3=paid, 100+=admin)
+- `level` (int32): Subscription tier (0=Free, 1=Subscriber, 10=Agent, 100+=admin)
 - `created_at` (int64): Unix timestamp of profile creation
 - `subscription_expiry` (int64): Unix timestamp when subscription expires (0 = no subscription)
 - `auto_renew` (bool): Whether subscription auto-renews
 - `reserve_funds` (uint64): Escrowed gas reserve in umirage
-- `is_moderator` (bool): Whether user is a moderator
 - `biography` (string): User bio text
 - `avatar` (string): Avatar URL
 - `banner` (string): Banner URL
@@ -29,7 +28,7 @@ For performance, list fields are stored at separate KV prefixes rather than in P
 
 | Prefix | Description | Keeper Methods |
 |--------|-------------|----------------|
-| `followed_mods/{owner}` | Moderators the user follows | `SetProfileFollowedMods`, `GetProfileFollowedMods` |
+| `plist_agents/{owner}` | Agents the user has enabled | `SetProfileEnabledAgents`, `GetProfileEnabledAgents` |
 | `followed_users/{owner}` | Users the user follows | `SetProfileFollowedUsers`, `GetProfileFollowedUsers` |
 | `followed_topics/{owner}` | Topics the user follows | `SetProfileFollowedTopics`, `GetProfileFollowedTopics` |
 | `blocked_users/{owner}` | Users the user has blocked | `SetProfileBlockedUsers`, `GetProfileBlockedUsers` |
@@ -60,7 +59,7 @@ The `InitialProfile` message wraps `ProfileCore` plus all list fields:
 ```protobuf
 message InitialProfile {
   ProfileCore core = 1;
-  repeated string followed_moderators = 2;
+  repeated string enabled_agents = 2;
   repeated string followed_users = 3;
   repeated string followed_topics = 4;
   repeated string blocked_users = 5;
@@ -78,7 +77,7 @@ The indexer DB (PostgreSQL) stores the full history of profile list data (up to 
 | Table | Description |
 |-------|-------------|
 | `profiles` | Core profile data |
-| `followed_mods` | Followed moderators |
+| `enabled_agents` | Enabled agents |
 | `followed_users` | Followed users |
 | `followed_topics` | Followed topics |
 | `blocked_users` | Blocked users |

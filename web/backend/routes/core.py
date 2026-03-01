@@ -27,8 +27,8 @@ from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
 
 from shared.datatypes import (
     MsgSetUsername,
-    MsgFollowModerator,
-    MsgUnfollowModerator,
+    MsgEnableAgent,
+    MsgDisableAgent,
     MsgFollowUser,
     MsgUnfollowUser,
     MsgFollowTopic,
@@ -60,8 +60,8 @@ from pow import (
     canon_base_edit,
     canon_base_vote,
     canon_base_set_username,
-    canon_base_follow_moderator,
-    canon_base_unfollow_moderator,
+    canon_base_enable_agent,
+    canon_base_disable_agent,
     canon_base_follow_user,
     canon_base_unfollow_user,
     canon_base_follow_topic,
@@ -774,18 +774,18 @@ def core_set_username():
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/follow_moderator", methods=["POST"])
-def core_follow_moderator():
+@core_bp.route("/api/core/enable_agent", methods=["POST"])
+def core_enable_agent():
     rid = next_request_id()
-    log_event(rid, "follow_moderator.begin")
+    log_event(rid, "enable_agent.begin")
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
         data = request.get_json(force=True) or {}
-        log_event(rid, "follow_moderator.data", data=data)
+        log_event(rid, "enable_agent.data", data=data)
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
-        moderator = str(data.get("moderator", "").strip())
+        agent = str(data.get("agent", "").strip())
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
@@ -798,10 +798,10 @@ def core_follow_moderator():
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
 
-        if not (pub_b64 and sig_b64 and moderator):
+        if not (pub_b64 and sig_b64 and agent):
             return jsonify({"error": "missing required fields"}), 400
-        if not _is_valid_mirage_addr(moderator):
-            return jsonify({"error": "invalid moderator address"}), 400
+        if not _is_valid_mirage_addr(agent):
+            return jsonify({"error": "invalid agent address"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -814,36 +814,41 @@ def core_follow_moderator():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
-        # Check if moderator is already followed
+        # Check if agent is already enabled
         try:
             profile = _query_chain_profile_full(user_addr)
             if profile:
-                followed_mods = [m.lower() for m in (profile.get("followed_moderators") or [])]
-                if moderator.lower() in followed_mods:
-                    log_event(rid, "follow_moderator.already_followed", moderator=moderator, user_addr=user_addr)
-                    return jsonify({"error": "moderator is already followed"}), 400
+                enabled = [a.lower() for a in (profile.get("enabled_agents") or [])]
+                if agent.lower() in enabled:
+                    log_event(rid, "enable_agent.already_enabled", agent=agent, user_addr=user_addr)
+                    return jsonify({"error": "agent is already enabled"}), 400
         except Exception:
             pass
 
         validator_addr = require_runtime().validator_payer_addr
 
         if not is_subscriber(user_addr):
+            required = _min_required_difficulty()
+            if int(difficulty) < int(required):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
+            if not _is_hex64(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
+            if not is_valid_recent_block_hash(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_follow_moderator(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, moderator
-                )
+                base = canon_base_enable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent)
                 digest = argon2_digest(base, last_block_hash, proof)
-                if digest is not None:
-                    effective_required = _effective_difficulty(int(difficulty))
-                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
-                        return jsonify({"error": "insufficient pow (precheck)"}), 400
+                if digest is not None and not check_pow_target(
+                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                ):
+                    return jsonify({"error": "insufficient pow (precheck)"}), 400
             except Exception:
                 pass
         else:
             if int(difficulty) > 0 or int(proof) > 0:
                 return jsonify({"error": "pow not allowed for subscribers"}), 400
 
-        msg = MsgFollowModerator()
+        msg = MsgEnableAgent()
         msg.authority = validator_addr
         msg.envelope_pubkey = pub_dec
         msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
@@ -852,14 +857,14 @@ def core_follow_moderator():
         msg.envelope_timestamp = timestamp
         msg.envelope_signature = sig_dec
         msg.target = user_addr
-        msg.moderator = moderator
+        msg.agent = agent
 
         any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgFollowModerator"
+        any_msg.type_url = "/mirage.core.v1.MsgEnableAgent"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(moderator)))
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
@@ -869,30 +874,30 @@ def core_follow_moderator():
             extra = {
                 "height": height,
                 "user_addr": user_addr,
-                "moderator": moderator,
+                "agent": agent,
                 "last_block_hash": last_block_hash,
                 "difficulty": int(difficulty),
                 "proof": int(proof),
             }
-            return _tx_error(rid, "core/follow_moderator", "MsgFollowModerator", code, tx_hash, raw_log, extra)
+            return _tx_error(rid, "core/enable_agent", "MsgEnableAgent", code, tx_hash, raw_log, extra)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "follow_moderator.err", error=str(e))
+        log_event(rid, "enable_agent.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 
 
-@core_bp.route("/api/core/unfollow_moderator", methods=["POST"])
-def core_unfollow_moderator():
+@core_bp.route("/api/core/disable_agent", methods=["POST"])
+def core_disable_agent():
     rid = next_request_id()
-    log_event(rid, "unfollow_moderator.begin")
+    log_event(rid, "disable_agent.begin")
     try:
         if is_node_catching_up():
             return jsonify({"error": "node_catching_up"}), 503
         data = request.get_json(force=True) or {}
         pub_b64 = str(data.get("pubkey", "").strip())
         sig_b64 = str(data.get("signature", "").strip())
-        moderator = str(data.get("moderator", "").strip())
+        agent = str(data.get("agent", "").strip())
         last_block_hash = str(data.get("last_block_hash", "").strip())
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
@@ -903,7 +908,7 @@ def core_unfollow_moderator():
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
 
-        if not (pub_b64 and sig_b64 and moderator):
+        if not (pub_b64 and sig_b64 and agent):
             return jsonify({"error": "missing required fields"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
@@ -928,9 +933,7 @@ def core_unfollow_moderator():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_unfollow_moderator(
-                    pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, moderator
-                )
+                base = canon_base_disable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -942,7 +945,7 @@ def core_unfollow_moderator():
             if int(difficulty) > 0 or int(proof) > 0:
                 return jsonify({"error": "pow not allowed for subscribers"}), 400
 
-        msg = MsgUnfollowModerator()
+        msg = MsgDisableAgent()
         msg.authority = validator_addr
         msg.envelope_pubkey = pub_dec
         msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
@@ -951,14 +954,14 @@ def core_unfollow_moderator():
         msg.envelope_timestamp = timestamp
         msg.envelope_signature = sig_dec
         msg.target = user_addr
-        msg.moderator = moderator
+        msg.agent = agent
 
         any_msg = AnyPB()
-        any_msg.type_url = "/mirage.core.v1.MsgUnfollowModerator"
+        any_msg.type_url = "/mirage.core.v1.MsgDisableAgent"
         any_msg.value = msg.SerializeToString()
         body = TxBody(messages=[any_msg], memo="")
         body_bytes = body.SerializeToString()
-        gas_est = int(estimate_total_gas_limit(body_bytes, len(moderator)))
+        gas_est = int(estimate_total_gas_limit(body_bytes, len(agent)))
         tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
         gas_used = int(simulate_gas(tx_bytes_est))
         gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
@@ -968,15 +971,15 @@ def core_unfollow_moderator():
             extra = {
                 "height": height,
                 "user_addr": user_addr,
-                "moderator": moderator,
+                "agent": agent,
                 "last_block_hash": last_block_hash,
                 "difficulty": int(difficulty),
                 "proof": int(proof),
             }
-            return _tx_error(rid, "core/unfollow_moderator", "MsgUnfollowModerator", code, tx_hash, raw_log, extra)
+            return _tx_error(rid, "core/disable_agent", "MsgDisableAgent", code, tx_hash, raw_log, extra)
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
-        log_event(rid, "unfollow_moderator.err", error=str(e))
+        log_event(rid, "disable_agent.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 
@@ -2721,14 +2724,10 @@ def core_post():
             p = expect_params()
             tiers = p.get("tiers") or []
             level = get_user_level(user_addr)
-            # Admins (level >= 100) are allowed to post without a subscription.
-            # Map admins to the highest defined tier for length limits.
-            if level >= 100:
-                idx = len(tiers) - 1
-            else:
-                if level < 0 or level >= len(tiers):
-                    return jsonify({"error": "invalid user level"}), 400
-                idx = level
+            # Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2
+            idx = {0: 0, 1: 1, 10: 2}.get(level, 2 if level >= 100 else -1)
+            if idx < 0 or idx >= len(tiers):
+                return jsonify({"error": "invalid user level"}), 400
             tier_cfg = tiers[idx] or {}
             max_title = int(tier_cfg.get("max_title_length", 0))
             max_content = int(tier_cfg.get("max_content_length", 0))
@@ -3224,7 +3223,7 @@ def core_upgrade_level():
     - pubkey: Base64 encoded compressed public key
     - signature: Base64 encoded signature
     - last_block_hash: Recent block hash for replay protection
-    - level: Target paid subscription level (1-3)
+    - level: Target paid subscription level (1=Subscriber, 10=Agent)
 
     Note:
     - PoW is NOT allowed for MsgUpgradeLevel. Users must pay with tokens.
@@ -3255,8 +3254,8 @@ def core_upgrade_level():
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
 
-        if level < 1 or level > 3:
-            return jsonify({"error": "invalid level (must be 1-3; use set_auto_renewal to change auto-renewal)"}), 400
+        if level not in (1, 10):
+            return jsonify({"error": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)"}), 400
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)
@@ -3281,8 +3280,10 @@ def core_upgrade_level():
         period_fee = 0
         try:
             tiers = p.get("tiers") or []
-            if isinstance(tiers, list) and level > 0 and level < len(tiers):
-                tf = tiers[level] or {}
+            # Map user level to tier array index: 0->0, 1->1, 10->2
+            tier_idx = {0: 0, 1: 1, 10: 2}.get(level, -1)
+            if isinstance(tiers, list) and 0 <= tier_idx < len(tiers):
+                tf = tiers[tier_idx] or {}
                 period_fee = int(tf.get("period_fee", 0) or 0)
         except Exception:
             period_fee = 0
@@ -3589,6 +3590,7 @@ def core_award():
 
         try:
             from routes.public import _inbox_cache
+
             recipient = post_owner.lower()
             cached = _inbox_cache.get(recipient)
             if cached:
