@@ -12,5 +12,6 @@
       }
     }
   ],
-  "deposit": "500000000000umirage"
+  "expedited": true,
+  "deposit": "1000000000000umirage"
 }

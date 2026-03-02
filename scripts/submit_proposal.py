@@ -609,6 +609,13 @@ def main():
     info(f"Messages: {num_msgs}, Expedited: {is_expedited}")
     info(f"Endpoint: {rpc_endpoint}")
 
+    if not is_expedited and not dry_run:
+        info("WARNING: Proposal is NOT expedited — it will use the standard (slow) voting period.")
+        resp = input("Type 'confirm' to proceed with non-expedited proposal, or Ctrl+C to abort: ")
+        if resp.strip().lower() != "confirm":
+            info("Aborted.")
+            return 1
+
     if dry_run:
         info("\n[DRY RUN] No transactions will be broadcast.")
         info(f"Log file: {_log_file}")
