@@ -14,18 +14,37 @@ const batchSize = 1000
 
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <data-dir> <db-name> [db-name ...]\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  Converts GoLevelDB databases to PebbleDB\n")
-		fmt.Fprintf(os.Stderr, "  Example: %s /root/.mirage/node/data application blockstore state tx_index evidence\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [--reverse] <data-dir> <db-name> [db-name ...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  Default:   GoLevelDB → PebbleDB\n")
+		fmt.Fprintf(os.Stderr, "  --reverse: PebbleDB → GoLevelDB\n")
+		fmt.Fprintf(os.Stderr, "  Example: %s /root/.mirage/node/data application blockstore state\n", os.Args[0])
 		os.Exit(1)
 	}
 
-	dataDir := os.Args[1]
-	dbNames := os.Args[2:]
+	args := os.Args[1:]
+	reverse := false
+	if args[0] == "--reverse" {
+		reverse = true
+		args = args[1:]
+	}
+
+	if len(args) < 2 {
+		fmt.Fprintf(os.Stderr, "ERROR: need <data-dir> and at least one <db-name>\n")
+		os.Exit(1)
+	}
+
+	dataDir := args[0]
+	dbNames := args[1:]
 
 	var failed []string
 	for _, name := range dbNames {
-		if err := convertDB(dataDir, name); err != nil {
+		var err error
+		if reverse {
+			err = convertPebbleToLevelDB(dataDir, name)
+		} else {
+			err = convertLevelDBToPebble(dataDir, name)
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "ERROR converting %s: %v\n", name, err)
 			failed = append(failed, name)
 		}
@@ -38,7 +57,7 @@ func main() {
 	fmt.Printf("\nAll %d databases converted successfully.\n", len(dbNames))
 }
 
-func convertDB(dataDir, name string) error {
+func convertLevelDBToPebble(dataDir, name string) error {
 	srcPath := filepath.Join(dataDir, name+".db")
 	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
 		fmt.Printf("[%s] skipping — %s does not exist\n", name, srcPath)
@@ -70,9 +89,9 @@ func convertDB(dataDir, name string) error {
 		return fmt.Errorf("create destination: %w", err)
 	}
 
-	fmt.Printf("[%s] Copying keys...\n", name)
+	fmt.Printf("[%s] Copying keys (GoLevelDB → PebbleDB)...\n", name)
 	start := time.Now()
-	copied, err := copyAll(name, srcDB, dstDB)
+	copied, err := copyLevelDBToPebble(name, srcDB, dstDB)
 	elapsed := time.Since(start)
 
 	srcDB.Close()
@@ -96,6 +115,60 @@ func convertDB(dataDir, name string) error {
 		return fmt.Errorf("close: %w", err)
 	}
 
+	return swapDirs(dataDir, name, srcPath, tmpDir, dstPath, cleanup)
+}
+
+func convertPebbleToLevelDB(dataDir, name string) error {
+	srcPath := filepath.Join(dataDir, name+".db")
+	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+		fmt.Printf("[%s] skipping — %s does not exist\n", name, srcPath)
+		return nil
+	}
+
+	tmpDir := filepath.Join(dataDir, "_leveldb_convert_tmp_"+name)
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		return fmt.Errorf("create temp dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+
+	fmt.Printf("\n[%s] Opening PebbleDB: %s\n", name, srcPath)
+	srcDB, err := pebble.Open(srcPath, &pebble.Options{
+		ReadOnly: true,
+	})
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("open pebble source: %w", err)
+	}
+
+	dstPath := filepath.Join(tmpDir, name+".db")
+	fmt.Printf("[%s] Creating GoLevelDB: %s\n", name, dstPath)
+	dstDB, err := dbm.NewGoLevelDB(name, tmpDir, nil)
+	if err != nil {
+		srcDB.Close()
+		cleanup()
+		return fmt.Errorf("create leveldb destination: %w", err)
+	}
+
+	fmt.Printf("[%s] Copying keys (PebbleDB → GoLevelDB)...\n", name)
+	start := time.Now()
+	copied, err := copyPebbleToLevelDB(name, srcDB, dstDB)
+	elapsed := time.Since(start)
+
+	srcDB.Close()
+
+	if err != nil {
+		dstDB.Close()
+		cleanup()
+		return fmt.Errorf("copy failed after %d keys: %w", copied, err)
+	}
+
+	fmt.Printf("[%s] Copied %d keys in %s\n", name, copied, elapsed.Round(time.Millisecond))
+	dstDB.Close()
+
+	return swapDirs(dataDir, name, srcPath, tmpDir, dstPath, cleanup)
+}
+
+func swapDirs(dataDir, name, srcPath, tmpDir, dstPath string, cleanup func()) error {
 	bakPath := srcPath + ".bak"
 	fmt.Printf("[%s] %s → %s\n", name, srcPath, bakPath)
 	if err := os.Rename(srcPath, bakPath); err != nil {
@@ -104,16 +177,16 @@ func convertDB(dataDir, name string) error {
 
 	fmt.Printf("[%s] %s → %s\n", name, dstPath, srcPath)
 	if err := os.Rename(dstPath, srcPath); err != nil {
-		os.Rename(bakPath, srcPath) // restore
+		os.Rename(bakPath, srcPath)
 		return fmt.Errorf("move new DB: %w", err)
 	}
 
 	cleanup()
-	fmt.Printf("[%s] Done (%d keys). Backup at %s\n", name, copied, bakPath)
+	fmt.Printf("[%s] Done. Backup at %s\n", name, bakPath)
 	return nil
 }
 
-func copyAll(label string, src dbm.DB, dst *pebble.DB) (int64, error) {
+func copyLevelDBToPebble(label string, src dbm.DB, dst *pebble.DB) (int64, error) {
 	itr, err := src.Iterator(nil, nil)
 	if err != nil {
 		return 0, fmt.Errorf("creating iterator: %w", err)
@@ -158,6 +231,69 @@ func copyAll(label string, src dbm.DB, dst *pebble.DB) (int64, error) {
 	if batchCount > 0 {
 		if err := batch.Commit(pebble.NoSync); err != nil {
 			return total, fmt.Errorf("final batch commit: %w", err)
+		}
+	} else {
+		batch.Close()
+	}
+
+	return total, nil
+}
+
+func copyPebbleToLevelDB(label string, src *pebble.DB, dst dbm.DB) (int64, error) {
+	iter, err := src.NewIter(nil)
+	if err != nil {
+		return 0, fmt.Errorf("creating pebble iterator: %w", err)
+	}
+	defer iter.Close()
+
+	var (
+		total      int64
+		batchCount int
+		batch      = dst.NewBatch()
+		lastReport = time.Now()
+	)
+
+	for iter.First(); iter.Valid(); iter.Next() {
+		key := make([]byte, len(iter.Key()))
+		copy(key, iter.Key())
+		val, err := iter.ValueAndErr()
+		if err != nil {
+			batch.Close()
+			return total, fmt.Errorf("reading value: %w", err)
+		}
+		valCopy := make([]byte, len(val))
+		copy(valCopy, val)
+
+		if err := batch.Set(key, valCopy); err != nil {
+			batch.Close()
+			return total, fmt.Errorf("batch set: %w", err)
+		}
+
+		batchCount++
+		total++
+
+		if batchCount >= batchSize {
+			if err := batch.Write(); err != nil {
+				return total, fmt.Errorf("batch write: %w", err)
+			}
+			batch = dst.NewBatch()
+			batchCount = 0
+		}
+
+		if time.Since(lastReport) >= 5*time.Second {
+			fmt.Printf("  [%s] %d keys copied...\n", label, total)
+			lastReport = time.Now()
+		}
+	}
+
+	if err := iter.Error(); err != nil {
+		batch.Close()
+		return total, fmt.Errorf("iterator error: %w", err)
+	}
+
+	if batchCount > 0 {
+		if err := batch.Write(); err != nil {
+			return total, fmt.Errorf("final batch write: %w", err)
 		}
 	} else {
 		batch.Close()

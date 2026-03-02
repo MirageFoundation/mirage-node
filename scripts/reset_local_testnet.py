@@ -330,33 +330,43 @@ def extract_backup(backup_tar: Path) -> tuple[Path, str, Path]:
     return extract_dir, image_ref, backup_root
 
 
+def _convert_pebbledb_to_goleveldb(backup_root: Path) -> None:
+    """Convert application.db from PebbleDB to GoLevelDB if needed.
+
+    Older miraged binaries have a bug where the export command doesn't load
+    app.toml, so they default to GoLevelDB regardless of config. This converts
+    the database so the image binary can open it.
+    """
+    convert_db = ROOT / "blockchain" / "bin" / "convert-db"
+    if not convert_db.exists():
+        status("Building convert-db tool...")
+        run(["make", "build-convert-db"], cwd=str(ROOT / "blockchain"))
+
+    app_db = backup_root / "node" / "data" / "application.db"
+    options_files = list(app_db.glob("OPTIONS-*")) if app_db.exists() else []
+    if not options_files:
+        return  # GoLevelDB doesn't have OPTIONS files, no conversion needed
+
+    status("Converting application.db PebbleDB → GoLevelDB for export compatibility...")
+    run([str(convert_db), "--reverse", str(backup_root / "node" / "data"), "application"])
+
+
 def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     status("Running chain export from backup data...")
     export_path = backup_root / "export.json"
     if export_path.exists():
         export_path.unlink()
 
-    local_miraged = ROOT / "blockchain" / "bin" / "miraged"
-    volumes = ["-v", f"{backup_root}:/root/.mirage"]
+    _convert_pebbledb_to_goleveldb(backup_root)
 
-    if local_miraged.exists():
-        status("Using locally-built miraged for export (pebbledb support guaranteed)...")
-        volumes += ["-v", f"{local_miraged}:/usr/local/bin/miraged:ro"]
-        export_cmd = (
-            "set -euo pipefail; "
-            "/usr/local/bin/miraged export --home /root/.mirage/node "
-            "--output-document /root/.mirage/export.json"
-        )
-    else:
-        status("Running export with image binary (no local build found)...")
-        export_cmd = (
-            "set -euo pipefail; "
-            "if [ -x /opt/mirage/blockchain/miraged ]; then MIRAGED=/opt/mirage/blockchain/miraged; "
-            "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then MIRAGED=/opt/mirage/blockchain/bin/miraged; "
-            "else echo 'ERROR: miraged binary not found in image' >&2; exit 1; fi; "
-            "$MIRAGED export --home /root/.mirage/node --output-document /root/.mirage/export.json"
-        )
-
+    status("Running export in isolated container (skip entrypoint)...")
+    export_cmd = (
+        "set -euo pipefail; "
+        "if [ -x /opt/mirage/blockchain/miraged ]; then MIRAGED=/opt/mirage/blockchain/miraged; "
+        "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then MIRAGED=/opt/mirage/blockchain/bin/miraged; "
+        "else echo 'ERROR: miraged binary not found in image' >&2; exit 1; fi; "
+        "$MIRAGED export --home /root/.mirage/node --output-document /root/.mirage/export.json"
+    )
     run(
         [
             "docker",
@@ -364,7 +374,8 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
             "--rm",
             "--entrypoint",
             "/bin/bash",
-            *volumes,
+            "-v",
+            f"{backup_root}:/root/.mirage",
             image_ref,
             "-c",
             export_cmd,
