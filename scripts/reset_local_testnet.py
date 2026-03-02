@@ -336,14 +336,27 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     if export_path.exists():
         export_path.unlink()
 
-    status("Running export in isolated container (skip entrypoint)...")
-    export_cmd = (
-        "set -euo pipefail; "
-        "if [ -x /opt/mirage/blockchain/miraged ]; then MIRAGED=/opt/mirage/blockchain/miraged; "
-        "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then MIRAGED=/opt/mirage/blockchain/bin/miraged; "
-        "else echo 'ERROR: miraged binary not found in image' >&2; exit 1; fi; "
-        "$MIRAGED export --home /root/.mirage/node --output-document /root/.mirage/export.json"
-    )
+    local_miraged = ROOT / "blockchain" / "bin" / "miraged"
+    volumes = ["-v", f"{backup_root}:/root/.mirage"]
+
+    if local_miraged.exists():
+        status("Using locally-built miraged for export (pebbledb support guaranteed)...")
+        volumes += ["-v", f"{local_miraged}:/usr/local/bin/miraged:ro"]
+        export_cmd = (
+            "set -euo pipefail; "
+            "/usr/local/bin/miraged export --home /root/.mirage/node "
+            "--output-document /root/.mirage/export.json"
+        )
+    else:
+        status("Running export with image binary (no local build found)...")
+        export_cmd = (
+            "set -euo pipefail; "
+            "if [ -x /opt/mirage/blockchain/miraged ]; then MIRAGED=/opt/mirage/blockchain/miraged; "
+            "elif [ -x /opt/mirage/blockchain/bin/miraged ]; then MIRAGED=/opt/mirage/blockchain/bin/miraged; "
+            "else echo 'ERROR: miraged binary not found in image' >&2; exit 1; fi; "
+            "$MIRAGED export --home /root/.mirage/node --output-document /root/.mirage/export.json"
+        )
+
     run(
         [
             "docker",
@@ -351,8 +364,7 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
             "--rm",
             "--entrypoint",
             "/bin/bash",
-            "-v",
-            f"{backup_root}:/root/.mirage",
+            *volumes,
             image_ref,
             "-c",
             export_cmd,
