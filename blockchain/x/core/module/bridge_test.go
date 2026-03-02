@@ -7,13 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"cosmossdk.io/log"
 	"cosmossdk.io/core/store"
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/gogo/protobuf/proto"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
+	"github.com/gogo/protobuf/proto"
 
 	"mirage/x/core/keeper"
 	"mirage/x/core/types"
@@ -113,11 +114,11 @@ func testValoperAddressString() string {
 
 // Helper to create a mock SDK context
 func newMockContext() sdk.Context {
-	// Create a minimal context for testing
 	return sdk.Context{}.
 		WithContext(context.Background()).
 		WithBlockHeight(100).
 		WithEventManager(sdk.NewEventManager()).
+		WithGasMeter(storetypes.NewInfiniteGasMeter()).
 		WithLogger(log.NewNopLogger())
 }
 
@@ -1130,7 +1131,7 @@ func TestThresholdWithOddTotalPower(t *testing.T) {
 }
 
 // =============================================================================
-// MintAttestation Consistency Tests  
+// MintAttestation Consistency Tests
 // =============================================================================
 
 // TestMintAttestationDestinationTxConsistency tests that the first destination_tx is preserved
