@@ -85,6 +85,7 @@ scripts/*
 !scripts/show_balances.py
 !scripts/migrate_pebbledb.py
 !scripts/submit_proposal.py
+!scripts/verify_upgrade.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py
