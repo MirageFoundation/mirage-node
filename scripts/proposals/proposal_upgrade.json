@@ -1,17 +1,17 @@
 {
-    "title": "Upgrade to v1.16.0 (Agent System)",
-    "summary": "This upgrade introduces the Agent system, replacing moderators. It simplifies the subscription model to 3 tiers (Free, Subscriber, Agent) and migrates existing data. Note: Agent tier is now Level 10.",
-    "messages": [
-        {
-            "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
-            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
-            "plan": {
-                "name": "v1.16.0",
-                "height": "0",
-                "info": "{\"binaries\":{\"linux/amd64\":\"https://github.com/mirage-protocol/mirage-node/releases/download/v1.16.0/miraged-linux-amd64\"}}"
-            }
-        }
-    ],
-    "expedited": true,
-    "deposit": "1000000000000umirage"
+  "title": "Upgrade to v1.16.0 (Agent System)",
+  "summary": "This upgrade introduces the Agent system, replacing moderators. It simplifies the subscription model to 3 tiers (Free, Subscriber, Agent) and migrates existing data. Note: Agent tier is now Level 10.",
+  "messages": [
+    {
+      "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+      "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+      "plan": {
+        "name": "v1.16.0",
+        "height": "0",
+        "info": "{\"binaries\":{\"linux/amd64\":\"https://github.com/mirage-protocol/mirage-node/releases/download/v1.16.0/miraged-linux-amd64\"}}"
+      }
+    }
+  ],
+  "expedited": true,
+  "deposit": "1000000000000umirage"
 }
