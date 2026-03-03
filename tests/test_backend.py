@@ -4005,7 +4005,7 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.set_agents_happy_path", str(e))
 
-    time.sleep(2)
+    time.sleep(3)
 
     # 13.7b Verify order in get_user_followed
     code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
@@ -4052,7 +4052,7 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.set_agents_clear", str(e))
 
-    time.sleep(2)
+    time.sleep(3)
 
     code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
     if code_followed == 200:
@@ -4553,7 +4553,7 @@ def test_frontend_bypass(backend: str):
         user_level = 1
 
     try:
-        params = requests.get(f"{backend}/api/get_status", params={"address": sub1_addr}, timeout=10).json()
+        params = requests.get(f"{backend}/api/get_chain_config", timeout=10).json()
         tiers = params.get("tiers") or []
         idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
         if 0 <= idx < len(tiers):
@@ -4794,8 +4794,8 @@ def test_hard_cap_vs_deque(backend: str):
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
 
-    # Fetch tier configs via API
-    code, params_resp = _get(f"{backend}/api/get_parameters")
+    # Fetch tier configs via chain config API (get_parameters only has PoW params)
+    code, params_resp = _get(f"{backend}/api/get_chain_config")
     if code != 200:
         _fail("hardcap.fetch_params", f"code={code}")
         return
@@ -4964,7 +4964,7 @@ def test_tier_config_api(backend: str):
     """Verify tier configurations are correctly served through the API."""
     print(f"\n{_COLOR_BOLD}[21] Tier Configuration via API{_COLOR_RESET}")
 
-    code, params_resp = _get(f"{backend}/api/get_parameters")
+    code, params_resp = _get(f"{backend}/api/get_chain_config")
     if code != 200:
         _fail("tierapi.fetch_params", f"code={code}")
         return
@@ -5117,7 +5117,8 @@ def test_upgrade_level_validation(backend: str):
     # Just verify the free user's current level
     try:
         us = get_user_status(backend, free_addr)
-        free_level = int(us.get("user_level", -1) or -1)
+        val = us.get("user_level")
+        free_level = int(val) if val is not None else -1
         if free_level == 0:
             _pass("upgrade.free_level_is_0")
         else:
@@ -5166,7 +5167,7 @@ def test_indexer_deque_storage(backend: str):
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
 
-    code, params_resp = _get(f"{backend}/api/get_parameters")
+    code, params_resp = _get(f"{backend}/api/get_chain_config")
     tiers = (params_resp or {}).get("tiers") or []
     sub_tier = tiers[1] if len(tiers) > 1 else {}
     max_blocked_users_sub = int(sub_tier.get("max_blocked_users", 500))

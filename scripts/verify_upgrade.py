@@ -158,6 +158,43 @@ EXPECTED_TIERS = [
     },
 ]
 
+# Fields removed in v1.16.0 tier overhaul — must not appear in params response
+REMOVED_TIER_FIELDS = [
+    "max_followed_mods",
+    "archive_duration_days",
+    "eligible_for_mod",
+    "can_change_name",
+]
+
+# Fields removed in v1.16.0 profile migration — must not appear in profile response
+REMOVED_PROFILE_FIELDS = [
+    "is_moderator",
+    "followed_moderators",
+]
+
+EXPECTED_AWARD_CONFIGS = [
+    {"name": "quality_post", "cost": 10_000_000_000},
+    {"name": "original_content", "cost": 5_000_000_000},
+    {"name": "based", "cost": 5_000_000_000},
+    {"name": "receipts", "cost": 5_000_000_000},
+]
+
+EXPECTED_PARAMS = {
+    "min_difficulty": 10,
+    "mint_interval": 200,
+    "mint_quantity": 125_000_000_000,
+    "mint_dynamic_credit_cap": 25,
+    "subscription_period": 43200,
+    "relay_min_gas_price": 5000,
+    "relay_max_gas_fee": 500_000_000,
+    "max_envelope_age": 60,
+    "min_username_size": 3,
+    "max_username_size": 30,
+    "min_topic_size": 2,
+    "max_topic_size": 35,
+    "block_hash_window": 10,
+}
+
 
 def is_valid_level(level: int) -> bool:
     return level in (0, 1, 10) or level >= 100
@@ -242,12 +279,59 @@ def check_blocks_advancing() -> None:
 
 
 def check_core_params() -> None:
-    section("Core Module Parameters (Tier Config)")
+    section("Core Module Parameters")
     data = http_get(f"{REST}/mirage/core/v1/params")
     if data is None:
         return
 
-    tiers = data.get("params", {}).get("tiers", [])
+    params = data.get("params", {})
+
+    # ── Global params ──
+    for key, expected_val in EXPECTED_PARAMS.items():
+        actual_raw = params.get(key, "0")
+        actual_val = int(actual_raw)
+        if actual_val != expected_val:
+            fail(f"params.{key} = {actual_val} (want {expected_val})")
+        else:
+            ok(f"params.{key} = {actual_val}")
+
+    mint_split = float(params.get("mint_dynamic_split", "0"))
+    if abs(mint_split - 0.5) >= 0.01:
+        fail(f"params.mint_dynamic_split = {mint_split} (want 0.5)")
+    else:
+        ok(f"params.mint_dynamic_split = {mint_split}")
+
+    reserve_pct = float(params.get("subscription_reserve_percent", "0"))
+    if abs(reserve_pct - 0.80) >= 0.01:
+        fail(f"params.subscription_reserve_percent = {reserve_pct} (want 0.80)")
+    else:
+        ok(f"params.subscription_reserve_percent = {reserve_pct}")
+
+    # ── Award configs ──
+    award_configs = params.get("award_configs", [])
+    if len(award_configs) != len(EXPECTED_AWARD_CONFIGS):
+        fail(f"Expected {len(EXPECTED_AWARD_CONFIGS)} award configs, got {len(award_configs)}")
+    else:
+        ok(f"Award config count: {len(award_configs)}")
+        award_errors = []
+        for expected_ac in EXPECTED_AWARD_CONFIGS:
+            match = next((a for a in award_configs if a.get("name") == expected_ac["name"]), None)
+            if match is None:
+                award_errors.append(f"missing award '{expected_ac['name']}'")
+            else:
+                actual_cost = int(match.get("cost", "0"))
+                if actual_cost != expected_ac["cost"]:
+                    award_errors.append(
+                        f"award '{expected_ac['name']}' cost={actual_cost} (want {expected_ac['cost']})"
+                    )
+        if award_errors:
+            for e in award_errors:
+                fail(e)
+        else:
+            ok("All award configs match (names + costs)")
+
+    # ── Tier configs ──
+    tiers = params.get("tiers", [])
     if len(tiers) != 3:
         fail(f"Expected 3 tiers, got {len(tiers)}")
         return
@@ -303,6 +387,16 @@ def check_core_params() -> None:
                 fail(f"{label}: {e}")
         else:
             ok(f"{label}: all fields match")
+
+    # ── Removed tier fields (pre-v1.16.0 leftovers) ──
+    stale_found = False
+    for i, tier in enumerate(tiers):
+        for removed in REMOVED_TIER_FIELDS:
+            if removed in tier:
+                fail(f"Tier[{i}]: stale field '{removed}' still present")
+                stale_found = True
+    if not stale_found:
+        ok("No stale pre-v1.16.0 tier fields present")
 
 
 def fetch_all_profiles() -> tuple[list[dict], int | None]:
@@ -366,6 +460,8 @@ def check_profiles() -> None:
         "banner": 0,
         "flair": 0,
     }
+    stale_field_hits: dict[str, int] = {f: 0 for f in REMOVED_PROFILE_FIELDS}
+
     for p in profiles:
         lvl = p.get("level", 0)
         if isinstance(lvl, str):
@@ -379,6 +475,9 @@ def check_profiles() -> None:
         for key in missing_scalars:
             if key not in p:
                 missing_scalars[key] += 1
+        for removed_field in REMOVED_PROFILE_FIELDS:
+            if removed_field in p:
+                stale_field_hits[removed_field] += 1
 
     dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
     ok(f"Level distribution: {dist}")
@@ -394,11 +493,20 @@ def check_profiles() -> None:
         else:
             ok(f"All profiles include '{key}' field")
 
+    # proto3 omits zero-value scalars (empty string) in JSON, so missing is expected
     for key, count in missing_scalars.items():
         if count:
             warn(f"{count} profiles missing '{key}' scalar field (empty values omitted by proto)")
         else:
             ok(f"All profiles include '{key}' scalar field")
+
+    stale_any = False
+    for removed_field, count in stale_field_hits.items():
+        if count:
+            fail(f"{count} profiles still have stale '{removed_field}' field")
+            stale_any = True
+    if not stale_any:
+        ok("No stale pre-v1.16.0 profile fields present")
 
 
 # ── Main ───────────────────────────────────────────────────
