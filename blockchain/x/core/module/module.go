@@ -314,6 +314,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			"reserve_remaining", core.ReserveFunds)
 	} else {
 		// Insufficient reserve: burn whatever is left, then downgrade
+		previousLevel := core.Level
 		if core.ReserveFunds > 0 {
 			if err := am.k.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
 				ctx.Logger().Warn("deductRelayGasFee: failed to burn remaining reserve", "owner", owner, "reserve", core.ReserveFunds, "err", err)
@@ -335,6 +336,16 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		core.Level = 0
 		core.SubscriptionExpiry = 0
 		core.AutoRenew = false
+
+		// Emit event so the indexer updates the user's level
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"subscription_expired",
+				sdk.NewAttribute("address", owner),
+				sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+				sdk.NewAttribute("reason", "reserve_exhausted"),
+			),
+		)
 	}
 
 	// Save updated profile
@@ -734,10 +745,15 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 		} else {
 			tierConfig := params.GetTierConfig(int(core.Level))
 			if tierConfig == nil {
+				previousLevel := core.Level
 				sdkCtx.Logger().Error("processSubscriptions: invalid level, downgrading to free",
 					"address", sub.Address, "level", core.Level)
 				core.Level = 0
 				core.SubscriptionExpiry = 0
+				sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+					sdk.NewAttribute("address", sub.Address),
+					sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+					sdk.NewAttribute("reason", "invalid_tier_config")))
 				goto saveProfile
 			}
 			periodFee := tierConfig.PeriodFee
@@ -755,10 +771,15 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				// Burn non-reserve portion
 				if burnAmount > 0 {
 					if err := am.k.BurnFromAccount(sdkCtx, sub.Address, burnAmount); err != nil {
+						previousLevel := core.Level
 						sdkCtx.Logger().Error("processSubscriptions: failed to burn fee portion",
 							"address", sub.Address, "err", err)
 						core.Level = 0
 						core.SubscriptionExpiry = 0
+						sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+							sdk.NewAttribute("address", sub.Address),
+							sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+							sdk.NewAttribute("reason", "renewal_burn_failed")))
 						goto saveProfile
 					}
 				}
@@ -766,10 +787,15 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				// Escrow reserve portion to module
 				if reserveAmount > 0 {
 					if err := am.k.DeductFeeFromOwner(sdkCtx, sub.Address, reserveAmount); err != nil {
+						previousLevel := core.Level
 						sdkCtx.Logger().Error("processSubscriptions: failed to escrow reserve",
 							"address", sub.Address, "err", err)
 						core.Level = 0
 						core.SubscriptionExpiry = 0
+						sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+							sdk.NewAttribute("address", sub.Address),
+							sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+							sdk.NewAttribute("reason", "renewal_escrow_failed")))
 						goto saveProfile
 					}
 				}

@@ -160,6 +160,7 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 	}
 
 	// Insufficient reserve - downgrade to free tier
+	previousLevel := core.Level
 	ctx.Logger().Warn("checkReserveOrDowngrade: insufficient reserve, downgrading to free tier",
 		"owner", addr,
 		"level", core.Level,
@@ -196,7 +197,7 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 		sdk.NewEvent(
 			"subscription_expired",
 			sdk.NewAttribute("address", addr),
-			sdk.NewAttribute("previous_level", fmt.Sprintf("%d", core.Level)),
+			sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
 			sdk.NewAttribute("reason", "insufficient_reserve"),
 		),
 	)
