@@ -67,6 +67,21 @@ const ValueBox = styled.div`
     overflow-x: auto;
 `;
 
+const BioTextarea = styled.textarea`
+    width: 100%;
+    box-sizing: border-box;
+    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    font-family: inherit;
+    font-size: 0.8rem;
+    resize: vertical;
+    min-height: 80px;
+    &:focus { outline: none; border-color: ${({ theme }) => theme?.colors?.accent || '#7c6dcd'}; }
+`;
+
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
@@ -1006,25 +1021,12 @@ export default function ProfileView({ state }) {
                                         <div style={{ width: '100%' }}>
                                             {bioEditing ? (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                                                    <textarea
+                                                    <BioTextarea
                                                         value={bioDraft}
                                                         onChange={e => setBioDraft(e.target.value)}
                                                         maxLength={BIO_MAX}
                                                         rows={4}
                                                         disabled={bioSaving}
-                                                        style={{
-                                                            width: '100%',
-                                                            boxSizing: 'border-box',
-                                                            background: 'var(--panel-alt, #1f2328)',
-                                                            border: '1px solid var(--border, #444)',
-                                                            borderRadius: '8px',
-                                                            padding: '0.6rem 0.85rem',
-                                                            color: 'var(--text, #eee)',
-                                                            fontFamily: 'inherit',
-                                                            fontSize: '0.8rem',
-                                                            resize: 'vertical',
-                                                            minHeight: '80px',
-                                                        }}
                                                         placeholder="Write a short biography..."
                                                         autoFocus
                                                     />

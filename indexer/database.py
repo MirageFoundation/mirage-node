@@ -324,9 +324,7 @@ class DatabaseManager:
                     """
                 )
                 cur.execute("ALTER TABLE enabled_agents ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
-                cur.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_enabled_agents_agent_lower ON enabled_agents(LOWER(agent))"
-                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_enabled_agents_agent_lower ON enabled_agents(LOWER(agent))")
 
                 # followed_users (for v1.5 social graph)
                 cur.execute(
@@ -1769,6 +1767,7 @@ class DatabaseManager:
                     """,
                     (owner, target, pos),
                 )
+
     def unfollow_user(self, owner: str, target: str) -> None:
         """Unfollow a user (remove from followed_users)."""
         with self._connect() as conn:
@@ -1796,6 +1795,7 @@ class DatabaseManager:
                     """,
                     (owner, topic, pos),
                 )
+
     def unfollow_topic(self, owner: str, topic: str) -> None:
         """Unfollow a topic (remove from followed_topics)."""
         with self._connect() as conn:
@@ -1921,7 +1921,7 @@ class DatabaseManager:
                     """
                     DELETE FROM blocked_topics
                     WHERE LOWER(owner) = LOWER(%s)
-                      AND LOWER(%s) LIKE LOWER(REPLACE(target, '*', '%'))
+                      AND LOWER(%s) LIKE LOWER(REPLACE(target, '*', '%%'))
                     """,
                     (owner, t),
                 )

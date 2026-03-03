@@ -23,7 +23,14 @@ const Section = styled.div`
 const SectionTitle = styled.div`
     font-weight: bold;
     font-size: 0.8rem;
+    margin-bottom: 0.15rem;
+`;
+
+const SectionSubtitle = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#999'};
+    font-size: 0.6rem;
     margin-bottom: 0.4rem;
+    line-height: 1.4;
 `;
 
 const ItemRow = styled.div`
@@ -419,6 +426,9 @@ export default function AgentsView({ state }) {
                         <ContainerBody>
                             <Section>
                                 <SectionTitle>Available Agents</SectionTitle>
+                                <SectionSubtitle>
+                                    Order matters: When two agents edit the same field, the one higher in your list wins.
+                                </SectionSubtitle>
                                 {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
                                 {(loadingAgents || loadingEnabled) ? (
                                     <EmptyMessage>Loading agents...</EmptyMessage>

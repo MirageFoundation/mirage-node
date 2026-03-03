@@ -298,6 +298,32 @@ def _get_profile_full(backend: str, address: str) -> dict:
     return r.json() or {}
 
 
+def _get_chain_profile(address: str) -> dict:
+    """Query the chain directly for a profile (bypasses indexer)."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "core",
+            "profile",
+            address.lower(),
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"failed to query chain profile: {out[:200]}")
+    idx = out.find("{")
+    if idx < 0:
+        raise RuntimeError(f"chain profile query: no JSON in output: {out[:200]}")
+    data = json.loads(out[idx:])
+    return data
+
+
 def _assert_capped_deque(name: str, got: list[str], expected: list[str]) -> None:
     if got == expected:
         _pass(name)
@@ -1728,8 +1754,8 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_posts") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_posts") or chain_profile.get("blockedPosts") or [])]
         expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
         _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
 
@@ -1774,8 +1800,8 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_users") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_users") or chain_profile.get("blockedUsers") or [])]
         expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
 
@@ -1820,8 +1846,10 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_topics") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [
+            str(v).lower() for v in (chain_profile.get("blocked_topics") or chain_profile.get("blockedTopics") or [])
+        ]
         expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_topics:]
         _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
 
@@ -2112,7 +2140,10 @@ def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000)
         if ccode == 0 and (dcode is None or dcode == 0):
             _pass(f"topup.{name}", extra=label)
         else:
-            _fail(f"topup.{name}", f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}")
+            _fail(
+                f"topup.{name}",
+                f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}",
+            )
 
 
 def test_follow_limits(backend: str) -> None:
@@ -2277,9 +2308,7 @@ def test_follow_limits(backend: str) -> None:
     before_profile = _get_profile_full(backend, sub_addr)
     before_followed = [str(v).lower() for v in (before_profile.get("followed_users") or [])]
     remaining = sub_max_followed_users - len(before_followed)
-    bulk_targets = [
-        str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)
-    ]
+    bulk_targets = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)]
     chunk_size = 25
     bulk_ok = True
     _debug(f"subscriber tier1 bulk follow users: total={len(bulk_targets)} chunk_size={chunk_size}")
@@ -3201,7 +3230,6 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     )
     _check_deliver_accept("hardcap.enable_after_disable", ccode, dcode, dlog)
 
-
     # ── 13.5 SetAgents atomic list replacement ──
     lb, _, _, _ = _get_pow_params(backend, aw_addr)
     ts = _now_ms()
@@ -3381,8 +3409,7 @@ def test_tier_features(backend: str) -> None:
     if not can_be_agent_0 and not can_be_agent_1 and can_be_agent_10:
         _pass("tierfeature.can_be_agent_only_level10")
     else:
-        _fail("tierfeature.can_be_agent_only_level10",
-              f"t0={can_be_agent_0} t1={can_be_agent_1} t10={can_be_agent_10}")
+        _fail("tierfeature.can_be_agent_only_level10", f"t0={can_be_agent_0} t1={can_be_agent_1} t10={can_be_agent_10}")
 
     can_remove_anon_0 = tier0.get("can_remove_anon", False)
     can_remove_anon_1 = tier1.get("can_remove_anon", False)
@@ -3390,8 +3417,7 @@ def test_tier_features(backend: str) -> None:
     if not can_remove_anon_0 and can_remove_anon_1 and can_remove_anon_10:
         _pass("tierfeature.can_remove_anon")
     else:
-        _fail("tierfeature.can_remove_anon",
-              f"t0={can_remove_anon_0} t1={can_remove_anon_1} t10={can_remove_anon_10}")
+        _fail("tierfeature.can_remove_anon", f"t0={can_remove_anon_0} t1={can_remove_anon_1} t10={can_remove_anon_10}")
 
     for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         v0 = tier0.get(flag, False)
@@ -3526,6 +3552,19 @@ def test_biography(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_reject("biography.too_long_rejected", ccode, dcode, dlog)
+
+    # 16.5 Biography with control characters rejected (NUL, BEL, etc.)
+    ts = _now_ms()
+    bad_bio = "Hello\x00World"
+    msg5 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), bad_bio, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg5, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.control_chars_rejected", ccode, dcode, dlog)
 
 
 # =========================================================================
