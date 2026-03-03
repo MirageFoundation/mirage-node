@@ -1239,7 +1239,7 @@ function ViewPostView({ state, updatePost }) {
             const chain = JSON.parse(localStorage.getItem('chainConfig') || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = Math.min(userLevel, tiers.length - 1);
+            const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : (userLevel === 10 || userLevel >= 100) ? 2 : 0;
             const tier = tiers[tierIndex] || {};
 
             return {

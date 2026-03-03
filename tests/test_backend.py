@@ -4555,8 +4555,9 @@ def test_frontend_bypass(backend: str):
     try:
         params = requests.get(f"{backend}/api/get_status", params={"address": sub1_addr}, timeout=10).json()
         tiers = params.get("tiers") or []
-        if user_level < len(tiers):
-            tier = tiers[user_level]
+        idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
+        if 0 <= idx < len(tiers):
+            tier = tiers[idx]
             max_content = int(tier.get("max_content_length", 50000) or 50000)
             max_title = int(tier.get("max_title_length", 300) or 300)
         else:
