@@ -8,7 +8,7 @@
             "plan": {
                 "name": "v1.16.0",
                 "height": "T+50",
-                "info": "{\"binaries\":{\"linux/amd64\":\"https://github.com/mirage-protocol/mirage-node/releases/download/v1.16.0/miraged-linux-amd64\"}}"
+                "info": ""
             }
         }
     ],
