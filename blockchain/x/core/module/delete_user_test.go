@@ -433,7 +433,7 @@ func TestDeleteUserTargetNormalization(t *testing.T) {
 	require.False(t, found, "profile should be deleted with trimmed target")
 }
 
-func TestDeleteUserWithoutUsername(t *testing.T) {
+func TestDeleteUserWithoutUsernameRejected(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
 	am := newTestModule(mk)
@@ -451,12 +451,11 @@ func TestDeleteUserWithoutUsername(t *testing.T) {
 		Target:         owner,
 	}
 
-	// Should not panic on the ReleaseUsername path when username is empty
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
 
+	// Profile should remain since self-delete was rejected
 	_, found, _ := mk.GetProfileCore(ctx, owner)
-	require.False(t, found, "profile without username should still be deletable")
+	require.True(t, found, "profile should still exist when self-delete is rejected for missing username")
 }

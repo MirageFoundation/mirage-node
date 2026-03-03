@@ -3523,26 +3523,7 @@ def test_biography(backend: str) -> None:
     )
     _check_deliver_accept("biography.subscriber_clear", ccode, dcode, dlog)
 
-    # 16.3 Agent (level 10) sets biography (should succeed)
-    agent = WALLETS["sub3"]
-    lb, _, _, _ = _get_pow_params(backend, str(agent.address()))
-    ts = _now_ms()
-    agent_bio = (
-        "This is a test agent biography.\n"
-        "Agents operate at level 10 with expanded capabilities.\n"
-        "This biography was set during automated testing."
-    )
-    msg_agent = _build_msg_set_biography(agent, lb, 0, ts, str(agent.address()), agent_bio, pow_val=0)
-    _, ccode, _, dcode, dlog = _submit_tx(
-        [(msg_agent, "/mirage.core.v1.MsgSetBiography")],
-        DEFAULT_GAS_LIMIT,
-        fee_payer,
-        agent.public_key().public_key_bytes,
-        wait_deliver=True,
-    )
-    _check_deliver_accept("biography.agent_set", ccode, dcode, dlog)
-
-    # 16.4 Free user sets biography with PoW (should be rejected by tier gate)
+    # 16.3 Free user sets biography with PoW (should be rejected by tier gate)
     fw = WALLETS["free"]
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
     ts = _now_ms()
@@ -3559,7 +3540,7 @@ def test_biography(backend: str) -> None:
     )
     _check_deliver_reject("biography.free_user_rejected", ccode, dcode, dlog)
 
-    # 16.5 Biography too long (> 512 chars) rejected
+    # 16.4 Biography too long (> 512 chars) rejected
     ts = _now_ms()
     long_bio = "x" * 600
     msg4 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), long_bio, pow_val=0)
@@ -3572,7 +3553,7 @@ def test_biography(backend: str) -> None:
     )
     _check_deliver_reject("biography.too_long_rejected", ccode, dcode, dlog)
 
-    # 16.6 Biography with control characters rejected (NUL, BEL, etc.)
+    # 16.5 Biography with control characters rejected (NUL, BEL, etc.)
     ts = _now_ms()
     bad_bio = "Hello\x00World"
     msg5 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), bad_bio, pow_val=0)

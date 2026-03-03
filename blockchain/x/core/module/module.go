@@ -204,6 +204,29 @@ func deriveOwnerFromPubkey(pubkey []byte) (string, error) {
 	return sdk.AccAddress(pub.Address()).String(), nil
 }
 
+// requireUsername loads ProfileCore for owner and fails hard if the profile
+// is missing or has no username set. Returns (ProfileCore, nil) on success.
+// Governance callers must skip this check before calling.
+func (am AppModule) requireUsername(sdkCtx sdk.Context, owner, action string) (types.ProfileCore, error) {
+	bz, found, err := am.k.GetProfileCore(sdkCtx, owner)
+	if err != nil {
+		return types.ProfileCore{}, fmt.Errorf("failed to load profile: %w", err)
+	}
+	if !found {
+		sdkCtx.Logger().Debug("requireUsername: no profile", "owner", owner, "action", action)
+		return types.ProfileCore{}, fmt.Errorf("username required: no profile found for %s", owner)
+	}
+	var core types.ProfileCore
+	if err := json.Unmarshal(bz, &core); err != nil {
+		return types.ProfileCore{}, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	if core.Username == "" {
+		sdkCtx.Logger().Debug("requireUsername: empty username", "owner", owner, "action", action)
+		return types.ProfileCore{}, fmt.Errorf("username required: set a username before calling %s", action)
+	}
+	return core, nil
+}
+
 // validateAndDeductFee checks minimum fee and deducts from owner
 func (am AppModule) validateAndDeductFee(ctx sdk.Context, owner string, feeAmt, minFee uint64) error {
 	if feeAmt == 0 {
@@ -1157,6 +1180,15 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		owner = sdk.AccAddress(pub.Address()).String()
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Post")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	params := am.k.GetParams(sdkCtx)
 
 	if err := rejectUnsafeFields(
@@ -1208,14 +1240,6 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
 		return nil, err
 	}
-
-	// Get user level for tier-based limits (only need Level from profile)
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
@@ -1264,12 +1288,11 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		// Get user level for gas fee deduction
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Vote")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1310,6 +1333,15 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		owner = sdk.AccAddress(pub.Address()).String()
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Edit")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	params := am.k.GetParams(sdkCtx)
 
 	if err := rejectUnsafeFields(
@@ -1335,14 +1367,6 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		if err := validateTxHash(target); err != nil {
 			return nil, err
 		}
-	}
-
-	// Get user level for tier-based limits (only need Level from profile)
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
 	if tierConfig == nil {
@@ -1628,17 +1652,18 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 		owner = target
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "SetBiography")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	biography := strings.TrimSpace(req.GetBiography())
 	if err := validateSafeText("biography", biography); err != nil {
 		return nil, err
-	}
-
-	// Get user's tier to check if they can have a biography
-	var userLevel int
-	if old, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var prev types.ProfileCore
-		_ = json.Unmarshal(old, &prev)
-		userLevel = int(prev.Level)
 	}
 
 	tierConfig := params.GetTierConfig(userLevel)
@@ -1714,9 +1739,11 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "EnableAgent")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
@@ -1746,14 +1773,6 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 		sdkCtx.Logger().Error("EnableAgent: failed to save enabled agents", "owner", owner, "err", err.Error())
 		sdkCtx.Logger().Info(logDelimiter)
 		return nil, err
-	}
-
-	if _, found, _ := am.k.GetProfileCore(sdkCtx, owner); !found {
-		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
-			return nil
-		}); err != nil {
-			sdkCtx.Logger().Error("EnableAgent: failed to create profile", "owner", owner, "err", err.Error())
-		}
 	}
 
 	sdkCtx.Logger().Info(logDelimiter)
@@ -1800,9 +1819,11 @@ func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "DisableAgent")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 
@@ -1869,9 +1890,11 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "SetAgents")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
@@ -1945,11 +1968,11 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockPost")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2002,11 +2025,11 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockPost")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2053,11 +2076,11 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockUser")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2134,11 +2157,11 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockUser")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2185,11 +2208,11 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockTopic")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
@@ -2270,11 +2293,11 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockTopic")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
@@ -2338,6 +2361,15 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		return nil, fmt.Errorf("invalid user address: %s", user)
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "FollowUser")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	blockedUsers, err := am.k.GetProfileBlockedUsers(sdkCtx, owner)
 	if err != nil {
 		return nil, err
@@ -2360,12 +2392,6 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		}
 	}
 
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(25)
 	if tierConfig != nil {
@@ -2431,9 +2457,11 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "UnfollowUser")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 
@@ -2489,6 +2517,15 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		owner = target
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "FollowTopic")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
@@ -2515,12 +2552,6 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		}
 	}
 
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	maxTopics := uint64(50)
 	if tierConfig != nil {
@@ -2586,9 +2617,11 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "UnfollowTopic")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 
@@ -2646,15 +2679,11 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		// Get user level for gas fee calculation
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Delete")
+		if err != nil {
+			return nil, err
 		}
-
-		// NOTE: We do NOT validate ownership here. The indexer enforces authorization.
-		// This is intentional - see SECURITY MODEL comment above.
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2711,14 +2740,14 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 
 	// Deduct relay gas fee for self-delete (relay node compensation)
 	if actorType == "self" {
-		var userLevel int
-		var core types.ProfileCore
-		if err := json.Unmarshal(bz, &core); err == nil {
-			userLevel = int(core.Level)
-		}
-		if err := am.deductRelayGasFee(sdkCtx, target, userLevel); err != nil {
+		core, err := am.requireUsername(sdkCtx, target, "DeleteUser")
+		if err != nil {
 			return nil, err
 		}
+		if err := am.deductRelayGasFee(sdkCtx, target, int(core.Level)); err != nil {
+			return nil, err
+		}
+		_ = bz // profile already loaded above
 	}
 
 	// Execute the full deletion
@@ -2764,12 +2793,11 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 			return nil, fmt.Errorf("envelope_pubkey must derive to sender")
 		}
 
-		// Get user level for gas fee deduction
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, sender); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, sender, "SendTokens")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	if err := validateAddress(target); err != nil {
@@ -2978,6 +3006,10 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 		return nil, err
 	}
 
+	if _, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel"); err != nil {
+		return nil, err
+	}
+
 	// MsgUpgradeLevel MUST be paid with tokens, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgUpgradeLevel cannot use PoW, must pay with tokens")
@@ -3114,6 +3146,10 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 		return nil, err
 	}
 
+	if _, err := am.requireUsername(sdkCtx, owner, "SetAutoRenewal"); err != nil {
+		return nil, err
+	}
+
 	// MsgSetAutoRenewal MUST be paid with reserve, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
@@ -3193,11 +3229,11 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Award")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	} else {
 		owner = authority
 	}

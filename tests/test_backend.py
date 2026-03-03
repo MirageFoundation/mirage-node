@@ -78,6 +78,7 @@ from shared.canon import (  # noqa: E402
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_report as _canon_base_report_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
+    canon_base_set_biography as _canon_base_set_biography_raw,
     canon_signed_with_pow,
 )
 
@@ -88,7 +89,7 @@ DEFAULT_BACKEND = "http://127.0.0.1:80"
 INDEX_TIMEOUT_SEC = 45.0
 
 # Populated during setup — all wallets are random, non-deterministic
-WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "sub3"
+WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "sub3", "agent1", "agent2"
 
 
 # ---------------------------------------------------------------------------
@@ -625,11 +626,13 @@ def setup_test_wallets(backend: str) -> bool:
     """
     print(f"\n{_COLOR_BOLD}[0] Setup: Generating wallets & funding{_COLOR_RESET}")
 
-    # Generate 4 fresh random wallets
+    # Generate 6 fresh random wallets
     WALLETS["free"] = _generate_wallet()
     WALLETS["sub1"] = _generate_wallet()
     WALLETS["sub2"] = _generate_wallet()
     WALLETS["sub3"] = _generate_wallet()
+    WALLETS["agent1"] = _generate_wallet()
+    WALLETS["agent2"] = _generate_wallet()
 
     for name, w in WALLETS.items():
         print(f"  Wallet {name:4s}: {w.address()}")
@@ -641,6 +644,8 @@ def setup_test_wallets(backend: str) -> bool:
         "sub1": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
         "sub2": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
         "sub3": 300_000_000_000,  #   300,000 MIRAGE  (Agent fee = 200,000)
+        "agent1": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
+        "agent2": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
     }
     try:
         faucet_addr = _resolve_validator_key_addr()
@@ -695,8 +700,21 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot check balance for {name}: {e}")
             return False
 
-    # Subscribe wallets: sub1,sub2 -> level 1 (Subscriber), sub3 -> level 10 (Agent)
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3")]:
+    # Set usernames for all wallets (required before any other core transaction)
+    for name, w in WALLETS.items():
+        uname = f"test{name}{_rand_str(4)}"
+        resp = _do_set_username_raw(backend, w, uname, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if txh:
+            print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
+        else:
+            err = resp.get("error", resp) if resp else "no response"
+            print(f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  Username {name}: {err}")
+
+    time.sleep(4)
+
+    # Subscribe wallets: sub1,sub2 -> level 1, sub3/agent1/agent2 -> level 10
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
         resp = _do_upgrade_level(backend, w, level)
         txh = str(resp.get("tx_hash", "")).lower()
@@ -711,7 +729,7 @@ def setup_test_wallets(backend: str) -> bool:
     time.sleep(6)
 
     # Verify subscription levels
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3")]:
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
         addr = str(w.address())
         try:
@@ -725,6 +743,32 @@ def setup_test_wallets(backend: str) -> bool:
                 print(f"  Verified {name} level={actual_level}")
         except Exception as e:
             print(f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  Cannot verify {name} level: {e}")
+
+    # Set biographies on the dedicated agent wallets
+    AGENT_BIOS = {
+        "agent1": (
+            "This is a test agent biography.\n"
+            "Agents operate at level 10 with expanded capabilities.\n"
+            "This biography was set during automated testing."
+        ),
+        "agent2": (
+            "Another test agent biography.\n"
+            "This agent was created for integration testing.\n"
+            "It verifies that level 10 accounts can hold biographies."
+        ),
+    }
+    for name, bio in AGENT_BIOS.items():
+        w = WALLETS[name]
+        resp = _do_set_biography(backend, w, bio)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            print(f"  Biography {name}: set ({len(bio)} chars, tx: {txh[:16]}...)")
+        else:
+            err = resp.get("error", resp)
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Biography {name}: {err}")
+            return False
+
+    time.sleep(4)
 
     print(f"  {_COLOR_GREEN}Setup complete{_COLOR_RESET}")
     return True
@@ -1093,6 +1137,36 @@ def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = F
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/set_username", payload)
+    return resp
+
+
+def _do_set_biography(backend: str, wallet, biography: str, skip_pow: bool = False) -> dict:
+    """Set biography via the backend API."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), d, ts, addr, biography)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "target": addr,
+        "biography": biography,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_biography", payload)
     return resp
 
 
@@ -5362,6 +5436,233 @@ def test_profile_fields(backend: str):
         _pass("profile.flair_may_be_omitted_if_empty")
 
 
+# ---------------------------------------------------------------------------
+# 26  Agent Block Propagation
+# ---------------------------------------------------------------------------
+
+
+def _feed_has_post(backend: str, viewer_addr: str, post_id: str, timeout: float = 10.0) -> bool:
+    """Check if a post appears in the newest feed for the given viewer."""
+    deadline = time.perf_counter() + timeout
+    pid = (post_id or "").lower()
+    while time.perf_counter() < deadline:
+        code, feed = _get(f"{backend}/api/get_posts", {"limit": 100, "by": "newest", "address": viewer_addr})
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            if any(str(p.get("post_id", "")).lower() == pid for p in posts):
+                return True
+        time.sleep(1)
+    return False
+
+
+def _feed_missing_post(backend: str, viewer_addr: str, post_id: str, timeout: float = 8.0) -> bool:
+    """Confirm a post does NOT appear in the newest feed for the given viewer.
+
+    Polls a few times to account for indexer lag.  Returns True when the post
+    is consistently absent.
+    """
+    pid = (post_id or "").lower()
+    checks = 0
+    for _ in range(int(timeout)):
+        code, feed = _get(f"{backend}/api/get_posts", {"limit": 100, "by": "newest", "address": viewer_addr})
+        if code == 200:
+            posts = (feed or {}).get("posts") or []
+            if any(str(p.get("post_id", "")).lower() == pid for p in posts):
+                return False
+            checks += 1
+            if checks >= 3:
+                return True
+        time.sleep(1)
+    return checks >= 2
+
+
+def test_agent_behavior(backend: str):
+    """Test agent block propagation: when a user enables an agent, the agent's
+    blocks (posts, users, topics) should also apply to the user's feed."""
+    print(f"\n{_COLOR_BOLD}[26] Agent Block Propagation{_COLOR_RESET}")
+
+    agent = WALLETS["agent1"]
+    user = WALLETS["sub1"]
+    victim = WALLETS["sub2"]
+    agent_addr = str(agent.address())
+    user_addr = str(user.address())
+    victim_addr = str(victim.address())
+
+    # ----- Setup: create test content -----
+
+    topic_a = f"agenttest_{_rand_str(6)}"
+    topic_b = f"agentblk_{_rand_str(6)}"
+
+    # Post by victim in topic_a (will be individually blocked by agent)
+    blocked_post = _do_post(backend, victim, topic_a, "Blocked Post", "This post should be hidden by the agent.")
+    if not blocked_post:
+        _fail("agent_behavior.setup_blocked_post", "could not create post")
+        return
+    if not _wait_indexed(backend, victim_addr, blocked_post, timeout=15.0):
+        _fail("agent_behavior.setup_blocked_post_indexed", "not indexed")
+        return
+
+    # Post by victim in topic_b (topic will be blocked by agent)
+    topic_post = _do_post(backend, victim, topic_b, "Topic Post", "This post is in a blocked topic.")
+    if not topic_post:
+        _fail("agent_behavior.setup_topic_post", "could not create post")
+        return
+    if not _wait_indexed(backend, victim_addr, topic_post, timeout=15.0):
+        _fail("agent_behavior.setup_topic_post_indexed", "not indexed")
+        return
+
+    # Post by victim in topic_a (control — should remain visible)
+    control_post = _do_post(backend, victim, topic_a, "Control Post", "This post should always be visible.")
+    if not control_post:
+        _fail("agent_behavior.setup_control_post", "could not create post")
+        return
+    if not _wait_indexed(backend, victim_addr, control_post, timeout=15.0):
+        _fail("agent_behavior.setup_control_post_indexed", "not indexed")
+        return
+
+    # Another user's post (author will be blocked by agent)
+    agent2 = WALLETS["agent2"]
+    agent2_addr = str(agent2.address())
+    author_post = _do_post(backend, agent2, topic_a, "Author Post", "Post from a user the agent will block.")
+    if not author_post:
+        _fail("agent_behavior.setup_author_post", "could not create post")
+        return
+    if not _wait_indexed(backend, agent2_addr, author_post, timeout=15.0):
+        _fail("agent_behavior.setup_author_post_indexed", "not indexed")
+        return
+
+    _pass("agent_behavior.setup_content_created")
+
+    # ----- 26.1 Baseline: user sees all posts before enabling agent -----
+
+    if _feed_has_post(backend, user_addr, blocked_post):
+        _pass("agent_behavior.baseline_sees_blocked_post")
+    else:
+        _fail("agent_behavior.baseline_sees_blocked_post", "not in feed")
+
+    if _feed_has_post(backend, user_addr, topic_post):
+        _pass("agent_behavior.baseline_sees_topic_post")
+    else:
+        _fail("agent_behavior.baseline_sees_topic_post", "not in feed")
+
+    if _feed_has_post(backend, user_addr, author_post):
+        _pass("agent_behavior.baseline_sees_author_post")
+    else:
+        _fail("agent_behavior.baseline_sees_author_post", "not in feed")
+
+    # ----- 26.2 Agent blocks: post, topic, user -----
+
+    resp = _do_block(backend, agent, blocked_post, "post")
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("agent_behavior.agent_blocks_post")
+    else:
+        _fail("agent_behavior.agent_blocks_post", f"resp={resp}")
+        return
+
+    resp = _do_block_topic(backend, agent, topic_b)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("agent_behavior.agent_blocks_topic")
+    else:
+        _fail("agent_behavior.agent_blocks_topic", f"resp={resp}")
+        return
+
+    resp = _do_block(backend, agent, agent2_addr, "user")
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("agent_behavior.agent_blocks_user")
+    else:
+        _fail("agent_behavior.agent_blocks_user", f"resp={resp}")
+        return
+
+    time.sleep(4)
+
+    # ----- 26.3 User still sees everything (agent not enabled yet) -----
+
+    if _feed_has_post(backend, user_addr, blocked_post):
+        _pass("agent_behavior.pre_enable_sees_blocked_post")
+    else:
+        _fail("agent_behavior.pre_enable_sees_blocked_post", "not in feed")
+
+    if _feed_has_post(backend, user_addr, topic_post):
+        _pass("agent_behavior.pre_enable_sees_topic_post")
+    else:
+        _fail("agent_behavior.pre_enable_sees_topic_post", "not in feed")
+
+    if _feed_has_post(backend, user_addr, author_post):
+        _pass("agent_behavior.pre_enable_sees_author_post")
+    else:
+        _fail("agent_behavior.pre_enable_sees_author_post", "not in feed")
+
+    # ----- 26.4 User enables agent -----
+
+    resp = _do_enable_agent(backend, user, agent_addr)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("agent_behavior.user_enables_agent")
+    else:
+        _fail("agent_behavior.user_enables_agent", f"resp={resp}")
+        return
+
+    time.sleep(5)
+
+    # ----- 26.5 Blocked post hidden from user's feed -----
+
+    if _feed_missing_post(backend, user_addr, blocked_post):
+        _pass("agent_behavior.blocked_post_hidden")
+    else:
+        _fail("agent_behavior.blocked_post_hidden", "post still visible after enabling agent")
+
+    # ----- 26.6 Topic-blocked post hidden from user's feed -----
+
+    if _feed_missing_post(backend, user_addr, topic_post):
+        _pass("agent_behavior.blocked_topic_post_hidden")
+    else:
+        _fail("agent_behavior.blocked_topic_post_hidden", "topic post still visible after enabling agent")
+
+    # ----- 26.7 User-blocked author's post hidden from user's feed -----
+
+    if _feed_missing_post(backend, user_addr, author_post):
+        _pass("agent_behavior.blocked_user_post_hidden")
+    else:
+        _fail("agent_behavior.blocked_user_post_hidden", "author post still visible after enabling agent")
+
+    # ----- 26.8 Control post still visible -----
+
+    if _feed_has_post(backend, user_addr, control_post):
+        _pass("agent_behavior.control_post_still_visible")
+    else:
+        _fail("agent_behavior.control_post_still_visible", "control post disappeared")
+
+    # ----- 26.9 Disable agent — blocked content reappears -----
+
+    resp = _do_enable_agent(backend, user, agent_addr, enable=False)
+    txh = str(resp.get("tx_hash", "")).lower()
+    if txh:
+        _pass("agent_behavior.user_disables_agent")
+    else:
+        _fail("agent_behavior.user_disables_agent", f"resp={resp}")
+        return
+
+    time.sleep(5)
+
+    if _feed_has_post(backend, user_addr, blocked_post):
+        _pass("agent_behavior.post_reappears_after_disable")
+    else:
+        _fail("agent_behavior.post_reappears_after_disable", "still hidden")
+
+    if _feed_has_post(backend, user_addr, topic_post):
+        _pass("agent_behavior.topic_post_reappears_after_disable")
+    else:
+        _fail("agent_behavior.topic_post_reappears_after_disable", "still hidden")
+
+    if _feed_has_post(backend, user_addr, author_post):
+        _pass("agent_behavior.author_post_reappears_after_disable")
+    else:
+        _fail("agent_behavior.author_post_reappears_after_disable", "still hidden")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -5390,6 +5691,7 @@ ALL_CATEGORIES = {
     "indexer_deque": test_indexer_deque_storage,
     "content_limits": test_content_limits,
     "profile_fields": test_profile_fields,
+    "agent_behavior": test_agent_behavior,
 }
 
 

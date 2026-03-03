@@ -29,11 +29,28 @@ func testPubkeyOwner() ([]byte, string) {
 }
 
 func setProfileLevel(t *testing.T, mk *mockKeeper, ctx sdk.Context, owner string, level int32) {
-	core := types.ProfileCore{
-		Owner: owner,
-		Level: level,
+	var existing types.ProfileCore
+	if bz, found, _ := mk.GetProfileCore(ctx, owner); found {
+		_ = json.Unmarshal(bz, &existing)
 	}
-	bz, err := json.Marshal(core)
+	existing.Owner = owner
+	existing.Level = level
+	if existing.Username == "" {
+		existing.Username = "Anon-testuser"
+	}
+	bz, err := json.Marshal(existing)
+	require.NoError(t, err)
+	require.NoError(t, mk.SetProfileCore(ctx, owner, bz))
+}
+
+func ensureUsername(t *testing.T, mk *mockKeeper, ctx sdk.Context, owner, username string) {
+	var existing types.ProfileCore
+	if bz, found, _ := mk.GetProfileCore(ctx, owner); found {
+		_ = json.Unmarshal(bz, &existing)
+	}
+	existing.Owner = owner
+	existing.Username = username
+	bz, err := json.Marshal(existing)
 	require.NoError(t, err)
 	require.NoError(t, mk.SetProfileCore(ctx, owner, bz))
 }
@@ -115,6 +132,7 @@ func TestBlockTopicNormalizesAndDedups(t *testing.T) {
 	require.NoError(t, mk.SetParams(ctx, params))
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 
 	req := &types.MsgBlockTopic{
 		Authority:      "not-gov",
@@ -147,6 +165,7 @@ func TestBlockTopicCapsToTierLimit(t *testing.T) {
 	require.NoError(t, mk.SetParams(ctx, params))
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	for _, topic := range []string{"Alpha", "Beta", "Gamma", "Delta"} {
 		_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
 			Authority:      "not-gov",
@@ -177,7 +196,8 @@ func TestBlockTopicInvalidTopic(t *testing.T) {
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
 		Authority:      "not-gov",
 		EnvelopePubkey: pub,
@@ -225,6 +245,7 @@ func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha", "beta"}))
 
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
@@ -276,6 +297,7 @@ func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"beer", "beerman123", "wine"}))
 
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
@@ -300,6 +322,7 @@ func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha", "beta"}))
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
@@ -325,6 +348,7 @@ func TestFollowTopicRemovesBlockedWildcard(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"beer*", "wine"}))
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
@@ -350,6 +374,7 @@ func TestBlockUserRemovesFollowedUser(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
 	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
 
@@ -375,6 +400,7 @@ func TestFollowUserRemovesBlockedUser(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
 	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
 
@@ -401,6 +427,7 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
 	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
 	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
@@ -427,6 +454,7 @@ func TestFollowTopicAlreadyFollowedStillRemovesBlock(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha"}))
 	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha"}))
 

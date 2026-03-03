@@ -86,7 +86,8 @@ func TestAwardRejectsEmptyTarget(t *testing.T) {
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
@@ -104,7 +105,8 @@ func TestAwardRejectsInvalidTarget(t *testing.T) {
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
@@ -122,7 +124,8 @@ func TestAwardRejectsEmptyType(t *testing.T) {
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
@@ -140,7 +143,8 @@ func TestAwardRejectsUnknownType(t *testing.T) {
 	ctx := newMockContext()
 	am := newTestModule(mk)
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),
 		EnvelopePubkey: pub,
@@ -164,7 +168,8 @@ func TestAwardAcceptsUppercaseTarget(t *testing.T) {
 	}
 	require.NoError(t, mk.SetParams(ctx, params))
 
-	pub, _ := testPubkeyOwner()
+	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	upper := strings.ToUpper(strings.Repeat("d", 64))
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),
@@ -217,6 +222,7 @@ func TestAwardNonAdminBurnsOrErrors(t *testing.T) {
 	am := newTestModule(mk)
 
 	pub, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := strings.Repeat("f", 64)
 	req := &types.MsgAward{
 		Authority:      testAccAddressString(),

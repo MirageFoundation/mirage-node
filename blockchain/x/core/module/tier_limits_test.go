@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cosmossdk.io/log"
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/stretchr/testify/require"
 
@@ -25,10 +26,13 @@ func genTxHash(i int) string {
 }
 
 // setupModule creates a mock keeper, context, and module with default params.
+// It also ensures the test pubkey owner has a username set (required for all user txs).
 func setupModule(t *testing.T) (*mockKeeper, sdk.Context, AppModule) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
 	am := newTestModule(mk)
+	_, owner := testPubkeyOwner()
+	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	return mk, ctx, am
 }
 
@@ -938,4 +942,84 @@ func TestHardCapVsDequeContrast(t *testing.T) {
 
 	followed, _ := mk.GetProfileFollowedUsers(ctx, owner)
 	require.Len(t, followed, 2, "followed list unchanged after failed 3rd follow")
+}
+
+// =========================================================================
+// Username requirement enforcement
+// =========================================================================
+
+func TestRequireUsernameRejectsNoProfile(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	// Use a fresh pubkey with NO profile at all
+	pub2, _ := func() ([]byte, string) {
+		priv := secp256k1.PrivKey{Key: bytes.Repeat([]byte{0x04}, 32)}
+		return priv.PubKey().Bytes(), sdk.AccAddress(priv.PubKey().Address()).String()
+	}()
+
+	_, err := am.Post(ctx, &types.MsgPost{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub2,
+		Topic:          "test",
+		Title:          "title",
+		Content:        "body",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
+}
+
+func TestRequireUsernameRejectsEmptyUsername(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	// Create a profile with empty username
+	core := types.ProfileCore{Owner: owner, Username: "", Level: 0}
+	bz, _ := json.Marshal(core)
+	_ = mk.SetProfileCore(ctx, owner, bz)
+
+	_, err := am.FollowUser(ctx, &types.MsgFollowUser{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		User:           genAddr(1),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
+}
+
+func TestRequireUsernameAllowsSetUsername(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	pub, owner := testPubkeyOwner()
+	// No profile at all — SetUsername should still work (it's exempt)
+	_, err := am.SetUsername(ctx, &types.MsgSetUsername{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		Username:       "newuser",
+	})
+	require.NoError(t, err)
+}
+
+func TestRequireUsernamePassesWithUsername(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+	_ = owner
+
+	_, err := am.FollowUser(ctx, &types.MsgFollowUser{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Target:         owner,
+		User:           genAddr(1),
+	})
+	require.NoError(t, err)
+
+	followed, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	require.Equal(t, []string{genAddr(1)}, followed)
 }
