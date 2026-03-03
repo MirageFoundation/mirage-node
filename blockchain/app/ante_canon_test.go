@@ -176,6 +176,11 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForDisableAgent(v.(*coretypes.MsgDisableAgent)) },
 		},
 		{
+			name: "MsgSetAgents",
+			obj:  &coretypes.MsgSetAgents{},
+			fn:   func(v interface{}) []byte { return buildCanonForSetAgents(v.(*coretypes.MsgSetAgents)) },
+		},
+		{
 			name: "MsgFollowUser",
 			obj:  &coretypes.MsgFollowUser{},
 			fn:   func(v interface{}) []byte { return buildCanonForFollowUser(v.(*coretypes.MsgFollowUser)) },

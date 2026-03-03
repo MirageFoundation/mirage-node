@@ -43,7 +43,7 @@ func TestEnableAgentHardCapFreeTier(t *testing.T) {
 	params := mk.GetParams(ctx)
 	freeTier := params.GetTierConfig(types.LevelFree)
 	require.NotNil(t, freeTier)
-	maxAgents := int(freeTier.MaxEnabledAgents) // 25
+	maxAgents := int(freeTier.MaxEnabledAgents) // 5
 
 	// Fill to max
 	agents := make([]string, maxAgents)
@@ -75,11 +75,11 @@ func TestEnableAgentHardCapSubscriberTier(t *testing.T) {
 	params := mk.GetParams(ctx)
 	subTier := params.GetTierConfig(types.LevelSubscriber)
 	require.NotNil(t, subTier)
-	require.Equal(t, uint64(500), subTier.MaxEnabledAgents)
+	require.Equal(t, uint64(50), subTier.MaxEnabledAgents)
 
 	// Pre-fill to max with mock data
-	agents := make([]string, 500)
-	for i := 0; i < 500; i++ {
+	agents := make([]string, 50)
+	for i := 0; i < 50; i++ {
 		agents[i] = fmt.Sprintf("mirage1agent%04d", i)
 	}
 	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, agents))
@@ -432,7 +432,7 @@ func TestTierLimitsFollowUserFreeLowerThanSubscriber(t *testing.T) {
 	// Upgrade to subscriber
 	setProfileLevel(t, mk, ctx, owner, int32(types.LevelSubscriber))
 
-	// Now should succeed (subscriber limit is 500)
+	// Now should succeed (subscriber limit is higher)
 	_, err = am.FollowUser(ctx, &types.MsgFollowUser{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, User: genAddr(3)})
 	require.NoError(t, err)
 }
@@ -480,6 +480,106 @@ func TestTierLimitsEnableAgentFreeLowerThanAgent(t *testing.T) {
 
 	_, err = am.EnableAgent(ctx, &types.MsgEnableAgent{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Agent: genAddr(3)})
 	require.NoError(t, err)
+}
+
+// =========================================================================
+// SetAgents: atomic list replacement
+// =========================================================================
+
+func TestSetAgentsBasic(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	a1, a2, a3 := genAddr(1), genAddr(2), genAddr(3)
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: []string{a1, a2, a3},
+	})
+	require.NoError(t, err)
+
+	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	require.Equal(t, []string{a1, a2, a3}, got)
+}
+
+func TestSetAgentsPreservesOrder(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	a1, a2, a3 := genAddr(1), genAddr(2), genAddr(3)
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: []string{a3, a1, a2},
+	})
+	require.NoError(t, err)
+
+	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	require.Equal(t, []string{a3, a1, a2}, got)
+}
+
+func TestSetAgentsEmptyClears(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, []string{genAddr(1), genAddr(2)}))
+
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: []string{},
+	})
+	require.NoError(t, err)
+
+	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	require.Len(t, got, 0)
+}
+
+func TestSetAgentsRejectsDuplicates(t *testing.T) {
+	_, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	a1 := genAddr(1)
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: []string{a1, a1},
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "duplicate")
+}
+
+func TestSetAgentsRejectsOverLimit(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	params := mk.GetParams(ctx)
+	params.Tiers[0].MaxEnabledAgents = 3
+	require.NoError(t, mk.SetParams(ctx, params))
+
+	agents := make([]string, 4)
+	for i := range agents {
+		agents[i] = genAddr(byte(i + 1))
+	}
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: agents,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many agents")
+}
+
+func TestSetAgentsReplacesExisting(t *testing.T) {
+	mk, ctx, am := setupModule(t)
+	pub, owner := testPubkeyOwner()
+
+	a1, a2, a3 := genAddr(1), genAddr(2), genAddr(3)
+	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, []string{a1, a2}))
+
+	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
+		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
+		Agents: []string{a3, a1},
+	})
+	require.NoError(t, err)
+
+	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	require.Equal(t, []string{a3, a1}, got)
 }
 
 // =========================================================================
@@ -555,8 +655,8 @@ func TestPostContentLengthSubscriberHigherLimit(t *testing.T) {
 	setProfileLevel(t, mk, ctx, owner, int32(types.LevelSubscriber))
 
 	params := mk.GetParams(ctx)
-	freeMax := params.Tiers[0].MaxContentLength  // 1000
-	subMax := params.Tiers[1].MaxContentLength    // 20000
+	freeMax := params.Tiers[0].MaxContentLength // 1000
+	subMax := params.Tiers[1].MaxContentLength  // 20000
 	require.Greater(t, subMax, freeMax)
 
 	// Content that exceeds free limit but fits subscriber limit
@@ -598,7 +698,7 @@ func TestPostTitleLengthSubscriberHigherLimit(t *testing.T) {
 
 	params := mk.GetParams(ctx)
 	freeMaxTitle := params.Tiers[0].MaxTitleLength // 150
-	subMaxTitle := params.Tiers[1].MaxTitleLength   // 300
+	subMaxTitle := params.Tiers[1].MaxTitleLength  // 300
 	require.Greater(t, subMaxTitle, freeMaxTitle)
 
 	title := string(bytes.Repeat([]byte("x"), int(freeMaxTitle)+1))
@@ -624,7 +724,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	// Free tier (index 0)
 	free := tiers[0]
 	require.Equal(t, uint64(0), free.PeriodFee)
-	require.Equal(t, uint64(25), free.MaxEnabledAgents)
+	require.Equal(t, uint64(5), free.MaxEnabledAgents)
 	require.Equal(t, uint64(25), free.MaxFollowedUsers)
 	require.Equal(t, uint64(25), free.MaxFollowedTopics)
 	require.Equal(t, uint64(25), free.MaxBlockedUsers)
@@ -644,7 +744,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	// Subscriber tier (index 1)
 	sub := tiers[1]
 	require.Equal(t, uint64(100_000_000_000), sub.PeriodFee)
-	require.Equal(t, uint64(500), sub.MaxEnabledAgents)
+	require.Equal(t, uint64(50), sub.MaxEnabledAgents)
 	require.Equal(t, uint64(500), sub.MaxFollowedUsers)
 	require.Equal(t, uint64(500), sub.MaxFollowedTopics)
 	require.Equal(t, uint64(500), sub.MaxBlockedUsers)
@@ -664,7 +764,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 	// Agent tier (index 2)
 	agent := tiers[2]
 	require.Equal(t, uint64(200_000_000_000), agent.PeriodFee)
-	require.Equal(t, uint64(500), agent.MaxEnabledAgents)
+	require.Equal(t, uint64(50), agent.MaxEnabledAgents)
 	require.Equal(t, uint64(500), agent.MaxFollowedUsers)
 	require.Equal(t, uint64(500), agent.MaxFollowedTopics)
 	require.Equal(t, uint64(500), agent.MaxBlockedUsers)

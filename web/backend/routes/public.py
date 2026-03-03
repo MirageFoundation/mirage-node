@@ -3040,7 +3040,7 @@ def get_circulation_stats():
 # ---- get_chain_config: chain governance params only ----
 _CHAIN_CONFIG_CACHE: Optional[Dict[str, Any]] = None
 _CHAIN_CONFIG_CACHE_TIME: float = 0.0
-_CHAIN_CONFIG_CACHE_TTL: float = 86400.0  # 24 hours — governance changes are rare
+_CHAIN_CONFIG_CACHE_TTL: float = 300.0  # 5 minutes — match load_params TTL
 
 
 @public_bp.route("/api/get_chain_config")

@@ -14,6 +14,7 @@ from shared.datatypes import (
     MsgSetUsername,
     MsgEnableAgent,
     MsgDisableAgent,
+    MsgSetAgents,
     MsgFollowUser,
     MsgUnfollowUser,
     MsgFollowTopic,
@@ -83,6 +84,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
     "/mirage.core.v1.MsgEnableAgent": MsgEnableAgent,
     "/mirage.core.v1.MsgDisableAgent": MsgDisableAgent,
+    "/mirage.core.v1.MsgSetAgents": MsgSetAgents,
     "/mirage.core.v1.MsgFollowUser": MsgFollowUser,
     "/mirage.core.v1.MsgUnfollowUser": MsgUnfollowUser,
     "/mirage.core.v1.MsgFollowTopic": MsgFollowTopic,
@@ -129,6 +131,8 @@ class MessageProcessor:
             self._handle_enable_agent(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgDisableAgent":
             self._handle_disable_agent(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgSetAgents":
+            self._handle_set_agents(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgFollowUser":
             self._handle_follow_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgUnfollowUser":
@@ -1148,6 +1152,20 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
+
+    def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgSetAgents."""
+        try:
+            parsed = MsgSetAgents()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
+            if not owner:
+                logger.warning("Rejected set_agents: missing owner")
+                return
+            self._refresh_enabled_agents(owner, ts)
+        except Exception as e:
+            logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""

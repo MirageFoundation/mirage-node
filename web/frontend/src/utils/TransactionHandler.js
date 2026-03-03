@@ -1103,6 +1103,44 @@ class TransactionHandler {
         });
     }
 
+    setAgents(agents) {
+        const publicKey = Storage.load("publicKey", "");
+        const seedPhrase = seedVault.getSeed() || "";
+        if (!publicKey || !seedPhrase) {
+            updateNotification("Not logged in");
+            return Promise.resolve({ success: false, error: "Not logged in" });
+        }
+
+        if (!Array.isArray(agents)) {
+            return Promise.resolve({ success: false, error: "agents must be an array" });
+        }
+
+        const normalized = agents.map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
+
+        const queuePosition = this.totalTransactions + 1;
+        this.pendingAgents.set('__set_agents__', { action: 'set_agents', agents: normalized, queuePosition });
+        this._notifyAgentListeners();
+        console.debug("[agents] enqueue set_agents", { count: normalized.length, queuePosition });
+
+        const baseTx = {
+            action: 'set_agents',
+            agents: normalized,
+        };
+
+        return new Promise((resolve) => {
+            const wrappedResolve = (result) => {
+                this.pendingAgents.delete('__set_agents__');
+                this._notifyAgentListeners();
+                console.debug("[agents] resolved set_agents", { success: !!result?.success, error: result?.error });
+                resolve(result);
+            };
+            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: '__set_agents__' };
+            this.transactions.push(transaction);
+            this.totalTransactions += 1;
+            this.processTransactions();
+        });
+    }
+
     /**
      * Report a post by txhash with a short reason. Requires PoW for level 0 users.
      * @param {string} txhash
@@ -2083,6 +2121,18 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
+            else if (transaction.action === "set_agents") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    agents: (transaction.agents || []).map(a => String(a).toLowerCase()),
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
             else if (transaction.action === "delete_user") {
                 challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
                 final_transaction = {
@@ -2529,6 +2579,64 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             tag100, encStr(target || ""),
             tag101, encStr(agent || ""),
+        );
+    }
+
+    // Build canonical bytes for MsgSetAgents
+    canonicalSetAgents({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agents }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetAgents\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]);
+        const agentParts = [];
+        for (const a of (agents || [])) {
+            agentParts.push(tag101, encStr(a));
+        }
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            ...agentParts,
         );
     }
 
@@ -3258,6 +3366,7 @@ class TransactionHandler {
             else if (action === 'create_post' || action === 'create_comment') msgName = 'MsgPost';
             else if (action === 'enable_agent') msgName = 'MsgEnableAgent';
             else if (action === 'disable_agent') msgName = 'MsgDisableAgent';
+            else if (action === 'set_agents') msgName = 'MsgSetAgents';
             else if (action === 'follow_user') msgName = 'MsgFollowUser';
             else if (action === 'unfollow_user') msgName = 'MsgUnfollowUser';
             else if (action === 'follow_topic') msgName = 'MsgFollowTopic';
@@ -3376,6 +3485,33 @@ class TransactionHandler {
                     pow: Number(proof),
                 };
                 endpoint = 'core/disable_agent';
+            } else if (msgName === 'MsgSetAgents') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const targetLower = signerAddress.toLowerCase();
+                const agentsLower = (transaction.agents || []).map(a => String(a).toLowerCase());
+                const canon = this.canonicalSetAgents({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: targetLower,
+                    agents: agentsLower,
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    agents: agentsLower,
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/set_agents';
             } else if (msgName === 'MsgFollowUser') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();
@@ -4630,6 +4766,26 @@ class TransactionHandler {
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.agent || "").toLowerCase()),
                 );
+            } else if (action === 'set_agents') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetAgents\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag100 = Uint8Array.from([100]);
+                const tag101 = Uint8Array.from([101]);
+                const agentParts = [];
+                for (const a of (transaction.agents || [])) {
+                    agentParts.push(tag101, encStr(String(a).toLowerCase()));
+                }
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag100, encStr(signerAddress.toLowerCase()),
+                    ...agentParts,
+                );
             } else if (action === 'set_username') {
                 const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetUsername\x00");
                 const tag2 = Uint8Array.from([2]);
@@ -4913,7 +5069,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

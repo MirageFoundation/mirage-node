@@ -388,34 +388,10 @@ const Mono = styled.span`
     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 `;
 
-// Static tier metadata (names and features). Fees come from blockchain.
-const TIER_METADATA = [
-    {
-        level: 0,
-        name: 'Free',
-        features: [
-            'Basic posting'
-        ]
-    },
-    {
-        level: 1,
-        name: 'Subscriber',
-        features: [
-            'Remove anonymous prefix',
-            'Profile biography, avatar & banner',
-            'Higher vote weight'
-        ]
-    },
-    {
-        level: 10,
-        name: 'Agent',
-        features: [
-            'Everything in Subscriber, plus:',
-            'Listed as a selectable agent on the Agents page',
-            'Moderate manually or automate with a bot via the API',
-            'Edit, translate, tag, or hide posts — your followers see your version'
-        ]
-    }
+const TIERS = [
+    { level: 0, name: 'Free' },
+    { level: 1, name: 'Subscriber' },
+    { level: 10, name: 'Agent' }
 ];
 
 // Map user level to tier array index (chain stores 3 tiers at indices 0,1,2)
@@ -427,38 +403,59 @@ const levelToTierIndex = (level) => {
     return -1;
 };
 
-// Build tier display info from chain tiers and static metadata
 const buildTierConfig = (chainTiers) => {
-    return TIER_METADATA.map((meta, idx) => {
+    return TIERS.map((meta) => {
         const tierIdx = levelToTierIndex(meta.level);
         const chainTier = (tierIdx >= 0 && tierIdx < chainTiers.length) ? chainTiers[tierIdx] : {};
         const periodFeeUmirage = Number(chainTier.period_fee || 0);
-        const maxContent = Number(chainTier.max_content_length || 0);
-        const maxTopics = Number(chainTier.max_followed_topics || 0);
-        const maxUsers = Number(chainTier.max_followed_users || 0);
 
-        const prefixFeatures = [];
-        if (meta.level !== 10) {
-            if (meta.level === 0) {
-                prefixFeatures.push('PoW for transactions');
-            } else {
-                prefixFeatures.push('Instant posting');
-            }
-            if (maxContent > 0) prefixFeatures.push(`Up to ${maxContent.toLocaleString()} characters`);
-            if (maxTopics > 0 || maxUsers > 0) {
-                const parts = [];
-                if (maxTopics > 0) parts.push(`${maxTopics} topics`);
-                if (maxUsers > 0) parts.push(`${maxUsers} users`);
-                prefixFeatures.push(`Follow up to ${parts.join(' and ')}`);
-            }
+        const num = (key) => {
+            const v = Number(chainTier[key] ?? 0);
+            return Number.isFinite(v) && v > 0 ? v : 0;
+        };
+        const maxContent = num('max_content_length');
+        const maxTopics = num('max_followed_topics');
+        const maxUsers = num('max_followed_users');
+        const maxAgents = num('max_enabled_agents');
+        const voteWeight = num('vote_weight');
+
+        const followParts = [];
+        if (maxTopics > 0) followParts.push(`${maxTopics} topics`);
+        if (maxUsers > 0) followParts.push(`${maxUsers} users`);
+
+        let features;
+        if (meta.level === 0) {
+            features = [
+                'PoW for transactions',
+                maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
+                followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`,
+                maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents',
+                'Basic posting'
+            ];
+        } else if (meta.level === 1) {
+            features = [
+                "Remove 'Anon-' prefix",
+                'Instant posting',
+                maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
+                followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`,
+                maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents',
+                'Profile biography, avatar & banner',
+                voteWeight > 1 ? `${voteWeight}x vote weight` : 'Higher vote weight'
+            ];
+        } else {
+            features = [
+                'Everything in Subscriber, plus:',
+                'Listed as a selectable agent on the Agents page',
+                'Moderate manually or automate with a bot via the API',
+                'Edit, translate, tag, or hide posts — your followers see your version'
+            ];
         }
-        const features = [...prefixFeatures, ...meta.features];
 
         return {
             level: meta.level,
             name: meta.name,
             periodFeeUmirage,
-            features,
+            features: features.filter(Boolean),
             chainTier
         };
     });

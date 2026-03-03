@@ -1429,7 +1429,7 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 	// Validate core fields (need to get agents count for validation)
 	agents, _ := am.k.GetProfileEnabledAgents(sdkCtx, owner)
 	tierConfig := params.GetTierConfig(int(core.Level))
-	maxAgents := uint64(25)
+	maxAgents := uint64(5)
 	if tierConfig != nil {
 		maxAgents = tierConfig.MaxEnabledAgents
 	}
@@ -1643,7 +1643,7 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
-	maxAgents := 25
+	maxAgents := 5
 	if tierConfig != nil {
 		maxAgents = int(tierConfig.MaxEnabledAgents)
 	}
@@ -1757,6 +1757,98 @@ func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent
 	}
 
 	return &types.MsgDisableAgentResponse{}, nil
+}
+
+// SetAgents atomically replaces the user's enabled agents list (ordered).
+func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*types.MsgSetAgentsResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("SetAgents: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		if derived != target {
+			return nil, fmt.Errorf("envelope_pubkey must derive to target")
+		}
+		owner = target
+	}
+
+	var userLevel int
+	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+		var core types.ProfileCore
+		_ = json.Unmarshal(bz, &core)
+		userLevel = int(core.Level)
+	}
+	tierConfig := params.GetTierConfig(userLevel)
+	maxAgents := 5
+	if tierConfig != nil {
+		maxAgents = int(tierConfig.MaxEnabledAgents)
+	}
+
+	agents := req.GetAgents()
+	if len(agents) > maxAgents {
+		return nil, fmt.Errorf("too many agents: %d > %d", len(agents), maxAgents)
+	}
+
+	seen := make(map[string]struct{}, len(agents))
+	normalized := make([]string, 0, len(agents))
+	for _, a := range agents {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if _, err := sdk.AccAddressFromBech32(a); err != nil {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("SetAgents: invalid agent address", "address", a)
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid agent address: %s", a)
+		}
+		if _, dup := seen[a]; dup {
+			return nil, fmt.Errorf("duplicate agent: %s", a)
+		}
+		seen[a] = struct{}{}
+		normalized = append(normalized, a)
+	}
+
+	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, normalized); err != nil {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("SetAgents: failed to save enabled agents", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, err
+	}
+
+	if _, found, _ := am.k.GetProfileCore(sdkCtx, owner); !found {
+		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
+			return nil
+		}); err != nil {
+			sdkCtx.Logger().Error("SetAgents: failed to create profile", "owner", owner, "err", err.Error())
+		}
+	}
+
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("SetAgents: agents set", "owner", owner, "count", len(normalized))
+	sdkCtx.Logger().Info(logDelimiter)
+
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgSetAgentsResponse{}, nil
 }
 
 // BlockPost blocks a post txhash (persisted on-chain)

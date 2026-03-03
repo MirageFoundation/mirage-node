@@ -94,39 +94,70 @@ def detect_upgrade_name() -> str | None:
 
 EXPECTED_TIERS = [
     {
-        "level": 0, "name": "Free",
+        "level": 0,
+        "name": "Free",
         "period_fee": 0,
-        "max_enabled_agents": 25, "max_followed_users": 25, "max_followed_topics": 25,
-        "max_blocked_users": 25, "max_blocked_posts": 25, "max_blocked_topics": 25,
-        "max_title_length": 150, "max_content_length": 1000, "editing_time_mins": 10,
+        "max_enabled_agents": 5,
+        "max_followed_users": 25,
+        "max_followed_topics": 25,
+        "max_blocked_users": 25,
+        "max_blocked_posts": 25,
+        "max_blocked_topics": 25,
+        "max_title_length": 150,
+        "max_content_length": 1000,
+        "editing_time_mins": 10,
         "vote_weight": 1.0,
-        "can_be_agent": False, "can_remove_anon": False,
-        "can_have_biography": False, "can_have_avatar": False,
-        "can_have_banner": False, "can_have_flair": False,
+        "can_be_agent": False,
+        "can_remove_anon": False,
+        "can_have_biography": False,
+        "can_have_avatar": False,
+        "can_have_banner": False,
+        "can_have_flair": False,
     },
     {
-        "level": 1, "name": "Subscriber",
+        "level": 1,
+        "name": "Subscriber",
         "period_fee": 100_000_000_000,
-        "max_enabled_agents": 500, "max_followed_users": 500, "max_followed_topics": 500,
-        "max_blocked_users": 500, "max_blocked_posts": 500, "max_blocked_topics": 500,
-        "max_title_length": 300, "max_content_length": 20_000, "editing_time_mins": 360,
+        "max_enabled_agents": 50,
+        "max_followed_users": 500,
+        "max_followed_topics": 500,
+        "max_blocked_users": 500,
+        "max_blocked_posts": 500,
+        "max_blocked_topics": 500,
+        "max_title_length": 300,
+        "max_content_length": 20_000,
+        "editing_time_mins": 360,
         "vote_weight": 1.33,
-        "can_be_agent": False, "can_remove_anon": True,
-        "can_have_biography": True, "can_have_avatar": True,
-        "can_have_banner": True, "can_have_flair": True,
+        "can_be_agent": False,
+        "can_remove_anon": True,
+        "can_have_biography": True,
+        "can_have_avatar": True,
+        "can_have_banner": True,
+        "can_have_flair": True,
     },
     {
-        "level": 10, "name": "Agent",
+        "level": 10,
+        "name": "Agent",
         "period_fee": 200_000_000_000,
-        "max_enabled_agents": 500, "max_followed_users": 500, "max_followed_topics": 500,
-        "max_blocked_users": 500, "max_blocked_posts": 500, "max_blocked_topics": 500,
-        "max_title_length": 300, "max_content_length": 20_000, "editing_time_mins": 360,
+        "max_enabled_agents": 50,
+        "max_followed_users": 500,
+        "max_followed_topics": 500,
+        "max_blocked_users": 500,
+        "max_blocked_posts": 500,
+        "max_blocked_topics": 500,
+        "max_title_length": 300,
+        "max_content_length": 20_000,
+        "editing_time_mins": 360,
         "vote_weight": 1.33,
-        "can_be_agent": True, "can_remove_anon": True,
-        "can_have_biography": True, "can_have_avatar": True,
-        "can_have_banner": True, "can_have_flair": True,
+        "can_be_agent": True,
+        "can_remove_anon": True,
+        "can_have_biography": True,
+        "can_have_avatar": True,
+        "can_have_banner": True,
+        "can_have_flair": True,
     },
 ]
+
 
 def is_valid_level(level: int) -> bool:
     return level in (0, 1, 10) or level >= 100
@@ -223,13 +254,23 @@ def check_core_params() -> None:
     ok(f"Tier count: {len(tiers)}")
 
     int_fields = [
-        "max_enabled_agents", "max_followed_users", "max_followed_topics",
-        "max_blocked_users", "max_blocked_posts", "max_blocked_topics",
-        "max_title_length", "max_content_length", "editing_time_mins",
+        "max_enabled_agents",
+        "max_followed_users",
+        "max_followed_topics",
+        "max_blocked_users",
+        "max_blocked_posts",
+        "max_blocked_topics",
+        "max_title_length",
+        "max_content_length",
+        "editing_time_mins",
     ]
     bool_fields = [
-        "can_be_agent", "can_remove_anon", "can_have_biography",
-        "can_have_avatar", "can_have_banner", "can_have_flair",
+        "can_be_agent",
+        "can_remove_anon",
+        "can_have_biography",
+        "can_have_avatar",
+        "can_have_banner",
+        "can_have_flair",
     ]
 
     for i, expected in enumerate(EXPECTED_TIERS):
@@ -361,7 +402,7 @@ def main() -> int:
         idx = args.index("--upgrade-name")
         if idx + 1 < len(args):
             upgrade_name = args[idx + 1]
-            args = args[:idx] + args[idx + 2:]
+            args = args[:idx] + args[idx + 2 :]
 
     if not upgrade_name:
         upgrade_name = detect_upgrade_name()

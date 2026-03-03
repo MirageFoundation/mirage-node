@@ -280,44 +280,40 @@ export default function AgentsView({ state }) {
             setErrorMessage('Unable to determine agent limit. Please refresh.');
             return;
         }
-        if (!isEnabled(addr) && maxEnabledAgents <= 0) {
-            setErrorMessage('Your tier cannot enable agents.');
-            return;
+
+        const baseOrder = draftDirty ? draftOrder : enabledOrder;
+        const normalizedBase = normalizeOrder(baseOrder);
+        const wasEnabled = normalizedBase.includes(addr);
+        let newList;
+        if (wasEnabled) {
+            newList = normalizedBase.filter(a => a !== addr);
+        } else {
+            if (normalizedBase.length >= maxEnabledAgents) {
+                setErrorMessage(`Enabled agents limit reached (${maxEnabledAgents}). Disable one first.`);
+                return;
+            }
+            newList = [...normalizedBase, addr];
         }
 
-        const wasEnabled = isEnabled(addr);
         try {
-            if (wasEnabled) {
-                const result = await tx.disableAgent(addr);
-                if (result?.success && mountedRef.current) {
-                    setEnabledOrder(prev => prev.filter(a => a !== addr));
-                    setDraftOrder(prev => prev.filter(a => a !== addr));
-                } else {
-                    setErrorMessage(result?.error || 'Failed to disable agent.');
-                }
+            const result = await tx.setAgents(newList);
+            if (result?.success && mountedRef.current) {
+                setEnabledOrder(newList);
+                setDraftOrder(newList);
+                setDraftDirty(false);
             } else {
-                if (enabledOrder.length >= maxEnabledAgents) {
+                const errText = String(result?.error || 'Failed to update agents.');
+                const lower = errText.toLowerCase();
+                if (lower.includes('limit') || lower.includes('too many agents')) {
                     setErrorMessage(`Enabled agents limit reached (${maxEnabledAgents}). Disable one first.`);
-                    return;
-                }
-                const result = await tx.enableAgent(addr);
-                if (result?.success && mountedRef.current) {
-                    setEnabledOrder(prev => (prev.includes(addr) ? prev : [...prev, addr]));
-                    setDraftOrder(prev => (prev.includes(addr) ? prev : [...prev, addr]));
                 } else {
-                    const errText = String(result?.error || 'Failed to enable agent.');
-                    const lower = errText.toLowerCase();
-                    if (lower.includes('limit') || lower.includes('enabled agents')) {
-                        setErrorMessage(`Enabled agents limit reached (${maxEnabledAgents}). Disable one first.`);
-                    } else {
-                        setErrorMessage(errText);
-                    }
+                    setErrorMessage(errText);
                 }
             }
         } catch (err) {
             setErrorMessage(String(err?.message || err || 'Agent update failed.'));
         }
-    }, [isPending, isEnabled, isApplyingOrder, viewerAddress, maxEnabledAgents, enabledOrder.length, enabledOrder, setEnabledOrder, setDraftOrder]);
+    }, [isPending, isEnabled, isApplyingOrder, viewerAddress, maxEnabledAgents, enabledOrder, draftOrder, draftDirty, normalizeOrder, setEnabledOrder, setDraftOrder]);
 
     const ordersEqual = useCallback((a, b) => {
         if (a.length !== b.length) return false;
@@ -367,35 +363,22 @@ export default function AgentsView({ state }) {
         setIsApplyingOrder(true);
         console.debug('[AgentsView] apply order', { from: enabledOrder, to: draftOrder });
 
-        const current = normalizeOrder(enabledOrder);
         const desired = normalizeOrder(draftOrder);
-
-        for (const addr of current) {
-            const result = await tx.disableAgent(addr);
-            if (!result?.success) {
-                setErrorMessage(result?.error || 'Failed to disable agent during reorder.');
-                setIsApplyingOrder(false);
-                await refreshEnabledOrder();
-                return;
+        try {
+            const result = await tx.setAgents(desired);
+            if (result?.success && mountedRef.current) {
+                setDraftDirty(false);
+                setEnabledOrder(desired);
+                setDraftOrder(desired);
+            } else {
+                setErrorMessage(result?.error || 'Failed to reorder agents.');
             }
+        } catch (err) {
+            setErrorMessage(String(err?.message || err || 'Reorder failed.'));
         }
-
-        for (const addr of desired) {
-            const result = await tx.enableAgent(addr);
-            if (!result?.success) {
-                setErrorMessage(result?.error || 'Failed to enable agent during reorder.');
-                setIsApplyingOrder(false);
-                await refreshEnabledOrder();
-                return;
-            }
-        }
-
-        setDraftDirty(false);
-        setEnabledOrder(desired);
-        setDraftOrder(desired);
         setIsApplyingOrder(false);
         await refreshEnabledOrder();
-    }, [viewerAddress, isApplyingOrder, hasDraftChanges, pendingAgents, enabledOrder, draftOrder, refreshEnabledOrder, normalizeOrder]);
+    }, [viewerAddress, isApplyingOrder, hasDraftChanges, pendingAgents, draftOrder, refreshEnabledOrder, normalizeOrder, enabledOrder]);
 
     const displayOrder = draftOrder.length ? draftOrder : enabledOrder;
 

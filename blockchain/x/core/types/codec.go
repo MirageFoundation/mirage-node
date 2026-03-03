@@ -15,7 +15,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	msgTypes := []sdk.Msg{
 		&MsgUpdateParams{},
 		&MsgPost{}, &MsgEdit{}, &MsgVote{}, &MsgSetUsername{},
-		&MsgEnableAgent{}, &MsgDisableAgent{},
+		&MsgEnableAgent{}, &MsgDisableAgent{}, &MsgSetAgents{},
 		&MsgFollowUser{}, &MsgUnfollowUser{},
 		&MsgFollowTopic{}, &MsgUnfollowTopic{},
 		&MsgBlockPost{}, &MsgUnblockPost{},
@@ -36,7 +36,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	msgResponseTypes := []proto.Message{
 		&MsgUpdateParamsResponse{},
 		&MsgPostResponse{}, &MsgEditResponse{}, &MsgVoteResponse{}, &MsgSetUsernameResponse{},
-		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{},
+		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{}, &MsgSetAgentsResponse{},
 		&MsgFollowUserResponse{}, &MsgUnfollowUserResponse{},
 		&MsgFollowTopicResponse{}, &MsgUnfollowTopicResponse{},
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},

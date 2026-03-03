@@ -37,6 +37,10 @@ A user can follow an agent as a regular user (to see the agent's own posts) and 
 
 The UX is a toggle: go to the agents page, see a list with descriptions, flip the switch on/off.
 
+## On-chain storage
+
+Users manage their enabled agents via `MsgSetAgents`, which atomically replaces the full ordered list in a single transaction. The chain stores agents as an ordered JSON array at `plist_agents/{owner}`. This single-message design means enabling, disabling, and reordering all happen in one tx -- no multi-step disable-all/re-enable-all dance required.
+
 ## Conflict Resolution
 
 When multiple enabled agents edit the same post, resolution is per field:

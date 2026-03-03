@@ -59,6 +59,7 @@ from shared.canon import (
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
     canon_base_enable_agent as _canon_base_enable_agent_raw,
     canon_base_disable_agent as _canon_base_disable_agent_raw,
+    canon_base_set_agents as _canon_base_set_agents_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
@@ -89,6 +90,7 @@ from shared.datatypes import (
     MsgUnblockTopic,
     MsgUnblockUser,
     MsgDisableAgent,
+    MsgSetAgents,
     MsgUnfollowTopic,
     MsgUnfollowUser,
     MsgUpgradeLevel,
@@ -897,6 +899,33 @@ def _build_msg_disable_agent(
     msg.envelope_signature = sig
     msg.target = target
     msg.agent = agent
+    return msg
+
+
+def _build_msg_set_agents(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    agents: list[str],
+    pow_val: int = 0,
+) -> MsgSetAgents:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_agents_raw(pub, lb_bytes, diff, ts, target, agents)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetAgents()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    for a in agents:
+        msg.agents.append(a)
     return msg
 
 
@@ -3143,6 +3172,88 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         wait_deliver=True,
     )
     _check_deliver_accept("hardcap.enable_after_disable", ccode, dcode, dlog)
+
+
+    # ── 13.5 SetAgents atomic list replacement ──
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    new_agents = [agent3, agent2]
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, new_agents, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_atomic", ccode, dcode, dlog)
+
+    # Verify order is preserved (indexer should reflect chain state)
+    profile = _get_profile_full(backend, aw_addr)
+    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    if got_agents == [agent3.lower(), agent2.lower()]:
+        _pass("hardcap.set_agents_order_preserved")
+    else:
+        _fail("hardcap.set_agents_order_preserved", f"got={got_agents[:6]}")
+
+    # Idempotent set (same list) should succeed
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent3, agent2], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_idempotent", ccode, dcode, dlog)
+
+    # Duplicate agent should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, agent2], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_duplicate_rejected", ccode, dcode, dlog)
+
+    # Invalid agent address should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, ["invalid_address"], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_invalid_address", ccode, dcode, dlog)
+
+    # ── 13.6 SetAgents clear all ──
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_clear", ccode, dcode, dlog)
+
+    profile = _get_profile_full(backend, aw_addr)
+    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    if got_agents:
+        _fail("hardcap.set_agents_clear_empty", f"count={len(got_agents)}")
+    else:
+        _pass("hardcap.set_agents_clear_empty")
 
 
 def test_upgrade_level_validation(backend: str) -> None:

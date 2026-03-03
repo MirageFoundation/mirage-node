@@ -30,6 +30,7 @@ export function usePendingAgents() {
     }, []);
 
     const isPending = useCallback((agentAddress) => {
+        if (pendingAgents['__set_agents__']) return true;
         const key = String(agentAddress || '').toLowerCase();
         return !!pendingAgents[key];
     }, [pendingAgents]);
@@ -40,12 +41,17 @@ export function usePendingAgents() {
     }, [pendingAgents]);
 
     const formatStatus = useCallback((agentAddress) => {
+        const setInfo = pendingAgents['__set_agents__'];
+        if (setInfo) {
+            const formatted = formatStatusForPosition(setInfo.queuePosition);
+            return formatted || 'Updating...';
+        }
         const info = getInfo(agentAddress);
         if (!info) return null;
         const formatted = formatStatusForPosition(info.queuePosition);
         if (formatted) return formatted;
         return info.action === 'disable' ? 'Disabling...' : 'Enabling...';
-    }, [getInfo, formatStatusForPosition]);
+    }, [getInfo, formatStatusForPosition, pendingAgents]);
 
     return {
         pendingAgents,

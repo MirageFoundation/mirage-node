@@ -125,6 +125,19 @@ def _build_pool():
     add_f(msg_unfollow, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_unfollow, "agent", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # MsgSetAgents
+    msg_set_agents = file_proto.message_type.add()
+    msg_set_agents.name = "MsgSetAgents"
+    add_f(msg_set_agents, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_set_agents, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_set_agents, "agents", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+
     # MsgFollowUser
     msg_follow_user = file_proto.message_type.add()
     msg_follow_user.name = "MsgFollowUser"
@@ -643,6 +656,7 @@ MsgVote = _get_message_class("mirage.core.v1.MsgVote")
 MsgSetUsername = _get_message_class("mirage.core.v1.MsgSetUsername")
 MsgEnableAgent = _get_message_class("mirage.core.v1.MsgEnableAgent")
 MsgDisableAgent = _get_message_class("mirage.core.v1.MsgDisableAgent")
+MsgSetAgents = _get_message_class("mirage.core.v1.MsgSetAgents")
 MsgFollowUser = _get_message_class("mirage.core.v1.MsgFollowUser")
 MsgUnfollowUser = _get_message_class("mirage.core.v1.MsgUnfollowUser")
 MsgFollowTopic = _get_message_class("mirage.core.v1.MsgFollowTopic")

@@ -55,12 +55,14 @@ The subscription model has been simplified to three clear tiers, with a new numb
 ### 4. Protocol Changes
 - **KV Store Migration:** `plist_mods/` prefix migrated to `plist_agents/`.
 - **Message Types:** `MsgFollowModerator` renamed to `MsgEnableAgent`, `MsgUnfollowModerator` to `MsgDisableAgent`.
-- **Legacy Support:** Old message types are still registered for historical block decoding, but new transactions must use the new types.
+- **New: `MsgSetAgents`** — atomically replaces the user's entire ordered enabled agents list in a single transaction. Accepts `repeated string agents = 101` (field 101). Validates addresses, rejects duplicates, enforces `max_enabled_agents` per tier. Replaces the need for separate enable/disable calls when reordering or bulk-updating agents.
+- **Legacy Support:** Old message types (`MsgEnableAgent`, `MsgDisableAgent`) are still registered for historical block decoding. New agent management should use `MsgSetAgents`.
 
 ### 5. Indexer & Backend
 - Indexer automatically migrates `followed_mods` table to `enabled_agents`.
-- Backend endpoints updated to `/api/core/enable_agent` and `/api/core/disable_agent`.
-- Frontend updated to reflect new tier system and Agent terminology.
+- Backend endpoints updated: `/api/core/enable_agent`, `/api/core/disable_agent` (legacy), and new `/api/core/set_agents` (preferred).
+- Indexer handles `MsgSetAgents` by refreshing the enabled_agents list from chain state. Historical `MsgEnableAgent`/`MsgDisableAgent` transactions are still decoded for replay.
+- Frontend updated to reflect new tier system, Agent terminology, and uses `MsgSetAgents` for all agent management.
 
 ## Upgrade Guide
 This is a breaking change. Nodes must upgrade to v1.16.0 binary to continue syncing. The upgrade handler will automatically:

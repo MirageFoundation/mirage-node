@@ -29,6 +29,7 @@ from shared.datatypes import (
     MsgSetUsername,
     MsgEnableAgent,
     MsgDisableAgent,
+    MsgSetAgents,
     MsgFollowUser,
     MsgUnfollowUser,
     MsgFollowTopic,
@@ -62,6 +63,7 @@ from pow import (
     canon_base_set_username,
     canon_base_enable_agent,
     canon_base_disable_agent,
+    canon_base_set_agents,
     canon_base_follow_user,
     canon_base_unfollow_user,
     canon_base_follow_topic,
@@ -982,6 +984,145 @@ def core_disable_agent():
         log_event(rid, "disable_agent.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/set_agents", methods=["POST"])
+def core_set_agents():
+    rid = next_request_id()
+    log_event(rid, "set_agents.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        log_event(rid, "set_agents.data", data=data)
+        pub_b64 = str(data.get("pubkey", "").strip())
+        sig_b64 = str(data.get("signature", "").strip())
+        agents_raw = data.get("agents")
+        if not isinstance(agents_raw, list):
+            return jsonify({"error": "agents must be an array"}), 400
+        agents = [str(a).strip().lower() for a in agents_raw]
+        last_block_hash = str(data.get("last_block_hash", "").strip())
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        if not (pub_b64 and sig_b64):
+            return jsonify({"error": "missing required fields"}), 400
+
+        for a in agents:
+            if not _is_valid_mirage_addr(a):
+                return jsonify({"error": f"invalid agent address: {a}"}), 400
+
+        seen = set()
+        for a in agents:
+            if a in seen:
+                return jsonify({"error": f"duplicate agent: {a}"}), 400
+            seen.add(a)
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields"}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        # Enforce max_enabled_agents from chain params (fail hard if missing)
+        params = expect_params()
+        tiers = params.get("tiers")
+        if not isinstance(tiers, list) or not tiers:
+            return jsonify({"error": "missing tier config"}), 500
+
+        profile = _query_chain_profile_full(user_addr)
+        if not profile or "level" not in profile:
+            return jsonify({"error": "missing profile level"}), 500
+        user_level = int(profile.get("level"))
+
+        tier_cfg = None
+        for t in tiers:
+            if int(t.get("level", -1)) == user_level:
+                tier_cfg = t
+                break
+        if tier_cfg is None:
+            return jsonify({"error": f"missing tier config for level {user_level}"}), 500
+        if "max_enabled_agents" not in tier_cfg:
+            return jsonify({"error": "missing max_enabled_agents"}), 500
+        max_agents = int(tier_cfg.get("max_enabled_agents"))
+        if len(agents) > max_agents:
+            log_event(rid, "set_agents.limit_exceeded", count=len(agents), max=max_agents)
+            return jsonify({"error": f"too many agents: {len(agents)} > {max_agents}"}), 400
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        if not is_subscriber(user_addr):
+            required = _min_required_difficulty()
+            if int(difficulty) < int(required):
+                return jsonify({"error": "insufficient pow (precheck)"}), 400
+            if not _is_hex64(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
+            if not is_valid_recent_block_hash(last_block_hash):
+                return jsonify({"error": "invalid last_block_hash"}), 400
+            try:
+                base = canon_base_set_agents(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents)
+                digest = argon2_digest(base, last_block_hash, proof)
+                if digest is not None and not check_pow_target(
+                    digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
+                ):
+                    return jsonify({"error": "insufficient pow (precheck)"}), 400
+            except Exception:
+                pass
+        else:
+            if int(difficulty) > 0 or int(proof) > 0:
+                return jsonify({"error": "pow not allowed for subscribers"}), 400
+
+        msg = MsgSetAgents()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = timestamp
+        msg.envelope_signature = sig_dec
+        msg.target = user_addr
+        for a in agents:
+            msg.agents.append(a)
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgSetAgents"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        payload_size = sum(len(a) for a in agents)
+        gas_est = int(estimate_total_gas_limit(body_bytes, payload_size))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "user_addr": user_addr,
+                "agents": agents,
+                "last_block_hash": last_block_hash,
+                "difficulty": int(difficulty),
+                "proof": int(proof),
+            }
+            return _tx_error(rid, "core/set_agents", "MsgSetAgents", code, tx_hash, raw_log, extra)
+        log_event(rid, "set_agents.ok", tx_hash=tx_hash, count=len(agents))
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "set_agents.err", error=str(e))
+        msg_str, status = _classify_exception(str(e))
+        return jsonify({"error": msg_str}), status
 
 
 @core_bp.route("/api/core/block_post", methods=["POST"])
@@ -3255,7 +3396,10 @@ def core_upgrade_level():
             return jsonify({"error": "missing required fields"}), 400
 
         if level not in (1, 10):
-            return jsonify({"error": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)"}), 400
+            return (
+                jsonify({"error": "invalid level (must be 1 or 10; use set_auto_renewal to change auto-renewal)"}),
+                400,
+            )
 
         pub_dec = base64.b64decode(pub_b64)
         sig_dec = base64.b64decode(sig_b64)

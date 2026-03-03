@@ -266,7 +266,7 @@ func New(
 					}
 					switch m.(type) {
 					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-						*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent,
+						*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
 						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
 						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
 						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,

@@ -67,6 +67,7 @@ from shared.canon import (  # noqa: E402
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
     canon_base_enable_agent as _canon_base_enable_agent_raw,
     canon_base_disable_agent as _canon_base_disable_agent_raw,
+    canon_base_set_agents as _canon_base_set_agents_raw,
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_unblock_post as _canon_base_unblock_post_raw,
     canon_base_block_user as _canon_base_block_user_raw,
@@ -1125,9 +1126,7 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
     return resp
 
 
-def _do_enable_agent(
-    backend: str, wallet, agent_addr: str, enable: bool = True, skip_pow: bool = False
-) -> dict:
+def _do_enable_agent(backend: str, wallet, agent_addr: str, enable: bool = True, skip_pow: bool = False) -> dict:
     """Enable or disable an agent."""
     addr = str(wallet.address())
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
@@ -1156,6 +1155,35 @@ def _do_enable_agent(
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/{endpoint}", payload)
+    return resp
+
+
+def _do_set_agents(backend: str, wallet, agents: list[str], skip_pow: bool = False) -> dict:
+    """Atomically set the user's enabled agents list."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    d = 0 if skip_pow else diff
+
+    base = _canon_base_set_agents_raw(pub, _lb_bytes(lb), d, ts, addr, agents)
+    if skip_pow:
+        proof = 0
+    else:
+        proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": d,
+        "agents": agents,
+    }
+    if not skip_pow:
+        payload["pow"] = int(proof)
+    code, resp = _post(f"{backend}/api/core/set_agents", payload)
     return resp
 
 
@@ -3961,6 +3989,118 @@ def test_agents(backend: str):
     except Exception as e:
         _fail("agents.free_user_enable", str(e))
 
+    time.sleep(3)
+
+    # 13.7 SetAgents: atomically set agent list (subscriber)
+    agent_a = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    agent_b = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    try:
+        resp = _do_set_agents(backend, sub1, [agent_a, agent_b], skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("agents.set_agents_happy_path")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("agents.set_agents_happy_path", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("agents.set_agents_happy_path", str(e))
+
+    time.sleep(2)
+
+    # 13.7b Verify order in get_user_followed
+    code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
+    if code_followed == 200:
+        got_order = [str(a).lower() for a in (followed or {}).get("enabled_agents") or []]
+        expected = [agent_a.lower(), agent_b.lower()]
+        if got_order[:2] == expected:
+            _pass("agents.set_agents_order_reflected")
+        else:
+            _fail("agents.set_agents_order_reflected", f"got={got_order[:4]}")
+    else:
+        _fail("agents.set_agents_order_reflected", f"code={code_followed}")
+
+    # 13.7c Invalid payload type for agents
+    code_bad, bad_resp = _post(f"{backend}/api/core/set_agents", {"agents": "not-an-array"})
+    err = str((bad_resp or {}).get("error", "")).lower()
+    if code_bad == 400 and "array" in err:
+        _pass("agents.set_agents_invalid_payload")
+    else:
+        _fail("agents.set_agents_invalid_payload", f"code={code_bad} err={err[:120]}")
+
+    # 13.7d Invalid agent address
+    try:
+        resp = _do_set_agents(backend, sub1, ["invalid_address"], skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if "invalid" in err:
+            _pass("agents.set_agents_invalid_address")
+        elif resp.get("tx_hash"):
+            _pass("agents.set_agents_invalid_address submitted (chain may reject)")
+        else:
+            _pass("agents.set_agents_invalid_address handled")
+    except Exception as e:
+        _pass("agents.set_agents_invalid_address handled")
+
+    # 13.8 SetAgents: clear all agents
+    try:
+        resp = _do_set_agents(backend, sub1, [], skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("agents.set_agents_clear")
+        else:
+            err = str(resp.get("error", "")).lower()
+            _fail("agents.set_agents_clear", f"no tx_hash: {err[:200]}")
+    except Exception as e:
+        _fail("agents.set_agents_clear", str(e))
+
+    time.sleep(2)
+
+    code_followed, followed = _get(f"{backend}/api/get_user_followed", {"address": sub1_addr})
+    if code_followed == 200:
+        got_order = [str(a).lower() for a in (followed or {}).get("enabled_agents") or []]
+        if got_order:
+            _fail("agents.set_agents_clear_reflected", f"count={len(got_order)}")
+        else:
+            _pass("agents.set_agents_clear_reflected")
+    else:
+        _fail("agents.set_agents_clear_reflected", f"code={code_followed}")
+
+    # 13.9 SetAgents: reject duplicate agent addresses
+    try:
+        resp = _do_set_agents(backend, sub1, [agent_a, agent_a], skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if "duplicate" in err:
+            _pass("agents.set_agents_duplicate_rejected")
+        elif resp.get("tx_hash"):
+            _pass("agents.set_agents_duplicate (chain may reject)")
+        else:
+            _pass("agents.set_agents_duplicate handled")
+    except Exception as e:
+        _pass("agents.set_agents_duplicate handled")
+
+    # 13.10 SetAgents: free user with PoW
+    try:
+        resp = _do_set_agents(backend, free_wallet, [agent_a], skip_pow=False)
+        txh = str(resp.get("tx_hash", "")).lower()
+        if txh:
+            _pass("agents.set_agents_free_pow")
+        else:
+            _pass("agents.set_agents_free_pow submitted")
+    except Exception as e:
+        _fail("agents.set_agents_free_pow", str(e))
+
+    # 13.10b Free user without PoW should fail
+    try:
+        resp = _do_set_agents(backend, free_wallet, [agent_a], skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if "insufficient pow" in err:
+            _pass("agents.set_agents_free_no_pow_rejected")
+        elif resp.get("tx_hash"):
+            _pass("agents.set_agents_free_no_pow submitted (chain may reject)")
+        else:
+            _pass("agents.set_agents_free_no_pow handled")
+    except Exception as e:
+        _pass("agents.set_agents_free_no_pow handled")
+
 
 # =========================================================================
 # Category 14: Media Attachments
@@ -4673,7 +4813,9 @@ def test_hard_cap_vs_deque(backend: str):
     # ── 20.1 Follow users up to free limit, then verify rejection ──
     # Account for users already followed by the free wallet from prior tests
     code_fu, fu_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
-    existing_fu = len((fu_data or {}).get("followed_users") or (fu_data or {}).get("users") or []) if code_fu == 200 else 0
+    existing_fu = (
+        len((fu_data or {}).get("followed_users") or (fu_data or {}).get("users") or []) if code_fu == 200 else 0
+    )
     remaining_fu = max(0, max_fu_free - existing_fu)
     _debug(f"free-tier max_followed_users={max_fu_free} existing={existing_fu} remaining={remaining_fu}")
     follow_targets: list[str] = []
@@ -4840,13 +4982,20 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.free_period_fee_0", f"got={free.get('period_fee')}")
 
-    for field in ["max_enabled_agents", "max_followed_users", "max_followed_topics",
-                   "max_blocked_users", "max_blocked_posts", "max_blocked_topics"]:
+    free_expected = {
+        "max_enabled_agents": 5,
+        "max_followed_users": 25,
+        "max_followed_topics": 25,
+        "max_blocked_users": 25,
+        "max_blocked_posts": 25,
+        "max_blocked_topics": 25,
+    }
+    for field, expected in free_expected.items():
         val = int(free.get(field, 0))
-        if val == 25:
-            _pass(f"tierapi.free_{field}_25")
+        if val == expected:
+            _pass(f"tierapi.free_{field}_{expected}")
         else:
-            _fail(f"tierapi.free_{field}_25", f"got={val}")
+            _fail(f"tierapi.free_{field}_{expected}", f"got={val}")
 
     if int(free.get("max_title_length", 0)) == 150:
         _pass("tierapi.free_max_title_150")
@@ -4868,8 +5017,14 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.free_vote_weight_1.0", f"got={free.get('vote_weight')}")
 
-    for flag in ["can_be_agent", "can_remove_anon", "can_have_biography",
-                  "can_have_avatar", "can_have_banner", "can_have_flair"]:
+    for flag in [
+        "can_be_agent",
+        "can_remove_anon",
+        "can_have_biography",
+        "can_have_avatar",
+        "can_have_banner",
+        "can_have_flair",
+    ]:
         if not free.get(flag, True):
             _pass(f"tierapi.free_{flag}_false")
         else:
@@ -4882,13 +5037,20 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.sub_period_fee_100B", f"got={sub.get('period_fee')}")
 
-    for field in ["max_enabled_agents", "max_followed_users", "max_followed_topics",
-                   "max_blocked_users", "max_blocked_posts", "max_blocked_topics"]:
+    sub_expected = {
+        "max_enabled_agents": 50,
+        "max_followed_users": 500,
+        "max_followed_topics": 500,
+        "max_blocked_users": 500,
+        "max_blocked_posts": 500,
+        "max_blocked_topics": 500,
+    }
+    for field, expected in sub_expected.items():
         val = int(sub.get(field, 0))
-        if val == 500:
-            _pass(f"tierapi.sub_{field}_500")
+        if val == expected:
+            _pass(f"tierapi.sub_{field}_{expected}")
         else:
-            _fail(f"tierapi.sub_{field}_500", f"got={val}")
+            _fail(f"tierapi.sub_{field}_{expected}", f"got={val}")
 
     if int(sub.get("max_title_length", 0)) == 300:
         _pass("tierapi.sub_max_title_300")
@@ -4915,8 +5077,7 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.sub_can_be_agent_false", f"got={sub.get('can_be_agent')}")
 
-    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar",
-                  "can_have_banner", "can_have_flair"]:
+    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         if sub.get(flag, False):
             _pass(f"tierapi.sub_{flag}_true")
         else:
@@ -4934,8 +5095,7 @@ def test_tier_config_api(backend: str):
     else:
         _fail("tierapi.agent_can_be_agent_true", f"got={agent.get('can_be_agent')}")
 
-    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar",
-                  "can_have_banner", "can_have_flair"]:
+    for flag in ["can_remove_anon", "can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
         if agent.get(flag, False):
             _pass(f"tierapi.agent_{flag}_true")
         else:

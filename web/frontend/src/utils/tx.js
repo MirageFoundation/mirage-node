@@ -150,6 +150,11 @@ export async function disableAgent(agentAddress) {
     return h.disableAgent(agentAddress);
 }
 
+export async function setAgents(agents) {
+    const h = await getHandler();
+    return h.setAgents(agents);
+}
+
 export function needsChainConfigRefresh() {
     if (_chainConfigFetchClaimed) return false;
     let stale = false;

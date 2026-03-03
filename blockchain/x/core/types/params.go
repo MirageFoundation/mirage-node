@@ -43,7 +43,7 @@ func DefaultTiers() []*TierConfig {
 		// Index 0 — Level 0: Free
 		{
 			PeriodFee:         0,
-			MaxEnabledAgents:  25,
+			MaxEnabledAgents:  5,
 			MaxFollowedUsers:  25,
 			MaxFollowedTopics: 25,
 			MaxBlockedUsers:   25,
@@ -63,7 +63,7 @@ func DefaultTiers() []*TierConfig {
 		// Index 1 — Level 1: Subscriber (100B umirage)
 		{
 			PeriodFee:         100_000_000_000,
-			MaxEnabledAgents:  500,
+			MaxEnabledAgents:  50,
 			MaxFollowedUsers:  500,
 			MaxFollowedTopics: 500,
 			MaxBlockedUsers:   500,
@@ -83,7 +83,7 @@ func DefaultTiers() []*TierConfig {
 		// Index 2 — Level 10: Agent (200B umirage)
 		{
 			PeriodFee:         200_000_000_000,
-			MaxEnabledAgents:  500,
+			MaxEnabledAgents:  50,
 			MaxFollowedUsers:  500,
 			MaxFollowedTopics: 500,
 			MaxBlockedUsers:   500,
