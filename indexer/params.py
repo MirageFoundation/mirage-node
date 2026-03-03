@@ -94,8 +94,10 @@ def _build_cache_from_params(p: dict) -> dict[str, Any]:
     result["min_content_size"] = 0
 
     # Build vote weight lookup: {level: weight}
-    vote_weights = {i: float(t.get("vote_weight", 1.0)) for i, t in enumerate(tiers)}
-    vote_weights[100] = vote_weights[len(tiers) - 1]  # admin = highest tier
+    # Tier index → user level: 0→0, 1→1, 2→10
+    _idx_to_level = {0: 0, 1: 1, 2: 10}
+    vote_weights = {_idx_to_level.get(i, i): float(t.get("vote_weight", 1.0)) for i, t in enumerate(tiers)}
+    vote_weights[100] = vote_weights[10]  # admin = agent-tier weight
     result["vote_weights"] = vote_weights
 
     # Award configs
