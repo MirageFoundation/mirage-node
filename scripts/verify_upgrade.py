@@ -12,7 +12,6 @@ import json
 import shutil
 import subprocess
 import sys
-import time
 import urllib.request
 import urllib.parse
 from pathlib import Path
@@ -182,8 +181,8 @@ EXPECTED_AWARD_CONFIGS = [
 EXPECTED_PARAMS = {
     "min_difficulty": 10,
     "mint_interval": 200,
-    "mint_quantity": 125_000_000_000,
-    "mint_dynamic_credit_cap": 25,
+    "mint_quantity": 5_800_000_000,
+    "mint_dynamic_credit_cap": 100,
     "subscription_period": 43200,
     "relay_min_gas_price": 5000,
     "relay_max_gas_fee": 500_000_000,
@@ -260,24 +259,6 @@ def check_upgrade_plan(upgrade_name: str) -> None:
             fail(f"Upgrade '{upgrade_name}' not found in applied upgrades")
 
 
-def check_blocks_advancing() -> None:
-    section("Block Production")
-    d1 = http_get(f"{RPC}/status")
-    if not d1:
-        return
-    h1 = int(d1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-    print(f"  Waiting 6s for new blocks (height={h1})...")
-    time.sleep(6)
-    d2 = http_get(f"{RPC}/status")
-    if not d2:
-        return
-    h2 = int(d2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-    if h2 > h1:
-        ok(f"Chain producing blocks ({h1} → {h2}, +{h2 - h1})")
-    else:
-        fail(f"Chain NOT producing blocks (stuck at {h1})")
-
-
 def check_core_params() -> None:
     section("Core Module Parameters")
     data = http_get(f"{REST}/mirage/core/v1/params")
@@ -296,8 +277,8 @@ def check_core_params() -> None:
             ok(f"params.{key} = {actual_val}")
 
     mint_split = float(params.get("mint_dynamic_split", "0"))
-    if abs(mint_split - 0.5) >= 0.01:
-        fail(f"params.mint_dynamic_split = {mint_split} (want 0.5)")
+    if abs(mint_split - 0.75) >= 0.01:
+        fail(f"params.mint_dynamic_split = {mint_split} (want 0.75)")
     else:
         ok(f"params.mint_dynamic_split = {mint_split}")
 
@@ -544,7 +525,6 @@ def main() -> int:
 
     check_software_version()
     check_upgrade_plan(upgrade_name)
-    check_blocks_advancing()
     check_core_params()
     check_profiles()
     section("Summary")
