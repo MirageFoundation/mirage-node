@@ -360,6 +360,12 @@ def check_profiles() -> None:
         "blocked_posts": 0,
         "blocked_topics": 0,
     }
+    missing_scalars = {
+        "biography": 0,
+        "avatar": 0,
+        "banner": 0,
+        "flair": 0,
+    }
     for p in profiles:
         lvl = p.get("level", 0)
         if isinstance(lvl, str):
@@ -370,6 +376,9 @@ def check_profiles() -> None:
         for key in missing_lists:
             if key not in p:
                 missing_lists[key] += 1
+        for key in missing_scalars:
+            if key not in p:
+                missing_scalars[key] += 1
 
     dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
     ok(f"Level distribution: {dist}")
@@ -384,6 +393,12 @@ def check_profiles() -> None:
             fail(f"{count} profiles missing '{key}' field")
         else:
             ok(f"All profiles include '{key}' field")
+
+    for key, count in missing_scalars.items():
+        if count:
+            warn(f"{count} profiles missing '{key}' scalar field (empty values omitted by proto)")
+        else:
+            ok(f"All profiles include '{key}' scalar field")
 
 
 # ── Main ───────────────────────────────────────────────────
