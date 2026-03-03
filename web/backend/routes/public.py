@@ -2510,8 +2510,11 @@ def get_user_followed():
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
-            # Enabled agents
-            cur.execute("SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s)", (addr,))
+            # Enabled agents (preserve order)
+            cur.execute(
+                "SELECT agent FROM enabled_agents WHERE LOWER(owner)=LOWER(%s) ORDER BY position ASC",
+                (addr,),
+            )
             enabled_agents = [row[0] for row in cur.fetchall()]
             # Followed topics
             cur.execute("SELECT topic FROM followed_topics WHERE LOWER(owner)=LOWER(%s)", (addr,))

@@ -300,13 +300,14 @@ const TierFeatures = styled.ul`
     li {
         padding: 0.2rem 0;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 0.3rem;
         
         &::before {
             content: '✓';
             color: ${props => props.$color || '#22C55E'};
             font-weight: bold;
+            line-height: 1.4;
         }
     }
 `;
@@ -409,9 +410,10 @@ const TIER_METADATA = [
         level: 10,
         name: 'Agent',
         features: [
-            'Eligible to be an agent',
-            'All subscriber features',
-            'Profile flair'
+            'Everything in Subscriber, plus:',
+            'Listed as a selectable agent on the Agents page',
+            'Moderate manually or automate with a bot via the API',
+            'Edit, translate, tag, or hide posts — your followers see your version'
         ]
     }
 ];
@@ -436,17 +438,19 @@ const buildTierConfig = (chainTiers) => {
         const maxUsers = Number(chainTier.max_followed_users || 0);
 
         const prefixFeatures = [];
-        if (meta.level === 0) {
-            prefixFeatures.push('PoW for transactions');
-        } else {
-            prefixFeatures.push('Instant posting');
-        }
-        if (maxContent > 0) prefixFeatures.push(`Up to ${maxContent.toLocaleString()} characters`);
-        if (maxTopics > 0 || maxUsers > 0) {
-            const parts = [];
-            if (maxTopics > 0) parts.push(`${maxTopics} topics`);
-            if (maxUsers > 0) parts.push(`${maxUsers} users`);
-            prefixFeatures.push(`Follow up to ${parts.join(' and ')}`);
+        if (meta.level !== 10) {
+            if (meta.level === 0) {
+                prefixFeatures.push('PoW for transactions');
+            } else {
+                prefixFeatures.push('Instant posting');
+            }
+            if (maxContent > 0) prefixFeatures.push(`Up to ${maxContent.toLocaleString()} characters`);
+            if (maxTopics > 0 || maxUsers > 0) {
+                const parts = [];
+                if (maxTopics > 0) parts.push(`${maxTopics} topics`);
+                if (maxUsers > 0) parts.push(`${maxUsers} users`);
+                prefixFeatures.push(`Follow up to ${parts.join(' and ')}`);
+            }
         }
         const features = [...prefixFeatures, ...meta.features];
 

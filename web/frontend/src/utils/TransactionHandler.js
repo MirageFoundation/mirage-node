@@ -96,6 +96,11 @@ class TransactionHandler {
             this.pendingDeletes = new Map();
             this._deleteListeners = new Set();
 
+            // Track in-flight enable/disable agent operations
+            // Map<agentAddress, { action: 'enable'|'disable', target: string, queuePosition: number }>
+            this.pendingAgents = new Map();
+            this._agentListeners = new Set();
+
             // Track in-flight votes by post ID: Map<postId, { direction: number, queuePosition: number }>
             this.pendingVotes = new Map();
             this._voteListeners = new Set();
@@ -287,6 +292,39 @@ class TransactionHandler {
     getPendingDeleteInfo(target) {
         const key = `account:${String(target || '').toLowerCase()}`;
         return this.pendingDeletes.get(key) || null;
+    }
+
+    // Agent tracking methods
+    addAgentListener(callback) {
+        if (typeof callback === 'function') {
+            this._agentListeners.add(callback);
+        }
+        return () => this._agentListeners.delete(callback);
+    }
+
+    _notifyAgentListeners() {
+        const pending = this.getPendingAgents();
+        this._agentListeners.forEach(cb => {
+            try { cb(pending); } catch (_) { }
+        });
+    }
+
+    getPendingAgents() {
+        const result = {};
+        this.pendingAgents.forEach((value, key) => {
+            result[key] = value;
+        });
+        return result;
+    }
+
+    isPendingAgent(agentAddress) {
+        const key = String(agentAddress || '').toLowerCase();
+        return this.pendingAgents.has(key);
+    }
+
+    getPendingAgentInfo(agentAddress) {
+        const key = String(agentAddress || '').toLowerCase();
+        return this.pendingAgents.get(key) || null;
     }
 
     addStatusListener(callback) {
@@ -977,6 +1015,88 @@ class TransactionHandler {
                 resolve(result);
             };
             const transaction = { ...baseTx, _resolve: wrappedResolve, _followKey: key };
+            this.transactions.push(transaction);
+            this.totalTransactions += 1;
+            this.processTransactions();
+        });
+    }
+
+    enableAgent(agentAddress) {
+        const publicKey = Storage.load("publicKey", "");
+        const seedPhrase = seedVault.getSeed() || "";
+        if (!publicKey || !seedPhrase) {
+            updateNotification("Not logged in");
+            return Promise.resolve({ success: false, error: "Not logged in" });
+        }
+
+        const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
+        if (!agentTrimmed) {
+            return Promise.resolve({ success: false, error: "empty agent address" });
+        }
+
+        if (this.pendingAgents.has(agentTrimmed)) {
+            return Promise.resolve({ success: false, error: "enable agent already in progress" });
+        }
+
+        const queuePosition = this.totalTransactions + 1;
+        this.pendingAgents.set(agentTrimmed, { action: 'enable', target: agentTrimmed, queuePosition });
+        this._notifyAgentListeners();
+        console.debug("[agents] enqueue enable_agent", { target: agentTrimmed, queuePosition });
+
+        const baseTx = {
+            action: 'enable_agent',
+            agent: agentTrimmed,
+        };
+
+        return new Promise((resolve) => {
+            const wrappedResolve = (result) => {
+                this.pendingAgents.delete(agentTrimmed);
+                this._notifyAgentListeners();
+                console.debug("[agents] resolved enable_agent", { target: agentTrimmed, success: !!result?.success, error: result?.error });
+                resolve(result);
+            };
+            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
+            this.transactions.push(transaction);
+            this.totalTransactions += 1;
+            this.processTransactions();
+        });
+    }
+
+    disableAgent(agentAddress) {
+        const publicKey = Storage.load("publicKey", "");
+        const seedPhrase = seedVault.getSeed() || "";
+        if (!publicKey || !seedPhrase) {
+            updateNotification("Not logged in");
+            return Promise.resolve({ success: false, error: "Not logged in" });
+        }
+
+        const agentTrimmed = String(agentAddress || "").trim().toLowerCase();
+        if (!agentTrimmed) {
+            return Promise.resolve({ success: false, error: "empty agent address" });
+        }
+
+        if (this.pendingAgents.has(agentTrimmed)) {
+            return Promise.resolve({ success: false, error: "disable agent already in progress" });
+        }
+
+        const queuePosition = this.totalTransactions + 1;
+        this.pendingAgents.set(agentTrimmed, { action: 'disable', target: agentTrimmed, queuePosition });
+        this._notifyAgentListeners();
+        console.debug("[agents] enqueue disable_agent", { target: agentTrimmed, queuePosition });
+
+        const baseTx = {
+            action: 'disable_agent',
+            agent: agentTrimmed,
+        };
+
+        return new Promise((resolve) => {
+            const wrappedResolve = (result) => {
+                this.pendingAgents.delete(agentTrimmed);
+                this._notifyAgentListeners();
+                console.debug("[agents] resolved disable_agent", { target: agentTrimmed, success: !!result?.success, error: result?.error });
+                resolve(result);
+            };
+            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: agentTrimmed };
             this.transactions.push(transaction);
             this.totalTransactions += 1;
             this.processTransactions();
@@ -1754,7 +1874,7 @@ class TransactionHandler {
             // Get the next transaction  
             const queued = this.transactions.shift() || {};
             const _resolve = typeof queued._resolve === 'function' ? queued._resolve : null;
-            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, ...transaction } = queued;
+            const { _resolve: _ignored, _followKey: _ignored2, _blockKey: _ignored3, _deleteKey: _ignored4, _agentKey: _ignored5, ...transaction } = queued;
             this.processedTransactions += 1;
             // Track quest-relevant actions
             if (transaction.action === 'create_vote' || transaction.action === 'create_post' || transaction.action === 'create_comment') {
@@ -1944,6 +2064,18 @@ class TransactionHandler {
                     action: transaction.action,
                     target: transaction.target || "",
                     topic: transaction.topic || "",
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
+            else if (transaction.action === "enable_agent" || transaction.action === "disable_agent") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    agent: (transaction.agent || "").toLowerCase(),
                     last_block_hash,
                     pow_difficulty: Number(pow_difficulty),
                     pow_base_bits: pow_base_bits_relay,

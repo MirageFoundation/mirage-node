@@ -68,6 +68,7 @@ const WelcomeView = lazyWithRetry(() => import('./views/WelcomeView'));
 const SearchResultsView = lazyWithRetry(() => import('./views/SearchResultsView'));
 const FollowsView = lazyWithRetry(() => import('./views/FollowsView'));
 const BlocksView = lazyWithRetry(() => import('./views/BlocksView'));
+const AgentsView = lazyWithRetry(() => import('./views/AgentsView'));
 const BridgeView = lazyWithRetry(() => import('./views/BridgeView'));
 const NotFoundView = lazyWithRetry(() => import('./views/NotFoundView'));
 const APP_VERSION = process.env.REACT_APP_VERSION || '';
@@ -150,6 +151,7 @@ const restorableRoutePrefixes = [
     '/settings',
     '/follows',
     '/blocks',
+    '/agents',
     '/subscription',
     '/network',
     '/server',
@@ -970,6 +972,7 @@ class App extends Component {
 
                                             <Route path="/follows" element={<FollowsView state={this.state} />} />
                                             <Route path="/blocks" element={<BlocksView state={this.state} />} />
+                                            <Route path="/agents" element={<AgentsView state={this.state} />} />
                                             <Route path="/settings" element={<SettingsView state={this.state} />} />
                                             <Route path="/subscription" element={<SubscriptionView state={this.state} />} />
                                             <Route path="/network" element={<NetworkView state={this.state} />} />

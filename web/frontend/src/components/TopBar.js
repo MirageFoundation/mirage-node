@@ -286,6 +286,12 @@ export function ProfileMenuContent({ displayName, onItemClick }) {
                 Blocks
             </MenuItem>
             <MenuItem
+                to="/agents"
+                onClick={() => handleItemClick('/agents')}
+            >
+                Agents
+            </MenuItem>
+            <MenuItem
                 to="/network"
                 onClick={() => handleItemClick('/network')}
             >

@@ -369,7 +369,7 @@ function MobileBottomNav({ state }) {
     const isFollowingActive = pathname === '/following';
     const isCreateActive = pathname === '/create_post';
     const isInboxActive = pathname === '/inbox';
-    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats']);
+    const isProfileActive = isPathActive(pathname, ['/profile', '/subscription', '/settings', '/network', '/reports', '/stats', '/agents']);
 
     // Get current topic for create button
     const currentTopic = React.useMemo(() => {

@@ -3,8 +3,6 @@ import { Helmet } from 'react-helmet-async';
 import styled from "styled-components";
 import { useNavigate, useLocation } from 'react-router-dom';
 import Storage from "../utils/Storage";
-import seedVault from "../utils/SeedVault";
-import { derivePrivateKeyFromSeed, derivePublicKeyFromSeed } from "../utils/CryptoUtils";
 import Api from '../lib/api';
 import * as tx from '../utils/tx';
 import Sidebar from "../components/Sidebar";
@@ -109,109 +107,6 @@ const Mono = styled.span`
     overflow-wrap: anywhere;
 `;
 
-const AgentsList = styled.div`
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.5rem;
-`;
-
-const AgentTag = styled.div`
-    background-color: ${({ theme }) => theme?.colors?.accent || '#2E3238'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 20px;
-    padding: 0.35rem 0.75rem;
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-size: 0.8rem;
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    opacity: ${({ $isRemoving }) => $isRemoving ? 0.5 : 1};
-    transition: opacity 0.2s ease;
-`;
-
-const RemoveAgentButton = styled.button`
-    background: none;
-    border: none;
-    color: ${({ theme }) => theme?.colors?.subtleText || '#ccc'};
-    cursor: pointer;
-    padding: 0;
-    font-size: 0.9rem;
-    line-height: 1;
-    
-    &:hover {
-        color: ${({ theme }) => theme?.colors?.text || '#fff'};
-    }
-`;
-
-const AgentInput = styled.input`
-    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
-    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
-    border-radius: 8px;
-    padding: 0.5rem 0.85rem;
-    color: ${({ theme }) => theme?.colors?.text || '#eee'};
-    font-size: 0.85rem;
-    flex: 1;
-    transition: all 0.2s ease;
-    
-    &:focus {
-        outline: none;
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
-    }
-`;
-
-const AgentInputRow = styled.div`
-    display: flex;
-    margin-top: 0.5rem;
-    align-items: center;
-    gap: 0.5rem;
-    @media (max-width: 600px) {
-        flex-direction: column;
-        align-items: stretch;
-    }
-`;
-
-const AgentErrorMessage = styled.div`
-    background-color: rgba(220, 38, 38, 0.1);
-    border: 1px solid #dc2626;
-    border-radius: 3px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    color: #dc2626;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-`;
-
-const AgentSuccessMessage = styled.div`
-    background-color: rgba(34, 197, 94, 0.1);
-    border: 1px solid #22c55e;
-    border-radius: 3px;
-    padding: 0.5rem;
-    margin-top: 0.5rem;
-    color: #22c55e;
-    font-size: 0.8rem;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-`;
-
-const LoadingSpinner = styled.div`
-    width: 16px;
-    height: 16px;
-    border: 2px solid ${({ theme }) => theme?.colors?.border || theme?.colors?.borderSubtle || '#393E46'};
-    border-top: 2px solid ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-`;
-
 const shortenAddress = (addr) => {
     if (!addr) return '';
     if (addr.length <= 24) return addr;
@@ -222,20 +117,12 @@ export default function FollowsView({ state }) {
     const navigate = useNavigate();
     const location = useLocation();
     const address = (state && state.publicKey) ? state.publicKey : Storage.load('publicKey', '');
-    const seedPhrase = (state && state.seedPhrase) ? state.seedPhrase : (seedVault.getSeed() || '');
 
     const [followedUsers, setFollowedUsers] = useState([]);
     const [followedTopics, setFollowedTopics] = useState([]);
-    const [enabledAgents, setEnabledAgents] = useState([]);
-    const [agentUsernames, setAgentUsernames] = useState({});
     const [followedUsernames, setFollowedUsernames] = useState({});
     const [listsLoading, setListsLoading] = useState(false);
     const [listsError, setListsError] = useState('');
-    const [newAgentInput, setNewAgentInput] = useState('');
-    const [agentError, setAgentError] = useState('');
-    const [agentSuccess, setAgentSuccess] = useState('');
-    const [isAddingAgent, setIsAddingAgent] = useState(false);
-    const [isRemovingAgent, setIsRemovingAgent] = useState('');
 
     const {
         isTopicPending: isFollowTopicPending,
@@ -255,8 +142,6 @@ export default function FollowsView({ state }) {
                 if (cancelled) return;
                 setFollowedUsers(data?.followed_users || []);
                 setFollowedTopics(data?.followed_topics || []);
-                setEnabledAgents(data?.enabled_agents || []);
-                Storage.save('enabled_agents', data?.enabled_agents || []);
             } catch (err) {
                 if (!cancelled) {
                     setListsError(err?.message || 'Failed to load follows');
@@ -272,11 +157,10 @@ export default function FollowsView({ state }) {
     }, [address]);
 
     useEffect(() => {
-        const combined = [...enabledAgents, ...followedUsers]
+        const addresses = followedUsers
             .map(a => String(a || '').trim())
             .filter(Boolean);
-        if (combined.length === 0) {
-            setAgentUsernames({});
+        if (addresses.length === 0) {
             setFollowedUsernames({});
             return;
         }
@@ -284,200 +168,25 @@ export default function FollowsView({ state }) {
         let cancelled = false;
         const resolveAll = async () => {
             try {
-                const mapping = await resolveUsernamesCached(combined, { timeoutMs: 5000 });
+                const mapping = await resolveUsernamesCached(addresses, { timeoutMs: 5000 });
                 if (cancelled) return;
-                const buildMap = (addresses) => {
-                    const result = {};
-                    for (const addr of addresses) {
-                        const lower = String(addr || '').toLowerCase();
-                        const uname = mapping[lower];
-                        result[addr] = uname || addr;
-                    }
-                    return result;
-                };
-                setAgentUsernames(buildMap(enabledAgents));
-                setFollowedUsernames(buildMap(followedUsers));
+                const result = {};
+                for (const addr of addresses) {
+                    const lower = String(addr || '').toLowerCase();
+                    const uname = mapping[lower];
+                    result[addr] = uname || addr;
+                }
+                setFollowedUsernames(result);
             } catch {
                 if (cancelled) return;
-                const buildFallback = (addresses) => {
-                    const result = {};
-                    addresses.forEach(a => { result[a] = a; });
-                    return result;
-                };
-                setAgentUsernames(buildFallback(enabledAgents));
-                setFollowedUsernames(buildFallback(followedUsers));
+                const result = {};
+                addresses.forEach(a => { result[a] = a; });
+                setFollowedUsernames(result);
             }
         };
         resolveAll();
         return () => { cancelled = true; };
-    }, [enabledAgents, followedUsers]);
-
-    const clearMessages = () => {
-        setAgentError('');
-        setAgentSuccess('');
-    };
-
-    const showError = (message) => {
-        setAgentError(message);
-        setAgentSuccess('');
-        setTimeout(() => setAgentError(''), 5000);
-    };
-
-    const showSuccess = (message) => {
-        setAgentSuccess(message);
-        setAgentError('');
-        setTimeout(() => setAgentSuccess(''), 3000);
-    };
-
-    const addAgent = async () => {
-        const trimmed = newAgentInput.trim();
-        if (!trimmed) return;
-
-        clearMessages();
-        setIsAddingAgent(true);
-
-        if (!/^[A-Za-z0-9-]+$/.test(trimmed)) {
-            showError('Invalid username format. Only letters, numbers, and hyphens are allowed.');
-            setIsAddingAgent(false);
-            return;
-        }
-
-        try {
-            const response = await Api.get('get_address_from_username', { username: trimmed }, { timeoutMs: 5000 });
-            if (!response || !response.exists || !response.address) {
-                showError(`Username "${trimmed}" not found. Make sure the username exists on-chain.`);
-                setIsAddingAgent(false);
-                return;
-            }
-
-            const agentAddress = response.address;
-
-            if (enabledAgents.map(a => a.toLowerCase()).includes(agentAddress.toLowerCase())) {
-                showError('This agent is already in your list.');
-                setIsAddingAgent(false);
-                return;
-            }
-
-            const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
-            if (!paramsData) {
-                showError('Unable to fetch network parameters. Please try again.');
-                setIsAddingAgent(false);
-                return;
-            }
-
-            const lastBlockHash = paramsData.last_block_hash || '';
-            const powDifficulty = Number(paramsData.pow_difficulty);
-
-            if (!lastBlockHash) {
-                showError('Unable to get last block hash from server. Please try again.');
-                setIsAddingAgent(false);
-                return;
-            }
-
-            if (!seedPhrase) {
-                showError('Seed phrase not available. Please sign in again.');
-                setIsAddingAgent(false);
-                return;
-            }
-
-            const transaction = {
-                action: 'enable_agent',
-                agent: agentAddress,
-                last_block_hash: lastBlockHash,
-                pow_difficulty: powDifficulty,
-                difficulty: powDifficulty,
-            };
-
-            const result = await tx.performTransaction(
-                transaction,
-                lastBlockHash,
-                derivePrivateKeyFromSeed(seedPhrase),
-                address,
-                false
-            );
-
-            if (result.success) {
-                const updated = [...enabledAgents.filter(a => a !== agentAddress), agentAddress];
-                if (updated.length > 3) updated.shift();
-                setEnabledAgents(updated);
-                Storage.save('enabled_agents', updated);
-                setNewAgentInput('');
-                showSuccess(`Successfully enabled agent "${trimmed}"`);
-            } else {
-                showError(`Failed to enable agent: ${result.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            showError(`Error checking username: ${error.message || 'Network error'}`);
-        } finally {
-            setIsAddingAgent(false);
-        }
-    };
-
-    const removeAgent = async (agentAddress) => {
-        setIsRemovingAgent(agentAddress);
-        clearMessages();
-
-        try {
-            const updated = enabledAgents.filter(a => a !== agentAddress);
-
-            const paramsData = await Api.get('get_parameters', address ? { address } : undefined, { timeoutMs: 5000 });
-            if (!paramsData) {
-                showError('Unable to fetch network parameters. Please try again.');
-                setIsRemovingAgent('');
-                return;
-            }
-
-            const lastBlockHash = paramsData.last_block_hash || '';
-            const powDifficulty = Number(paramsData.pow_difficulty);
-
-            if (!lastBlockHash) {
-                showError('Unable to fetch last block hash. Please try again.');
-                setIsRemovingAgent('');
-                return;
-            }
-
-            const currentSeed = seedVault.getSeed() || '';
-            if (!currentSeed) {
-                showError('No seed phrase found. Please sign in again.');
-                setIsRemovingAgent('');
-                return;
-            }
-
-            const transaction = {
-                action: 'disable_agent',
-                agent: agentAddress,
-                last_block_hash: lastBlockHash,
-                pow_difficulty: powDifficulty >>> 0,
-            };
-
-            const privateKeyHex = derivePrivateKeyFromSeed(currentSeed);
-            const derivedAddress = derivePublicKeyFromSeed(currentSeed);
-            const challenge = `${derivedAddress}:${lastBlockHash}:${powDifficulty}`;
-
-            const result = await tx.performTransaction(transaction, challenge, privateKeyHex, derivedAddress, false);
-
-            if (result && result.success) {
-                setEnabledAgents(updated);
-                Storage.save('enabled_agents', updated);
-                const uname = agentUsernames[agentAddress] || agentAddress;
-                showSuccess(`Disabled agent "${uname}"`);
-            } else {
-                showError(`Failed to disable agent: ${result?.error || 'Unknown error'}`);
-            }
-        } catch (error) {
-            console.error('Remove agent error:', error);
-            showError(`Failed to disable agent: ${error.message || error}`);
-        } finally {
-            setIsRemovingAgent('');
-        }
-    };
-
-    const handleAgentKeyDown = (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            addAgent();
-        }
-    };
+    }, [followedUsers]);
 
     const handleUnfollowTopic = async (e, topic) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
@@ -524,76 +233,7 @@ export default function FollowsView({ state }) {
                             <ClickableTab $active>Follows</ClickableTab>
                         </TabsRow>
                         <ContainerBody>
-                            <SectionTitle $first>Enabled Agents</SectionTitle>
-                            <ValueBox>
-                                {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
-                                {!listsLoading && !listsError && enabledAgents.length === 0 && (
-                                    <Mono style={{ color: '#888' }}>No agents enabled. Add up to 3 agents whose block lists will be applied to your feed.</Mono>
-                                )}
-                                {!listsLoading && !listsError && enabledAgents.length > 0 && (
-                                    <AgentsList>
-                                        {enabledAgents.map((agentAddr) => (
-                                            <AgentTag key={agentAddr} $isRemoving={isRemovingAgent === agentAddr}>
-                                                <Mono
-                                                    style={{ cursor: 'pointer' }}
-                                                    onClick={() => navigate(`/u/${encodeURIComponent(agentUsernames[agentAddr] || agentAddr)}?tab=posts`)}
-                                                >
-                                                    {agentUsernames[agentAddr] && agentUsernames[agentAddr] !== agentAddr
-                                                        ? agentUsernames[agentAddr]
-                                                        : shortenAddress(agentAddr)}
-                                                </Mono>
-                                                <RemoveAgentButton
-                                                    onClick={() => removeAgent(agentAddr)}
-                                                    title="Remove"
-                                                    disabled={isRemovingAgent === agentAddr}
-                                                >
-                                                    {isRemovingAgent === agentAddr ? <LoadingSpinner /> : '×'}
-                                                </RemoveAgentButton>
-                                            </AgentTag>
-                                        ))}
-                                    </AgentsList>
-                                )}
-                                {!listsLoading && (
-                                    <>
-                                        <AgentInputRow>
-                                            <AgentInput
-                                                type="text"
-                                                placeholder="Add an agent by username"
-                                                value={newAgentInput}
-                                                onChange={(e) => {
-                                                    setNewAgentInput(e.target.value);
-                                                    setAgentError('');
-                                                    setAgentSuccess('');
-                                                }}
-                                                onKeyDown={handleAgentKeyDown}
-                                                disabled={isAddingAgent}
-                                            />
-                                            <Button
-                                                onClick={addAgent}
-                                                disabled={isAddingAgent || !newAgentInput.trim()}
-                                                loading={isAddingAgent}
-                                                size="sm"
-                                            >
-                                                Add
-                                            </Button>
-                                        </AgentInputRow>
-                                        {agentError && (
-                                            <AgentErrorMessage>
-                                                <span>⚠</span>
-                                                {agentError}
-                                            </AgentErrorMessage>
-                                        )}
-                                        {agentSuccess && (
-                                            <AgentSuccessMessage>
-                                                <span>✓</span>
-                                                {agentSuccess}
-                                            </AgentSuccessMessage>
-                                        )}
-                                    </>
-                                )}
-                            </ValueBox>
-
-                            <SectionTitle>Topics</SectionTitle>
+                            <SectionTitle $first>Topics</SectionTitle>
                             <ValueBox>
                                 {listsLoading && <Mono style={{ color: '#888' }}>Loading...</Mono>}
                                 {!listsLoading && !listsError && followedTopics.length === 0 && (
