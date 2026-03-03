@@ -365,7 +365,15 @@ tmux send-keys -t "$SESSION:status" "PYTHONPATH=$ROOT_DIR python3 $ROOT_DIR/scri
 
 echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
-# Keep container alive
-while true; do sleep 1; done
-
-
+# Keep container alive + periodic cleanup (WAL segments, old logs)
+CLEANUP_INTERVAL=86400
+SECONDS_SINCE_CLEANUP=0
+while true; do
+    sleep 1
+    SECONDS_SINCE_CLEANUP=$((SECONDS_SINCE_CLEANUP + 1))
+    if [ "$SECONDS_SINCE_CLEANUP" -ge "$CLEANUP_INTERVAL" ]; then
+        SECONDS_SINCE_CLEANUP=0
+        find "$NODE_HOME/data/cs.wal" -name "wal.*" -type f -mtime +0 -delete 2>/dev/null || true
+        find "$LOGS_DIR" -name "*.log" -type f -mtime +30 -delete 2>/dev/null || true
+    fi
+done

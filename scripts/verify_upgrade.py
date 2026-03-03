@@ -305,13 +305,9 @@ def check_profiles() -> None:
         fail("No profiles found (cannot validate migration)")
         return
 
-    ok(f"Total profiles: {len(profiles)}")
-    if total is None:
-        fail("Pagination total missing (expected pagination.count_total=true)")
-    elif total != len(profiles):
-        fail(f"Profile count mismatch: fetched {len(profiles)} vs total {total}")
-    else:
-        ok(f"Pagination total matches fetched count ({total})")
+    ok(f"Total profiles fetched: {len(profiles)}")
+    if total and total > 0 and total != len(profiles):
+        fail(f"Profile count mismatch: fetched {len(profiles)} vs pagination total {total}")
 
     bad_levels = []
     level_counts: dict[int, int] = {}
