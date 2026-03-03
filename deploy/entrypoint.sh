@@ -367,7 +367,7 @@ echo "✓ Started. Attach via: tmux attach -t $SESSION"
 
 # Keep container alive + periodic cleanup (WAL segments, old logs)
 CLEANUP_INTERVAL=86400
-SECONDS_SINCE_CLEANUP=0
+SECONDS_SINCE_CLEANUP=$CLEANUP_INTERVAL
 while true; do
     sleep 1
     SECONDS_SINCE_CLEANUP=$((SECONDS_SINCE_CLEANUP + 1))
