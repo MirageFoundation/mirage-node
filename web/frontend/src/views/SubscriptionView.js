@@ -505,9 +505,8 @@ export default function SubscriptionView({ state }) {
         return () => window.removeEventListener('chainConfigUpdated', onConfigUpdated);
     }, []);
 
-    // Clear stale localStorage cache and fetch fresh chain config on every mount
+    // Refresh chain config when visiting SubscriptionView
     useEffect(() => {
-        try { localStorage.removeItem('chainConfig'); } catch (_) { }
         (async () => {
             try {
                 const cfg = await Api.get('get_chain_config', undefined);
