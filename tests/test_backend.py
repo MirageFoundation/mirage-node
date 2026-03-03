@@ -640,7 +640,7 @@ def setup_test_wallets(backend: str) -> bool:
     # Set usernames for all wallets (required before any other core transaction)
     for name, w in WALLETS.items():
         uname = f"test{name}{_rand_str(4)}"
-        resp = _do_set_username_raw(backend, w, uname, skip_pow=True)
+        resp = _do_set_username_raw(backend, w, uname, skip_pow=False)
         txh = str(resp.get("tx_hash", "")).lower() if resp else ""
         if txh:
             print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
