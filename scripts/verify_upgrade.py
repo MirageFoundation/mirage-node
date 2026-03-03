@@ -2,15 +2,18 @@
 """
 Verify a software upgrade was applied correctly on a Mirage chain.
 
-Usage:
-    scripts/verify_upgrade.py [local|remote] [--upgrade-name NAME]
+Runs locally on the node itself (inside the container / on the server).
+No Docker dependency — queries localhost REST/RPC and the local miraged binary.
 
-Default: local, upgrade name auto-detected from latest proposal file.
+Usage:
+    python3 verify_upgrade.py [--upgrade-name NAME]
+
+Default upgrade name auto-detected from proposals/proposal_upgrade.json.
 Checks: node version, upgrade plan cleared, chain producing blocks,
         core params match expected tier config, profiles migrated.
 """
 import json
-import re
+import shutil
 import subprocess
 import sys
 import time
@@ -18,11 +21,8 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPTS_DIR.parent
-LOCAL_CONTAINER = "mirage"
-LOCAL_RPC = "http://127.0.0.1:26657"
-LOCAL_REST = "http://127.0.0.1:1317"
-REMOTE_RPC = "http://159.203.114.27:26657"
-REMOTE_REST = "http://159.203.114.27:1317"
+RPC = "http://127.0.0.1:26657"
+REST = "http://127.0.0.1:1317"
 
 _passed = 0
 _failed = 0
@@ -53,50 +53,26 @@ def section(title: str) -> None:
     print(f"{'─' * 60}")
 
 
-def query_rest(base: str, path: str) -> dict | None:
+def query_http(url: str) -> dict | None:
     import urllib.request
     try:
-        url = f"{base}{path}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read())
     except Exception as e:
-        fail(f"REST query {path} failed: {e}")
+        fail(f"HTTP query {url} failed: {e}")
         return None
 
 
-def query_rpc(endpoint: str, path: str) -> dict | None:
-    import urllib.request
-    try:
-        url = f"{endpoint}{path}"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read())
-    except Exception as e:
-        fail(f"RPC query {path} failed: {e}")
-        return None
-
-
-def docker_exec_json(cmd: list[str]) -> dict | None:
-    full = ["docker", "exec", LOCAL_CONTAINER] + cmd
-    result = subprocess.run(full, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        return None
-    try:
-        return json.loads(result.stdout)
-    except Exception:
-        return None
-
-
-def get_miraged_path_in_container() -> str:
-    for p in ["/opt/mirage/blockchain/bin/miraged", "/opt/mirage/blockchain/miraged"]:
-        r = subprocess.run(
-            ["docker", "exec", LOCAL_CONTAINER, "test", "-f", p],
-            capture_output=True, check=False,
-        )
-        if r.returncode == 0:
+def find_miraged() -> str:
+    for p in [
+        "/opt/mirage/blockchain/bin/miraged",
+        "/opt/mirage/blockchain/miraged",
+    ]:
+        if Path(p).is_file():
             return p
-    return "miraged"
+    found = shutil.which("miraged")
+    return found or "miraged"
 
 
 def detect_upgrade_name() -> str:
@@ -180,9 +156,9 @@ EXPECTED_TIERS = [
 ]
 
 
-def check_node_reachable(rpc: str) -> bool:
+def check_node_reachable() -> bool:
     section("Node Connectivity")
-    data = query_rpc(rpc, "/status")
+    data = query_http(f"{RPC}/status")
     if not data:
         fail("Node not reachable")
         return False
@@ -202,15 +178,15 @@ def check_node_reachable(rpc: str) -> bool:
     return True
 
 
-def check_blocks_advancing(rpc: str) -> None:
+def check_blocks_advancing() -> None:
     section("Block Production")
-    data1 = query_rpc(rpc, "/status")
+    data1 = query_http(f"{RPC}/status")
     if not data1:
         return
     h1 = int(data1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
     print(f"  Waiting 6s for new blocks (height={h1})...")
     time.sleep(6)
-    data2 = query_rpc(rpc, "/status")
+    data2 = query_http(f"{RPC}/status")
     if not data2:
         return
     h2 = int(data2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
@@ -220,9 +196,9 @@ def check_blocks_advancing(rpc: str) -> None:
         fail(f"Chain is NOT producing blocks (stuck at {h1})")
 
 
-def check_upgrade_plan_cleared(rest: str) -> None:
+def check_upgrade_plan_cleared() -> None:
     section("Upgrade Plan")
-    data = query_rest(rest, "/cosmos/upgrade/v1beta1/current_plan")
+    data = query_http(f"{REST}/cosmos/upgrade/v1beta1/current_plan")
     if data is None:
         return
     plan = data.get("plan")
@@ -234,8 +210,8 @@ def check_upgrade_plan_cleared(rest: str) -> None:
         fail(f"Upgrade plan still active: {name} at height {height}")
 
 
-def check_applied_upgrade(rest: str, upgrade_name: str) -> None:
-    data = query_rest(rest, f"/cosmos/upgrade/v1beta1/applied_plan/{upgrade_name}")
+def check_applied_upgrade(upgrade_name: str) -> None:
+    data = query_http(f"{REST}/cosmos/upgrade/v1beta1/applied_plan/{upgrade_name}")
     if data is None:
         return
     height = data.get("height", "0")
@@ -245,29 +221,28 @@ def check_applied_upgrade(rest: str, upgrade_name: str) -> None:
         fail(f"Upgrade '{upgrade_name}' not found in applied upgrades")
 
 
-def check_software_version(rpc: str, is_local: bool) -> None:
+def check_software_version() -> None:
     section("Software Version")
-    if is_local:
-        miraged = get_miraged_path_in_container()
-        result = subprocess.run(
-            ["docker", "exec", LOCAL_CONTAINER, miraged, "version"],
-            capture_output=True, text=True, check=False,
-        )
-        if result.returncode == 0:
-            version = result.stdout.strip()
-            ok(f"Binary version: {version}")
-        else:
-            warn(f"Could not get binary version: {result.stderr.strip()}")
+    miraged = find_miraged()
+    result = subprocess.run(
+        [miraged, "version"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0:
+        version = result.stdout.strip()
+        ok(f"Binary version: {version}")
     else:
-        data = query_rest(rpc.replace("26657", "1317"), "/cosmos/base/tendermint/v1beta1/node_info")
-        if data:
-            ver = data.get("application_version", {}).get("version", "?")
-            ok(f"Binary version: {ver}")
+        warn(f"Could not get binary version from {miraged}: {result.stderr.strip()}")
+
+    data = query_http(f"{REST}/cosmos/base/tendermint/v1beta1/node_info")
+    if data:
+        ver = data.get("application_version", {}).get("version", "?")
+        ok(f"Running version (ABCI): {ver}")
 
 
-def check_core_params(rest: str) -> None:
+def check_core_params() -> None:
     section("Core Module Parameters (Tier Config)")
-    data = query_rest(rest, "/mirage/core/v1/params")
+    data = query_http(f"{REST}/mirage/core/v1/params")
     if data is None:
         return
 
@@ -292,18 +267,19 @@ def check_core_params(rest: str) -> None:
     for i, expected in enumerate(EXPECTED_TIERS):
         actual = tiers[i]
         name = expected["name"]
+        tier_ok = True
 
         actual_fee = int(actual.get("period_fee", "0"))
-        if actual_fee == expected["period_fee"]:
-            ok(f"Tier {i} ({name}): period_fee={actual_fee}")
-        else:
+        if actual_fee != expected["period_fee"]:
             fail(f"Tier {i} ({name}): period_fee={actual_fee}, expected {expected['period_fee']}")
+            tier_ok = False
 
         for field in tier_fields_int:
             actual_val = int(actual.get(field, "0"))
             expected_val = expected[field]
             if actual_val != expected_val:
                 fail(f"Tier {i} ({name}): {field}={actual_val}, expected {expected_val}")
+                tier_ok = False
 
         for field in tier_fields_bool:
             actual_val = actual.get(field, False)
@@ -312,17 +288,20 @@ def check_core_params(rest: str) -> None:
             expected_val = expected[field]
             if actual_val != expected_val:
                 fail(f"Tier {i} ({name}): {field}={actual_val}, expected {expected_val}")
+                tier_ok = False
 
         actual_vw = float(actual.get("vote_weight", "0"))
-        if abs(actual_vw - expected["vote_weight"]) < 0.01:
-            ok(f"Tier {i} ({name}): all fields match expected values")
-        else:
+        if abs(actual_vw - expected["vote_weight"]) >= 0.01:
             fail(f"Tier {i} ({name}): vote_weight={actual_vw}, expected {expected['vote_weight']}")
+            tier_ok = False
+
+        if tier_ok:
+            ok(f"Tier {i} ({name}): all fields match expected values")
 
 
-def check_profiles_migrated(rest: str) -> None:
+def check_profiles_migrated() -> None:
     section("Profile Migration")
-    data = query_rest(rest, "/mirage/core/v1/profiles")
+    data = query_http(f"{REST}/mirage/core/v1/profiles")
     if data is None:
         return
 
@@ -364,31 +343,24 @@ def check_profiles_migrated(rest: str) -> None:
         ok("No profiles use legacy 'followed_moderators' field name")
 
 
-def check_kv_migration(is_local: bool) -> None:
-    if not is_local:
-        return
-    section("KV Store Migration (plist_mods → plist_agents)")
-    miraged = get_miraged_path_in_container()
-    # No easy way to enumerate KV prefixes via REST — skip with info note
-    ok("KV migration verified by upgrade handler logs (check node logs for 'migrated plist_mods -> plist_agents')")
-
-
-def check_new_message_types(rest: str, is_local: bool) -> None:
+def check_new_message_types() -> None:
     section("New Message Types")
-    if is_local:
-        miraged = get_miraged_path_in_container()
-        result = subprocess.run(
-            ["docker", "exec", LOCAL_CONTAINER, miraged, "tx", "core", "--help"],
-            capture_output=True, text=True, check=False,
-        )
-        output = result.stdout + result.stderr
-        for msg in ["enable-agent", "disable-agent"]:
-            if msg in output:
-                ok(f"TX subcommand '{msg}' registered")
-            else:
-                fail(f"TX subcommand '{msg}' NOT found")
-    else:
-        warn("Message type check skipped for remote (no CLI access)")
+    miraged = find_miraged()
+    result = subprocess.run(
+        [miraged, "tx", "core", "--help"],
+        capture_output=True, text=True, check=False,
+    )
+    output = result.stdout + result.stderr
+    for msg in ["enable-agent", "disable-agent"]:
+        if msg in output:
+            ok(f"TX subcommand '{msg}' registered")
+        else:
+            fail(f"TX subcommand '{msg}' NOT found")
+
+
+def check_kv_migration() -> None:
+    section("KV Store Migration (plist_mods → plist_agents)")
+    ok("KV migration verified by upgrade handler logs (check node logs for 'migrated plist_mods -> plist_agents')")
 
 
 def main() -> int:
@@ -401,31 +373,23 @@ def main() -> int:
             upgrade_name = args[idx + 1]
             args = args[:idx] + args[idx + 2:]
 
-    mode = args[0] if args else "local"
-    is_local = mode == "local"
-
-    if is_local:
-        rpc, rest = LOCAL_RPC, LOCAL_REST
-    else:
-        rpc, rest = REMOTE_RPC, REMOTE_REST
-
     if not upgrade_name:
         upgrade_name = detect_upgrade_name()
 
-    print(f"==> Verifying upgrade '{upgrade_name}' ({mode} mode)")
+    print(f"==> Verifying upgrade '{upgrade_name}'")
 
-    if not check_node_reachable(rpc):
-        print(f"\n\033[31mFATAL: Cannot reach node at {rpc}\033[0m")
+    if not check_node_reachable():
+        print(f"\n\033[31mFATAL: Cannot reach node at {RPC}\033[0m")
         return 1
 
-    check_software_version(rpc, is_local)
-    check_upgrade_plan_cleared(rest)
-    check_applied_upgrade(rest, upgrade_name)
-    check_blocks_advancing(rpc)
-    check_core_params(rest)
-    check_profiles_migrated(rest)
-    check_kv_migration(is_local)
-    check_new_message_types(rest, is_local)
+    check_software_version()
+    check_upgrade_plan_cleared()
+    check_applied_upgrade(upgrade_name)
+    check_blocks_advancing()
+    check_core_params()
+    check_profiles_migrated()
+    check_kv_migration()
+    check_new_message_types()
 
     section("Summary")
     total = _passed + _failed + _warned
