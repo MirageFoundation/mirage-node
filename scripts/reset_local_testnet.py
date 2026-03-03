@@ -456,6 +456,17 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 "docker exec mirage sed -i 's/^DOMAIN=.*/DOMAIN=/' /root/.mirage/env/node.env 2>/dev/null || true",
             ]
         )
+        # Enable open registration without invite codes for local testnet
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage sed -i "
+                "'s/^REGISTRATION_ENABLED=.*/REGISTRATION_ENABLED=true/; "
+                "s/^REGISTRATION_INVITE_CODE_REQUIRED=.*/REGISTRATION_INVITE_CODE_REQUIRED=false/' "
+                "/root/.mirage/env/backend.env 2>/dev/null || true",
+            ]
+        )
 
     run(["bash", "-lc", "docker exec mirage chmod -R u+rwX /root/.mirage/node.clone || true"])
 

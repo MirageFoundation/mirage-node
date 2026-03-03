@@ -2544,6 +2544,48 @@ def get_user_followed():
         return safe_error(e)
 
 
+@public_bp.route("/api/get_agents")
+def get_agents():
+    """Get all active Agent-tier profiles (level=10, subscription not expired, not deleted)."""
+    rid = next_request_id()
+    log_event(rid, "get_agents.begin")
+    try:
+        now = int(time.time())
+        conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT p.owner, p.username, p.biography, p.avatar
+                FROM profiles p
+                WHERE p.level = 10
+                  AND p.subscription_expiry > %s
+                  AND p.deleted_at IS NULL
+                ORDER BY COALESCE(NULLIF(p.username, ''), p.owner) ASC
+                """,
+                (now,),
+            )
+            rows = cur.fetchall()
+        finally:
+            conn.close()
+
+        agents = [
+            {
+                "address": row[0],
+                "username": row[1] or "",
+                "biography": row[2] or "",
+                "avatar": row[3] or "",
+            }
+            for row in rows
+        ]
+
+        log_event(rid, "get_agents.ok", count=len(agents))
+        return jsonify({"agents": agents})
+    except Exception as e:
+        log_event(rid, "get_agents.err", error=str(e))
+        return safe_error(e)
+
+
 @public_bp.route("/api/get_user_blocked")
 def get_user_blocked():
     """Get user's block lists (posts, users, topics)."""
