@@ -434,8 +434,8 @@ const buildTierConfig = (chainTiers) => {
             ];
         } else if (meta.level === 1) {
             features = [
-                "Remove 'Anon-' prefix",
                 'Instant posting',
+                "Remove 'Anon-' prefix",
                 maxContent > 0 && `Post up to ${maxContent.toLocaleString()} characters`,
                 followParts.length > 0 && `Follow up to ${followParts.join(' and ')}`,
                 maxAgents > 0 ? `Enable up to ${maxAgents} agents` : 'Cannot enable agents',
