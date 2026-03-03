@@ -1046,13 +1046,10 @@ def core_set_agents():
             return jsonify({"error": "missing profile level"}), 500
         user_level = int(profile.get("level"))
 
-        tier_cfg = None
-        for t in tiers:
-            if int(t.get("level", -1)) == user_level:
-                tier_cfg = t
-                break
-        if tier_cfg is None:
-            return jsonify({"error": f"missing tier config for level {user_level}"}), 500
+        idx = {0: 0, 1: 1, 10: 2}.get(user_level, 2 if user_level >= 100 else -1)
+        if idx < 0 or idx >= len(tiers):
+            return jsonify({"error": f"invalid user level {user_level}"}), 500
+        tier_cfg = tiers[idx] or {}
         if "max_enabled_agents" not in tier_cfg:
             return jsonify({"error": "missing max_enabled_agents"}), 500
         max_agents = int(tier_cfg.get("max_enabled_agents"))

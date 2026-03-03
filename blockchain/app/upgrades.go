@@ -1414,8 +1414,8 @@ func (app *App) RegisterUpgradeHandlers() {
 						switch oldLevel {
 						case 0:
 							newLevel = 0
-					case 1, 2, 3:
-						newLevel = 1
+						case 1, 2, 3:
+							newLevel = 1
 						default:
 							if oldLevel >= 100 {
 								newLevel = oldLevel // preserve admin levels
