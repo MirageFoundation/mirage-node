@@ -637,6 +637,20 @@ def setup_test_wallets(backend: str) -> bool:
     for name, w in WALLETS.items():
         print(f"  Wallet {name:4s}: {w.address()}")
 
+    # Set usernames for all wallets (required before any other core transaction)
+    for name, w in WALLETS.items():
+        uname = f"test{name}{_rand_str(4)}"
+        resp = _do_set_username_raw(backend, w, uname, skip_pow=True)
+        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
+        if txh:
+            print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
+        else:
+            err = resp.get("error", resp) if resp else "no response"
+            print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Username {name}: {err}")
+            return False
+
+    time.sleep(4)
+
     # Faucet all wallets (sub wallets need tokens for subscription fees)
     # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 200K MIRAGE
     FAUCET_AMOUNTS = {
@@ -699,19 +713,6 @@ def setup_test_wallets(backend: str) -> bool:
         except Exception as e:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot check balance for {name}: {e}")
             return False
-
-    # Set usernames for all wallets (required before any other core transaction)
-    for name, w in WALLETS.items():
-        uname = f"test{name}{_rand_str(4)}"
-        resp = _do_set_username_raw(backend, w, uname, skip_pow=True)
-        txh = str(resp.get("tx_hash", "")).lower() if resp else ""
-        if txh:
-            print(f"  Username {name:4s}: {uname} (tx: {txh[:16]}...)")
-        else:
-            err = resp.get("error", resp) if resp else "no response"
-            print(f"  {_COLOR_YELLOW}WARN{_COLOR_RESET}  Username {name}: {err}")
-
-    time.sleep(4)
 
     # Subscribe wallets: sub1,sub2 -> level 1, sub3/agent1/agent2 -> level 10
     for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3"), (10, "agent1"), (10, "agent2")]:

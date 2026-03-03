@@ -1010,7 +1010,6 @@ func TestRequireUsernameAllowsSetUsername(t *testing.T) {
 func TestRequireUsernamePassesWithUsername(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
-	_ = owner
 
 	_, err := am.FollowUser(ctx, &types.MsgFollowUser{
 		Authority:      "not-gov",
@@ -1022,4 +1021,34 @@ func TestRequireUsernamePassesWithUsername(t *testing.T) {
 
 	followed, _ := mk.GetProfileFollowedUsers(ctx, owner)
 	require.Equal(t, []string{genAddr(1)}, followed)
+}
+
+func TestRequireUsernameRejectsUpgradeLevel(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	pub, _ := testPubkeyOwner()
+	_, err := am.UpgradeLevel(ctx, &types.MsgUpgradeLevel{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		Level:          uint32(types.LevelSubscriber),
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
+}
+
+func TestRequireUsernameRejectsSetAutoRenewal(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+
+	pub, _ := testPubkeyOwner()
+	_, err := am.SetAutoRenewal(ctx, &types.MsgSetAutoRenewal{
+		Authority:      "not-gov",
+		EnvelopePubkey: pub,
+		AutoRenew:      true,
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
 }

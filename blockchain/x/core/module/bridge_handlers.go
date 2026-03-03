@@ -62,8 +62,12 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 
 	// Require username before any bridge operation
 	var userLevel int
-	bz, found, _ := k.GetProfileCore(ctx, owner)
+	bz, found, err := k.GetProfileCore(ctx, owner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
 	if !found {
+		ctx.Logger().Debug("requireUsername: no profile", "owner", owner, "action", "BridgeBurn")
 		return nil, fmt.Errorf("username required: no profile found for %s", owner)
 	}
 	var profileCore types.ProfileCore
@@ -71,6 +75,7 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
 	}
 	if profileCore.Username == "" {
+		ctx.Logger().Debug("requireUsername: empty username", "owner", owner, "action", "BridgeBurn")
 		return nil, fmt.Errorf("username required: set a username before calling BridgeBurn")
 	}
 	userLevel = int(profileCore.Level)

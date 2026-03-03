@@ -2732,22 +2732,28 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 		actorType = "self"
 	}
 
-	// Verify the profile exists and extract level for gas fee
-	bz, found, _ := am.k.GetProfileCore(sdkCtx, target)
+	// Verify the profile exists and has a username
+	bz, found, err := am.k.GetProfileCore(sdkCtx, target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
 	if !found {
 		return nil, fmt.Errorf("profile not found or already deleted for %s", target)
+	}
+	var core types.ProfileCore
+	if err := json.Unmarshal(bz, &core); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	if core.Username == "" {
+		sdkCtx.Logger().Debug("requireUsername: empty username", "owner", target, "action", "DeleteUser")
+		return nil, fmt.Errorf("username required: set a username before calling DeleteUser")
 	}
 
 	// Deduct relay gas fee for self-delete (relay node compensation)
 	if actorType == "self" {
-		core, err := am.requireUsername(sdkCtx, target, "DeleteUser")
-		if err != nil {
-			return nil, err
-		}
 		if err := am.deductRelayGasFee(sdkCtx, target, int(core.Level)); err != nil {
 			return nil, err
 		}
-		_ = bz // profile already loaded above
 	}
 
 	// Execute the full deletion
@@ -3006,7 +3012,8 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 		return nil, err
 	}
 
-	if _, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel"); err != nil {
+	core, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel")
+	if err != nil {
 		return nil, err
 	}
 
@@ -3021,20 +3028,6 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 	// Admin levels require governance via MsgSetLevel; level 0 is free (downgrade via MsgSetAutoRenewal).
 	if !types.ValidSubscriptionLevels[requestedLevel] {
 		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber) or %d (Agent)", requestedLevel, types.LevelSubscriber, types.LevelAgent)
-	}
-
-	// Get or create profile core
-	var core types.ProfileCore
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		if err := json.Unmarshal(bz, &core); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
-		}
-	} else {
-		// Create new profile core
-		core = types.ProfileCore{
-			Owner:     owner,
-			CreatedAt: sdkCtx.BlockTime().Unix(),
-		}
 	}
 
 	// Get tier config for requested level
@@ -3146,23 +3139,14 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 		return nil, err
 	}
 
-	if _, err := am.requireUsername(sdkCtx, owner, "SetAutoRenewal"); err != nil {
+	core, err := am.requireUsername(sdkCtx, owner, "SetAutoRenewal")
+	if err != nil {
 		return nil, err
 	}
 
 	// MsgSetAutoRenewal MUST be paid with reserve, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
-	}
-
-	// Load existing profile core
-	var core types.ProfileCore
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		if err := json.Unmarshal(bz, &core); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("profile not found for owner: %s", owner)
 	}
 
 	targetAuto := req.GetAutoRenew()

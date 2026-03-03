@@ -459,3 +459,27 @@ func TestDeleteUserWithoutUsernameRejected(t *testing.T) {
 	_, found, _ := mk.GetProfileCore(ctx, owner)
 	require.True(t, found, "profile should still exist when self-delete is rejected for missing username")
 }
+
+func TestDeleteUserGovernanceWithoutUsernameRejected(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+	govAddr := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+
+	targetAddr := testAccAddressString()
+	core := types.ProfileCore{Owner: targetAddr, Username: "", Level: 1}
+	bz, _ := json.Marshal(core)
+	_ = mk.SetProfileCore(ctx, targetAddr, bz)
+
+	req := &types.MsgDeleteUser{
+		Authority: govAddr,
+		Target:    targetAddr,
+	}
+
+	_, err := am.DeleteUser(ctx, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
+
+	_, found, _ := mk.GetProfileCore(ctx, targetAddr)
+	require.True(t, found, "profile should remain when governance delete is rejected for missing username")
+}

@@ -246,6 +246,56 @@ func TestBridgeBurnHandlerHappyPath(t *testing.T) {
 	}
 }
 
+func TestBridgeBurnRejectsMissingProfile(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	envelopePubkey := bytes.Repeat([]byte{0x02}, 33)
+	_, err := deriveOwnerFromPubkey(envelopePubkey)
+	if err != nil {
+		t.Fatalf("deriveOwnerFromPubkey error: %v", err)
+	}
+
+	req := &types.MsgBridgeBurn{
+		EnvelopePubkey:     envelopePubkey,
+		DestinationChain:   "solana",
+		DestinationAddress: "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs",
+		Amount:             100,
+	}
+
+	_, err = bridgeBurn(ctx, mk, req, func(_ sdk.Context, _ string, _ int) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "username required") {
+		t.Fatalf("expected username required error, got: %v", err)
+	}
+}
+
+func TestBridgeBurnRejectsEmptyUsername(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	envelopePubkey := bytes.Repeat([]byte{0x02}, 33)
+	owner, err := deriveOwnerFromPubkey(envelopePubkey)
+	if err != nil {
+		t.Fatalf("deriveOwnerFromPubkey error: %v", err)
+	}
+	profileBz, _ := json.Marshal(types.ProfileCore{Owner: owner, Username: ""})
+	mk.profileCores[owner] = profileBz
+
+	req := &types.MsgBridgeBurn{
+		EnvelopePubkey:     envelopePubkey,
+		DestinationChain:   "solana",
+		DestinationAddress: "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs",
+		Amount:             100,
+	}
+
+	_, err = bridgeBurn(ctx, mk, req, func(_ sdk.Context, _ string, _ int) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "username required") {
+		t.Fatalf("expected username required error, got: %v", err)
+	}
+}
+
 func TestBridgeAttestBurnedHandlerThreshold(t *testing.T) {
 	ctx := newMockContext()
 	params := testBridgeParams("solana", 0)
