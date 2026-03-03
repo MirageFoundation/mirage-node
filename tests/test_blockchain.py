@@ -64,6 +64,7 @@ from shared.canon import (
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_username as _canon_base_set_username_raw,
+    canon_base_set_biography as _canon_base_set_biography_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_vote as _canon_base_vote_raw,
     canon_signed_with_pow,
@@ -86,6 +87,7 @@ from shared.datatypes import (
     MsgSetAutoRenewal,
     MsgSetLevel,
     MsgSetUsername,
+    MsgSetBiography,
     MsgUnblockPost,
     MsgUnblockTopic,
     MsgUnblockUser,
@@ -499,6 +501,32 @@ def _build_msg_set_username(
     msg.envelope_signature = sig
     msg.target = target
     msg.username = username
+    return msg
+
+
+def _build_msg_set_biography(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    biography: str,
+    pow_val: int = 0,
+) -> MsgSetBiography:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_biography_raw(pub, lb_bytes, diff, ts, target, biography)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetBiography()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.biography = biography
     return msg
 
 
@@ -3436,6 +3464,70 @@ def test_tier_features(backend: str) -> None:
     _check_deliver_accept("tierfeature.sub_content_1050_accepted", ccode, dcode, dlog)
 
 
+def test_biography(backend: str) -> None:
+    """Test MsgSetBiography: subscriber can set, free user rejected, length limit."""
+    print(f"\n{_COLOR_BOLD}[16] Biography{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # 16.1 Subscriber sets biography (should succeed)
+    sub = WALLETS["sub1"]
+    lb, _, _, _ = _get_pow_params(backend, str(sub.address()))
+    ts = _now_ms()
+    bio_text = "Hello, I am a subscriber!"
+    msg = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), bio_text, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("biography.subscriber_set", ccode, dcode, dlog)
+
+    # 16.2 Subscriber clears biography (empty string should succeed)
+    ts = _now_ms()
+    msg2 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), "", pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg2, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("biography.subscriber_clear", ccode, dcode, dlog)
+
+    # 16.3 Free user sets biography with PoW (should be rejected by tier gate)
+    fw = WALLETS["free"]
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
+    ts = _now_ms()
+    pub = fw.public_key().public_key_bytes
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), diff, ts, str(fw.address()), "free bio")
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    msg3 = _build_msg_set_biography(fw, lb, diff, ts, str(fw.address()), "free bio", pow_val=int(proof))
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg3, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.free_user_rejected", ccode, dcode, dlog)
+
+    # 16.4 Biography too long (> 512 chars) rejected
+    ts = _now_ms()
+    long_bio = "x" * 600
+    msg4 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), long_bio, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg4, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.too_long_rejected", ccode, dcode, dlog)
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -3456,6 +3548,7 @@ ALL_CATEGORIES = {
     "hard_cap_vs_deque": test_hard_cap_vs_deque,
     "upgrade_validation": test_upgrade_level_validation,
     "tier_features": test_tier_features,
+    "biography": test_biography,
 }
 
 

@@ -240,6 +240,11 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			obj:  &coretypes.MsgUpgradeLevel{},
 			fn:   func(v interface{}) []byte { return buildCanonForUpgradeLevel(v.(*coretypes.MsgUpgradeLevel)) },
 		},
+		{
+			name: "MsgSetBiography",
+			obj:  &coretypes.MsgSetBiography{},
+			fn:   func(v interface{}) []byte { return buildCanonForSetBiography(v.(*coretypes.MsgSetBiography)) },
+		},
 	}
 
 	for _, tc := range tests {

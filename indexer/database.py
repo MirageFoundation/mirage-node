@@ -1691,6 +1691,15 @@ class DatabaseManager:
                     (int(updated_at), owner),
                 )
 
+    def update_profile_biography(self, owner: str, biography: str, updated_at: int) -> None:
+        """Update biography field on a profile."""
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE profiles SET biography = %s, updated_at = %s WHERE LOWER(owner) = LOWER(%s)",
+                    (biography or "", int(updated_at), owner),
+                )
+
     def soft_delete_profile(self, owner: str, deleted_at: int) -> int:
         """Mark a profile as deleted (soft-delete). Returns rows affected."""
         with self._connect() as conn:

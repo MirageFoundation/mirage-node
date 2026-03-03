@@ -583,6 +583,51 @@ class TransactionHandler {
         }
     }
 
+    async setBiography(biographyRaw) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const biography = String(biographyRaw ?? "").trim();
+
+            let last_block_hash = "";
+            let pow_difficulty = 0;
+            let pow_base_bits = 0;
+            let pow_factor = 0;
+            const userLevel = Number(Storage.load('user_level', '0')) || 0;
+            if (userLevel === 0) {
+                updateNotification("Preparing biography update");
+                const statusData = await Api.get('get_parameters', publicKey ? { address: publicKey } : undefined);
+                last_block_hash = statusData.last_block_hash || "";
+                pow_difficulty = requirePowDifficulty(statusData.pow_difficulty);
+                pow_base_bits = requirePowBaseBits(statusData.pow_base_bits);
+                pow_factor = requirePowFactor(statusData.pow_factor);
+                try {
+                    const onChainBalance = Number(typeof statusData.balance !== 'undefined' ? statusData.balance : Storage.load('user_balance', '0'));
+                    this._persistUserBalance(onChainBalance, { normalizeStorage: true });
+                } catch (_) { }
+            }
+
+            const tx = {
+                action: 'set_biography',
+                biography,
+                last_block_hash: userLevel >= 1 ? "" : last_block_hash,
+                pow_difficulty: userLevel >= 1 ? 0 : pow_difficulty,
+                pow_base_bits,
+                pow_factor,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
+            const challenge = `${derivedAddress}:${userLevel >= 1 ? "" : last_block_hash}:0`;
+
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
     /**
      * Block or unblock a post by its txhash
      * @param {string} txhash - The post txhash to block/unblock
@@ -2145,6 +2190,18 @@ class TransactionHandler {
                     timestamp: txTimestamp,
                 };
             }
+            else if (transaction.action === "set_biography") {
+                challenge = `${derivedAddress}:${last_block_hash}:${pow_difficulty}`;
+                final_transaction = {
+                    action: transaction.action,
+                    biography: transaction.biography ?? "",
+                    last_block_hash,
+                    pow_difficulty: Number(pow_difficulty),
+                    pow_base_bits: pow_base_bits_relay,
+                    pow_factor: pow_factor_relay,
+                    timestamp: txTimestamp,
+                };
+            }
 
             const privateKey = derivePrivateKeyFromSeed(seedPhrase);
 
@@ -2471,6 +2528,59 @@ class TransactionHandler {
             tag6, uvarint64(timestamp || 0),
             tag100, encStr(target || ""),
             tag101, encStr(username || ""),
+        );
+    }
+
+    canonicalSetBiography({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, biography }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgSetBiography\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);
+        const tag100 = Uint8Array.from([100]);
+        const tag101 = Uint8Array.from([101]);
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag100, encStr(target || ""),
+            tag101, encStr(biography ?? ""),
         );
     }
 
@@ -3381,6 +3491,7 @@ class TransactionHandler {
             else if (action === 'delete_user') msgName = 'MsgDeleteUser';
             else if (action === 'send_tokens') msgName = 'MsgSendTokens';
             else if (action === 'set_username') msgName = 'MsgSetUsername';
+            else if (action === 'set_biography') msgName = 'MsgSetBiography';
             else if (action === 'report') msgName = 'MsgReport';
             else if (action === 'edit_post') msgName = 'MsgEdit';
             else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
@@ -3431,6 +3542,31 @@ class TransactionHandler {
                     }
                 } catch (e) { console.error('[Referral] Error reading referrer:', e); }
                 endpoint = 'core/set_username';
+            } else if (msgName === 'MsgSetBiography') {
+                const difficulty = resolveTxDifficulty(transaction);
+                const canon = this.canonicalSetBiography({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: difficulty,
+                    proof: Number(proof),
+                    timestamp: transaction.timestamp,
+                    target: signerAddress,
+                    biography: transaction.biography ?? "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    pubkey: pubB64,
+                    signature: sigB64,
+                    timestamp: transaction.timestamp,
+                    biography: transaction.biography ?? "",
+                    last_block_hash: transaction.last_block_hash,
+                    pow_difficulty: difficulty,
+                    pow: Number(proof),
+                };
+                endpoint = 'core/set_biography';
             } else if (msgName === 'MsgEnableAgent') {
                 const difficulty = resolveTxDifficulty(transaction);
                 const targetLower = signerAddress.toLowerCase();

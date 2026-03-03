@@ -12,6 +12,7 @@ from shared.datatypes import (
     MsgEdit,
     MsgVote,
     MsgSetUsername,
+    MsgSetBiography,
     MsgEnableAgent,
     MsgDisableAgent,
     MsgSetAgents,
@@ -82,6 +83,7 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgEdit": MsgEdit,
     "/mirage.core.v1.MsgVote": MsgVote,
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
+    "/mirage.core.v1.MsgSetBiography": MsgSetBiography,
     "/mirage.core.v1.MsgEnableAgent": MsgEnableAgent,
     "/mirage.core.v1.MsgDisableAgent": MsgDisableAgent,
     "/mirage.core.v1.MsgSetAgents": MsgSetAgents,
@@ -127,6 +129,8 @@ class MessageProcessor:
             self._handle_vote(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSetUsername":
             self._handle_set_username(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgSetBiography":
+            self._handle_set_biography(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgEnableAgent":
             self._handle_enable_agent(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgDisableAgent":
@@ -1049,6 +1053,36 @@ class MessageProcessor:
                 )
         except Exception as e:
             logger.error("Error handling MsgSetUsername: %s", e, exc_info=True)
+
+    def _handle_set_biography(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgSetBiography — update biography in profiles table."""
+        try:
+            parsed = MsgSetBiography()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+
+            addr = str(msg_dict.get("target", ""))
+            if not addr:
+                return
+            biography = str(msg_dict.get("biography", ""))
+
+            # Query chain for the authoritative profile (biography is persisted in ProfileCore)
+            profile_data = self._query_chain_profile(addr)
+            if profile_data:
+                biography = profile_data.get("biography", "") or ""
+
+            self.db.update_profile_biography(addr, biography, ts)
+            self.log_yaml(
+                "Updated biography",
+                {
+                    "address": addr,
+                    "timestamp": int(ts),
+                    "time_iso": self.iso_timestamp(ts),
+                    "biography_len": len(biography),
+                },
+            )
+        except Exception as e:
+            logger.error("Error handling MsgSetBiography: %s", e, exc_info=True)
 
     def _refresh_enabled_agents(self, addr: str, ts: int):
         """Query plist_agents/{addr} from chain and replace DB (full mirror)."""

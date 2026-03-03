@@ -86,6 +86,24 @@ def canon_base_set_username(
     return bytes(out)
 
 
+def canon_base_set_biography(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    biography: str,
+) -> bytes:
+    out = bytearray(_prefix("MsgSetBiography"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    out += _enc_str(101, biography)
+    return bytes(out)
+
+
 # NOTE: Authority (tag 1) is NOT included - it's set by backend to validator address
 # NOTE: Pow (tag 5) is included AFTER envelope fields (2-4) but BEFORE timestamp (6)
 # to match Go ante_metasig.go canonical order

@@ -357,6 +357,31 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgSetBiography:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgSetBiography", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForSetBiography(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgSetBiography", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
 		case *coretypes.MsgDelete:
 			if m.Authority == govAuthority {
 				continue
@@ -813,6 +838,17 @@ func buildCanonForSetUsername(m *coretypes.MsgSetUsername) []byte {
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Username)
+	return cw.buf
+}
+
+func buildCanonForSetBiography(m *coretypes.MsgSetBiography) []byte {
+	cw := newCanonWriter("MsgSetBiography")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Target)
+	cw.writeString(101, m.Biography)
 	return cw.buf
 }
 

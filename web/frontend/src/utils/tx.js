@@ -195,6 +195,11 @@ export async function setUsername(username) {
     return h.setUsername(username);
 }
 
+export async function setBiography(biography) {
+    const h = await getHandler();
+    return h.setBiography(biography);
+}
+
 export async function createPost(topic, title, content, tag = "", media = []) {
     const h = await getHandler();
     return h.createPost(topic, title, content, tag, media);

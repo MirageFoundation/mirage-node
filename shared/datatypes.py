@@ -99,6 +99,19 @@ def _build_pool():
     add_f(msg3, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg3, "username", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
+    # MsgSetBiography
+    msg_bio = file_proto.message_type.add()
+    msg_bio.name = "MsgSetBiography"
+    add_f(msg_bio, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bio, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bio, "biography", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # MsgEnableAgent
     msg_follow = file_proto.message_type.add()
     msg_follow.name = "MsgEnableAgent"
@@ -654,6 +667,7 @@ MsgPost = _get_message_class("mirage.core.v1.MsgPost")
 MsgEdit = _get_message_class("mirage.core.v1.MsgEdit")
 MsgVote = _get_message_class("mirage.core.v1.MsgVote")
 MsgSetUsername = _get_message_class("mirage.core.v1.MsgSetUsername")
+MsgSetBiography = _get_message_class("mirage.core.v1.MsgSetBiography")
 MsgEnableAgent = _get_message_class("mirage.core.v1.MsgEnableAgent")
 MsgDisableAgent = _get_message_class("mirage.core.v1.MsgDisableAgent")
 MsgSetAgents = _get_message_class("mirage.core.v1.MsgSetAgents")

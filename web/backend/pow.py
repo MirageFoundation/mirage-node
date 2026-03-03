@@ -63,6 +63,19 @@ def canon_base_set_username(
     )
 
 
+def canon_base_set_biography(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    biography: str,
+) -> bytes:
+    return canon_shared.canon_base_set_biography(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, biography
+    )
+
+
 def canon_base_post(
     pub_dec: bytes,
     last_block_hash: str,
@@ -510,6 +523,7 @@ def decode_any(s: str) -> bytes:
 __all__ = [
     "uvarint",
     "canon_base_set_username",
+    "canon_base_set_biography",
     "canon_base_post",
     "canon_base_edit",
     "canon_base_vote",

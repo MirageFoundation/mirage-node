@@ -30,6 +30,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMinted{},
 		// Award
 		&MsgAward{},
+		// Profile
+		&MsgSetBiography{},
 	}
 	registry.RegisterImplementations((*sdk.Msg)(nil), msgTypes...)
 
@@ -51,6 +53,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMintedResponse{},
 		// Award
 		&MsgAwardResponse{},
+		// Profile
+		&MsgSetBiographyResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
 

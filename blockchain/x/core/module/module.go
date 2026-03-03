@@ -1596,6 +1596,83 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	return &types.MsgSetUsernameResponse{}, nil
 }
 
+// SetBiography updates a user's biography (subscriber-only feature)
+func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography) (*types.MsgSetBiographyResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("SetBiography: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		if derived != target {
+			return nil, fmt.Errorf("envelope_pubkey must derive to target")
+		}
+		owner = target
+	}
+
+	biography := strings.TrimSpace(req.GetBiography())
+	if err := validateSafeText("biography", biography); err != nil {
+		return nil, err
+	}
+
+	// Get user's tier to check if they can have a biography
+	var userLevel int
+	if old, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
+		var prev types.ProfileCore
+		_ = json.Unmarshal(old, &prev)
+		userLevel = int(prev.Level)
+	}
+
+	tierConfig := params.GetTierConfig(userLevel)
+
+	// Non-empty biography requires CanHaveBiography (governance can always set)
+	if biography != "" && authority != govAuthority {
+		if tierConfig == nil || !tierConfig.CanHaveBiography {
+			return nil, fmt.Errorf("biography not available for tier level %d", userLevel)
+		}
+	}
+
+	// Update profile core
+	if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
+		c.Biography = biography
+		return nil
+	}); err != nil {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("SetBiography: update profile failed", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("SetBiography: biography updated", "owner", owner, "length", len(biography))
+	sdkCtx.Logger().Info(logDelimiter)
+
+	// Deduct gas fee from paid users
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgSetBiographyResponse{}, nil
+}
+
 // EnableAgent adds an agent to the user's enabled agents list (capped deque)
 func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) (*types.MsgEnableAgentResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)

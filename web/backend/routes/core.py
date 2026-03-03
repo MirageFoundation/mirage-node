@@ -27,6 +27,7 @@ from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
 
 from shared.datatypes import (
     MsgSetUsername,
+    MsgSetBiography,
     MsgEnableAgent,
     MsgDisableAgent,
     MsgSetAgents,
@@ -61,6 +62,7 @@ from pow import (
     canon_base_edit,
     canon_base_vote,
     canon_base_set_username,
+    canon_base_set_biography,
     canon_base_enable_agent,
     canon_base_disable_agent,
     canon_base_set_agents,
@@ -772,6 +774,146 @@ def core_set_username():
     except Exception as e:
         err_str = str(e)
         log_event(rid, "set_username.err", error=err_str)
+        msg, status = _classify_exception(err_str)
+        return jsonify({"error": msg}), status
+
+
+@core_bp.route("/api/core/set_biography", methods=["POST"])
+def core_set_biography():
+    rid = next_request_id()
+    log_event(rid, "set_biography.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        log_event(rid, "set_biography.data", data=data)
+        pub_b64 = str(data.get("pubkey", "").strip())
+        sig_b64 = str(data.get("signature", "").strip())
+        biography = str(data.get("biography", ""))
+        last_block_hash = str(data.get("last_block_hash", "").strip())
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        has_difficulty = "pow_difficulty" in data
+        has_pow = "pow" in data
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+
+        log_event(
+            rid,
+            "set_biography.parsed",
+            pubkey_len=len(pub_b64),
+            sig_len=len(sig_b64),
+            biography_len=len(biography),
+            last_block_hash=last_block_hash[:16] if last_block_hash else "",
+            difficulty=difficulty,
+            proof=proof,
+        )
+
+        if _has_unsafe_chars(biography):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
+
+        if not (pub_b64 and sig_b64):
+            return jsonify({"error": "missing required fields"}), 400
+
+        if len(biography) > 512:
+            return jsonify({"error": "biography too long"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        # Free users require PoW; subscribers must NOT use PoW
+        if not is_subscriber(user_addr):
+            if not (last_block_hash and has_difficulty and has_pow):
+                return jsonify({"error": "missing required fields"}), 400
+            try:
+                base = canon_base_set_biography(
+                    pub_dec,
+                    last_block_hash,
+                    int(difficulty),
+                    timestamp,
+                    user_addr,
+                    biography,
+                )
+                digest = argon2_digest(base, last_block_hash, proof)
+                if digest is not None:
+                    effective_required = _effective_difficulty(int(difficulty))
+                    if not check_pow_target(digest, effective_required, get_pow_base_bits(), _pow_factor()):
+                        return jsonify({"error": "insufficient pow (precheck)"}), 400
+            except Exception:
+                pass
+        else:
+            if int(difficulty) > 0 or int(proof) > 0:
+                return jsonify({"error": "pow not allowed for subscribers"}), 400
+
+        # Verify signature over canonical signed bytes
+        try:
+            base = canon_base_set_biography(
+                pub_dec,
+                last_block_hash,
+                int(difficulty),
+                timestamp,
+                user_addr,
+                biography,
+            )
+            signed = canon_signed_with_pow(base, int(proof))
+            if not _verify_signature(pub_dec, sig_dec, signed):
+                return jsonify({"error": "invalid signature"}), 400
+        except Exception:
+            return jsonify({"error": "invalid signature"}), 400
+
+        msg = MsgSetBiography()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = timestamp
+        msg.envelope_signature = sig_dec
+        msg.target = user_addr
+        msg.biography = biography
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgSetBiography"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        content_len = len(msg.biography)
+        gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "user_addr": user_addr,
+                "biography_len": len(biography),
+                "last_block_hash": last_block_hash,
+                "difficulty": int(difficulty),
+                "proof": int(proof),
+            }
+            return _tx_error(rid, "core/set_biography", "MsgSetBiography", code, tx_hash, raw_log, extra)
+
+        log_event(rid, "set_biography.ok", tx_hash=tx_hash, user=user_addr, biography_len=len(biography))
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        err_str = str(e)
+        log_event(rid, "set_biography.err", error=err_str)
         msg, status = _classify_exception(err_str)
         return jsonify({"error": msg}), status
 

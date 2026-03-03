@@ -315,6 +315,14 @@ export default function ProfileView({ state }) {
     const [showAllTopicPrefs, setShowAllTopicPrefs] = useState(false);
     const [showAllAuthorPrefs, setShowAllAuthorPrefs] = useState(false);
     const [showAllSimilarUsers, setShowAllSimilarUsers] = useState(false);
+
+    // Biography state
+    const [biography, setBiography] = useState('');
+    const [bioEditing, setBioEditing] = useState(false);
+    const [bioDraft, setBioDraft] = useState('');
+    const [bioSaving, setBioSaving] = useState(false);
+    const [bioError, setBioError] = useState('');
+    const [bioButtonStatus, setBioButtonStatus] = useState('');
     const formatPrefWeight = (w) => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -486,7 +494,19 @@ export default function ProfileView({ state }) {
                 }
             }
         };
+
+        const fetchBiography = async () => {
+            try {
+                const data = await Api.get('get_profile', { address: profileAddress, _cb: Date.now() });
+                if (!data || cancelled) return;
+                setBiography(data.biography || '');
+            } catch (_) {
+                if (!cancelled) setBiography('');
+            }
+        };
+
         fetchUserStatus();
+        fetchBiography();
         return () => {
             cancelled = true;
         };
@@ -782,6 +802,63 @@ export default function ProfileView({ state }) {
             ? `${profileAddress.slice(0, 10)}...`
             : 'Profile';
 
+    const canHaveBiography = (() => {
+        try {
+            const raw = localStorage.getItem('chainConfig');
+            if (!raw) return false;
+            const cfg = JSON.parse(raw);
+            const tiers = cfg?.tiers;
+            if (!Array.isArray(tiers)) return false;
+            const tier = tiers.find(t => Number(t.level ?? t.index) === userLevel) || tiers[userLevel];
+            if (!tier) return false;
+            return !!tier.can_have_biography;
+        } catch (_) {
+            return false;
+        }
+    })();
+
+    const BIO_MAX = 512;
+
+    const handleBioSave = async () => {
+        const trimmed = bioDraft.trim();
+        if (trimmed.length > BIO_MAX) {
+            setBioError(`Biography too long (${trimmed.length}/${BIO_MAX})`);
+            return;
+        }
+        setBioSaving(true);
+        setBioError('');
+        setBioButtonStatus('Preparing...');
+        try {
+            const result = await tx.setBiography(trimmed);
+            if (!result || !result.success) {
+                setBioError(String(result?.error || 'Failed to update biography'));
+                setBioSaving(false);
+                setBioButtonStatus('');
+                return;
+            }
+            setBioButtonStatus('Submitting...');
+            const txHash = result.tx_hash ? String(result.tx_hash).toLowerCase() : '';
+            if (txHash) {
+                setBioButtonStatus('Verifying...');
+                const pollResult = await tx.pollTxStatus(txHash, { initialDelay: 3000, interval: 2000, maxAttempts: 5 });
+                if (pollResult && !pollResult.success) {
+                    setBioError(pollResult.error_details?.message || 'Transaction rejected');
+                    setBioSaving(false);
+                    setBioButtonStatus('');
+                    return;
+                }
+            }
+            setBiography(trimmed);
+            setBioEditing(false);
+            setBioSaving(false);
+            setBioButtonStatus('');
+        } catch (e) {
+            setBioError(String(e?.message || e));
+            setBioSaving(false);
+            setBioButtonStatus('');
+        }
+    };
+
     // Show loading/error states for username resolution
     if (isResolvingUsername || usernameResolutionError) {
         return (
@@ -924,6 +1001,94 @@ export default function ProfileView({ state }) {
                                             <Mono>{registeredDisplay}</Mono>
                                         </ValueBox>
                                     </RowCentered>
+                                    <Row>
+                                        <Label>Biography:</Label>
+                                        <div style={{ width: '100%' }}>
+                                            {bioEditing ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                    <textarea
+                                                        value={bioDraft}
+                                                        onChange={e => setBioDraft(e.target.value)}
+                                                        maxLength={BIO_MAX}
+                                                        rows={4}
+                                                        disabled={bioSaving}
+                                                        style={{
+                                                            width: '100%',
+                                                            boxSizing: 'border-box',
+                                                            background: 'var(--panel-alt, #1f2328)',
+                                                            border: '1px solid var(--border, #444)',
+                                                            borderRadius: '8px',
+                                                            padding: '0.6rem 0.85rem',
+                                                            color: 'var(--text, #eee)',
+                                                            fontFamily: 'inherit',
+                                                            fontSize: '0.8rem',
+                                                            resize: 'vertical',
+                                                            minHeight: '80px',
+                                                        }}
+                                                        placeholder="Write a short biography..."
+                                                        autoFocus
+                                                    />
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                        <span style={{ fontSize: '0.7rem', color: bioDraft.length > BIO_MAX ? '#f87171' : '#888' }}>
+                                                            {bioDraft.length}/{BIO_MAX}
+                                                        </span>
+                                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="subtle"
+                                                                disabled={bioSaving}
+                                                                onClick={() => { setBioEditing(false); setBioError(''); setBioDraft(biography); }}
+                                                            >
+                                                                Cancel
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                disabled={bioSaving || bioDraft.length > BIO_MAX}
+                                                                loading={bioSaving}
+                                                                onClick={handleBioSave}
+                                                            >
+                                                                {bioButtonStatus || 'Save'}
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                    {bioError && (
+                                                        <span style={{ fontSize: '0.75rem', color: '#f87171' }}>{bioError}</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <ValueBoxWithButton>
+                                                    <Mono style={{
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-word',
+                                                        color: biography ? undefined : '#888',
+                                                        fontSize: '0.8rem',
+                                                    }}>
+                                                        {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
+                                                    </Mono>
+                                                    {isOwnProfile && canHaveBiography && (
+                                                        <Button
+                                                            size="sm"
+                                                            minWidth="copy"
+                                                            mobileFullWidth
+                                                            onClick={() => { setBioDraft(biography); setBioEditing(true); setBioError(''); }}
+                                                        >
+                                                            {biography ? 'Edit' : 'Add'}
+                                                        </Button>
+                                                    )}
+                                                    {isOwnProfile && !canHaveBiography && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="subtle"
+                                                            mobileFullWidth
+                                                            onClick={() => navigate('/subscription')}
+                                                        >
+                                                            Upgrade
+                                                        </Button>
+                                                    )}
+                                                </ValueBoxWithButton>
+                                            )}
+                                        </div>
+                                    </Row>
                                 </>
                             )}
 
