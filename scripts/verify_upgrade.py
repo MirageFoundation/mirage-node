@@ -2,31 +2,29 @@
 """
 Verify a software upgrade was applied correctly on a Mirage chain.
 
-Runs locally on the node itself (inside the container / on the server).
-No Docker dependency — queries localhost REST/RPC and the local miraged binary.
+Runs locally on the node (inside the container / on the server).
+Queries localhost REST (1317) and RPC (26657) + local miraged binary.
 
 Usage:
-    python3 verify_upgrade.py [--upgrade-name NAME]
-
-Default upgrade name auto-detected from proposals/proposal_upgrade.json.
-Checks: node version, upgrade plan cleared, chain producing blocks,
-        core params match expected tier config, profiles migrated.
+    python3 verify_upgrade.py [--upgrade-name NAME] [--debug]
 """
 import json
 import shutil
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.parse
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
-ROOT = SCRIPTS_DIR.parent
 RPC = "http://127.0.0.1:26657"
 REST = "http://127.0.0.1:1317"
 
 _passed = 0
 _failed = 0
 _warned = 0
+_debug = False
 
 
 def ok(msg: str) -> None:
@@ -47,35 +45,39 @@ def warn(msg: str) -> None:
     print(f"  \033[33m!\033[0m {msg}")
 
 
+def debug(msg: str) -> None:
+    if _debug:
+        print(f"  [debug] {msg}")
+
+
 def section(title: str) -> None:
     print(f"\n{'─' * 60}")
     print(f"  {title}")
     print(f"{'─' * 60}")
 
 
-def query_http(url: str) -> dict | None:
-    import urllib.request
+def http_get(url: str) -> dict | None:
     try:
+        debug(f"GET {url}")
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read())
     except Exception as e:
-        fail(f"HTTP query {url} failed: {e}")
+        fail(f"HTTP GET {url} failed: {e}")
         return None
 
 
 def find_miraged() -> str:
-    for p in [
-        "/opt/mirage/blockchain/bin/miraged",
-        "/opt/mirage/blockchain/miraged",
-    ]:
+    for p in ["/opt/mirage/blockchain/bin/miraged", "/opt/mirage/blockchain/miraged"]:
         if Path(p).is_file():
+            debug(f"Found miraged at {p}")
             return p
-    found = shutil.which("miraged")
-    return found or "miraged"
+    found = shutil.which("miraged") or "miraged"
+    debug(f"Using miraged from PATH: {found}")
+    return found
 
 
-def detect_upgrade_name() -> str:
+def detect_upgrade_name() -> str | None:
     proposal_file = SCRIPTS_DIR / "proposals" / "proposal_upgrade.json"
     if proposal_file.exists():
         try:
@@ -83,94 +85,71 @@ def detect_upgrade_name() -> str:
             for msg in data.get("messages", []):
                 plan = msg.get("plan", {})
                 if plan.get("name"):
+                    debug(f"Detected upgrade name from proposal: {plan['name']}")
                     return plan["name"]
         except Exception:
             pass
-    return "v1.16.0"
+    return None
 
 
 EXPECTED_TIERS = [
     {
-        "level": 0,
-        "name": "Free",
+        "level": 0, "name": "Free",
         "period_fee": 0,
-        "max_enabled_agents": 25,
-        "max_followed_users": 25,
-        "max_followed_topics": 25,
-        "max_blocked_users": 25,
-        "max_blocked_posts": 25,
-        "max_blocked_topics": 25,
-        "max_title_length": 150,
-        "max_content_length": 1000,
-        "editing_time_mins": 10,
+        "max_enabled_agents": 25, "max_followed_users": 25, "max_followed_topics": 25,
+        "max_blocked_users": 25, "max_blocked_posts": 25, "max_blocked_topics": 25,
+        "max_title_length": 150, "max_content_length": 1000, "editing_time_mins": 10,
         "vote_weight": 1.0,
-        "can_be_agent": False,
-        "can_remove_anon": False,
-        "can_have_biography": False,
-        "can_have_avatar": False,
-        "can_have_banner": False,
-        "can_have_flair": False,
+        "can_be_agent": False, "can_remove_anon": False,
+        "can_have_biography": False, "can_have_avatar": False,
+        "can_have_banner": False, "can_have_flair": False,
     },
     {
-        "level": 1,
-        "name": "Subscriber",
+        "level": 1, "name": "Subscriber",
         "period_fee": 100_000_000_000,
-        "max_enabled_agents": 500,
-        "max_followed_users": 500,
-        "max_followed_topics": 500,
-        "max_blocked_users": 500,
-        "max_blocked_posts": 500,
-        "max_blocked_topics": 500,
-        "max_title_length": 300,
-        "max_content_length": 20_000,
-        "editing_time_mins": 360,
+        "max_enabled_agents": 500, "max_followed_users": 500, "max_followed_topics": 500,
+        "max_blocked_users": 500, "max_blocked_posts": 500, "max_blocked_topics": 500,
+        "max_title_length": 300, "max_content_length": 20_000, "editing_time_mins": 360,
         "vote_weight": 1.33,
-        "can_be_agent": False,
-        "can_remove_anon": True,
-        "can_have_biography": True,
-        "can_have_avatar": True,
-        "can_have_banner": True,
-        "can_have_flair": True,
+        "can_be_agent": False, "can_remove_anon": True,
+        "can_have_biography": True, "can_have_avatar": True,
+        "can_have_banner": True, "can_have_flair": True,
     },
     {
-        "level": 10,
-        "name": "Agent",
+        "level": 10, "name": "Agent",
         "period_fee": 200_000_000_000,
-        "max_enabled_agents": 500,
-        "max_followed_users": 500,
-        "max_followed_topics": 500,
-        "max_blocked_users": 500,
-        "max_blocked_posts": 500,
-        "max_blocked_topics": 500,
-        "max_title_length": 300,
-        "max_content_length": 20_000,
-        "editing_time_mins": 360,
+        "max_enabled_agents": 500, "max_followed_users": 500, "max_followed_topics": 500,
+        "max_blocked_users": 500, "max_blocked_posts": 500, "max_blocked_topics": 500,
+        "max_title_length": 300, "max_content_length": 20_000, "editing_time_mins": 360,
         "vote_weight": 1.33,
-        "can_be_agent": True,
-        "can_remove_anon": True,
-        "can_have_biography": True,
-        "can_have_avatar": True,
-        "can_have_banner": True,
-        "can_have_flair": True,
+        "can_be_agent": True, "can_remove_anon": True,
+        "can_have_biography": True, "can_have_avatar": True,
+        "can_have_banner": True, "can_have_flair": True,
     },
 ]
+
+def is_valid_level(level: int) -> bool:
+    return level in (0, 1, 10) or level >= 100
+
+
+# ── Checks ─────────────────────────────────────────────────
 
 
 def check_node_reachable() -> bool:
     section("Node Connectivity")
-    data = query_http(f"{RPC}/status")
+    data = http_get(f"{RPC}/status")
     if not data:
         fail("Node not reachable")
         return False
-    result = data.get("result", {})
-    node_info = result.get("node_info", {})
-    sync_info = result.get("sync_info", {})
-    network = node_info.get("network", "?")
-    version = node_info.get("version", "?")
-    height = sync_info.get("latest_block_height", "?")
-    catching_up = sync_info.get("catching_up", False)
+    r = data.get("result", {})
+    ni = r.get("node_info", {})
+    si = r.get("sync_info", {})
+    network = ni.get("network", "?")
+    cometbft = ni.get("version", "?")
+    height = si.get("latest_block_height", "?")
+    catching_up = si.get("catching_up", False)
 
-    ok(f"Node reachable (network={network}, cometbft={version}, height={height})")
+    ok(f"Node reachable (network={network}, cometbft={cometbft}, height={height})")
     if catching_up:
         warn("Node is still catching up")
     else:
@@ -178,194 +157,209 @@ def check_node_reachable() -> bool:
     return True
 
 
-def check_blocks_advancing() -> None:
-    section("Block Production")
-    data1 = query_http(f"{RPC}/status")
-    if not data1:
-        return
-    h1 = int(data1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-    print(f"  Waiting 6s for new blocks (height={h1})...")
-    time.sleep(6)
-    data2 = query_http(f"{RPC}/status")
-    if not data2:
-        return
-    h2 = int(data2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
-    if h2 > h1:
-        ok(f"Chain is producing blocks ({h1} → {h2}, +{h2 - h1})")
-    else:
-        fail(f"Chain is NOT producing blocks (stuck at {h1})")
-
-
-def check_upgrade_plan_cleared() -> None:
-    section("Upgrade Plan")
-    data = query_http(f"{REST}/cosmos/upgrade/v1beta1/current_plan")
-    if data is None:
-        return
-    plan = data.get("plan")
-    if plan is None or plan == {}:
-        ok("No active upgrade plan (cleared after upgrade)")
-    else:
-        name = plan.get("name", "?")
-        height = plan.get("height", "?")
-        fail(f"Upgrade plan still active: {name} at height {height}")
-
-
-def check_applied_upgrade(upgrade_name: str) -> None:
-    data = query_http(f"{REST}/cosmos/upgrade/v1beta1/applied_plan/{upgrade_name}")
-    if data is None:
-        return
-    height = data.get("height", "0")
-    if height and height != "0":
-        ok(f"Upgrade '{upgrade_name}' applied at height {height}")
-    else:
-        fail(f"Upgrade '{upgrade_name}' not found in applied upgrades")
-
-
 def check_software_version() -> None:
     section("Software Version")
     miraged = find_miraged()
-    result = subprocess.run(
-        [miraged, "version"],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode == 0:
-        version = result.stdout.strip()
-        ok(f"Binary version: {version}")
+    r = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
+    if r.returncode == 0:
+        ok(f"Binary on disk: {r.stdout.strip()}")
     else:
-        warn(f"Could not get binary version from {miraged}: {result.stderr.strip()}")
+        fail(f"Could not run '{miraged} version': {r.stderr.strip()[:120]}")
 
-    data = query_http(f"{REST}/cosmos/base/tendermint/v1beta1/node_info")
+    data = http_get(f"{REST}/cosmos/base/tendermint/v1beta1/node_info")
     if data:
         ver = data.get("application_version", {}).get("version", "?")
-        ok(f"Running version (ABCI): {ver}")
+        ok(f"Running node (ABCI): {ver}")
+
+
+def check_upgrade_plan(upgrade_name: str) -> None:
+    section("Upgrade Status")
+
+    data = http_get(f"{REST}/cosmos/upgrade/v1beta1/current_plan")
+    if data is not None:
+        plan = data.get("plan")
+        if plan is None or plan == {}:
+            ok("No active upgrade plan (cleared after upgrade)")
+        else:
+            fail(f"Upgrade plan still active: {plan.get('name', '?')} at height {plan.get('height', '?')}")
+
+    data = http_get(f"{REST}/cosmos/upgrade/v1beta1/applied_plan/{upgrade_name}")
+    if data is not None:
+        h = data.get("height", "0")
+        if h and h != "0":
+            ok(f"Upgrade '{upgrade_name}' applied at height {h}")
+        else:
+            fail(f"Upgrade '{upgrade_name}' not found in applied upgrades")
+
+
+def check_blocks_advancing() -> None:
+    section("Block Production")
+    d1 = http_get(f"{RPC}/status")
+    if not d1:
+        return
+    h1 = int(d1.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
+    print(f"  Waiting 6s for new blocks (height={h1})...")
+    time.sleep(6)
+    d2 = http_get(f"{RPC}/status")
+    if not d2:
+        return
+    h2 = int(d2.get("result", {}).get("sync_info", {}).get("latest_block_height", 0))
+    if h2 > h1:
+        ok(f"Chain producing blocks ({h1} → {h2}, +{h2 - h1})")
+    else:
+        fail(f"Chain NOT producing blocks (stuck at {h1})")
 
 
 def check_core_params() -> None:
     section("Core Module Parameters (Tier Config)")
-    data = query_http(f"{REST}/mirage/core/v1/params")
+    data = http_get(f"{REST}/mirage/core/v1/params")
     if data is None:
         return
 
-    params = data.get("params", {})
-    tiers = params.get("tiers", [])
-
+    tiers = data.get("params", {}).get("tiers", [])
     if len(tiers) != 3:
         fail(f"Expected 3 tiers, got {len(tiers)}")
         return
     ok(f"Tier count: {len(tiers)}")
 
-    tier_fields_int = [
+    int_fields = [
         "max_enabled_agents", "max_followed_users", "max_followed_topics",
         "max_blocked_users", "max_blocked_posts", "max_blocked_topics",
         "max_title_length", "max_content_length", "editing_time_mins",
     ]
-    tier_fields_bool = [
+    bool_fields = [
         "can_be_agent", "can_remove_anon", "can_have_biography",
         "can_have_avatar", "can_have_banner", "can_have_flair",
     ]
 
     for i, expected in enumerate(EXPECTED_TIERS):
         actual = tiers[i]
-        name = expected["name"]
-        tier_ok = True
+        label = f"Tier {expected['level']} ({expected['name']})"
+        errors = []
 
         actual_fee = int(actual.get("period_fee", "0"))
         if actual_fee != expected["period_fee"]:
-            fail(f"Tier {i} ({name}): period_fee={actual_fee}, expected {expected['period_fee']}")
-            tier_ok = False
+            errors.append(f"period_fee={actual_fee} (want {expected['period_fee']})")
 
-        for field in tier_fields_int:
-            actual_val = int(actual.get(field, "0"))
-            expected_val = expected[field]
-            if actual_val != expected_val:
-                fail(f"Tier {i} ({name}): {field}={actual_val}, expected {expected_val}")
-                tier_ok = False
+        for f in int_fields:
+            av = int(actual.get(f, "0"))
+            if av != expected[f]:
+                errors.append(f"{f}={av} (want {expected[f]})")
 
-        for field in tier_fields_bool:
-            actual_val = actual.get(field, False)
-            if isinstance(actual_val, str):
-                actual_val = actual_val.lower() == "true"
-            expected_val = expected[field]
-            if actual_val != expected_val:
-                fail(f"Tier {i} ({name}): {field}={actual_val}, expected {expected_val}")
-                tier_ok = False
+        for f in bool_fields:
+            av = actual.get(f, False)
+            if isinstance(av, str):
+                av = av.lower() == "true"
+            if av != expected[f]:
+                errors.append(f"{f}={av} (want {expected[f]})")
 
-        actual_vw = float(actual.get("vote_weight", "0"))
-        if abs(actual_vw - expected["vote_weight"]) >= 0.01:
-            fail(f"Tier {i} ({name}): vote_weight={actual_vw}, expected {expected['vote_weight']}")
-            tier_ok = False
+        av_vw = float(actual.get("vote_weight", "0"))
+        if abs(av_vw - expected["vote_weight"]) >= 0.01:
+            errors.append(f"vote_weight={av_vw} (want {expected['vote_weight']})")
 
-        if tier_ok:
-            ok(f"Tier {i} ({name}): all fields match expected values")
+        if errors:
+            for e in errors:
+                fail(f"{label}: {e}")
+        else:
+            ok(f"{label}: all fields match")
 
 
-def check_profiles_migrated() -> None:
+def fetch_all_profiles() -> tuple[list[dict], int | None]:
+    """Fetch all profiles with pagination."""
+    profiles: list[dict] = []
+    next_key: str | None = None
+    total: int | None = None
+    page = 0
+    while True:
+        page += 1
+        debug(f"Fetching profiles page {page} (next_key={'set' if next_key else 'none'})")
+        url = f"{REST}/mirage/core/v1/profiles?pagination.limit=500&pagination.count_total=true"
+        if next_key:
+            url += f"&pagination.key={urllib.parse.quote(next_key)}"
+        data = http_get(url)
+        if data is None:
+            break
+        batch = data.get("profiles", [])
+        profiles.extend(batch)
+        debug(f"Fetched {len(batch)} profiles (total so far: {len(profiles)})")
+        pagination = data.get("pagination", {}) or {}
+        if total is None:
+            try:
+                total = int(pagination.get("total", "0"))
+            except Exception:
+                total = None
+        nk = pagination.get("next_key")
+        if not nk or not batch:
+            break
+        next_key = nk
+        if page > 200:
+            fail("Pagination safety limit reached (100k+ profiles)")
+            break
+    return profiles, total
+
+
+def check_profiles() -> None:
     section("Profile Migration")
-    data = query_http(f"{REST}/mirage/core/v1/profiles")
-    if data is None:
-        return
-
-    profiles = data.get("profiles", [])
+    profiles, total = fetch_all_profiles()
     if not profiles:
-        warn("No profiles found (may be expected on fresh testnet)")
+        fail("No profiles found (cannot validate migration)")
         return
 
-    ok(f"Found {len(profiles)} profiles")
+    ok(f"Total profiles: {len(profiles)}")
+    if total is None:
+        fail("Pagination total missing (expected pagination.count_total=true)")
+    elif total != len(profiles):
+        fail(f"Profile count mismatch: fetched {len(profiles)} vs total {total}")
+    else:
+        ok(f"Pagination total matches fetched count ({total})")
 
     bad_levels = []
-    has_is_moderator = 0
-    has_old_field = 0
+    level_counts: dict[int, int] = {}
+    missing_lists = {
+        "enabled_agents": 0,
+        "followed_users": 0,
+        "followed_topics": 0,
+        "blocked_users": 0,
+        "blocked_posts": 0,
+        "blocked_topics": 0,
+    }
     for p in profiles:
-        core = p if isinstance(p, dict) and "owner" in p else p.get("core", p)
-        level = core.get("level", 0)
-        if isinstance(level, str):
-            level = int(level)
-        if level in (2, 3, 4, 5, 6, 7, 8, 9):
-            bad_levels.append((core.get("owner", "?")[:20], level))
-        if "is_moderator" in core:
-            has_is_moderator += 1
-        if "followed_moderators" in p:
-            has_old_field += 1
+        lvl = p.get("level", 0)
+        if isinstance(lvl, str):
+            lvl = int(lvl)
+        level_counts[lvl] = level_counts.get(lvl, 0) + 1
+        if not is_valid_level(lvl):
+            bad_levels.append((p.get("owner", "?")[:20], lvl))
+        for key in missing_lists:
+            if key not in p:
+                missing_lists[key] += 1
+
+    dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
+    ok(f"Level distribution: {dist}")
 
     if bad_levels:
-        fail(f"{len(bad_levels)} profiles have unmigrated levels (2-9): {bad_levels[:5]}")
+        fail(f"{len(bad_levels)} profiles have invalid levels: {bad_levels[:5]}")
     else:
-        ok("No profiles have invalid levels (2-9)")
+        ok("All profiles have valid levels (0, 1, 10, or 100+)")
 
-    if has_is_moderator:
-        fail(f"{has_is_moderator} profiles still have 'is_moderator' field")
-    else:
-        ok("No profiles have legacy 'is_moderator' field")
-
-    if has_old_field:
-        warn(f"{has_old_field} profiles still use 'followed_moderators' (expected to be 'enabled_agents')")
-    else:
-        ok("No profiles use legacy 'followed_moderators' field name")
-
-
-def check_new_message_types() -> None:
-    section("New Message Types")
-    miraged = find_miraged()
-    result = subprocess.run(
-        [miraged, "tx", "core", "--help"],
-        capture_output=True, text=True, check=False,
-    )
-    output = result.stdout + result.stderr
-    for msg in ["enable-agent", "disable-agent"]:
-        if msg in output:
-            ok(f"TX subcommand '{msg}' registered")
+    for key, count in missing_lists.items():
+        if count:
+            fail(f"{count} profiles missing '{key}' field")
         else:
-            fail(f"TX subcommand '{msg}' NOT found")
+            ok(f"All profiles include '{key}' field")
 
 
-def check_kv_migration() -> None:
-    section("KV Store Migration (plist_mods → plist_agents)")
-    ok("KV migration verified by upgrade handler logs (check node logs for 'migrated plist_mods -> plist_agents')")
+# ── Main ───────────────────────────────────────────────────
 
 
 def main() -> int:
     args = sys.argv[1:]
     upgrade_name = None
+    global _debug
+
+    if "--debug" in args:
+        args.remove("--debug")
+        _debug = True
 
     if "--upgrade-name" in args:
         idx = args.index("--upgrade-name")
@@ -375,6 +369,12 @@ def main() -> int:
 
     if not upgrade_name:
         upgrade_name = detect_upgrade_name()
+    if not upgrade_name:
+        fail("Upgrade name not found (pass --upgrade-name or check proposal file)")
+        section("Summary")
+        total = _passed + _failed + _warned
+        print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")
+        return 1
 
     print(f"==> Verifying upgrade '{upgrade_name}'")
 
@@ -383,26 +383,21 @@ def main() -> int:
         return 1
 
     check_software_version()
-    check_upgrade_plan_cleared()
-    check_applied_upgrade(upgrade_name)
+    check_upgrade_plan(upgrade_name)
     check_blocks_advancing()
     check_core_params()
-    check_profiles_migrated()
-    check_kv_migration()
-    check_new_message_types()
-
+    check_profiles()
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")
     if _failed:
         print(f"\n\033[31mUPGRADE VERIFICATION FAILED ({_failed} failures)\033[0m")
         return 1
-    elif _warned:
+    if _warned:
         print(f"\n\033[33mUPGRADE VERIFICATION PASSED with {_warned} warnings\033[0m")
         return 0
-    else:
-        print(f"\n\033[32mUPGRADE VERIFICATION PASSED\033[0m")
-        return 0
+    print(f"\n\033[32mUPGRADE VERIFICATION PASSED\033[0m")
+    return 0
 
 
 if __name__ == "__main__":
