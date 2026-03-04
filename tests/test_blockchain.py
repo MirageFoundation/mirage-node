@@ -114,6 +114,7 @@ DEFAULT_BACKEND = tb.DEFAULT_BACKEND
 COMET_RPC_URL = "http://127.0.0.1:26657"
 DEFAULT_GAS_LIMIT = 200000
 FILL_GAS_LIMIT = 1000000  # Higher gas for fill-loop txs (keeper iterates growing lists)
+FILL_GAS_BUFFER = 1.3  # Multiplier on simulated gas for fill loops (block-to-block variance)
 
 _COLOR_GREEN = "\033[92m"
 _COLOR_RED = "\033[91m"
@@ -137,6 +138,11 @@ _GOV_MODULE_ADDR: Optional[str] = None
 _GRPC_TARGET: Optional[str] = None
 _GRPC_CHANNEL = None
 _SIMULATE_MODE_LOGGED = False
+
+# Per-pubkey tx/gas tracking for the end-of-run cost summary.
+_TX_STATS: dict[str, dict] = {}  # hex(pubkey) -> {"attempted", "paid", "gas_total", "fee_total"}
+_FEE_PAYER_STATS: dict[str, dict] = {}  # fee_payer_addr -> {"attempted", "paid", "gas_total", "fee_total"}
+_TX_STATS_LOCK = threading.Lock()
 
 
 def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
@@ -598,7 +604,26 @@ def _submit_tx(
     wait_deliver: bool = False,
 ) -> tuple[str, int, str, Optional[int], Optional[str]]:
     tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
+    if fee_amount is None:
+        actual_fee = int(math.ceil(int(gas_limit) * _min_gas_price_umirage()))
+    else:
+        actual_fee = int(fee_amount)
     tx_hash, check_code, check_log = _broadcast_tx_sync(tx_bytes)
+    pk_hex = signer_pubkey.hex()
+    fp_key = str(fee_payer or "")
+    with _TX_STATS_LOCK:
+        stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+        stats["attempted"] += 1
+        if check_code == 0:
+            stats["paid"] += 1
+            stats["gas_total"] += int(gas_limit)
+            stats["fee_total"] += actual_fee
+        fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+        fp_stats["attempted"] += 1
+        if check_code == 0:
+            fp_stats["paid"] += 1
+            fp_stats["gas_total"] += int(gas_limit)
+            fp_stats["fee_total"] += actual_fee
     if not wait_deliver or check_code != 0:
         return tx_hash, check_code, check_log, None, None
     deliver_code, deliver_log = _wait_for_tx_result(tx_hash)
@@ -2391,7 +2416,9 @@ def test_follow_limits(backend: str) -> None:
     # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
     remaining_followed_users = max(0, max_followed_users - len(existing_followed_users))
-    _debug(f"free-tier max_followed_users={max_followed_users} existing={len(existing_followed_users)} remaining={remaining_followed_users}")
+    _debug(
+        f"free-tier max_followed_users={max_followed_users} existing={len(existing_followed_users)} remaining={remaining_followed_users}"
+    )
     fill_ok = True
     followed_user_targets: list[str] = []
     chunk_size = 25
@@ -2409,14 +2436,16 @@ def test_follow_limits(backend: str) -> None:
             msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("follow.user_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.user_fill ({len(existing_followed_users) + remaining_followed_users}/{max_followed_users} followed)")
+        _pass(
+            f"follow.user_fill ({len(existing_followed_users) + remaining_followed_users}/{max_followed_users} followed)"
+        )
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2438,7 +2467,9 @@ def test_follow_limits(backend: str) -> None:
     # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
     remaining_followed_topics = max(0, max_followed_topics - len(existing_followed_topics))
-    _debug(f"free-tier max_followed_topics={max_followed_topics} existing={len(existing_followed_topics)} remaining={remaining_followed_topics}")
+    _debug(
+        f"free-tier max_followed_topics={max_followed_topics} existing={len(existing_followed_topics)} remaining={remaining_followed_topics}"
+    )
     fill_ok = True
     followed_topic_targets: list[str] = []
     for start in range(0, remaining_followed_topics, chunk_size):
@@ -2455,14 +2486,16 @@ def test_follow_limits(backend: str) -> None:
             msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgFollowTopic"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("follow.topic_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.topic_fill ({len(existing_followed_topics) + remaining_followed_topics}/{max_followed_topics} followed)")
+        _pass(
+            f"follow.topic_fill ({len(existing_followed_topics) + remaining_followed_topics}/{max_followed_topics} followed)"
+        )
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2484,7 +2517,9 @@ def test_follow_limits(backend: str) -> None:
     # 8.3 Fill free-tier max_enabled_agents + overflow
     max_enabled_agents = _tier_int(tier0, "max_enabled_agents")
     remaining_enabled_agents = max(0, max_enabled_agents - len(existing_enabled_agents))
-    _debug(f"free-tier max_enabled_agents={max_enabled_agents} existing={len(existing_enabled_agents)} remaining={remaining_enabled_agents}")
+    _debug(
+        f"free-tier max_enabled_agents={max_enabled_agents} existing={len(existing_enabled_agents)} remaining={remaining_enabled_agents}"
+    )
     fill_ok = True
     enabled_agent_targets: list[str] = []
     for start in range(0, remaining_enabled_agents, chunk_size):
@@ -2501,14 +2536,16 @@ def test_follow_limits(backend: str) -> None:
             msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgEnableAgent"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("follow.agent_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.agent_fill ({len(existing_enabled_agents) + remaining_enabled_agents}/{max_enabled_agents} enabled)")
+        _pass(
+            f"follow.agent_fill ({len(existing_enabled_agents) + remaining_enabled_agents}/{max_enabled_agents} enabled)"
+        )
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2537,7 +2574,9 @@ def test_follow_limits(backend: str) -> None:
     sub_chain_profile = _get_chain_profile(sub_addr)
     before_followed = sub_chain_profile.get("followed_users") or sub_chain_profile.get("followedUsers") or []
     remaining = max(0, sub_max_followed_users - len(before_followed))
-    _debug(f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} remaining={remaining}")
+    _debug(
+        f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} remaining={remaining}"
+    )
     bulk_targets = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)]
     chunk_size = 25
     bulk_ok = True
@@ -2551,12 +2590,12 @@ def test_follow_limits(backend: str) -> None:
             msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(
-            msgs,
-            sim_limit,
-            fee_payer,
-            sub_pub,
-        )
+        try:
+            sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, sub_pub) * FILL_GAS_BUFFER)
+        except Exception as sim_err:
+            _fail("follow.subscriber_bulk_user_fill", f"simulate failed at chunk_start={start}: {str(sim_err)[:200]}")
+            bulk_ok = False
+            break
         _debug(f"subscriber bulk follow gas: start={start} msgs={len(msgs)} sim_limit={sim_limit} gas_used={sim_gas}")
         gas_limit = sim_gas
         _, ccode, _, dcode, dlog = _submit_tx(
@@ -3371,7 +3410,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgBlockUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("hardcap.blocked_user_deque_fill", f"chunk_start={start} ccode={ccode} dcode={dcode}")
@@ -3406,7 +3445,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgBlockPost"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("hardcap.blocked_post_deque_fill", f"chunk_start={start}")
@@ -3432,7 +3471,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
             msgs.append((msg, "/mirage.core.v1.MsgBlockTopic"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
-        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
         _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
             _fail("hardcap.blocked_topic_deque_fill", f"chunk_start={start}")
@@ -4134,6 +4173,117 @@ STATELESS_CATEGORIES = {
 }
 
 
+def _query_balance_umirage(addr: str) -> int:
+    """Query on-chain spendable umirage balance for an address."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "bank",
+            "balances",
+            addr,
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"balances query failed: exit={code} out={str(out)[:200]}")
+    data = _parse_cli_json(out)
+    if not data:
+        raise RuntimeError(f"balances JSON parse failed for addr={addr}")
+    for b in data.get("balances", []):
+        if b.get("denom") == "umirage":
+            return int(b.get("amount", 0) or 0)
+    raise RuntimeError(f"umirage balance missing for addr={addr}")
+
+
+def _print_gas_summary(backend: str) -> None:
+    """Print fee payer stats (validator gas paid) and reserve spend stats."""
+    if _FEE_PAYER_STATS:
+        rows: list[tuple[str, int, int, int, int]] = []
+        for addr, stats in _FEE_PAYER_STATS.items():
+            label = "validator" if addr and addr == _VALIDATOR_ADDR else (addr[:16] + "…" if addr else "unknown")
+            rows.append((label, stats["attempted"], stats["paid"], stats["gas_total"], stats["fee_total"]))
+        rows.sort(key=lambda r: (0 if r[0] == "validator" else 1, r[0]))
+
+        print(f"\n{'─' * 86}")
+        print(f"{_COLOR_BOLD}Fee Payer (Validator) Gas Summary{_COLOR_RESET}")
+        print(f"{'─' * 86}")
+        hdr = f"  {'Fee Payer':<14} {'TXs':>6}  {'Paid':>6}  " f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
+        print(hdr)
+        print(f"  {'':─<14} {'':─>6}  {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+
+        grand_tx = grand_paid = grand_gas = grand_fee = 0
+        for label, attempted, paid, gas_total, fee_total in rows:
+            avg_fee = fee_total // paid if paid else 0
+            fee_mirage = fee_total / 1_000_000
+            avg_fee_mirage = avg_fee / 1_000_000
+            print(
+                f"  {label:<14} {attempted:>6}  {paid:>6}  {gas_total:>14,}  "
+                f"{fee_mirage:>11,.2f} M  {avg_fee_mirage:>9,.2f} M"
+            )
+            grand_tx += attempted
+            grand_paid += paid
+            grand_gas += gas_total
+            grand_fee += fee_total
+
+        print(f"  {'':─<14} {'':─>6}  {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+        grand_avg_fee = grand_fee // grand_paid if grand_paid else 0
+        grand_fee_m = grand_fee / 1_000_000
+        grand_avg_m = grand_avg_fee / 1_000_000
+        print(
+            f"  {'TOTAL':<14} {grand_tx:>6}  {grand_paid:>6}  {grand_gas:>14,}  "
+            f"{grand_fee_m:>11,.2f} M  {grand_avg_m:>9,.2f} M"
+        )
+        print(f"{'─' * 86}")
+        print(f"  (Fees are from tx fee amounts; gas limit totals are for paid txs)")
+
+    if not WALLETS:
+        raise RuntimeError("wallets not initialized for reserve spend summary")
+    if not tb.FAUCET_AMOUNTS:
+        raise RuntimeError("missing faucet amounts for reserve spend summary")
+
+    print(f"\n{'─' * 86}")
+    print(f"{_COLOR_BOLD}Wallet Reserve Spend Summary{_COLOR_RESET}")
+    print(f"{'─' * 86}")
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Fauceted':>14}  " f"{'Remaining':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    print(hdr)
+    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
+
+    grand_tx = grand_spent = 0
+    for name in ("free", "sub1", "sub2", "agent1", "agent2"):
+        w = WALLETS.get(name)
+        if not w:
+            continue
+        pk_hex = w.public_key().public_key_bytes.hex()
+        stats = _TX_STATS.get(pk_hex, {"attempted": 0})
+        attempted = int(stats.get("attempted", 0) or 0)
+        fauceted = int(tb.FAUCET_AMOUNTS.get(name, 0) or 0)
+        remaining = _query_balance_umirage(str(w.address()))
+        spent = max(0, fauceted - remaining)
+        spent_m = spent / 1_000_000
+        avg_m = (spent_m / attempted) if attempted else 0
+        avg_str = f"{avg_m:>11,.2f} M" if attempted else f"{'—':>14}"
+        print(
+            f"  {name:<10} {attempted:>5}  {fauceted / 1_000_000:>11,.1f} M  "
+            f"{remaining / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
+        )
+        grand_tx += attempted
+        grand_spent += spent
+
+    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
+    grand_spent_m = grand_spent / 1_000_000
+    grand_avg_m = (grand_spent_m / grand_tx) if grand_tx else 0
+    grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
+    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  " f"{'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
+    print(f"{'─' * 86}")
+    print(f"  (Spent = Fauceted − Remaining = subscriptions + awards + sends; gas paid by validator)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage Blockchain Direct-Submit Test Suite")
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
@@ -4242,6 +4392,9 @@ def main() -> int:
     passed = sum(1 for r in RESULTS if r.passed)
     failed = sum(1 for r in RESULTS if not r.passed)
     total = len(RESULTS)
+
+    # ── Gas cost summary per wallet ──────────────────────────────
+    _print_gas_summary(backend)
 
     print(f"\n{'=' * 60}")
     if failed:

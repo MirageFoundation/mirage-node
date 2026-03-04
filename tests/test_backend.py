@@ -91,6 +91,12 @@ INDEX_TIMEOUT_SEC = 45.0
 
 # Populated during setup — all wallets are random, non-deterministic
 WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "agent1", "agent2"
+FAUCET_AMOUNTS: dict[str, int] = {}  # set during setup — umirage fauceted per wallet
+
+# Per-pubkey tx tracking for the end-of-run cost summary.
+_TX_COUNTS: dict[str, int] = {}  # base64(pubkey) -> number of relay txs submitted
+_TX_HASHES: list[str] = []
+_TX_HASHES_SEEN: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -210,9 +216,18 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             continue
 
         try:
-            return r.status_code, r.json()
+            body = r.json()
         except Exception:
-            return r.status_code, {}
+            body = {}
+        if "/api/core/" in url and isinstance(payload, dict):
+            pk_b64 = payload.get("pubkey", "")
+            txh = str(body.get("tx_hash", "") or "").lower()
+            if pk_b64 and txh:
+                _TX_COUNTS[pk_b64] = _TX_COUNTS.get(pk_b64, 0) + 1
+                if txh not in _TX_HASHES_SEEN:
+                    _TX_HASHES.append(txh)
+                    _TX_HASHES_SEEN.add(txh)
+        return r.status_code, body
 
     return 599, {}
 
@@ -620,6 +635,43 @@ def _do_award(
     return code, resp
 
 
+def _required_sub1_spend_budget_umirage(backend: str) -> int:
+    """Compute extra funding needed for sub1 from live chain config.
+
+    Includes explicit spends used by this suite:
+    - post award: quality_post
+    - comment award: receipts
+    - token send happy path: 1000 umirage
+    """
+    code, cfg = _get(f"{backend}/api/get_chain_config")
+    if code != 200 or not isinstance(cfg, dict):
+        raise RuntimeError(f"get_chain_config failed (code={code})")
+
+    award_cfgs = cfg.get("award_configs")
+    if not isinstance(award_cfgs, list) or not award_cfgs:
+        raise RuntimeError("award_configs missing or empty in chain config")
+
+    costs: dict[str, int] = {}
+    for entry in award_cfgs:
+        if not isinstance(entry, dict):
+            raise RuntimeError("invalid award_configs entry type")
+        name = str(entry.get("name", "")).strip()
+        if not name:
+            raise RuntimeError("award_configs entry missing name")
+        try:
+            costs[name] = int(entry.get("cost", 0) or 0)
+        except Exception as e:
+            raise RuntimeError(f"invalid cost for award '{name}': {e}") from e
+
+    required_awards = ("quality_post", "receipts")
+    missing = [name for name in required_awards if name not in costs]
+    if missing:
+        raise RuntimeError(f"required award types missing from chain config: {missing}")
+
+    token_send_amount = 1000  # test_tokens.happy_path
+    return int(costs["quality_post"]) + int(costs["receipts"]) + token_send_amount
+
+
 def setup_test_wallets(backend: str) -> bool:
     """Generate random wallets, faucet them, and subscribe (level 1=Subscriber, 10=Agent).
 
@@ -653,13 +705,23 @@ def setup_test_wallets(backend: str) -> bool:
 
     # Faucet all wallets (sub wallets need tokens for subscription fees)
     # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 500K MIRAGE
-    FAUCET_AMOUNTS = {
-        "free": 1_000_000,  #           1 MIRAGE (minimal non-zero for balance checks)
-        "sub1": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
-        "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
-        "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-        "agent2": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-    }
+    try:
+        sub1_spend_budget = _required_sub1_spend_budget_umirage(backend)
+        _debug(f"sub1 dynamic spend budget={sub1_spend_budget} umirage")
+    except Exception as e:
+        print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot compute sub1 spend budget: {e}")
+        return False
+
+    FAUCET_AMOUNTS.clear()
+    FAUCET_AMOUNTS.update(
+        {
+            "free": 1_000_000,  #           1 MIRAGE (minimal non-zero for balance checks)
+            "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
+            "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
+            "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
+            "agent2": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
+        }
+    )
     try:
         faucet_addr = _resolve_validator_key_addr()
         spendable = _get_spendable_balance(faucet_addr)
@@ -1801,7 +1863,7 @@ def test_post_lifecycle(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
-    topic = "test"
+    topic = f"annot{_rand_str(6)}"
     title = f"Test Post {_rand_str(6)}"
     content = f"Content body {_rand_str(20)}"
 
@@ -6165,6 +6227,137 @@ ALL_CATEGORIES = {
 }
 
 
+def _parse_cli_json(out: str) -> dict:
+    """Extract the first top-level JSON object from CLI output."""
+    idx = out.find("{")
+    if idx < 0:
+        raise ValueError("no JSON object in output")
+    depth = 0
+    end = idx
+    for i in range(idx, len(out)):
+        if out[i] == "{":
+            depth += 1
+        elif out[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    try:
+        return json.loads(out[idx:end])
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"invalid JSON output: {e}") from e
+
+
+def _get_tx_fee_umirage(tx_hash: str) -> int:
+    """Return the fee (umirage) paid by a tx hash."""
+    miraged = _miraged_cmd()
+    qcode, qout = _docker_exec(
+        f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json"
+    )
+    if qcode != 0 or not qout:
+        raise RuntimeError(f"tx query failed: hash={tx_hash} exit={qcode} out={str(qout)[:200]}")
+    data = _parse_cli_json(qout)
+    fee = ((data.get("tx") or {}).get("auth_info") or {}).get("fee") or {}
+    for c in fee.get("amount", []):
+        if c.get("denom") == "umirage":
+            return int(c.get("amount", 0) or 0)
+    raise RuntimeError(f"umirage fee missing for tx={tx_hash}")
+
+
+def _query_balance_umirage(addr: str) -> int:
+    """Query on-chain spendable umirage balance for an address."""
+    try:
+        miraged = _miraged_cmd()
+        qcode, qout = _docker_exec(
+            f"{miraged} q bank balances {addr} --home /root/.mirage/node "
+            f"--node tcp://127.0.0.1:26657 -o json"
+        )
+    except Exception:
+        qcode, qout = -1, ""
+    if qcode != 0 or not qout:
+        raise RuntimeError(f"balances query failed: addr={addr} exit={qcode} out={str(qout)[:200]}")
+    data = _parse_cli_json(qout)
+    bals = data.get("balances", [])
+    for b in bals:
+        if b.get("denom") == "umirage":
+            return int(b.get("amount", 0) or 0)
+    raise RuntimeError(f"umirage balance missing for addr={addr}")
+
+
+def _print_validator_fee_summary() -> None:
+    """Print validator gas fees based on tx fee amounts."""
+    if not _TX_HASHES:
+        return
+    total_fee = 0
+    for txh in _TX_HASHES:
+        fee = _get_tx_fee_umirage(txh)
+        total_fee += fee
+
+    avg_fee = total_fee // len(_TX_HASHES) if _TX_HASHES else 0
+    total_fee_m = total_fee / 1_000_000
+    avg_fee_m = avg_fee / 1_000_000
+
+    print(f"\n{'─' * 74}")
+    print(f"{_COLOR_BOLD}Validator Gas Fee Summary{_COLOR_RESET}")
+    print(f"{'─' * 74}")
+    print(f"  TXs: {len(_TX_HASHES):>6}")
+    print(f"  Total Fee: {total_fee_m:,.2f} MIRAGE")
+    print(f"  Avg Fee / TX: {avg_fee_m:,.4f} MIRAGE")
+    print(f"{'─' * 74}")
+    print(f"  (Fees are from tx auth_info.fee.amount)")
+
+
+def _print_wallet_stats(backend: str) -> None:
+    """Print per-wallet tx count, balance spent, and avg cost per tx."""
+    if not WALLETS:
+        return
+
+    rows: list[tuple[str, int, int, int, int]] = []
+    for name in ("free", "sub1", "sub2", "agent1", "agent2"):
+        w = WALLETS.get(name)
+        if not w:
+            continue
+        pk_b64 = base64.b64encode(w.public_key().public_key_bytes).decode()
+        tx_count = _TX_COUNTS.get(pk_b64, 0)
+        fauceted = FAUCET_AMOUNTS.get(name, 0)
+        remaining = _query_balance_umirage(str(w.address()))
+        spent = max(0, fauceted - remaining)
+        rows.append((name, tx_count, fauceted, remaining, spent))
+
+    if not rows:
+        return
+
+    print(f"\n{'─' * 86}")
+    print(f"{_COLOR_BOLD}Wallet Spend & TX Summary{_COLOR_RESET}")
+    print(f"{'─' * 86}")
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Fauceted':>14}  " f"{'Remaining':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    print(hdr)
+    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
+
+    grand_tx = grand_spent = 0
+    for name, tx_count, fauceted, remaining, spent in rows:
+        fauceted_m = fauceted / 1_000_000
+        remaining_m = remaining / 1_000_000
+        spent_m = spent / 1_000_000
+        avg_m = (spent_m / tx_count) if tx_count else 0
+        avg_str = f"{avg_m:>11,.2f} M" if tx_count else f"{'—':>14}"
+        print(
+            f"  {name:<10} {tx_count:>5}  {fauceted_m:>11,.1f} M  "
+            f"{remaining_m:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
+        )
+        grand_tx += tx_count
+        grand_spent += spent
+
+    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
+    grand_spent_m = grand_spent / 1_000_000
+    grand_avg_m = (grand_spent_m / grand_tx) if grand_tx else 0
+    grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
+    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  " f"{'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
+    print(f"{'─' * 86}")
+    print(f"  (Amounts in MIRAGE;  1 MIRAGE = 1,000,000 umirage)")
+    print(f"  (Spent = Fauceted − Remaining = subscription fees + awards + sends;  gas paid by validator)")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage Local Test Suite")
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
@@ -6263,10 +6456,14 @@ def main() -> int:
             if not r.passed:
                 err = f" — {r.error}" if r.error else ""
                 print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {r.name}{err}")
-        return 1
     else:
         print(f"{_COLOR_GREEN}{_COLOR_BOLD}RESULT: {passed}/{total} passed, ALL OK{_COLOR_RESET}")
-        return 0
+
+    # ── Gas / spend stats ─────────────────────────────────────────
+    _print_validator_fee_summary()
+    _print_wallet_stats(backend)
+
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
