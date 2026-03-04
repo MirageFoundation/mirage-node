@@ -4219,6 +4219,32 @@ def test_agents(backend: str):
     except Exception as e:
         _pass("agents.set_agents_duplicate handled")
 
+    # 13.9b SetAgents: reject self-as-agent
+    try:
+        resp = _do_set_agents(backend, sub1, [sub1_addr], skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if "yourself" in err:
+            _pass("agents.set_agents_self_rejected")
+        elif resp.get("tx_hash"):
+            _fail("agents.set_agents_self_rejected", "tx accepted but should reject self-as-agent")
+        else:
+            _fail("agents.set_agents_self_rejected", f"unexpected: {err[:120]}")
+    except Exception as e:
+        _fail("agents.set_agents_self_rejected", str(e))
+
+    # 13.9c SetAgents: reject self mixed with valid agents
+    try:
+        resp = _do_set_agents(backend, sub1, [agent_a, sub1_addr], skip_pow=True)
+        err = str(resp.get("error", "")).lower()
+        if "yourself" in err:
+            _pass("agents.set_agents_self_mixed_rejected")
+        elif resp.get("tx_hash"):
+            _fail("agents.set_agents_self_mixed_rejected", "tx accepted but should reject self-as-agent")
+        else:
+            _fail("agents.set_agents_self_mixed_rejected", f"unexpected: {err[:120]}")
+    except Exception as e:
+        _fail("agents.set_agents_self_mixed_rejected", str(e))
+
     # 13.10 SetAgents: free user with PoW
     try:
         resp = _do_set_agents(backend, free_wallet, [agent_a], skip_pow=False)

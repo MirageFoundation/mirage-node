@@ -510,6 +510,17 @@ def check_profiles() -> None:
     if not stale_any:
         ok("No stale pre-v1.16.0 profile fields present")
 
+    self_agent_violations = []
+    for p in profiles:
+        owner = str(p.get("owner", "")).lower()
+        agents = [str(a).lower() for a in (p.get("enabled_agents") or [])]
+        if owner and owner in agents:
+            self_agent_violations.append(owner[:20])
+    if self_agent_violations:
+        fail(f"{len(self_agent_violations)} profiles have themselves as enabled agent: {self_agent_violations[:5]}")
+    else:
+        ok("No profiles have themselves as enabled agent")
+
 
 # ── Main ───────────────────────────────────────────────────
 

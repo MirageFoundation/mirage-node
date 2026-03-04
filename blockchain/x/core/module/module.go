@@ -259,11 +259,11 @@ func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
 }
 
 // deductRelayGasFee deducts gas fee from paid users (level >= 1) using their escrowed reserve.
-// Fee = gasConsumed * relayMinGasPrice, capped at relayMaxGasFee.
+// Fee = gasUsed * relayMinGasPrice, capped at relayMaxGasFee.
 // relayMinGasPrice is in umirage per gas unit (e.g., 5000 = 5000 umirage per gas).
 // Only deducts from users with level >= 1; free users (level 0) use PoW instead.
 // If reserve is insufficient, burns remainder, zeros reserve, and downgrades user to level 0.
-func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int) error {
+func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int, gasUsed uint64, reason string) error {
 	// Only charge paid users (level >= 1)
 	if userLevel < 1 {
 		return nil
@@ -273,9 +273,8 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	minGasPrice := params.RelayMinGasPrice
 	maxGasFee := params.RelayMaxGasFee
 
-	// Calculate fee based on gas consumed
-	gasConsumed := ctx.GasMeter().GasConsumed()
-	fee := calculateRelayFee(gasConsumed, minGasPrice, maxGasFee)
+	// Calculate fee based on gas used for this message
+	fee := calculateRelayFee(gasUsed, minGasPrice, maxGasFee)
 
 	if fee == 0 {
 		return nil
@@ -289,6 +288,8 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			ctx.Logger().Warn("relay gas fee (admin): insufficient balance, skipping deduction",
 				"owner", owner,
 				"level", userLevel,
+				"reason", reason,
+				"gas_used", gasUsed,
 				"fee", fee,
 				"err", err)
 			return nil
@@ -297,14 +298,19 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			ctx.Logger().Warn("relay gas fee (admin): failed to burn from module after deduction",
 				"owner", owner,
 				"level", userLevel,
+				"reason", reason,
+				"gas_used", gasUsed,
 				"fee", fee,
 				"err", err)
 		} else {
 			ctx.Logger().Info("relay gas fee deducted from admin balance",
 				"owner", owner,
 				"level", userLevel,
-				"gasConsumed", gasConsumed,
-				"fee", fee)
+				"reason", reason,
+				"gas_used", gasUsed,
+				"fee", fee,
+				"min_gas_price", minGasPrice,
+				"max_gas_fee", maxGasFee)
 		}
 		return nil
 	}
@@ -325,6 +331,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	// Deduct from reserve
 	if core.ReserveFunds >= fee {
 		// Sufficient reserve: deduct and burn from module
+		reserveBefore := core.ReserveFunds
 		core.ReserveFunds -= fee
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
 			ctx.Logger().Warn("deductRelayGasFee: failed to burn from module", "owner", owner, "fee", fee, "err", err)
@@ -332,12 +339,17 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		ctx.Logger().Info("relay gas fee deducted from reserve",
 			"owner", owner,
 			"level", userLevel,
-			"gasConsumed", gasConsumed,
+			"reason", reason,
+			"gas_used", gasUsed,
 			"fee", fee,
+			"min_gas_price", minGasPrice,
+			"max_gas_fee", maxGasFee,
+			"reserve_before", reserveBefore,
 			"reserve_remaining", core.ReserveFunds)
 	} else {
 		// Insufficient reserve: burn whatever is left, then downgrade
 		previousLevel := core.Level
+		reserveBefore := core.ReserveFunds
 		if core.ReserveFunds > 0 {
 			if err := am.k.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
 				ctx.Logger().Warn("deductRelayGasFee: failed to burn remaining reserve", "owner", owner, "reserve", core.ReserveFunds, "err", err)
@@ -346,8 +358,13 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		ctx.Logger().Info("deductRelayGasFee: reserve exhausted, downgrading to free",
 			"owner", owner,
 			"level", core.Level,
-			"reserve_was", core.ReserveFunds,
-			"fee_needed", fee)
+			"reason", reason,
+			"gas_used", gasUsed,
+			"fee", fee,
+			"min_gas_price", minGasPrice,
+			"max_gas_fee", maxGasFee,
+			"reserve_before", reserveBefore,
+			"reserve_was", core.ReserveFunds)
 
 		// Remove subscription index
 		if core.SubscriptionExpiry > 0 {
@@ -1159,6 +1176,7 @@ func validateMsgPostMedia(media []string) error {
 // Post handler accepts MsgPost and returns empty response.
 func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1262,7 +1280,8 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Post"); err != nil {
 		return nil, err
 	}
 
@@ -1272,6 +1291,7 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 // Vote handler accepts MsgVote and returns empty response.
 func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVoteResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1305,7 +1325,8 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 
 	// Deduct gas fee from paid users
 	if owner != "" {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Vote"); err != nil {
 			return nil, err
 		}
 	}
@@ -1316,6 +1337,7 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 // Edit handler accepts MsgEdit and returns empty response.
 func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEditResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1421,7 +1443,8 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Edit"); err != nil {
 		return nil, err
 	}
 
@@ -1432,6 +1455,7 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 // Sentinel "." means no change; empty string means clear.
 func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*types.MsgAnnotateResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1562,7 +1586,8 @@ func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*type
 		"media_count", len(media),
 	)
 
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Annotate"); err != nil {
 		return nil, err
 	}
 
@@ -1659,6 +1684,7 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 // SetUsername typed handler persists username
 func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) (*types.MsgSetUsernameResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1754,7 +1780,8 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetUsername"); err != nil {
 		return nil, err
 	}
 
@@ -1764,6 +1791,7 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 // SetBiography updates a user's biography (subscriber-only feature)
 func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography) (*types.MsgSetBiographyResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1832,7 +1860,8 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetBiography"); err != nil {
 		return nil, err
 	}
 
@@ -1842,6 +1871,7 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 // EnableAgent adds an agent to the user's enabled agents list (capped deque)
 func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) (*types.MsgEnableAgentResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1920,7 +1950,8 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 	sdkCtx.Logger().Info("EnableAgent: agent enabled", "owner", owner, "agent", agent)
 	sdkCtx.Logger().Info(logDelimiter)
 
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "EnableAgent"); err != nil {
 		return nil, err
 	}
 
@@ -1930,6 +1961,7 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 // DisableAgent removes an agent from the user's enabled agents list
 func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent) (*types.MsgDisableAgentResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1991,7 +2023,8 @@ func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent
 	sdkCtx.Logger().Info("DisableAgent: agent disabled", "owner", owner, "agent", agent)
 	sdkCtx.Logger().Info(logDelimiter)
 
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "DisableAgent"); err != nil {
 		return nil, err
 	}
 
@@ -2001,6 +2034,7 @@ func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent
 // SetAgents atomically replaces the user's enabled agents list (ordered).
 func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*types.MsgSetAgentsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2049,6 +2083,7 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 		return nil, fmt.Errorf("too many agents: %d > %d", len(agents), maxAgents)
 	}
 
+	ownerLower := strings.ToLower(owner)
 	seen := make(map[string]struct{}, len(agents))
 	normalized := make([]string, 0, len(agents))
 	for _, a := range agents {
@@ -2058,6 +2093,9 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 			sdkCtx.Logger().Error("SetAgents: invalid agent address", "address", a)
 			sdkCtx.Logger().Info(logDelimiter)
 			return nil, fmt.Errorf("invalid agent address: %s", a)
+		}
+		if a == ownerLower {
+			return nil, fmt.Errorf("cannot set yourself as an agent")
 		}
 		if _, dup := seen[a]; dup {
 			return nil, fmt.Errorf("duplicate agent: %s", a)
@@ -2085,7 +2123,8 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 	sdkCtx.Logger().Info("SetAgents: agents set", "owner", owner, "count", len(normalized))
 	sdkCtx.Logger().Info(logDelimiter)
 
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetAgents"); err != nil {
 		return nil, err
 	}
 
@@ -2095,6 +2134,7 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 // BlockPost blocks a post txhash (persisted on-chain)
 func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*types.MsgBlockPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2144,7 +2184,8 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 	sdkCtx.Logger().Info("BlockPost", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		_ = am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockPost")
 	}
 
 	return &types.MsgBlockPostResponse{}, nil
@@ -2153,6 +2194,7 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 // UnblockPost unblocks a post txhash (persisted on-chain)
 func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) (*types.MsgUnblockPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -2192,7 +2234,8 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 	sdkCtx.Logger().Info("UnblockPost", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockPost"); err != nil {
 			return nil, err
 		}
 	}
@@ -2203,6 +2246,7 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 // BlockUser blocks a user address (persisted on-chain)
 func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*types.MsgBlockUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2274,7 +2318,8 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 	sdkCtx.Logger().Info("BlockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2285,6 +2330,7 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 // UnblockUser unblocks a user address (persisted on-chain)
 func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) (*types.MsgUnblockUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -2324,7 +2370,8 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 	sdkCtx.Logger().Info("UnblockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2335,6 +2382,7 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 // BlockTopic blocks a topic (persisted on-chain, tier-limited)
 func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2409,7 +2457,8 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 	sdkCtx.Logger().Info("BlockTopic", "owner", owner, "topic", topic)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2420,6 +2469,7 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 // UnblockTopic unblocks a topic (persisted on-chain)
 func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2460,7 +2510,8 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 	sdkCtx.Logger().Info("UnblockTopic", "owner", owner, "topic", topic)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2471,6 +2522,7 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 // FollowUser follows a user (adds to followed users list, capped deque)
 func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*types.MsgFollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2560,7 +2612,8 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 	sdkCtx.Logger().Info("FollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "FollowUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2571,6 +2624,7 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 // UnfollowUser unfollows a user (removes from followed users list)
 func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser) (*types.MsgUnfollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2620,7 +2674,8 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	sdkCtx.Logger().Info("UnfollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnfollowUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2631,6 +2686,7 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 // FollowTopic follows a topic (adds to followed topics list, capped deque)
 func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) (*types.MsgFollowTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2720,7 +2776,8 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 	sdkCtx.Logger().Info("FollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "FollowTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2731,6 +2788,7 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 // UnfollowTopic unfollows a topic (removes from followed topics list)
 func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTopic) (*types.MsgUnfollowTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2780,7 +2838,8 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 	sdkCtx.Logger().Info("UnfollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnfollowTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2804,6 +2863,7 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 // indexer rejects it - the post remains visible. This is the intended design.
 func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.MsgDeleteResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -2838,7 +2898,8 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Delete"); err != nil {
 		return nil, err
 	}
 
@@ -2849,6 +2910,7 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 // Authorization: self-signed (envelope_pubkey derives to target) or governance.
 func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*types.MsgDeleteUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2892,7 +2954,8 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 
 	// Deduct relay gas fee for self-delete (relay node compensation)
 	if actorType == "self" {
-		if err := am.deductRelayGasFee(sdkCtx, target, int(core.Level)); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, target, int(core.Level), gasUsed, "DeleteUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2918,6 +2981,7 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 // SendTokens sends tokens from signer to target.
 func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*types.MsgSendTokensResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	sender := strings.ToLower(strings.TrimSpace(req.GetSender()))
@@ -2986,7 +3050,8 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, sender, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, sender, userLevel, gasUsed, "SendTokens"); err != nil {
 		return nil, err
 	}
 
@@ -3270,6 +3335,7 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 // SetAutoRenewal sets the auto_renew flag for a user's subscription.
 func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRenewal) (*types.MsgSetAutoRenewalResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 
 	// Derive owner from envelope_pubkey
 	if len(req.GetEnvelopePubkey()) != 33 {
@@ -3327,7 +3393,8 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	)
 
 	// Deduct gas fee from paid users using their escrowed reserve
-	if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level)); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level), gasUsed, "SetAutoRenewal"); err != nil {
 		return nil, err
 	}
 
@@ -3342,6 +3409,7 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 // Award handler accepts MsgAward, burns MIRAGE (free for admins level >= 100).
 func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgAwardResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -3403,7 +3471,8 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 	)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Award"); err != nil {
 			return nil, err
 		}
 	}
@@ -3412,7 +3481,12 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 }
 
 func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {
-	return bridgeBurn(sdk.UnwrapSDKContext(ctx), am.k, req, am.deductRelayGasFee)
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	return bridgeBurn(sdkCtx, am.k, req, func(c sdk.Context, owner string, userLevel int) error {
+		gasUsed := c.GasMeter().GasConsumed() - gasStart
+		return am.deductRelayGasFee(c, owner, userLevel, gasUsed, "BridgeBurn")
+	})
 }
 
 // BridgeAttest allows validators to attest to a burn on an external chain (inbound).

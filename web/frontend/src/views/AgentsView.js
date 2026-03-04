@@ -241,8 +241,10 @@ export default function AgentsView({ state }) {
             if (!alive || !mountedRef.current) return;
 
             if (agentsRes.status === 'fulfilled') {
-                const agentsList = Array.isArray(agentsRes.value?.agents) ? agentsRes.value.agents : [];
-                console.debug('[AgentsView] loaded', agentsList.length, 'agents');
+                const raw = Array.isArray(agentsRes.value?.agents) ? agentsRes.value.agents : [];
+                const viewerLower = viewerAddress.toLowerCase();
+                const agentsList = raw.filter(a => (a.address || '').toLowerCase() !== viewerLower);
+                console.debug('[AgentsView] loaded', agentsList.length, 'agents (excluded self)');
                 setAgents(agentsList);
             } else {
                 console.error('[AgentsView] failed to load agents:', agentsRes.reason);

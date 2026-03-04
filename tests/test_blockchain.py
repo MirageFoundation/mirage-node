@@ -3463,6 +3463,32 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     )
     _check_deliver_reject("hardcap.set_agents_invalid_address", ccode, dcode, dlog)
 
+    # Self-as-agent should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [aw_addr], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_self_rejected", ccode, dcode, dlog)
+
+    # Self mixed with valid agents should also be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, aw_addr], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_self_mixed_rejected", ccode, dcode, dlog)
+
     # ── 13.6 SetAgents clear all ──
     lb, _, _, _ = _get_pow_params(backend, aw_addr)
     ts = _now_ms()

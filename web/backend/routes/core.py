@@ -1179,6 +1179,9 @@ def core_set_agents():
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
 
+        if user_addr.lower() in agents:
+            return jsonify({"error": "cannot set yourself as an agent"}), 400
+
         # Enforce max_enabled_agents from chain params (fail hard if missing)
         params = expect_params()
         tiers = params.get("tiers")
