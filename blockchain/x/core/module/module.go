@@ -1908,6 +1908,12 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 		sdkCtx.Logger().Info(logDelimiter)
 		return nil, fmt.Errorf("invalid agent address: %s", agent)
 	}
+	if agent == owner {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("EnableAgent: self-enable not allowed", "owner", owner)
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, fmt.Errorf("cannot enable yourself as an agent")
+	}
 
 	var userLevel int
 	if authority != govAuthority {

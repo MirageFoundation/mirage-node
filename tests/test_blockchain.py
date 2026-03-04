@@ -18,11 +18,13 @@ import json
 import math
 import os
 import random
+import shutil
 import string
 import sys
 import threading
 import time
 import tomllib
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
@@ -3200,77 +3202,83 @@ def test_direct_bank(backend: str) -> None:
     print(f"\n{_COLOR_BOLD}[13] Direct bank send (bypass check){_COLOR_RESET}")
     kb = _keyring_backend()
     key_name = f"directbank{_rand_str(6)}"
+    key_home = tempfile.mkdtemp(prefix="mirage_directbank_")
+    _debug(f"direct_bank keyring_home={key_home}")
 
-    code, out = _run_miraged(
-        ["keys", "add", key_name, "--home", "/root/.mirage/node", "--keyring-backend", kb, "--output", "json"],
-        timeout=10,
-    )
-    if code != 0 or not out:
-        _fail("direct_bank.key_add", f"exit={code} out={out[:200]}")
-        return
     try:
-        idx = out.find("{")
-        if idx < 0:
-            raise ValueError("no JSON object in output")
-        addr = str(json.loads(out[idx:]).get("address", "")).strip()
-    except Exception as e:
-        _fail("direct_bank.key_add", f"parse error: {e}")
-        return
-    if not addr:
-        _fail("direct_bank.key_add", "missing address")
-        return
+        code, out = _run_miraged(
+            ["keys", "add", key_name, "--home", key_home, "--keyring-backend", kb, "--output", "json"],
+            timeout=10,
+        )
+        if code != 0 or not out:
+            _fail("direct_bank.key_add", f"exit={code} out={out[:200]}")
+            return
+        try:
+            idx = out.find("{")
+            if idx < 0:
+                raise ValueError("no JSON object in output")
+            addr = str(json.loads(out[idx:]).get("address", "")).strip()
+        except Exception as e:
+            _fail("direct_bank.key_add", f"parse error: {e}")
+            return
+        if not addr:
+            _fail("direct_bank.key_add", "missing address")
+            return
 
-    if not tb._faucet(backend, addr, 5_000_000):
-        _fail("direct_bank.faucet", "faucet failed")
-        return
+        if not tb._faucet(backend, addr, 5_000_000):
+            _fail("direct_bank.faucet", "faucet failed")
+            return
 
-    target = str(WALLETS["free"].address())
-    code, out = _run_miraged(
-        [
-            "tx",
-            "bank",
-            "send",
-            addr,
-            target,
-            "1umirage",
-            "--home",
-            "/root/.mirage/node",
-            "--keyring-backend",
-            kb,
-            "--chain-id",
-            "mirage-1",
-            "--node",
-            "tcp://127.0.0.1:26657",
-            "--yes",
-            "--gas",
-            "auto",
-            "--gas-adjustment",
-            "1.5",
-            "--gas-prices",
-            "5000umirage",
-            "-o",
-            "json",
-        ],
-        timeout=30,
-    )
-    if code != 0 or not out:
-        _fail("direct_bank.msg_send_blocked", f"exit={code} out={out[:200]}")
-        return
-    try:
-        # miraged may print log lines before the JSON — find the last '{'
-        json_start = out.rfind("{")
-        if json_start < 0:
-            raise ValueError("no JSON object in output")
-        resp = json.loads(out[json_start:])
-        tx_code = int(resp.get("code", 1))
-    except Exception as e:
-        _fail("direct_bank.msg_send_blocked", f"parse error: {e}")
-        return
+        target = str(WALLETS["free"].address())
+        code, out = _run_miraged(
+            [
+                "tx",
+                "bank",
+                "send",
+                addr,
+                target,
+                "1umirage",
+                "--home",
+                key_home,
+                "--keyring-backend",
+                kb,
+                "--chain-id",
+                "mirage-1",
+                "--node",
+                "tcp://127.0.0.1:26657",
+                "--yes",
+                "--gas",
+                "auto",
+                "--gas-adjustment",
+                "1.5",
+                "--gas-prices",
+                "5000umirage",
+                "-o",
+                "json",
+            ],
+            timeout=30,
+        )
+        if code != 0 or not out:
+            _fail("direct_bank.msg_send_blocked", f"exit={code} out={out[:200]}")
+            return
+        try:
+            # miraged may print log lines before the JSON — find the last '{'
+            json_start = out.rfind("{")
+            if json_start < 0:
+                raise ValueError("no JSON object in output")
+            resp = json.loads(out[json_start:])
+            tx_code = int(resp.get("code", 1))
+        except Exception as e:
+            _fail("direct_bank.msg_send_blocked", f"parse error: {e}")
+            return
 
-    if tx_code == 0:
-        _fail("direct_bank.msg_send_blocked", "direct MsgSend succeeded (bypass allowed)")
-    else:
-        _pass("direct_bank.msg_send_blocked")
+        if tx_code == 0:
+            _fail("direct_bank.msg_send_blocked", "direct MsgSend succeeded (bypass allowed)")
+        else:
+            _pass("direct_bank.msg_send_blocked")
+    finally:
+        if os.path.isdir(key_home):
+            shutil.rmtree(key_home)
 
 
 def test_hard_cap_vs_deque(backend: str) -> None:
@@ -3822,7 +3830,7 @@ def test_annotate_chain(backend: str) -> None:
     agent = WALLETS.get("agent1")
     free = WALLETS.get("free")
     if not agent or not free:
-        _skip("annotate_chain.setup", "wallets not available")
+        _fail("annotate_chain.setup", "wallets not available")
         return
 
     fee_payer = _VALIDATOR_ADDR or ""
@@ -3882,15 +3890,141 @@ def test_annotate_chain(backend: str) -> None:
     )
     _check_reject("annotate_chain.pow_rejected", code, log, "pow")
 
-    # 5. Invalid override should fail
+    # 5. Invalid override should fail (rejected at DeliverTx, not CheckTx)
     msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", "invalid", appendix="note")
-    _, code, log, _, _ = _submit_tx(
+    _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgAnnotate")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         signer_pub,
+        wait_deliver=True,
     )
-    _check_reject("annotate_chain.invalid_override", code, log, "invalid override")
+    _check_deliver_reject("annotate_chain.invalid_override", ccode, dcode, dlog)
+
+    # 6. Title exceeding MaxTitleLength should be rejected
+    tier_agent = _get_tier_config(10)
+    max_title = _tier_int(tier_agent, "max_title_length")
+    over_title = "A" * (max_title + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", over_title, ".", ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.title_too_long", ccode, dcode, dlog)
+
+    # 7. Content exceeding MaxContentLength should be rejected
+    max_content = _tier_int(tier_agent, "max_content_length")
+    over_content = "B" * (max_content + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", ".", over_content, ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.content_too_long", ccode, dcode, dlog)
+
+    # 8. Appendix exceeding MaxContentLength should be rejected
+    over_appendix = "C" * (max_content + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix=over_appendix)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.appendix_too_long", ccode, dcode, dlog)
+
+    # 9. Title exactly at limit should succeed
+    exact_title = "D" * max_title
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", exact_title, ".", ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("annotate_chain.title_at_limit_ok", ccode, dcode, dlog)
+
+    # 10. Subscriber (level 1) submitting annotate should fail
+    sub = WALLETS.get("sub1")
+    if sub:
+        msg = _build_msg_annotate(sub, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="sub note")
+        tx_hash, code, log, _, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgAnnotate")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            sub.public_key().public_key_bytes,
+        )
+        _check_reject("annotate_chain.subscriber_rejected", code, log, "agent tier", tx_hash)
+
+    # 11. No-username wallet submitting annotate should fail
+    noname_wallet = LocalWallet(PrivateKey(), prefix="mirage")
+    msg = _build_msg_annotate(noname_wallet, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="x")
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.no_username_rejected", code, log, "username", tx_hash)
+
+    # 12. EnableAgent self-enable (agent == owner) — chain should reject
+    agent_addr = str(agent.address())
+    msg = _build_msg_enable_agent(agent, lb, 0, _now_ms(), agent_addr, agent_addr, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("annotate_chain.self_enable_rejected")
+    else:
+        _fail("annotate_chain.self_enable_rejected", f"BUG: EnableAgent allows self-enable (SetAgents rejects it)")
+
+    # 13. SetAgents with more than tier max should be rejected
+    max_agents = _tier_int(tier_agent, "max_enabled_agents")
+    over_agents = [str(LocalWallet(PrivateKey(), prefix="mirage").address()) for _ in range(max_agents + 1)]
+    msg = _build_msg_set_agents(agent, lb, 0, _now_ms(), agent_addr, over_agents, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT * 5,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.set_agents_over_max", ccode, dcode, dlog)
+
+    # 14. EnableAgent without username should fail
+    noname_wallet2 = LocalWallet(PrivateKey(), prefix="mirage")
+    noname_addr = str(noname_wallet2.address())
+    random_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    msg = _build_msg_enable_agent(noname_wallet2, lb, 0, _now_ms(), noname_addr, random_agent, pow_val=0)
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet2.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.enable_no_username", code, log, "username", tx_hash)
+
+    # 15. SetAgents without username should fail
+    msg = _build_msg_set_agents(noname_wallet2, lb, 0, _now_ms(), noname_addr, [random_agent], pow_val=0)
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet2.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
 # =========================================================================

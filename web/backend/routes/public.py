@@ -406,19 +406,48 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     """
     if not viewer or not posts:
         return posts
+    viewer_lower = (viewer or "").strip().lower()
+    if not viewer_lower or viewer_lower == "guest":
+        return posts
+
+    eligible_posts = []
+    for post in posts:
+        author_lower = (post.get("author") or post.get("user_id") or post.get("owner") or "").strip().lower()
+        if author_lower and author_lower == viewer_lower:
+            post.pop("agent_edited", None)
+            post.pop("agent_edits_meta", None)
+            post.pop("appendices", None)
+            continue
+        eligible_posts.append(post)
+
+    if not eligible_posts:
+        return posts
+
     agents = _get_enabled_agents(cur, viewer)
+    if agents:
+        agents = [a for a in agents if a.lower() != viewer_lower]
+
+    post_ids = [p.get("post_id", "").lower() for p in eligible_posts if p.get("post_id")]
+    if not post_ids:
+        return posts
+    post_ph = ",".join(["%s"] * len(post_ids))
+
+    cur.execute(
+        f"""SELECT 1 FROM agent_edits
+            WHERE post_txhash IN ({post_ph})
+              AND LOWER(agent_address) = %s
+            LIMIT 1""",
+        post_ids + [viewer_lower],
+    )
+    if cur.fetchone():
+        agents.insert(0, viewer_lower)
     if not agents:
         return posts
 
     import json as _json
 
-    post_ids = [p.get("post_id", "").lower() for p in posts if p.get("post_id")]
-    if not post_ids:
-        return posts
-
     # Batch fetch all edits for these posts from enabled agents
     agent_ph = ",".join(["%s"] * len(agents))
-    post_ph = ",".join(["%s"] * len(post_ids))
     cur.execute(
         f"""SELECT post_txhash, agent_address, topic, title, content, tag, media, appendix
             FROM agent_edits
@@ -453,7 +482,7 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
 
     # Apply per post
     agent_order = [a.lower() for a in agents]
-    for post in posts:
+    for post in eligible_posts:
         pid = (post.get("post_id") or "").lower()
         if pid not in edits_by_post:
             continue

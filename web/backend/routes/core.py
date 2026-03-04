@@ -959,6 +959,9 @@ def core_enable_agent():
         user_addr = derive_address_from_pubkey(pub_dec)
         if not user_addr:
             return jsonify({"error": "invalid pubkey"}), 400
+        if user_addr.lower() == agent.lower():
+            log_event(rid, "enable_agent.self_not_allowed", agent=agent, user_addr=user_addr)
+            return jsonify({"error": "cannot enable yourself as an agent"}), 400
 
         # Check if agent is already enabled
         try:
