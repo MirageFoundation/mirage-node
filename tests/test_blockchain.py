@@ -2117,10 +2117,10 @@ def test_msg_validation(backend: str) -> None:
 def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
     """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
 
-    Uses the sub3 wallet (highest residual balance) as the donor.
+    Uses the agent2 wallet (high residual balance) as the donor.
     Default: 10,000 MIRAGE per wallet.
     """
-    donor = WALLETS["sub3"]
+    donor = WALLETS["agent2"]
     donor_addr = str(donor.address())
     fee_payer = _VALIDATOR_ADDR or ""
     for name in names:
@@ -2352,7 +2352,7 @@ def test_follow_limits(backend: str) -> None:
         _check_deliver_reject("follow.subscriber_bulk_user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
-    w_mx = WALLETS["sub3"]
+    w_mx = WALLETS["agent1"]
     w_mx_addr = str(w_mx.address())
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
@@ -2753,7 +2753,7 @@ def test_tier_enforcement(backend: str) -> None:
 
     fee_payer = _VALIDATOR_ADDR or ""
 
-    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2"), (10, "sub3")]:
+    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2"), (10, "agent1")]:
         w = WALLETS[wallet_name]
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(w.address()))
         ts = _now_ms()
@@ -3089,7 +3089,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     """Test that follow/enable lists use hard cap while block lists use deque."""
     print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
 
-    _topup_wallets(backend, ["free", "sub3"])
+    _topup_wallets(backend, ["free", "agent1"])
     time.sleep(3)
 
     fee_payer = _VALIDATOR_ADDR or ""
@@ -3182,7 +3182,7 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
 
     # ── 13.4 Enable agent then disable to verify recovery ──
-    aw = WALLETS["sub3"]
+    aw = WALLETS["agent1"]
     aw_addr = str(aw.address())
     aw_pub = aw.public_key().public_key_bytes
     tier10 = _get_tier_config(10)
@@ -3524,7 +3524,7 @@ def test_biography(backend: str) -> None:
     _check_deliver_accept("biography.subscriber_clear", ccode, dcode, dlog)
 
     # 16.3 Agent (level 10) sets biography (should succeed)
-    agent = WALLETS["sub3"]
+    agent = WALLETS["agent1"]
     lb, _, _, _ = _get_pow_params(backend, str(agent.address()))
     ts = _now_ms()
     agent_bio = (

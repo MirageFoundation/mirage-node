@@ -89,7 +89,7 @@ DEFAULT_BACKEND = "http://127.0.0.1:80"
 INDEX_TIMEOUT_SEC = 45.0
 
 # Populated during setup — all wallets are random, non-deterministic
-WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "sub3", "agent1", "agent2"
+WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "agent1", "agent2"
 
 
 # ---------------------------------------------------------------------------
@@ -626,11 +626,10 @@ def setup_test_wallets(backend: str) -> bool:
     """
     print(f"\n{_COLOR_BOLD}[0] Setup: Generating wallets & funding{_COLOR_RESET}")
 
-    # Generate 6 fresh random wallets
+    # Generate 5 fresh random wallets
     WALLETS["free"] = _generate_wallet()
     WALLETS["sub1"] = _generate_wallet()
     WALLETS["sub2"] = _generate_wallet()
-    WALLETS["sub3"] = _generate_wallet()
     WALLETS["agent1"] = _generate_wallet()
     WALLETS["agent2"] = _generate_wallet()
 
@@ -657,7 +656,6 @@ def setup_test_wallets(backend: str) -> bool:
         "free": 1_000_000_000,  #     1,000 MIRAGE
         "sub1": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
         "sub2": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
-        "sub3": 300_000_000_000,  #   300,000 MIRAGE  (Agent fee = 200,000)
         "agent1": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
         "agent2": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
     }
@@ -714,8 +712,8 @@ def setup_test_wallets(backend: str) -> bool:
             print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  Cannot check balance for {name}: {e}")
             return False
 
-    # Subscribe wallets: sub1,sub2 -> level 1, sub3/agent1/agent2 -> level 10
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3"), (10, "agent1"), (10, "agent2")]:
+    # Subscribe wallets: sub1,sub2 -> level 1, agent1/agent2 -> level 10
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
         resp = _do_upgrade_level(backend, w, level)
         txh = str(resp.get("tx_hash", "")).lower()
@@ -730,7 +728,7 @@ def setup_test_wallets(backend: str) -> bool:
     time.sleep(6)
 
     # Verify subscription levels
-    for level, name in [(1, "sub1"), (1, "sub2"), (10, "sub3"), (10, "agent1"), (10, "agent2")]:
+    for level, name in [(1, "sub1"), (1, "sub2"), (10, "agent1"), (10, "agent2")]:
         w = WALLETS[name]
         addr = str(w.address())
         try:
@@ -1991,8 +1989,8 @@ def test_social_graph(backend: str):
     sub_addr = str(sub_wallet.address())
     sub2_wallet = WALLETS["sub2"]
     sub2_addr = str(sub2_wallet.address())
-    sub3_wallet = WALLETS["sub3"]
-    sub3_addr = str(sub3_wallet.address())
+    agent1_wallet = WALLETS["agent1"]
+    agent1_addr = str(agent1_wallet.address())
     test_topic = f"testtopic{_rand_str(4)}"
 
     # 5.1 follow_user
@@ -2051,31 +2049,31 @@ def test_social_graph(backend: str):
         _fail("social.block_user reflected in get_user_blocked (mutual)", f"user={sub2_addr}")
 
     # 5.3b block->follow user removes block
-    resp = _do_block(backend, wallet, sub3_addr, "user", block=True)
+    resp = _do_block(backend, wallet, agent1_addr, "user", block=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("social.block_user for follow-removal setup")
     else:
         _fail("social.block_user for follow-removal setup", f"resp={resp}")
-    if _wait_blocked_user(backend, addr, sub3_addr, True):
+    if _wait_blocked_user(backend, addr, agent1_addr, True):
         _pass("social.block_user reflected before follow")
     else:
-        _fail("social.block_user reflected before follow", f"user={sub3_addr}")
+        _fail("social.block_user reflected before follow", f"user={agent1_addr}")
 
-    resp = _do_follow_user(backend, wallet, sub3_addr, follow=True)
+    resp = _do_follow_user(backend, wallet, agent1_addr, follow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("social.follow_user after block succeeds")
     else:
         _fail("social.follow_user after block succeeds", f"resp={resp}")
-    if _wait_blocked_user(backend, addr, sub3_addr, False):
+    if _wait_blocked_user(backend, addr, agent1_addr, False):
         _pass("social.follow_user removes blocked user")
     else:
-        _fail("social.follow_user removes blocked user", f"user={sub3_addr}")
-    if _wait_followed_user(backend, addr, sub3_addr, True):
+        _fail("social.follow_user removes blocked user", f"user={agent1_addr}")
+    if _wait_followed_user(backend, addr, agent1_addr, True):
         _pass("social.follow_user reflected in get_user_followed (mutual)")
     else:
-        _fail("social.follow_user reflected in get_user_followed (mutual)", f"user={sub3_addr}")
+        _fail("social.follow_user reflected in get_user_followed (mutual)", f"user={agent1_addr}")
 
     # 5.4 follow_topic
     resp = _do_follow_topic(backend, wallet, test_topic, follow=True)
@@ -2453,8 +2451,8 @@ def test_subscriber(backend: str):
     sub1_addr = str(sub1_wallet.address())
     sub2_wallet = WALLETS["sub2"]
     sub2_addr = str(sub2_wallet.address())
-    sub3_wallet = WALLETS["sub3"]
-    sub3_addr = str(sub3_wallet.address())
+    agent1_wallet = WALLETS["agent1"]
+    agent1_addr = str(agent1_wallet.address())
 
     # 7.1 Free user level = 0
     try:
@@ -2467,11 +2465,11 @@ def test_subscriber(backend: str):
     except Exception as e:
         _fail("tiers.free_user_level", str(e))
 
-    # 7.2 Verify subscription levels (sub1,sub2=level 1, sub3=level 10)
+    # 7.2 Verify subscription levels (sub1,sub2=level 1, agent1=level 10)
     for level, name, w, a in [
         (1, "sub1", sub1_wallet, sub1_addr),
         (1, "sub2", sub2_wallet, sub2_addr),
-        (10, "sub3", sub3_wallet, sub3_addr),
+        (10, "agent1", agent1_wallet, agent1_addr),
     ]:
         try:
             st = get_user_status(backend, a)
@@ -2495,7 +2493,7 @@ def test_subscriber(backend: str):
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
-        (10, "sub3", sub3_wallet),
+        (10, "agent1", agent1_wallet),
     ]:
         txh = _do_post(backend, w, "test", f"Tier{level} post {_rand_str(4)}", f"tier {level} body", skip_pow=True)
         if txh:
@@ -2518,7 +2516,7 @@ def test_subscriber(backend: str):
         for level, name, w in [
             (1, "sub1", sub1_wallet),
             (1, "sub2", sub2_wallet),
-            (10, "sub3", sub3_wallet),
+            (10, "agent1", agent1_wallet),
         ]:
             resp = _do_vote(backend, w, txh_free, 1, skip_pow=True)
             txh_vote = str(resp.get("tx_hash", "")).lower()
@@ -2531,7 +2529,7 @@ def test_subscriber(backend: str):
     for level, name, w in [
         (1, "sub1", sub1_wallet),
         (1, "sub2", sub2_wallet),
-        (10, "sub3", sub3_wallet),
+        (10, "agent1", agent1_wallet),
     ]:
         try:
             a = str(w.address())
@@ -2590,7 +2588,7 @@ def test_subscriber(backend: str):
         _fail("tiers.free_user_no_pow_rejected", str(e))
 
     # 7.9 All tiers can edit their own posts
-    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("sub3", sub3_wallet)]:
+    for name, w in [("sub1", sub1_wallet), ("sub2", sub2_wallet), ("agent1", agent1_wallet)]:
         if name in tier_posts:
             time.sleep(2)
             resp = _do_edit(
@@ -5316,7 +5314,7 @@ def test_content_limits(backend: str):
 
     free_wallet = WALLETS["free"]
     sub1 = WALLETS["sub1"]
-    sub3 = WALLETS["sub3"]
+    agent1 = WALLETS["agent1"]
 
     # 24.1 Free user: content > 1000 should fail
     long_content = "x" * 1050
@@ -5365,7 +5363,7 @@ def test_content_limits(backend: str):
         _fail("content_limits.sub_title_160_accepted")
 
     # 24.7 Agent: same limits as subscriber for content/title
-    txh = _do_post(backend, sub3, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
+    txh = _do_post(backend, agent1, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
     if txh:
         _pass("content_limits.agent_1050_accepted")
     else:
@@ -5381,8 +5379,8 @@ def test_profile_fields(backend: str):
 
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
-    sub3 = WALLETS["sub3"]
-    sub3_addr = str(sub3.address())
+    agent1 = WALLETS["agent1"]
+    agent1_addr = str(agent1.address())
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
 
@@ -5401,13 +5399,13 @@ def test_profile_fields(backend: str):
         _fail("profile.sub1_level_1", f"level={level}")
 
     # 25.3 Agent level
-    code, agent_profile = _get(f"{backend}/api/get_profile", {"address": sub3_addr})
+    code, agent_profile = _get(f"{backend}/api/get_profile", {"address": agent1_addr})
     if code == 200:
         agent_level = agent_profile.get("level")
         if agent_level is not None and int(agent_level) == 10:
-            _pass("profile.sub3_level_10")
+            _pass("profile.agent1_level_10")
         else:
-            _fail("profile.sub3_level_10", f"level={agent_level}")
+            _fail("profile.agent1_level_10", f"level={agent_level}")
 
     # 25.4 Free level
     code, free_profile = _get(f"{backend}/api/get_profile", {"address": free_addr})
