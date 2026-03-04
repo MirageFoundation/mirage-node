@@ -651,13 +651,13 @@ def setup_test_wallets(backend: str) -> bool:
     time.sleep(4)
 
     # Faucet all wallets (sub wallets need tokens for subscription fees)
-    # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 200K MIRAGE
+    # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 500K MIRAGE
     FAUCET_AMOUNTS = {
         "free": 1_000_000_000,  #     1,000 MIRAGE
         "sub1": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
         "sub2": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
-        "agent1": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
-        "agent2": 300_000_000_000,  # 300,000 MIRAGE  (Agent fee = 200,000)
+        "agent1": 600_000_000_000,  # 600,000 MIRAGE  (Agent fee = 500,000)
+        "agent2": 600_000_000_000,  # 600,000 MIRAGE  (Agent fee = 500,000)
     }
     try:
         faucet_addr = _resolve_validator_key_addr()
