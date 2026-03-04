@@ -5208,7 +5208,14 @@ def test_hard_cap_vs_deque(backend: str):
         # Disable one and re-enable should succeed
         if agent_targets:
             resp = _do_enable_agent(backend, free_wallet, agent_targets[0], enable=False, skip_pow=False)
-            time.sleep(2)
+            # Wait for the disable to propagate (poll until agent count drops)
+            for _wait in range(15):
+                time.sleep(1)
+                wcode, wdata = _get(f"{backend}/api/get_profile", {"address": free_addr})
+                if wcode == 200:
+                    cur_count = len((wdata or {}).get("enabled_agents") or [])
+                    if cur_count < max_agents_free:
+                        break
             resp = _do_enable_agent(backend, free_wallet, overflow_agent, enable=True, skip_pow=False)
             txh = str(resp.get("tx_hash", "")).lower()
             tx_code = int(resp.get("code", 0) or 0)
@@ -6009,12 +6016,16 @@ def test_annotate(backend: str):
 
     # Poll for overlay to appear (indexer needs to process both set_agents and annotate txs).
     # First wait for get_comments to find the post (can lag behind get_user_posts under load).
+    # Keep the best root seen — transient viewer-filtering during indexer reprocessing can
+    # temporarily return an empty root even after it was previously found.
     root = {}
     for _poll in range(int(INDEX_TIMEOUT_SEC)):
         time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         if code == 200:
-            root = (data or {}).get("root") or {}
+            candidate = (data or {}).get("root") or {}
+            if candidate:
+                root = candidate
             if root.get("agent_edited"):
                 break
     if not root:
