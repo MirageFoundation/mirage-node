@@ -3693,7 +3693,7 @@ function ViewPostView({ state, updatePost }) {
                                     {isBusy
                                         ? (replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting...' :
                                             replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying...' :
-                                                'Processing...')
+                                                'Processing')
                                         : (isEdit
                                             ? 'Save Edit'
                                             : (replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'))}

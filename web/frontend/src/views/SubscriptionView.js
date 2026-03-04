@@ -1082,7 +1082,7 @@ export default function SubscriptionView({ state }) {
                                                             }
                                                         >
                                                             <StatusIndicator />
-                                                            {isUpgrading ? 'Processing...' : (autoRenew ? 'Auto-renewing' : 'Not renewing')}
+                                                            {isUpgrading ? 'Processing' : (autoRenew ? 'Auto-renewing' : 'Not renewing')}
                                                         </StatusBadge>
                                                         {timeRemainingText && (
                                                             <RenewalTime>

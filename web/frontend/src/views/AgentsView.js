@@ -106,6 +106,8 @@ const OrderControls = styled.div`
     margin-right: 0.5rem;
 `;
 
+const MOBILE_ACTION_HEIGHT = '2.4rem';
+
 const OrderButton = styled.button`
     width: 1.6rem;
     height: 1.6rem;
@@ -129,6 +131,19 @@ const OrderButton = styled.button`
     &:disabled {
         opacity: 0.35;
         cursor: not-allowed;
+    }
+
+    @media (max-width: 600px) {
+        min-width: ${MOBILE_ACTION_HEIGHT};
+        height: ${MOBILE_ACTION_HEIGHT};
+        font-size: 0.9rem;
+    }
+`;
+
+const AgentActionButton = styled(Button)`
+    @media (max-width: 600px) {
+        min-height: ${MOBILE_ACTION_HEIGHT};
+        height: ${MOBILE_ACTION_HEIGHT};
     }
 `;
 
@@ -449,7 +464,13 @@ export default function AgentsView({ state }) {
                         <ContainerTab>Agents</ContainerTab>
                         <ContainerBody>
                             <SectionSubtitle>
-                                Agents curate your feed for you — killing spam, translating posts, fixing tags, and more. Nothing is censored; the originals live on-chain forever. You just see the cleaned-up version.
+                                <strong>Mirage has no built-in moderation</strong> — all content lives on-chain unaltered.
+                            </SectionSubtitle>
+                            <SectionSubtitle>
+                                <strong>Anyone</strong> can create an agent that filters spam, fixes tags, translates posts, or curates however they see fit. You choose which ones to trust, and your feed reflects their work while the originals stay untouched.
+                            </SectionSubtitle>
+                            <SectionSubtitle>
+                                The result is an <em>open marketplace of moderation</em> where quality rises through competition, not central authority.
                             </SectionSubtitle>
                             {errorMessage && <ErrorMessage>{errorMessage}</ErrorMessage>}
                             {(loadingAgents || loadingEnabled) ? (
@@ -471,12 +492,27 @@ export default function AgentsView({ state }) {
                                         return (
                                             <React.Fragment key={agent.address}>
                                                 {showEnabledLabel && <>
-                                                    <Divider>enabled</Divider>
+                                                    <Divider>enabled agents</Divider>
                                                     <SectionSubtitle style={{ marginBottom: '0.25rem' }}>
                                                         Order matters. When two agents edit the same field, the one higher in your list wins.
                                                     </SectionSubtitle>
                                                 </>}
-                                                {showAvailableLabel && <Divider>available</Divider>}
+                                                {showAvailableLabel && <>
+                                                    {hasDraftChanges && (
+                                                        <ActionRow>
+                                                            <Button
+                                                                variant="primary"
+                                                                size="sm"
+                                                                disabled={isApplyingOrder || !viewerAddress}
+                                                                loading={isApplyingOrder}
+                                                                onClick={applyOrder}
+                                                            >
+                                                                Apply order
+                                                            </Button>
+                                                        </ActionRow>
+                                                    )}
+                                                    <Divider>available agents</Divider>
+                                                </>}
                                                 <AgentCard>
                                                     <AgentRow>
                                                         <AgentInfo>
@@ -508,7 +544,7 @@ export default function AgentsView({ state }) {
                                                                     </OrderButton>
                                                                 </OrderControls>
                                                             )}
-                                                            <Button
+                                                            <AgentActionButton
                                                                 variant={
                                                                     enabled && hoverAgent === addrLower
                                                                         ? 'primaryDanger'
@@ -529,7 +565,7 @@ export default function AgentsView({ state }) {
                                                                     : enabled
                                                                         ? (hoverAgent === addrLower ? 'Disable' : 'Enabled')
                                                                         : 'Enable'}
-                                                            </Button>
+                                                            </AgentActionButton>
                                                         </AgentActions>
                                                     </AgentRow>
                                                 </AgentCard>
@@ -538,7 +574,7 @@ export default function AgentsView({ state }) {
                                     })}
                                 </AgentsList>
                             )}
-                            {hasDraftChanges && (
+                            {hasDraftChanges && enabledCount === sortedAgents.length && (
                                 <ActionRow>
                                     <Button
                                         variant="primary"

@@ -1093,7 +1093,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                     {isSubmitting
                                                         ? (submitStatus === 'verifying' ? 'Verifying...' :
                                                             submitStatus === 'submitting' ? 'Submitting...' :
-                                                                'Processing...')
+                                                                'Processing')
                                                         : (isEditMode ? 'Save Edit' : 'Submit')}
                                                 </Button>
                                             </div>

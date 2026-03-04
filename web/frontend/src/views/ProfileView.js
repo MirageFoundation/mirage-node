@@ -952,7 +952,7 @@ export default function ProfileView({ state }) {
                                                     mobileFullWidth
                                                 >
                                                     {isFollowInProgress
-                                                        ? (formatStatusForPosition(myQueuePosition) || 'Processing...')
+                                                        ? (formatStatusForPosition(myQueuePosition) || 'Processing')
                                                         : (isFollowingProfile
                                                             ? (followHover ? 'Unfollow' : 'Following')
                                                             : 'Follow')}

@@ -60,7 +60,7 @@ export function useTxStatus() {
             return 'Submitting...';
         }
 
-        return 'Processing...';
+        return 'Processing';
     }, [status]);
 
     return { status, formatStatusForPosition, getMyQueuePosition, isActive: status.isActive };

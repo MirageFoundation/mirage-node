@@ -220,7 +220,7 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
 
         const userLevel = Number(Storage.load('user_level', '0') || 0);
         if (userLevel === 0) {
-            updateNotification("Processing...", 10);
+            updateNotification("Processing", 10);
         }
 
         // Submit vote to backend
