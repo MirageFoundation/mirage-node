@@ -508,7 +508,7 @@ def _build_pool():
     add_f(msg4, "min_username_size", 36, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_topic_size", 37, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_dynamic_credit_cap", 38, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "mint_dynamic_fraction", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "mint_dynamic_split", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "subscription_period", 40, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     # tiers is a repeated TierConfig (field 41)
     f_tiers = msg4.field.add()
@@ -517,7 +517,7 @@ def _build_pool():
     f_tiers.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_tiers.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_tiers.type_name = ".mirage.core.v1.TierConfig"
-    add_f(msg4, "subscription_reserve_fraction", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "subscription_reserve_percent", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_envelope_age", 45, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)

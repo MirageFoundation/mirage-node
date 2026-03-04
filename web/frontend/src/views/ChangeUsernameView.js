@@ -152,7 +152,7 @@ function ChangeUsernameView({ state }) {
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
     const [statusStartTime, setStatusStartTime] = useState(null);
-    const [elapsedTime, setElapsedTime] = useState(0);
+    const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
     const [userLevel, setUserLevel] = useState(null);

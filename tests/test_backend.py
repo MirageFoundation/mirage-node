@@ -973,6 +973,14 @@ def _do_annotate(
         "appendix": appendix,
     }
     code, resp = _post(f"{backend}/api/core/annotate", payload)
+    resp = resp or {}
+    if code >= 400 or resp.get("error"):
+        details = resp.get("details")
+        _debug(f"annotate error code={code} error={resp.get('error')} details={details}")
+        out = {"error": resp.get("error", f"HTTP {code}")}
+        if details:
+            out["details"] = details
+        return out
     return resp
 
 
@@ -3192,6 +3200,7 @@ def test_edge_cases(backend: str):
         if code < 400:
             _pass(f"edge.unicode_{label}_accepted")
         else:
+            _debug(f"edge.unicode_{label}_accepted failed code={code} resp={resp}")
             _fail(f"edge.unicode_{label}_accepted", f"code={code}")
 
     # ── Unicode topics should be rejected ─────────────────────────
@@ -4950,12 +4959,12 @@ def test_rate_limit(backend: str):
 
 
 # =========================================================================
-# Category 20: Hard Cap vs Deque (backend-level)
+# Category 19: Hard Cap vs Deque (backend-level)
 # =========================================================================
 def test_hard_cap_vs_deque(backend: str):
     """Test that follow/enable lists reject at limit (hard cap) while
     block lists evict oldest (deque) through the backend API."""
-    print(f"\n{_COLOR_BOLD}[20] Hard Cap vs Deque (backend API){_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[19] Hard Cap vs Deque (backend API){_COLOR_RESET}")
 
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
@@ -4979,7 +4988,7 @@ def test_hard_cap_vs_deque(backend: str):
     max_ft_free = int(free_tier.get("max_followed_topics", 0))
     max_bu_free = int(free_tier.get("max_blocked_users", 0))
 
-    # ── 20.1 Follow users up to free limit, then verify rejection ──
+    # ── 19.1 Follow users up to free limit, then verify rejection ──
     # Account for users already followed by the free wallet from prior tests
     code_fu, fu_data = _get(f"{backend}/api/get_user_followed", {"address": free_addr})
     existing_fu = (
@@ -5029,7 +5038,7 @@ def test_hard_cap_vs_deque(backend: str):
         else:
             _pass("hardcap.fu_follow_after_unfollow (skipped — no new targets to unfollow)")
 
-    # ── 20.2 Follow topics up to free limit, then verify rejection ──
+    # ── 19.2 Follow topics up to free limit, then verify rejection ──
     existing_ft = len((fu_data or {}).get("followed_topics") or []) if code_fu == 200 else 0
     remaining_ft = max(0, max_ft_free - existing_ft)
     _debug(f"free-tier max_followed_topics={max_ft_free} existing={existing_ft} remaining={remaining_ft}")
@@ -5060,7 +5069,7 @@ def test_hard_cap_vs_deque(backend: str):
         else:
             _fail("hardcap.ft_overflow_rejected", f"txh={txh} code={tx_code}")
 
-    # ── 20.3 Enable agents up to free limit, then verify rejection ──
+    # ── 19.3 Enable agents up to free limit, then verify rejection ──
     code_ea, ea_data = _get(f"{backend}/api/get_profile", {"address": free_addr})
     existing_ea = len((ea_data or {}).get("enabled_agents") or []) if code_ea == 200 else 0
     remaining_ea = max(0, max_agents_free - existing_ea)
@@ -5106,7 +5115,7 @@ def test_hard_cap_vs_deque(backend: str):
         else:
             _pass("hardcap.ea_enable_after_disable (skipped — no new targets to disable)")
 
-    # ── 20.4 blocked_users: deque (should never reject) ──
+    # ── 19.4 blocked_users: deque (should never reject) ──
     _debug(f"free-tier max_blocked_users={max_bu_free}")
     total_to_block = max_bu_free + 3
     bu_fill_ok = True
@@ -5126,11 +5135,11 @@ def test_hard_cap_vs_deque(backend: str):
 
 
 # =========================================================================
-# Category 21: Tier Configuration Verification (backend API)
+# Category 20: Tier Configuration Verification (backend API)
 # =========================================================================
 def test_tier_config_api(backend: str):
     """Verify tier configurations are correctly served through the API."""
-    print(f"\n{_COLOR_BOLD}[21] Tier Configuration via API{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[20] Tier Configuration via API{_COLOR_RESET}")
 
     code, params_resp = _get(f"{backend}/api/get_chain_config")
     if code != 200:
@@ -5272,16 +5281,16 @@ def test_tier_config_api(backend: str):
 
 
 # =========================================================================
-# Category 22: Upgrade Level Validation (backend API)
+# Category 21: Upgrade Level Validation (backend API)
 # =========================================================================
 def test_upgrade_level_validation(backend: str):
     """Test level upgrade validation via the backend API."""
-    print(f"\n{_COLOR_BOLD}[22] Upgrade Level Validation (backend API){_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[21] Upgrade Level Validation (backend API){_COLOR_RESET}")
 
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
 
-    # 22.1 Valid levels (1, 10) — we already tested these in test_subscriber
+    # 21.1 Valid levels (1, 10) — we already tested these in test_subscriber
     # Just verify the free user's current level
     try:
         us = get_user_status(backend, free_addr)
@@ -5294,7 +5303,7 @@ def test_upgrade_level_validation(backend: str):
     except Exception as e:
         _fail("upgrade.free_level_is_0", str(e))
 
-    # 22.2 Invalid level 3 should be rejected
+    # 21.2 Invalid level 3 should be rejected
     resp = _do_upgrade_level(backend, free_wallet, 3)
     err = str(resp.get("error", "")).lower() if resp else ""
     txh = str(resp.get("tx_hash", "")).lower() if resp else ""
@@ -5304,7 +5313,7 @@ def test_upgrade_level_validation(backend: str):
     else:
         _fail("upgrade.level_3_rejected", f"txh={txh} code={tx_code} err={err[:100]}")
 
-    # 22.3 Invalid level 0 (already free)
+    # 21.3 Invalid level 0 (already free)
     resp = _do_upgrade_level(backend, free_wallet, 0)
     err = str(resp.get("error", "")).lower() if resp else ""
     txh = str(resp.get("tx_hash", "")).lower() if resp else ""
@@ -5313,7 +5322,7 @@ def test_upgrade_level_validation(backend: str):
     else:
         _fail("upgrade.level_0_rejected", f"txh={txh}")
 
-    # 22.4 Invalid levels 2, 5, 9, 100
+    # 21.4 Invalid levels 2, 5, 9, 100
     for invalid_level in [2, 5, 9, 100]:
         resp = _do_upgrade_level(backend, free_wallet, invalid_level)
         err = str(resp.get("error", "")).lower() if resp else ""
@@ -5326,11 +5335,11 @@ def test_upgrade_level_validation(backend: str):
 
 
 # =========================================================================
-# Category 23: Indexer Deque Storage (backend API)
+# Category 22: Indexer Deque Storage (backend API)
 # =========================================================================
 def test_indexer_deque_storage(backend: str):
     """Test that the indexer stores blocked_* entries beyond the chain limit."""
-    print(f"\n{_COLOR_BOLD}[23] Indexer Deque Storage{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[22] Indexer Deque Storage{_COLOR_RESET}")
 
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
@@ -5401,17 +5410,17 @@ def test_indexer_deque_storage(backend: str):
 
 
 # =========================================================================
-# Category 24: Subscriber Content Length Limits (backend API)
+# Category 23: Subscriber Content Length Limits (backend API)
 # =========================================================================
 def test_content_limits(backend: str):
     """Test content/title length limits per tier at the backend API level."""
-    print(f"\n{_COLOR_BOLD}[24] Content Length Limits{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[23] Content Length Limits{_COLOR_RESET}")
 
     free_wallet = WALLETS["free"]
     sub1 = WALLETS["sub1"]
     agent1 = WALLETS["agent1"]
 
-    # 24.1 Free user: content > 1000 should fail
+    # 23.1 Free user: content > 1000 should fail
     long_content = "x" * 1050
     txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=False)
     if txh is None:
@@ -5419,7 +5428,7 @@ def test_content_limits(backend: str):
     else:
         _fail("content_limits.free_over_1000_rejected", f"txh={txh}")
 
-    # 24.2 Free user: content <= 1000 should succeed
+    # 23.2 Free user: content <= 1000 should succeed
     ok_content = "x" * 950
     txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", "Title", ok_content, skip_pow=False)
     if txh:
@@ -5427,14 +5436,14 @@ def test_content_limits(backend: str):
     else:
         _fail("content_limits.free_950_accepted")
 
-    # 24.3 Subscriber: content > 1000 but <= 20000 should succeed
+    # 23.3 Subscriber: content > 1000 but <= 20000 should succeed
     txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
     if txh:
         _pass("content_limits.sub_1050_accepted")
     else:
         _fail("content_limits.sub_1050_accepted")
 
-    # 24.4 Subscriber: content > 20000 should fail
+    # 23.4 Subscriber: content > 20000 should fail
     huge_content = "x" * 20050
     txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", "Title", huge_content, skip_pow=True)
     if txh is None:
@@ -5442,7 +5451,7 @@ def test_content_limits(backend: str):
     else:
         _fail("content_limits.sub_over_20000_rejected", f"txh={txh}")
 
-    # 24.5 Free user: title > 150 should fail
+    # 23.5 Free user: title > 150 should fail
     long_title = "T" * 160
     txh = _do_post(backend, free_wallet, f"cl{_rand_str(4)}", long_title, "body", skip_pow=False)
     if txh is None:
@@ -5450,14 +5459,14 @@ def test_content_limits(backend: str):
     else:
         _fail("content_limits.free_title_over_150_rejected", f"txh={txh}")
 
-    # 24.6 Subscriber: title 160 should succeed (limit is 300)
+    # 23.6 Subscriber: title 160 should succeed (limit is 300)
     txh = _do_post(backend, sub1, f"cl{_rand_str(4)}", long_title, "body", skip_pow=True)
     if txh:
         _pass("content_limits.sub_title_160_accepted")
     else:
         _fail("content_limits.sub_title_160_accepted")
 
-    # 24.7 Agent: same limits as subscriber for content/title
+    # 23.7 Agent: same limits as subscriber for content/title
     txh = _do_post(backend, agent1, f"cl{_rand_str(4)}", "Title", long_content, skip_pow=True)
     if txh:
         _pass("content_limits.agent_1050_accepted")
@@ -5466,11 +5475,11 @@ def test_content_limits(backend: str):
 
 
 # =========================================================================
-# Category 25: Profile Fields Verification
+# Category 24: Profile Fields Verification
 # =========================================================================
 def test_profile_fields(backend: str):
     """Verify profile fields are correctly returned through the API."""
-    print(f"\n{_COLOR_BOLD}[25] Profile Fields Verification{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[24] Profile Fields Verification{_COLOR_RESET}")
 
     sub1 = WALLETS["sub1"]
     sub1_addr = str(sub1.address())
@@ -5479,21 +5488,21 @@ def test_profile_fields(backend: str):
     free_wallet = WALLETS["free"]
     free_addr = str(free_wallet.address())
 
-    # 25.1 Verify get_profile returns expected fields
+    # 24.1 Verify get_profile returns expected fields
     code, profile = _get(f"{backend}/api/get_profile", {"address": sub1_addr})
     if code != 200:
         _fail("profile.get_profile_200", f"code={code}")
         return
     _pass("profile.get_profile_200")
 
-    # 25.2 Verify level is correct
+    # 24.2 Verify level is correct
     level = profile.get("level")
     if level is not None and int(level) == 1:
         _pass("profile.sub1_level_1")
     else:
         _fail("profile.sub1_level_1", f"level={level}")
 
-    # 25.3 Agent level
+    # 24.3 Agent level
     code, agent_profile = _get(f"{backend}/api/get_profile", {"address": agent1_addr})
     if code == 200:
         agent_level = agent_profile.get("level")
@@ -5502,7 +5511,7 @@ def test_profile_fields(backend: str):
         else:
             _fail("profile.agent1_level_10", f"level={agent_level}")
 
-    # 25.4 Free level
+    # 24.4 Free level
     code, free_profile = _get(f"{backend}/api/get_profile", {"address": free_addr})
     if code == 200:
         free_level = free_profile.get("level")
@@ -5511,19 +5520,19 @@ def test_profile_fields(backend: str):
         else:
             _fail("profile.free_level_0", f"level={free_level}")
 
-    # 25.5 Verify enabled_agents field exists in profile
+    # 24.5 Verify enabled_agents field exists in profile
     if "enabled_agents" in (profile or {}):
         _pass("profile.has_enabled_agents_field")
     else:
         _pass("profile.enabled_agents_in_followed_data")
 
-    # 25.6 Verify is_moderator is NOT in profile
+    # 24.6 Verify is_moderator is NOT in profile
     if "is_moderator" not in (profile or {}):
         _pass("profile.no_is_moderator_field")
     else:
         _fail("profile.no_is_moderator_field", "is_moderator still present")
 
-    # 25.7 Verify flair field exists (may be empty string)
+    # 24.7 Verify flair field exists (may be empty string)
     if "flair" in (profile or {}) or "flair" in (free_profile or {}):
         _pass("profile.has_flair_field")
     else:
@@ -5573,7 +5582,7 @@ def _feed_missing_post(backend: str, viewer_addr: str, post_id: str, timeout: fl
 def test_agent_behavior(backend: str):
     """Test agent block propagation: when a user enables an agent, the agent's
     blocks (posts, users, topics) should also apply to the user's feed."""
-    print(f"\n{_COLOR_BOLD}[26] Agent Block Propagation{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[25] Agent Block Propagation{_COLOR_RESET}")
 
     agent = WALLETS["agent1"]
     user = WALLETS["sub1"]
@@ -5588,7 +5597,7 @@ def test_agent_behavior(backend: str):
     topic_b = f"agentblk_{_rand_str(6)}"
 
     # Post by victim in topic_a (will be individually blocked by agent)
-    blocked_post = _do_post(backend, victim, topic_a, "Blocked Post", "This post should be hidden by the agent.")
+    blocked_post = _do_post(backend, victim, topic_a, "Blocked Post", "This post should be hidden by the agent.", skip_pow=True)
     if not blocked_post:
         _fail("agent_behavior.setup_blocked_post", "could not create post")
         return
@@ -5597,7 +5606,7 @@ def test_agent_behavior(backend: str):
         return
 
     # Post by victim in topic_b (topic will be blocked by agent)
-    topic_post = _do_post(backend, victim, topic_b, "Topic Post", "This post is in a blocked topic.")
+    topic_post = _do_post(backend, victim, topic_b, "Topic Post", "This post is in a blocked topic.", skip_pow=True)
     if not topic_post:
         _fail("agent_behavior.setup_topic_post", "could not create post")
         return
@@ -5606,7 +5615,7 @@ def test_agent_behavior(backend: str):
         return
 
     # Post by victim in topic_a (control — should remain visible)
-    control_post = _do_post(backend, victim, topic_a, "Control Post", "This post should always be visible.")
+    control_post = _do_post(backend, victim, topic_a, "Control Post", "This post should always be visible.", skip_pow=True)
     if not control_post:
         _fail("agent_behavior.setup_control_post", "could not create post")
         return
@@ -5617,7 +5626,7 @@ def test_agent_behavior(backend: str):
     # Another user's post (author will be blocked by agent)
     agent2 = WALLETS["agent2"]
     agent2_addr = str(agent2.address())
-    author_post = _do_post(backend, agent2, topic_a, "Author Post", "Post from a user the agent will block.")
+    author_post = _do_post(backend, agent2, topic_a, "Author Post", "Post from a user the agent will block.", skip_pow=True)
     if not author_post:
         _fail("agent_behavior.setup_author_post", "could not create post")
         return
@@ -5627,7 +5636,7 @@ def test_agent_behavior(backend: str):
 
     _pass("agent_behavior.setup_content_created")
 
-    # ----- 26.1 Baseline: user sees all posts before enabling agent -----
+    # ----- 25.1 Baseline: user sees all posts before enabling agent -----
 
     if _feed_has_post(backend, user_addr, blocked_post):
         _pass("agent_behavior.baseline_sees_blocked_post")
@@ -5644,9 +5653,9 @@ def test_agent_behavior(backend: str):
     else:
         _fail("agent_behavior.baseline_sees_author_post", "not in feed")
 
-    # ----- 26.2 Agent blocks: post, topic, user -----
+    # ----- 25.2 Agent blocks: post, topic, user -----
 
-    resp = _do_block(backend, agent, blocked_post, "post")
+    resp = _do_block(backend, agent, blocked_post, "post", skip_pow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("agent_behavior.agent_blocks_post")
@@ -5654,7 +5663,7 @@ def test_agent_behavior(backend: str):
         _fail("agent_behavior.agent_blocks_post", f"resp={resp}")
         return
 
-    resp = _do_block_topic(backend, agent, topic_b)
+    resp = _do_block_topic(backend, agent, topic_b, skip_pow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("agent_behavior.agent_blocks_topic")
@@ -5662,7 +5671,7 @@ def test_agent_behavior(backend: str):
         _fail("agent_behavior.agent_blocks_topic", f"resp={resp}")
         return
 
-    resp = _do_block(backend, agent, agent2_addr, "user")
+    resp = _do_block(backend, agent, agent2_addr, "user", skip_pow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("agent_behavior.agent_blocks_user")
@@ -5672,7 +5681,7 @@ def test_agent_behavior(backend: str):
 
     time.sleep(4)
 
-    # ----- 26.3 User still sees everything (agent not enabled yet) -----
+    # ----- 25.3 User still sees everything (agent not enabled yet) -----
 
     if _feed_has_post(backend, user_addr, blocked_post):
         _pass("agent_behavior.pre_enable_sees_blocked_post")
@@ -5689,9 +5698,9 @@ def test_agent_behavior(backend: str):
     else:
         _fail("agent_behavior.pre_enable_sees_author_post", "not in feed")
 
-    # ----- 26.4 User enables agent -----
+    # ----- 25.4 User enables agent -----
 
-    resp = _do_enable_agent(backend, user, agent_addr)
+    resp = _do_enable_agent(backend, user, agent_addr, skip_pow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("agent_behavior.user_enables_agent")
@@ -5701,37 +5710,37 @@ def test_agent_behavior(backend: str):
 
     time.sleep(5)
 
-    # ----- 26.5 Blocked post hidden from user's feed -----
+    # ----- 25.5 Blocked post hidden from user's feed -----
 
     if _feed_missing_post(backend, user_addr, blocked_post):
         _pass("agent_behavior.blocked_post_hidden")
     else:
         _fail("agent_behavior.blocked_post_hidden", "post still visible after enabling agent")
 
-    # ----- 26.6 Topic-blocked post hidden from user's feed -----
+    # ----- 25.6 Topic-blocked post hidden from user's feed -----
 
     if _feed_missing_post(backend, user_addr, topic_post):
         _pass("agent_behavior.blocked_topic_post_hidden")
     else:
         _fail("agent_behavior.blocked_topic_post_hidden", "topic post still visible after enabling agent")
 
-    # ----- 26.7 User-blocked author's post hidden from user's feed -----
+    # ----- 25.7 User-blocked author's post hidden from user's feed -----
 
     if _feed_missing_post(backend, user_addr, author_post):
         _pass("agent_behavior.blocked_user_post_hidden")
     else:
         _fail("agent_behavior.blocked_user_post_hidden", "author post still visible after enabling agent")
 
-    # ----- 26.8 Control post still visible -----
+    # ----- 25.8 Control post still visible -----
 
     if _feed_has_post(backend, user_addr, control_post):
         _pass("agent_behavior.control_post_still_visible")
     else:
         _fail("agent_behavior.control_post_still_visible", "control post disappeared")
 
-    # ----- 26.9 Disable agent — blocked content reappears -----
+    # ----- 25.9 Disable agent — blocked content reappears -----
 
-    resp = _do_enable_agent(backend, user, agent_addr, enable=False)
+    resp = _do_enable_agent(backend, user, agent_addr, enable=False, skip_pow=True)
     txh = str(resp.get("tx_hash", "")).lower()
     if txh:
         _pass("agent_behavior.user_disables_agent")
@@ -5759,7 +5768,7 @@ def test_agent_behavior(backend: str):
 
 def test_annotate(backend: str):
     """Test MsgAnnotate agent overlay edits."""
-    print(f"\n{_COLOR_BOLD}[ANNOTATE] Agent Annotations{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[26] Agent Annotations{_COLOR_RESET}")
 
     agent = WALLETS.get("agent1")
     free = WALLETS.get("free")
@@ -5842,7 +5851,6 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.viewer_sets_agents", f"resp={resp}")
         return
-    time.sleep(5)
 
     def _find_node(nodes, target_id: str):
         for n in nodes or []:
@@ -5854,11 +5862,18 @@ def test_annotate(backend: str):
                     return found
         return None
 
-    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
-    if code != 200:
+    # Poll for overlay to appear (indexer needs to process both set_agents and annotate txs)
+    root = {}
+    for _poll in range(10):
+        time.sleep(2)
+        code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+        if code == 200:
+            root = (data or {}).get("root") or {}
+            if root.get("agent_edited"):
+                break
+    if not root:
         _fail("annotate.overlay_get_comments", f"code={code}")
         return
-    root = (data or {}).get("root") or {}
     if root.get("title") == new_title:
         _pass("annotate.overlay_title_applied")
     else:
@@ -5886,9 +5901,16 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.no_change_sentinel_tx", resp.get("error", str(resp)))
         return
-    time.sleep(5)
-    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
-    root = (data or {}).get("root") or {}
+
+    # Poll for overlays to remain unchanged
+    root = {}
+    for _poll in range(10):
+        time.sleep(2)
+        code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+        if code == 200:
+            root = (data or {}).get("root") or {}
+            if root.get("title") == new_title:
+                break
     if root.get("title") == new_title:
         _pass("annotate.no_change_preserves_title")
     else:
@@ -5913,7 +5935,6 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.agent2_title_override", resp.get("error", str(resp)))
         return
-    time.sleep(5)
 
     resp = _do_set_agents(backend, free, [agent2_addr, agent_addr], skip_pow=False)
     if resp.get("tx_hash"):
@@ -5921,9 +5942,16 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.viewer_agent_order_2_1", f"resp={resp}")
         return
-    time.sleep(5)
-    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
-    root = (data or {}).get("root") or {}
+
+    # Poll for agent2's overlay to appear
+    root = {}
+    for _poll in range(10):
+        time.sleep(2)
+        code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+        if code == 200:
+            root = (data or {}).get("root") or {}
+            if root.get("title") == title2:
+                break
     if root.get("title") == title2:
         _pass("annotate.priority_title_agent2_wins")
     else:
@@ -5944,9 +5972,16 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.viewer_agent_order_1_2", f"resp={resp}")
         return
-    time.sleep(5)
-    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
-    root = (data or {}).get("root") or {}
+
+    # Poll for agent1-first priority overlay
+    root = {}
+    for _poll in range(10):
+        time.sleep(2)
+        code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+        if code == 200:
+            root = (data or {}).get("root") or {}
+            if root.get("title") == new_title:
+                break
     if root.get("title") == new_title:
         _pass("annotate.priority_title_agent1_wins")
     else:
@@ -5967,9 +6002,15 @@ def test_annotate(backend: str):
     else:
         _fail("annotate.comment_content_override", resp.get("error", str(resp)))
         return
-    time.sleep(5)
-    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
-    comment_node = _find_node((data or {}).get("children") or [], comment_tx)
+
+    # Poll for comment overlay
+    comment_node = None
+    for _poll in range(10):
+        time.sleep(2)
+        code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+        comment_node = _find_node((data or {}).get("children") or [], comment_tx)
+        if comment_node and comment_node.get("content") == comment_content:
+            break
     if comment_node and comment_node.get("content") == comment_content:
         _pass("annotate.comment_overlay_applied")
     else:
@@ -5978,7 +6019,7 @@ def test_annotate(backend: str):
 
 def test_edit_target_immutability(backend: str):
     """Test that MsgEdit cannot change a post's target (parent)."""
-    print(f"\n{_COLOR_BOLD}[EDIT-TARGET] MsgEdit Target Immutability{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[27] MsgEdit Target Immutability{_COLOR_RESET}")
 
     free = WALLETS.get("free")
     if not free:

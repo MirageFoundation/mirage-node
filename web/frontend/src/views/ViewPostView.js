@@ -1174,7 +1174,7 @@ function ViewPostView({ state, updatePost }) {
     const [replyThumbLoading, setReplyThumbLoading] = useState({}); // { postId: boolean }
     const [replySubmitError, setReplySubmitError] = useState({}); // { postId: string }
     const [replySubmitStartTime, setReplySubmitStartTime] = useState({}); // { postId: number }
-    const [replyElapsedTime, setReplyElapsedTime] = useState({}); // { postId: number }
+    const [, setReplyElapsedTime] = useState({}); // { postId: number }
     const [replySubmitStatus, setReplySubmitStatus] = useState({}); // { postId: 'idle'|'solving'|'submitting'|'verifying' }
     const replyErrorClearTimeoutRef = useRef({}); // { postId: timeoutId }
     const mobileReplyOverlayRef = useRef(null);

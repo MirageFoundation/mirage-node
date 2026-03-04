@@ -3156,6 +3156,7 @@ def get_chain_config():
             "max_topic_size": p["max_topic_size"],
             "min_topic_size": p["min_topic_size"],
             "subscription_period": p["subscription_period"],
+            "subscription_reserve_percent": p["subscription_reserve_percent"],
             "mint_interval": p["mint_interval"],
             "block_time": _get_block_time_seconds(),
             "tiers": p["tiers"],

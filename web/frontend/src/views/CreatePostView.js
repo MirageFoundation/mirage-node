@@ -263,7 +263,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const errorClearTimeoutRef = React.useRef(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStartTime, setSubmitStartTime] = useState(null);
-    const [elapsedTime, setElapsedTime] = useState(0);
+    const [, setElapsedTime] = useState(0);
     const [submitStatus, setSubmitStatus] = useState('idle'); // idle, solving, submitting, verifying
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [editorUpload, setEditorUpload] = useState(null);
