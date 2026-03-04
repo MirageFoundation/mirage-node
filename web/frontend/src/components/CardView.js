@@ -2123,6 +2123,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     )}
                                 </>
                             )}
+                            {post.agent_edited && (
+                                <>
+                                    <MetaSeparator>·</MetaSeparator>
+                                    <span style={{ opacity: 0.5, fontStyle: 'italic' }}>
+                                        agent modified
+                                    </span>
+                                </>
+                            )}
                         </MetaInfoRowLeft>
                         <MenuContainer ref={menuRef}>
                             <MenuButton
@@ -2588,11 +2596,6 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                     )}
                     {showContent && post.content && (
                         <InlineTeaserMedia url={sanitizeUrlForLink(extractFirstUrl(post.content) || post.content)} />
-                    )}
-                    {post.agent_edited && (
-                        <span style={{ fontSize: '0.7em', opacity: 0.5, fontStyle: 'italic', marginRight: '0.5rem' }}>
-                            agent modified{post.appendices && post.appendices.length > 0 ? ` · ${post.appendices.length} note${post.appendices.length > 1 ? 's' : ''}` : ''}
-                        </span>
                     )}
                     {footer && (
                         <StyledFooter>{footer}</StyledFooter>

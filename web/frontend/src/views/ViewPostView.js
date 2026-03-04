@@ -4064,6 +4064,14 @@ function ViewPostView({ state, updatePost }) {
                                                             </span>
                                                         </>
                                                     )}
+                                                    {post.agent_edited && (
+                                                        <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{ opacity: 0.5, fontStyle: 'italic' }}>
+                                                                agent modified
+                                                            </span>
+                                                        </>
+                                                    )}
                                                 </MetaInfoRowLeft>
                                                 {renderPostMenu(post)}
                                             </DesktopMetaInfoRow>
@@ -4151,17 +4159,6 @@ function ViewPostView({ state, updatePost }) {
                                                     ))}
                                                 </div>
                                             )}
-                                            {!isCollapsed && post.agent_edited && (
-                                                <div style={{
-                                                    fontSize: '0.75em',
-                                                    opacity: 0.6,
-                                                    marginTop: '0.25rem',
-                                                    fontStyle: 'italic',
-                                                }}>
-                                                    modified by agent
-                                                </div>
-                                            )}
-
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (
                                                 <>

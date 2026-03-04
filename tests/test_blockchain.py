@@ -294,6 +294,28 @@ def _get_gov_module_address() -> str:
     return addr
 
 
+def _parse_cli_json(out: str) -> dict | None:
+    """Extract the first top-level JSON object from CLI output that may
+    contain log lines before/after the JSON."""
+    idx = out.find("{")
+    if idx < 0:
+        return None
+    depth = 0
+    end = idx
+    for i in range(idx, len(out)):
+        if out[i] == "{":
+            depth += 1
+        elif out[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    try:
+        return json.loads(out[idx:end])
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def _get_chain_params() -> dict:
     code, out = _run_miraged(
         ["q", "core", "params", "--home", "/root/.mirage/node", "--node", "tcp://127.0.0.1:26657", "-o", "json"],
@@ -301,11 +323,9 @@ def _get_chain_params() -> dict:
     )
     if code != 0 or not out:
         raise RuntimeError(f"failed to query core params: {out[:200]}")
-    # miraged may print log lines before the JSON — find the first '{'
-    idx = out.find("{")
-    if idx < 0:
+    data = _parse_cli_json(out)
+    if not data:
         raise RuntimeError(f"core params query: no JSON in output: {out[:200]}")
-    data = json.loads(out[idx:])
     return data.get("params") or data
 
 
@@ -327,11 +347,37 @@ def _tier_int(tier: dict, key: str) -> int:
 
 
 def _get_pow_params(backend: str, address: str | None = None) -> tuple[str, int, int, float]:
+    # Prefer direct chain query (uncached) over backend /api/get_parameters
+    # which has a 3-second cache TTL that causes stale params in bulk loops.
+    # The difficulty query returns: current_difficulty, latest_block_hash,
+    # min_difficulty (= pow_base_bits) — everything we need except pow_factor.
+    code, out = _run_miraged(
+        ["q", "core", "difficulty", "--home", "/root/.mirage/node", "--node", "tcp://127.0.0.1:26657", "-o", "json"],
+        timeout=10,
+    )
+    if code == 0 and out:
+        data = _parse_cli_json(out)
+        if data:
+            lb = str(data.get("latest_block_hash", "") or "").strip().lower()
+            raw_diff = data.get("current_difficulty")
+            base_bits = int(data.get("min_difficulty", 0) or 0)
+            if lb and raw_diff is not None and base_bits > 0:
+                try:
+                    params = _get_chain_params()
+                    pow_factor = float(params.get("pow_difficulty_step", 0) or 0)
+                except Exception:
+                    pow_factor = 0.0
+                if pow_factor <= 0:
+                    st = get_status(backend, address=address)
+                    pow_factor = float(st.get("pow_factor", 0.25) or 0.25)
+                return lb, int(raw_diff), base_bits, pow_factor
+
+    # Fallback: use the backend HTTP endpoint.
     st = get_status(backend, address=address)
     lb = str(st.get("last_block_hash", "") or "")
     diff = int(st.get("pow_difficulty", 0) or 0)
     base_bits = int(st.get("pow_base_bits", 0) or 0)
-    pow_factor = float(st.get("pow_factor", 0.25))
+    pow_factor = float(st.get("pow_factor", 0.25) or 0.25)
     if not lb:
         raise RuntimeError("missing last_block_hash from get_status")
     return lb, diff, base_bits, pow_factor
@@ -362,10 +408,9 @@ def _get_chain_profile(address: str) -> dict:
     )
     if code != 0 or not out:
         raise RuntimeError(f"failed to query chain profile: {out[:200]}")
-    idx = out.find("{")
-    if idx < 0:
+    data = _parse_cli_json(out)
+    if not data:
         raise RuntimeError(f"chain profile query: no JSON in output: {out[:200]}")
-    data = json.loads(out[idx:])
     return data
 
 
@@ -2291,11 +2336,11 @@ def test_msg_validation(backend: str) -> None:
     _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
 
 
-def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
+def _topup_wallets(backend: str, names: list[str], amount: int = 1_000_000) -> None:
     """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
 
     Uses the agent2 wallet (high residual balance) as the donor.
-    Default: 10,000 MIRAGE per wallet.
+    Default: 1 MIRAGE per wallet.
     """
     donor = WALLETS["agent2"]
     donor_addr = str(donor.address())
@@ -2337,14 +2382,21 @@ def test_follow_limits(backend: str) -> None:
     fee_payer = _VALIDATOR_ADDR or ""
     tier0 = _get_tier_config(0)
 
+    # Query chain (not indexer) for accurate pre-existing list counts.
+    fw_chain_profile = _get_chain_profile(fw_addr)
+    existing_followed_users = fw_chain_profile.get("followed_users") or fw_chain_profile.get("followedUsers") or []
+    existing_followed_topics = fw_chain_profile.get("followed_topics") or fw_chain_profile.get("followedTopics") or []
+    existing_enabled_agents = fw_chain_profile.get("enabled_agents") or fw_chain_profile.get("enabledAgents") or []
+
     # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
-    _debug(f"free-tier max_followed_users={max_followed_users}")
+    remaining_followed_users = max(0, max_followed_users - len(existing_followed_users))
+    _debug(f"free-tier max_followed_users={max_followed_users} existing={len(existing_followed_users)} remaining={remaining_followed_users}")
     fill_ok = True
     followed_user_targets: list[str] = []
     chunk_size = 25
-    for start in range(0, max_followed_users, chunk_size):
-        batch_count = min(chunk_size, max_followed_users - start)
+    for start in range(0, remaining_followed_users, chunk_size):
+        batch_count = min(chunk_size, remaining_followed_users - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         msgs: list[tuple[object, str]] = []
@@ -2364,7 +2416,7 @@ def test_follow_limits(backend: str) -> None:
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.user_fill ({max_followed_users} followed)")
+        _pass(f"follow.user_fill ({len(existing_followed_users) + remaining_followed_users}/{max_followed_users} followed)")
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2385,11 +2437,12 @@ def test_follow_limits(backend: str) -> None:
 
     # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
-    _debug(f"free-tier max_followed_topics={max_followed_topics}")
+    remaining_followed_topics = max(0, max_followed_topics - len(existing_followed_topics))
+    _debug(f"free-tier max_followed_topics={max_followed_topics} existing={len(existing_followed_topics)} remaining={remaining_followed_topics}")
     fill_ok = True
     followed_topic_targets: list[str] = []
-    for start in range(0, max_followed_topics, chunk_size):
-        batch_count = min(chunk_size, max_followed_topics - start)
+    for start in range(0, remaining_followed_topics, chunk_size):
+        batch_count = min(chunk_size, remaining_followed_topics - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         msgs = []
@@ -2409,7 +2462,7 @@ def test_follow_limits(backend: str) -> None:
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.topic_fill ({max_followed_topics} followed)")
+        _pass(f"follow.topic_fill ({len(existing_followed_topics) + remaining_followed_topics}/{max_followed_topics} followed)")
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2430,11 +2483,12 @@ def test_follow_limits(backend: str) -> None:
 
     # 8.3 Fill free-tier max_enabled_agents + overflow
     max_enabled_agents = _tier_int(tier0, "max_enabled_agents")
-    _debug(f"free-tier max_enabled_agents={max_enabled_agents}")
+    remaining_enabled_agents = max(0, max_enabled_agents - len(existing_enabled_agents))
+    _debug(f"free-tier max_enabled_agents={max_enabled_agents} existing={len(existing_enabled_agents)} remaining={remaining_enabled_agents}")
     fill_ok = True
     enabled_agent_targets: list[str] = []
-    for start in range(0, max_enabled_agents, chunk_size):
-        batch_count = min(chunk_size, max_enabled_agents - start)
+    for start in range(0, remaining_enabled_agents, chunk_size):
+        batch_count = min(chunk_size, remaining_enabled_agents - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts_base = _now_ms()
         msgs = []
@@ -2454,7 +2508,7 @@ def test_follow_limits(backend: str) -> None:
             fill_ok = False
             break
     if fill_ok:
-        _pass(f"follow.agent_fill ({max_enabled_agents} enabled)")
+        _pass(f"follow.agent_fill ({len(existing_enabled_agents) + remaining_enabled_agents}/{max_enabled_agents} enabled)")
 
     if fill_ok:
         # Overflow should be REJECTED (hard cap, not deque)
@@ -2480,9 +2534,10 @@ def test_follow_limits(backend: str) -> None:
     sub_pub = sub.public_key().public_key_bytes
     sub_tier = _get_tier_config(1)
     sub_max_followed_users = _tier_int(sub_tier, "max_followed_users")
-    before_profile = _get_profile_full(backend, sub_addr)
-    before_followed = [str(v).lower() for v in (before_profile.get("followed_users") or [])]
-    remaining = sub_max_followed_users - len(before_followed)
+    sub_chain_profile = _get_chain_profile(sub_addr)
+    before_followed = sub_chain_profile.get("followed_users") or sub_chain_profile.get("followedUsers") or []
+    remaining = max(0, sub_max_followed_users - len(before_followed))
+    _debug(f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} remaining={remaining}")
     bulk_targets = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)]
     chunk_size = 25
     bulk_ok = True
@@ -4007,7 +4062,13 @@ def test_annotate_chain(backend: str) -> None:
     noname_wallet2 = LocalWallet(PrivateKey(), prefix="mirage")
     noname_addr = str(noname_wallet2.address())
     random_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-    msg = _build_msg_enable_agent(noname_wallet2, lb, 0, _now_ms(), noname_addr, random_agent, pow_val=0)
+    lb2, diff2, base_bits2, pow_factor2 = _get_pow_params(backend, noname_addr)
+    ts2 = _now_ms()
+    base2 = _canon_base_enable_agent_raw(
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb2), diff2, ts2, noname_addr, random_agent
+    )
+    proof2 = _compute_pow_quiet(base2, diff2, base_bits2, pow_factor2, lb2)
+    msg = _build_msg_enable_agent(noname_wallet2, lb2, diff2, ts2, noname_addr, random_agent, pow_val=proof2)
     tx_hash, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgEnableAgent")],
         DEFAULT_GAS_LIMIT,
@@ -4017,7 +4078,13 @@ def test_annotate_chain(backend: str) -> None:
     _check_reject("annotate_chain.enable_no_username", code, log, "username", tx_hash)
 
     # 15. SetAgents without username should fail
-    msg = _build_msg_set_agents(noname_wallet2, lb, 0, _now_ms(), noname_addr, [random_agent], pow_val=0)
+    lb3, diff3, base_bits3, pow_factor3 = _get_pow_params(backend, noname_addr)
+    ts3 = _now_ms()
+    base3 = _canon_base_set_agents_raw(
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb3), diff3, ts3, noname_addr, [random_agent]
+    )
+    proof3 = _compute_pow_quiet(base3, diff3, base_bits3, pow_factor3, lb3)
+    msg = _build_msg_set_agents(noname_wallet2, lb3, diff3, ts3, noname_addr, [random_agent], pow_val=proof3)
     tx_hash, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetAgents")],
         DEFAULT_GAS_LIMIT,

@@ -410,18 +410,7 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     if not viewer_lower or viewer_lower == "guest":
         return posts
 
-    eligible_posts = []
-    for post in posts:
-        author_lower = (post.get("author") or post.get("user_id") or post.get("owner") or "").strip().lower()
-        if author_lower and author_lower == viewer_lower:
-            post.pop("agent_edited", None)
-            post.pop("agent_edits_meta", None)
-            post.pop("appendices", None)
-            continue
-        eligible_posts.append(post)
-
-    if not eligible_posts:
-        return posts
+    eligible_posts = posts
 
     agents = _get_enabled_agents(cur, viewer)
     if agents:

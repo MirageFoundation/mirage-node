@@ -654,11 +654,11 @@ def setup_test_wallets(backend: str) -> bool:
     # Faucet all wallets (sub wallets need tokens for subscription fees)
     # Level 1 (Subscriber) = 100K MIRAGE, Level 10 (Agent) = 500K MIRAGE
     FAUCET_AMOUNTS = {
-        "free": 1_000_000_000,  #     1,000 MIRAGE
-        "sub1": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
-        "sub2": 150_000_000_000,  #   150,000 MIRAGE  (Subscriber fee = 100,000)
-        "agent1": 600_000_000_000,  # 600,000 MIRAGE  (Agent fee = 500,000)
-        "agent2": 600_000_000_000,  # 600,000 MIRAGE  (Agent fee = 500,000)
+        "free": 1_000_000,  #           1 MIRAGE (minimal non-zero for balance checks)
+        "sub1": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
+        "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
+        "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
+        "agent2": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
     }
     try:
         faucet_addr = _resolve_validator_key_addr()
@@ -5634,8 +5634,15 @@ def _ensure_subscriber(backend: str, wallet: LocalWallet, name: str, expected_le
         if not txh:
             _debug(f"{name} re-subscribe failed: {resp.get('error', resp)}")
             return False
-        time.sleep(4)
-        return True
+        # Wait until the indexer reflects the upgraded level; core routes gate skip_pow on indexer level.
+        for _ in range(15):
+            time.sleep(1)
+            us = get_user_status(backend, addr)
+            level = int(us.get("user_level", 0) or 0)
+            if level >= expected_level:
+                return True
+        _debug(f"{name} re-subscribe not indexed yet after tx={txh[:12]}")
+        return False
     except Exception as e:
         _debug(f"{name} level check error: {e}")
         return False
@@ -5661,11 +5668,13 @@ def test_agent_behavior(backend: str):
 
     # ----- Setup: create test content -----
 
-    topic_a = f"agenttest_{_rand_str(6)}"
-    topic_b = f"agentblk_{_rand_str(6)}"
+    topic_a = f"agenttest{_rand_str(6)}"
+    topic_b = f"agentblk{_rand_str(6)}"
 
     # Post by victim in topic_a (will be individually blocked by agent)
-    blocked_post = _do_post(backend, victim, topic_a, "Blocked Post", "This post should be hidden by the agent.", skip_pow=True)
+    blocked_post = _do_post(
+        backend, victim, topic_a, "Blocked Post", "This post should be hidden by the agent.", skip_pow=True
+    )
     if not blocked_post:
         _fail("agent_behavior.setup_blocked_post", "could not create post")
         return
@@ -5683,7 +5692,9 @@ def test_agent_behavior(backend: str):
         return
 
     # Post by victim in topic_a (control — should remain visible)
-    control_post = _do_post(backend, victim, topic_a, "Control Post", "This post should always be visible.", skip_pow=True)
+    control_post = _do_post(
+        backend, victim, topic_a, "Control Post", "This post should always be visible.", skip_pow=True
+    )
     if not control_post:
         _fail("agent_behavior.setup_control_post", "could not create post")
         return
@@ -5694,7 +5705,9 @@ def test_agent_behavior(backend: str):
     # Another user's post (author will be blocked by agent)
     agent2 = WALLETS["agent2"]
     agent2_addr = str(agent2.address())
-    author_post = _do_post(backend, agent2, topic_a, "Author Post", "Post from a user the agent will block.", skip_pow=True)
+    author_post = _do_post(
+        backend, agent2, topic_a, "Author Post", "Post from a user the agent will block.", skip_pow=True
+    )
     if not author_post:
         _fail("agent_behavior.setup_author_post", "could not create post")
         return
