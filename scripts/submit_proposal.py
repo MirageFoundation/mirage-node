@@ -834,13 +834,14 @@ def main():
             deposit_amount = explicit_deposit
             deposit_source = "explicit"
 
-    # Update proposal with calculated deposit
+    # Update proposal with calculated deposit — always write to a temp file
+    # so the original proposal JSON is never modified.
     if proposal_json:
         proposal_json["deposit"] = f"{deposit_amount}umirage"
-        # Write updated proposal to temp file
-        if proposal_file:
-            with open(proposal_file, "w", encoding="utf-8") as wf:
-                json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
+        tmpdir = tempfile.mkdtemp(prefix="mirage_proposal_")
+        proposal_file = Path(tmpdir) / proposal_file.name
+        with open(proposal_file, "w", encoding="utf-8") as wf:
+            json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
 
     # Fee = gas * gas_price (5000 umirage per gas unit)
     gas_price = 5000
