@@ -26,7 +26,9 @@ import random
 import string
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -97,6 +99,7 @@ FAUCET_AMOUNTS: dict[str, int] = {}  # set during setup — umirage fauceted per
 _TX_COUNTS: dict[str, int] = {}  # base64(pubkey) -> number of relay txs submitted
 _TX_HASHES: list[str] = []
 _TX_HASHES_SEEN: set[str] = set()
+_TX_STATS_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +115,7 @@ class TestResult:
 
 
 RESULTS: list[TestResult] = []
+_RESULTS_LOCK = threading.Lock()
 
 _COLOR_GREEN = "\033[92m"
 _COLOR_RED = "\033[91m"
@@ -122,14 +126,16 @@ _COLOR_BOLD = "\033[1m"
 
 def _pass(name: str, **details) -> TestResult:
     r = TestResult(name=name, passed=True, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     print(f"  {_COLOR_GREEN}PASS{_COLOR_RESET}  {name}")
     return r
 
 
 def _fail(name: str, error: str = "", **details) -> TestResult:
     r = TestResult(name=name, passed=False, error=error, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     err = f" — {error}" if error else ""
     print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name}{err}")
     return r
@@ -223,10 +229,11 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             pk_b64 = payload.get("pubkey", "")
             txh = str(body.get("tx_hash", "") or "").lower()
             if pk_b64 and txh:
-                _TX_COUNTS[pk_b64] = _TX_COUNTS.get(pk_b64, 0) + 1
-                if txh not in _TX_HASHES_SEEN:
-                    _TX_HASHES.append(txh)
-                    _TX_HASHES_SEEN.add(txh)
+                with _TX_STATS_LOCK:
+                    _TX_COUNTS[pk_b64] = _TX_COUNTS.get(pk_b64, 0) + 1
+                    if txh not in _TX_HASHES_SEEN:
+                        _TX_HASHES.append(txh)
+                        _TX_HASHES_SEEN.add(txh)
         return r.status_code, body
 
     return 599, {}
@@ -6226,6 +6233,13 @@ ALL_CATEGORIES = {
     "edit_target": test_edit_target_immutability,
 }
 
+STATELESS_CATEGORIES = {
+    "params",
+    "search",
+    "tier_config_api",
+    "upgrade_validation",
+}
+
 
 def _parse_cli_json(out: str) -> dict:
     """Extract the first top-level JSON object from CLI output."""
@@ -6442,11 +6456,28 @@ def main() -> int:
     else:
         to_run = ALL_CATEGORIES
 
-    for name, fn in to_run.items():
+    def _run_category(name: str, fn) -> None:
         try:
             fn(backend)
         except Exception as e:
             _fail(f"{name}.UNEXPECTED_ERROR", str(e))
+
+    parallel_names = [name for name in to_run if name in STATELESS_CATEGORIES]
+    serial_names = [name for name in to_run if name not in STATELESS_CATEGORIES]
+    if parallel_names:
+        _debug(f"parallel categories: {', '.join(parallel_names)}")
+        if len(parallel_names) == 1:
+            name = parallel_names[0]
+            _run_category(name, to_run[name])
+        else:
+            with ThreadPoolExecutor(max_workers=len(parallel_names)) as pool:
+                futures = {pool.submit(_run_category, name, to_run[name]): name for name in parallel_names}
+                for fut in as_completed(futures):
+                    fut.result()
+    if serial_names:
+        _debug(f"sequential categories: {', '.join(serial_names)}")
+        for name in serial_names:
+            _run_category(name, to_run[name])
 
     # Summary
     passed = sum(1 for r in RESULTS if r.passed)
