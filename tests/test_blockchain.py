@@ -140,11 +140,6 @@ _GRPC_TARGET: Optional[str] = None
 _GRPC_CHANNEL = None
 _SIMULATE_MODE_LOGGED = False
 
-# Per-pubkey tx/gas tracking for the end-of-run cost summary.
-_TX_STATS: dict[str, dict] = {}  # hex(pubkey) -> {"attempted", "paid", "gas_total", "fee_total"}
-_FEE_PAYER_STATS: dict[str, dict] = {}  # fee_payer_addr -> {"attempted", "paid", "gas_total", "fee_total"}
-_TX_STATS_LOCK = threading.Lock()
-
 _MIN_GAS_PRICE_CACHE: Optional[float] = None
 
 
@@ -609,30 +604,9 @@ def _submit_tx(
     fee_denom: str = "umirage",
     fee_amount: Optional[int] = None,
     wait_deliver: bool = False,
-    include_in_stats: bool = True,
 ) -> tuple[str, int, str, Optional[int], Optional[str]]:
     tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
-    if fee_amount is None:
-        actual_fee = int(math.ceil(int(gas_limit) * _min_gas_price_umirage()))
-    else:
-        actual_fee = int(fee_amount)
     tx_hash, check_code, check_log = _broadcast_tx_sync(tx_bytes)
-    pk_hex = signer_pubkey.hex()
-    fp_key = str(fee_payer or "")
-    if include_in_stats:
-        with _TX_STATS_LOCK:
-            stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-            stats["attempted"] += 1
-            if check_code == 0:
-                stats["paid"] += 1
-                stats["gas_total"] += int(gas_limit)
-                stats["fee_total"] += actual_fee
-            fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-            fp_stats["attempted"] += 1
-            if check_code == 0:
-                fp_stats["paid"] += 1
-                fp_stats["gas_total"] += int(gas_limit)
-                fp_stats["fee_total"] += actual_fee
     if not wait_deliver or check_code != 0:
         return tx_hash, check_code, check_log, None, None
     deliver_code, deliver_log = _wait_for_tx_result(tx_hash)
@@ -4205,128 +4179,6 @@ STATELESS_CATEGORIES = {
 }
 
 
-def _query_balance_umirage(addr: str) -> int:
-    """Query on-chain spendable umirage balance for an address."""
-    code, out = _run_miraged(
-        [
-            "q",
-            "bank",
-            "balances",
-            addr,
-            "--home",
-            "/root/.mirage/node",
-            "--node",
-            "tcp://127.0.0.1:26657",
-            "-o",
-            "json",
-        ],
-        timeout=10,
-    )
-    if code != 0 or not out:
-        raise RuntimeError(f"balances query failed: exit={code} out={str(out)[:200]}")
-    data = _parse_cli_json(out)
-    if not data:
-        raise RuntimeError(f"balances JSON parse failed for addr={addr}")
-    for b in data.get("balances", []):
-        if b.get("denom") == "umirage":
-            return int(b.get("amount", 0) or 0)
-    return 0
-
-
-def _print_gas_summary() -> None:
-    """Print fee payer stats (validator gas paid) and reserve spend stats."""
-    if _FEE_PAYER_STATS:
-        rows: list[tuple[str, int, int, int, int]] = []
-        for addr, stats in _FEE_PAYER_STATS.items():
-            if not stats.get("attempted") and not stats.get("paid"):
-                continue
-            label = "validator" if addr and addr == _VALIDATOR_ADDR else (addr[:16] + "…" if addr else "unknown")
-            rows.append((label, stats["attempted"], stats["paid"], stats["gas_total"], stats["fee_total"]))
-        rows.sort(key=lambda r: (0 if r[0] == "validator" else 1, r[0]))
-
-        if not rows:
-            return
-        print(f"\n{'─' * 86}")
-        print(f"{_COLOR_BOLD}Fee Payer (Validator) Gas Summary{_COLOR_RESET}")
-        print(f"{'─' * 86}")
-        hdr = (
-            f"  {'Fee Payer':<14} {'Attempted':>9} {'CheckTx':>7}  "
-            f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
-        )
-        print(hdr)
-        print(f"  {'':─<14} {'':─>9} {'':─>7}  {'':─>14}  {'':─>14}  {'':─>12}")
-
-        grand_attempted = grand_paid = grand_gas = grand_fee = 0
-        for label, attempted, paid, gas_total, fee_total in rows:
-            avg_fee = fee_total // paid if paid else 0
-            fee_mirage = fee_total / 1_000_000
-            avg_fee_mirage = avg_fee / 1_000_000
-            print(
-                f"  {label:<14} {attempted:>9} {paid:>7}  {gas_total:>14,}  "
-                f"{fee_mirage:>11,.2f} M  {avg_fee_mirage:>9,.2f} M"
-            )
-            grand_attempted += attempted
-            grand_paid += paid
-            grand_gas += gas_total
-            grand_fee += fee_total
-
-        print(f"  {'':─<14} {'':─>9} {'':─>7}  {'':─>14}  {'':─>14}  {'':─>12}")
-        grand_avg_fee = grand_fee // grand_paid if grand_paid else 0
-        grand_fee_m = grand_fee / 1_000_000
-        grand_avg_m = grand_avg_fee / 1_000_000
-        print(
-            f"  {'TOTAL':<14} {grand_attempted:>9} {grand_paid:>7}  {grand_gas:>14,}  "
-            f"{grand_fee_m:>11,.2f} M  {grand_avg_m:>9,.2f} M"
-        )
-        print(f"{'─' * 86}")
-        print(f"  (Fees = gas_limit × min_gas_price, i.e. max charged — actual gas_used may be lower)")
-        print(f"  (Attempted includes failed CheckTx; totals include CheckTx-accepted only)")
-
-    if not WALLETS:
-        print(f"{_COLOR_RED}Wallet reserve summary skipped: wallets not initialized{_COLOR_RESET}")
-        return
-    if not tb.POST_SETUP_BALANCES:
-        print(f"{_COLOR_YELLOW}Wallet reserve summary skipped: no post-setup balance snapshot{_COLOR_RESET}")
-        return
-
-    print(f"\n{'─' * 86}")
-    print(f"{_COLOR_BOLD}Wallet Reserve Spend (test transactions only){_COLOR_RESET}")
-    print(f"{'─' * 86}")
-    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Reserve Start':>14}  {'Reserve End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
-    print(hdr)
-    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
-
-    grand_tx = grand_spent = 0
-    for name in ("free", "sub1", "sub2", "agent1", "agent2"):
-        w = WALLETS.get(name)
-        if not w:
-            continue
-        pk_hex = w.public_key().public_key_bytes.hex()
-        stats = _TX_STATS.get(pk_hex, {"attempted": 0})
-        tx_count = int(stats.get("paid", 0) or 0)
-        reserve_start = int(tb.POST_SETUP_BALANCES.get(name, 0) or 0)
-        reserve_end = _query_balance_umirage(str(w.address()))
-        spent = max(0, reserve_start - reserve_end)
-        spent_m = spent / 1_000_000
-        avg_m = (spent_m / tx_count) if tx_count else 0
-        avg_str = f"{avg_m:>11,.2f} M" if tx_count else f"{'—':>14}"
-        print(
-            f"  {name:<10} {tx_count:>5}  {reserve_start / 1_000_000:>11,.1f} M  "
-            f"{reserve_end / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
-        )
-        grand_tx += tx_count
-        grand_spent += spent
-
-    print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
-    grand_spent_m = grand_spent / 1_000_000
-    grand_avg_m = (grand_spent_m / grand_tx) if grand_tx else 0
-    grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
-    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  {'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
-    print(f"{'─' * 86}")
-    print(f"  (Reserve = balance after subscription, before tests; gas paid by validator)")
-    print(f"  (TX count = CheckTx-accepted)")
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Mirage Blockchain Direct-Submit Test Suite")
     parser.add_argument("--backend", default=DEFAULT_BACKEND, help=f"Backend URL (default: {DEFAULT_BACKEND})")
@@ -4413,10 +4265,6 @@ def main() -> int:
     else:
         to_run = ALL_CATEGORIES
 
-    # Reset tx stats so setup transactions don't appear in the summary.
-    _TX_STATS.clear()
-    _FEE_PAYER_STATS.clear()
-
     def _run_category(name: str, fn) -> None:
         try:
             fn(backend)
@@ -4443,12 +4291,6 @@ def main() -> int:
     passed = sum(1 for r in RESULTS if r.passed)
     failed = sum(1 for r in RESULTS if not r.passed)
     total = len(RESULTS)
-
-    # ── Gas cost summary per wallet ──────────────────────────────
-    try:
-        _print_gas_summary()
-    except Exception as e:
-        print(f"\n{_COLOR_RED}Gas summary failed: {e}{_COLOR_RESET}")
 
     print(f"\n{'=' * 60}")
     if failed:

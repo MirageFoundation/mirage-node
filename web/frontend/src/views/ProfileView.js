@@ -85,7 +85,7 @@ const BioTextarea = styled.textarea`
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.75rem;
     flex-wrap: nowrap;
     overflow: hidden;
@@ -829,7 +829,7 @@ export default function ProfileView({ state }) {
         }
         setBioSaving(true);
         setBioError('');
-        setBioButtonStatus('Preparing...');
+        setBioButtonStatus('Processing');
         try {
             const result = await tx.setBiography(trimmed);
             if (!result || !result.success) {
@@ -838,10 +838,8 @@ export default function ProfileView({ state }) {
                 setBioButtonStatus('');
                 return;
             }
-            setBioButtonStatus('Submitting...');
             const txHash = result.tx_hash ? String(result.tx_hash).toLowerCase() : '';
             if (txHash) {
-                setBioButtonStatus('Verifying...');
                 const pollResult = await tx.pollTxStatus(txHash, { initialDelay: 3000, interval: 2000, maxAttempts: 5 });
                 if (pollResult && !pollResult.success) {
                     setBioError(pollResult.error_details?.message || 'Transaction rejected');

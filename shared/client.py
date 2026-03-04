@@ -556,7 +556,7 @@ def set_username(
             "signature": base64.b64encode(sig).decode(),
         }
 
-    r = _session.post(f"{backend}/api/core/set_username", json=req, timeout=20)
+    r = _request_with_retries("POST", f"{backend}/api/core/set_username", json=req, timeout=20)
     return r.json() if r.headers.get("content-type", "").startswith("application/json") else {"status": r.status_code}
 
 
@@ -668,7 +668,7 @@ def post(
             "media": media or [],
         }
 
-    r = _session.post(f"{backend}/api/core/post", json=req, timeout=20)
+    r = _request_with_retries("POST", f"{backend}/api/core/post", json=req, timeout=20)
     try:
         data = r.json()
     except Exception:
@@ -740,7 +740,7 @@ def vote(
             "direction": direction,
         }
 
-    r = _session.post(f"{backend}/api/core/vote", json=req, timeout=20)
+    r = _request_with_retries("POST", f"{backend}/api/core/vote", json=req, timeout=20)
     return r.json() if r.headers.get("content-type", "").startswith("application/json") else {"status": r.status_code}
 
 
