@@ -115,6 +115,7 @@ COMET_RPC_URL = "http://127.0.0.1:26657"
 DEFAULT_GAS_LIMIT = 200000
 FILL_GAS_LIMIT = 1000000  # Higher gas for fill-loop txs (keeper iterates growing lists)
 FILL_GAS_BUFFER = 1.3  # Multiplier on simulated gas for fill loops (block-to-block variance)
+ESTIMATED_CHECKTX_TOTAL = 230  # Update if suite adds/removes tx submissions
 
 _COLOR_GREEN = "\033[92m"
 _COLOR_RED = "\033[91m"
@@ -143,10 +144,6 @@ _SIMULATE_MODE_LOGGED = False
 _TX_STATS: dict[str, dict] = {}  # hex(pubkey) -> {"attempted", "paid", "gas_total", "fee_total"}
 _FEE_PAYER_STATS: dict[str, dict] = {}  # fee_payer_addr -> {"attempted", "paid", "gas_total", "fee_total"}
 _TX_STATS_LOCK = threading.Lock()
-
-# Topup transfer tracking so reserve deltas can be adjusted.
-_TOPUP_SENT: dict[str, int] = {}  # wallet_name -> total umirage sent as topup donor
-_TOPUP_RECEIVED: dict[str, int] = {}  # wallet_name -> total umirage received
 
 _MIN_GAS_PRICE_CACHE: Optional[float] = None
 
@@ -2373,55 +2370,66 @@ def test_msg_validation(backend: str) -> None:
     _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
 
 
-def _topup_wallets(backend: str, names: list[str], amount: int = 1_000_000) -> None:
-    """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
+def _required_validator_fee_budget_umirage() -> int:
+    min_gas_price = _min_gas_price_umirage()
+    per_tx_fee = int(math.ceil(int(DEFAULT_GAS_LIMIT) * min_gas_price))
+    total = per_tx_fee * int(ESTIMATED_CHECKTX_TOTAL)
+    _debug(
+        "validator fee budget: "
+        f"min_gas_price={min_gas_price} per_tx={per_tx_fee / 1_000_000:,.0f} MIRAGE "
+        f"estimated_txs={ESTIMATED_CHECKTX_TOTAL} total={total / 1_000_000:,.0f} MIRAGE"
+    )
+    return total
 
-    Uses the agent2 wallet (high residual balance) as the donor.
-    Default: 1 MIRAGE per wallet.
-    """
-    donor = WALLETS["agent2"]
-    donor_addr = str(donor.address())
-    fee_payer = _VALIDATOR_ADDR or ""
-    total_needed = int(amount) * max(0, len(names))
-    donor_bal = _query_balance_umirage(donor_addr)
-    if donor_bal < total_needed:
+
+def _query_spendable_umirage(addr: str) -> int:
+    """Query on-chain spendable umirage balance for an address."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "bank",
+            "spendable-balances",
+            addr,
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0:
+        raise RuntimeError(f"spendable balance query failed: exit={code} out={out[:200]}")
+    data = _parse_cli_json(out)
+    balances = data.get("balances") or []
+    for entry in balances:
+        if entry.get("denom") == "umirage":
+            return int(entry.get("amount", 0) or 0)
+    return 0
+
+
+def _validate_validator_funds() -> bool:
+    """Fail fast if the validator fee payer cannot cover the suite."""
+    if not _VALIDATOR_ADDR:
+        _fail("validator.funds", "validator address not set")
+        return False
+    required = _required_validator_fee_budget_umirage()
+    balance = _query_spendable_umirage(_VALIDATOR_ADDR)
+    if balance < required:
         _fail(
-            "topup.donor_balance",
-            f"insufficient donor balance: have={donor_bal} need={total_needed} ({amount / 1_000_000:,.0f} MIRAGE × {len(names)})",
+            "validator.funds",
+            f"insufficient fee balance: have={balance} need={required} "
+            f"({balance / 1_000_000:,.0f} MIRAGE < {required / 1_000_000:,.0f} MIRAGE)",
         )
-        return
-    for name in names:
-        w = WALLETS[name]
-        addr = str(w.address())
-        lb, _, _, _ = _get_pow_params(backend, donor_addr)
-        ts = _now_ms()
-        msg = _build_msg_send_tokens(donor, lb, 0, ts, donor_addr, addr, amount, pow_val=0)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgSendTokens")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            donor.public_key().public_key_bytes,
-            wait_deliver=True,
-            include_in_stats=False,
-        )
-        label = f"{amount / 1_000_000:,.0f} MIRAGE"
-        if ccode == 0 and (dcode is None or dcode == 0):
-            _TOPUP_SENT["agent2"] = _TOPUP_SENT.get("agent2", 0) + amount
-            _TOPUP_RECEIVED[name] = _TOPUP_RECEIVED.get(name, 0) + amount
-            _pass(f"topup.{name}", extra=label)
-        else:
-            _fail(
-                f"topup.{name}",
-                f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}",
-            )
+        return False
+    _debug(f"validator spendable={balance / 1_000_000:,.0f} MIRAGE (ok)")
+    return True
 
 
 def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
-
-    _topup_wallets(backend, ["free"], amount=1_000_000)
-    _topup_wallets(backend, ["sub1"], amount=2_000_000_000_000)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -3403,9 +3411,6 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     """Test that follow/enable lists use hard cap while block lists use deque."""
     print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
 
-    _topup_wallets(backend, ["free"], amount=1_000_000)
-    _topup_wallets(backend, ["agent1"], amount=100_000_000_000)
-
     fee_payer = _VALIDATOR_ADDR or ""
 
     # ── 13.1 blocked_users deque: block more than limit, oldest evicted ──
@@ -4233,41 +4238,49 @@ def _print_gas_summary() -> None:
     if _FEE_PAYER_STATS:
         rows: list[tuple[str, int, int, int, int]] = []
         for addr, stats in _FEE_PAYER_STATS.items():
+            if not stats.get("attempted") and not stats.get("paid"):
+                continue
             label = "validator" if addr and addr == _VALIDATOR_ADDR else (addr[:16] + "…" if addr else "unknown")
             rows.append((label, stats["attempted"], stats["paid"], stats["gas_total"], stats["fee_total"]))
         rows.sort(key=lambda r: (0 if r[0] == "validator" else 1, r[0]))
 
+        if not rows:
+            return
         print(f"\n{'─' * 86}")
         print(f"{_COLOR_BOLD}Fee Payer (Validator) Gas Summary{_COLOR_RESET}")
         print(f"{'─' * 86}")
-        hdr = f"  {'Fee Payer':<14} {'TXs':>6}  " f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
+        hdr = (
+            f"  {'Fee Payer':<14} {'Attempted':>9} {'CheckTx':>7}  "
+            f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
+        )
         print(hdr)
-        print(f"  {'':─<14} {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+        print(f"  {'':─<14} {'':─>9} {'':─>7}  {'':─>14}  {'':─>14}  {'':─>12}")
 
-        grand_paid = grand_gas = grand_fee = 0
+        grand_attempted = grand_paid = grand_gas = grand_fee = 0
         for label, attempted, paid, gas_total, fee_total in rows:
             avg_fee = fee_total // paid if paid else 0
             fee_mirage = fee_total / 1_000_000
             avg_fee_mirage = avg_fee / 1_000_000
             print(
-                f"  {label:<14} {paid:>6}  {gas_total:>14,}  "
+                f"  {label:<14} {attempted:>9} {paid:>7}  {gas_total:>14,}  "
                 f"{fee_mirage:>11,.2f} M  {avg_fee_mirage:>9,.2f} M"
             )
+            grand_attempted += attempted
             grand_paid += paid
             grand_gas += gas_total
             grand_fee += fee_total
 
-        print(f"  {'':─<14} {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+        print(f"  {'':─<14} {'':─>9} {'':─>7}  {'':─>14}  {'':─>14}  {'':─>12}")
         grand_avg_fee = grand_fee // grand_paid if grand_paid else 0
         grand_fee_m = grand_fee / 1_000_000
         grand_avg_m = grand_avg_fee / 1_000_000
         print(
-            f"  {'TOTAL':<14} {grand_paid:>6}  {grand_gas:>14,}  "
+            f"  {'TOTAL':<14} {grand_attempted:>9} {grand_paid:>7}  {grand_gas:>14,}  "
             f"{grand_fee_m:>11,.2f} M  {grand_avg_m:>9,.2f} M"
         )
         print(f"{'─' * 86}")
         print(f"  (Fees = gas_limit × min_gas_price, i.e. max charged — actual gas_used may be lower)")
-        print(f"  (CheckTx-accepted txs; gas charged at CheckTx regardless of DeliverTx outcome)")
+        print(f"  (Attempted includes failed CheckTx; totals include CheckTx-accepted only)")
 
     if not WALLETS:
         print(f"{_COLOR_RED}Wallet reserve summary skipped: wallets not initialized{_COLOR_RESET}")
@@ -4279,7 +4292,7 @@ def _print_gas_summary() -> None:
     print(f"\n{'─' * 86}")
     print(f"{_COLOR_BOLD}Wallet Reserve Spend (test transactions only){_COLOR_RESET}")
     print(f"{'─' * 86}")
-    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Adj. Start':>14}  {'End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Reserve Start':>14}  {'Reserve End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
     print(hdr)
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
 
@@ -4293,15 +4306,12 @@ def _print_gas_summary() -> None:
         tx_count = int(stats.get("paid", 0) or 0)
         reserve_start = int(tb.POST_SETUP_BALANCES.get(name, 0) or 0)
         reserve_end = _query_balance_umirage(str(w.address()))
-        topup_in = _TOPUP_RECEIVED.get(name, 0)
-        topup_out = _TOPUP_SENT.get(name, 0)
-        adjusted_start = reserve_start + topup_in - topup_out
-        spent = max(0, adjusted_start - reserve_end)
+        spent = max(0, reserve_start - reserve_end)
         spent_m = spent / 1_000_000
         avg_m = (spent_m / tx_count) if tx_count else 0
         avg_str = f"{avg_m:>11,.2f} M" if tx_count else f"{'—':>14}"
         print(
-            f"  {name:<10} {tx_count:>5}  {adjusted_start / 1_000_000:>11,.1f} M  "
+            f"  {name:<10} {tx_count:>5}  {reserve_start / 1_000_000:>11,.1f} M  "
             f"{reserve_end / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
         )
         grand_tx += tx_count
@@ -4313,8 +4323,8 @@ def _print_gas_summary() -> None:
     grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
     print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  {'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
     print(f"{'─' * 86}")
-    print(f"  (Adjusted Start = post-setup balance + topup received − topup sent)")
-    print(f"  (TX count = CheckTx-accepted; excludes topup.* transfers; gas paid by validator)")
+    print(f"  (Reserve = balance after subscription, before tests; gas paid by validator)")
+    print(f"  (TX count = CheckTx-accepted)")
 
 
 def main() -> int:
@@ -4388,6 +4398,10 @@ def main() -> int:
         print(f"\n{_COLOR_RED}ABORT: Cannot resolve validator/gov addresses: {e}{_COLOR_RESET}")
         return 1
 
+    if not _validate_validator_funds():
+        print(f"\n{_COLOR_RED}ABORT: Validator fee payer is underfunded.{_COLOR_RESET}")
+        return 1
+
     if args.category:
         cats = [c.strip() for c in args.category.split(",")]
         for c in cats:
@@ -4402,8 +4416,6 @@ def main() -> int:
     # Reset tx stats so setup transactions don't appear in the summary.
     _TX_STATS.clear()
     _FEE_PAYER_STATS.clear()
-    _TOPUP_SENT.clear()
-    _TOPUP_RECEIVED.clear()
 
     def _run_category(name: str, fn) -> None:
         try:

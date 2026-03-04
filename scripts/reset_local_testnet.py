@@ -126,6 +126,8 @@ LOCAL_EVIDENCE_PARAMS = {
     "max_age_duration": str(LOCAL_RETENTION_SECONDS * 1_000_000_000),
     "max_bytes": "1048576",
 }
+EXTRA_VALIDATOR_FUNDS_MIRAGE = 10_000_000
+EXTRA_VALIDATOR_FUNDS_UMIRAGE = EXTRA_VALIDATOR_FUNDS_MIRAGE * 1_000_000
 
 
 def ensure_mirage_tmp() -> Path:
@@ -815,6 +817,13 @@ def transform_to_single_validator(
     val_addr = convert_bech32_prefix(valoper, "mirage")
     valcons = compute_valcons_from_pubkey_b64(cons_pub_b64)
     status(f"Using validator: {valoper} (account {val_addr})")
+    extra_validator_funds = EXTRA_VALIDATOR_FUNDS_UMIRAGE
+    if extra_validator_funds <= 0:
+        raise RuntimeError("EXTRA_VALIDATOR_FUNDS_MIRAGE must be a positive integer")
+    status(
+        f"DEBUG: Extra validator funds configured: {EXTRA_VALIDATOR_FUNDS_MIRAGE} MIRAGE "
+        f"({extra_validator_funds} umirage)"
+    )
 
     total_bonded_base = 0
     for v in validators:
@@ -898,12 +907,44 @@ def transform_to_single_validator(
             continue
         else:
             new_balances.append(bal)
+    val_balance_before = None
+    for bal in new_balances:
+        if bal.get("address") != val_addr:
+            continue
+        coins = bal.get("coins")
+        if not isinstance(coins, list):
+            raise RuntimeError("invalid coins for validator balance (expected list)")
+        for coin in coins:
+            if coin.get("denom") != "umirage":
+                continue
+            amount_raw = coin.get("amount")
+            if amount_raw is None:
+                raise RuntimeError("missing amount for validator umirage balance")
+            if not str(amount_raw).isdigit():
+                raise RuntimeError(f"invalid validator umirage balance amount: {amount_raw!r}")
+            val_balance_before = int(amount_raw)
+            coin["amount"] = str(val_balance_before + extra_validator_funds)
+            break
+        else:
+            val_balance_before = 0
+            coins.append({"denom": "umirage", "amount": str(extra_validator_funds)})
+        bal["coins"] = coins
+        break
+    if val_balance_before is None:
+        new_balances.append(
+            {"address": val_addr, "coins": [{"denom": "umirage", "amount": str(extra_validator_funds)}]}
+        )
+        val_balance_before = 0
+    status(
+        "DEBUG: Added extra validator funds: "
+        f"{val_balance_before} -> {val_balance_before + extra_validator_funds} umirage"
+    )
     bank["balances"] = new_balances
 
-    supply_delta = (total_bonded - old_bonded_balance) - old_not_bonded_balance
+    supply_delta = (total_bonded - old_bonded_balance) - old_not_bonded_balance + extra_validator_funds
     status(
         f"Supply delta: {supply_delta} (bonded: {old_bonded_balance} -> {total_bonded}, "
-        f"not_bonded: {old_not_bonded_balance} -> 0)"
+        f"not_bonded: {old_not_bonded_balance} -> 0, extra_validator_funds: {extra_validator_funds})"
     )
     supply_list = bank.get("supply") or []
     for c in supply_list:

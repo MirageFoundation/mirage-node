@@ -142,6 +142,15 @@ def _fail(name: str, error: str = "", **details) -> TestResult:
     return r
 
 
+def _skip(name: str, reason: str = "", **details) -> TestResult:
+    r = TestResult(name=name, passed=True, error=reason, details={"skipped": True, **details})
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
+    err = f" — {reason}" if reason else ""
+    print(f"  {_COLOR_YELLOW}SKIP{_COLOR_RESET}  {name}{err}")
+    return r
+
+
 def _debug(msg: str) -> None:
     print(f"  {_COLOR_YELLOW}debug{_COLOR_RESET} {msg}")
 
@@ -727,7 +736,7 @@ def setup_test_wallets(backend: str) -> bool:
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
             "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 3_000_000_000_000,  # 500,000 MIRAGE (Agent fee) + 2,500,000 MIRAGE (topup donor budget)
+            "agent2": 500_000_000_000,  # 500,000 MIRAGE (Agent fee)
         }
     )
     try:
@@ -6295,7 +6304,7 @@ def _get_tx_outcome(tx_hash: str) -> tuple[bool, int]:
     if r.status_code != 200:
         raise RuntimeError(f"tx query failed: hash={tx_hash} status={r.status_code}")
     data = r.json()
-    tx_resp = (data.get("tx_response") or {})
+    tx_resp = data.get("tx_response") or {}
     code = int(tx_resp.get("code", 0) or 0)
     fee = ((data.get("tx") or {}).get("auth_info") or {}).get("fee") or {}
     for c in fee.get("amount", []):
@@ -6351,7 +6360,9 @@ def _print_validator_fee_summary(outcomes: dict[str, tuple[bool, int]], errors: 
     print(f"\n{'─' * 74}")
     print(f"{_COLOR_BOLD}Validator Gas Fee Summary{_COLOR_RESET}")
     print(f"{'─' * 74}")
-    print(f"  Successful TXs: {len(fees):>6} (failed: {sum(1 for ok, _ in outcomes.values() if not ok):>2}, query errors: {len(errors):>2})")
+    print(
+        f"  Successful TXs: {len(fees):>6} (failed: {sum(1 for ok, _ in outcomes.values() if not ok):>2}, query errors: {len(errors):>2})"
+    )
     print(f"  Total Fee: {total_fee_m:,.2f} MIRAGE")
     print(f"  Avg Fee / TX: {avg_fee_m:,.4f} MIRAGE")
     print(f"{'─' * 74}")
