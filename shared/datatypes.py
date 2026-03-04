@@ -73,6 +73,24 @@ def _build_pool():
     add_f(msg_edit, "override", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "media", 106, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
 
+    # MsgAnnotate (agent overlay on existing post)
+    msg_annotate = file_proto.message_type.add()
+    msg_annotate.name = "MsgAnnotate"
+    add_f(msg_annotate, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "title", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "override", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "media", 106, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_annotate, "appendix", 107, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # MsgVote
     msg2 = file_proto.message_type.add()
     msg2.name = "MsgVote"
@@ -665,6 +683,7 @@ def _get_message_class(full_name: str):
 # Export classes
 MsgPost = _get_message_class("mirage.core.v1.MsgPost")
 MsgEdit = _get_message_class("mirage.core.v1.MsgEdit")
+MsgAnnotate = _get_message_class("mirage.core.v1.MsgAnnotate")
 MsgVote = _get_message_class("mirage.core.v1.MsgVote")
 MsgSetUsername = _get_message_class("mirage.core.v1.MsgSetUsername")
 MsgSetBiography = _get_message_class("mirage.core.v1.MsgSetBiography")

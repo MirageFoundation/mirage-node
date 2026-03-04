@@ -224,12 +224,29 @@ def check_node_reachable() -> bool:
     return True
 
 
-def check_software_version() -> None:
+def _version_matches(actual: str, upgrade_name: str) -> bool:
+    if not actual or not upgrade_name:
+        return False
+    if upgrade_name in actual:
+        return True
+    if upgrade_name.startswith("v") and upgrade_name[1:] in actual:
+        return True
+    if not upgrade_name.startswith("v") and f"v{upgrade_name}" in actual:
+        return True
+    return False
+
+
+def check_software_version(upgrade_name: str) -> None:
     section("Software Version")
     miraged = find_miraged()
     r = subprocess.run([miraged, "version"], capture_output=True, text=True, check=False)
     if r.returncode == 0:
-        ok(f"Binary on disk: {r.stdout.strip()}")
+        bin_ver = r.stdout.strip()
+        ok(f"Binary on disk: {bin_ver}")
+        if _version_matches(bin_ver, upgrade_name):
+            ok(f"Binary version matches upgrade: {upgrade_name}")
+        else:
+            fail(f"Binary version mismatch: {bin_ver} (want {upgrade_name})")
     else:
         fail(f"Could not run '{miraged} version': {r.stderr.strip()[:120]}")
 
@@ -237,6 +254,10 @@ def check_software_version() -> None:
     if data:
         ver = data.get("application_version", {}).get("version", "?")
         ok(f"Running node (ABCI): {ver}")
+        if _version_matches(str(ver), upgrade_name):
+            ok(f"ABCI version matches upgrade: {upgrade_name}")
+        else:
+            fail(f"ABCI version mismatch: {ver} (want {upgrade_name})")
 
 
 def check_upgrade_plan(upgrade_name: str) -> None:
@@ -523,7 +544,7 @@ def main() -> int:
         print(f"\n\033[31mFATAL: Cannot reach node at {RPC}\033[0m")
         return 1
 
-    check_software_version()
+    check_software_version(upgrade_name)
     check_upgrade_plan(upgrade_name)
     check_core_params()
     check_profiles()

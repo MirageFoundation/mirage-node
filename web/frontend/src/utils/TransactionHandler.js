@@ -1647,6 +1647,50 @@ class TransactionHandler {
     }
 
 
+    /**
+     * Agent-only: annotate (overlay edit) an existing post
+     * @param {string} overrideId - txhash of the post being annotated
+     * @param {{topic?: string, title?: string, content?: string, tag?: string, media?: string[], appendix?: string}} fields
+     * @returns {Promise<{success: boolean, error?: string, tx_hash?: string, result?: any}>}
+     */
+    async annotatePost(overrideId, fields) {
+        try {
+            const seedPhrase = seedVault.getSeed() || "";
+            const publicKey = Storage.load("publicKey", "");
+            const overrideLower = String(overrideId || "").trim().toLowerCase();
+            if (!overrideLower || overrideLower.length !== 64) return { success: false, error: "invalid override id" };
+            const topic = String(fields?.topic ?? ".").trim();
+            const title = String(fields?.title ?? ".").trim();
+            const content = String(fields?.content ?? ".").trim();
+            const tag = String(fields?.tag ?? ".").trim();
+            const appendix = String(fields?.appendix ?? ".").trim();
+            const media = Array.isArray(fields?.media) ? fields.media : ["."];
+
+            const tx = {
+                action: 'annotate_post',
+                override: overrideLower,
+                topic,
+                title,
+                content,
+                tag,
+                media,
+                appendix,
+                last_block_hash: "",
+                pow_difficulty: 0,
+                pow_base_bits: 0,
+                pow_factor: 0,
+                timestamp: Math.max(0, Date.now() - 15000),
+            };
+            const privateKeyHex = derivePrivateKeyFromSeed(seedPhrase);
+            const derivedAddress = (function () { try { return derivePublicKeyFromSeed(seedPhrase); } catch (_) { return publicKey; } })();
+            const challenge = `${derivedAddress}::0`;
+            const result = await this.performTransaction(tx, challenge, privateKeyHex, derivedAddress, false);
+            return result;
+        } catch (e) {
+            return { success: false, error: String(e?.message || e) };
+        }
+    }
+
     setWarnOnLeaveCallback(setWarnOnLeave) {
         this.setWarnOnLeave = setWarnOnLeave;
     }
@@ -2483,6 +2527,75 @@ class TransactionHandler {
             tag104, encStr(tag || ""),
             tag105, encStr(override || ""),
             ...mediaParts,
+        );
+    }
+
+    canonicalAnnotate({ pub_bytes, last_block_hash, difficulty, proof, timestamp, topic, title, content, tag, override, media, appendix }) {
+        const uvarint = (n) => {
+            const out = [];
+            let v = (n >>> 0);
+            while (v >= 0x80) { out.push(((v & 0x7f) | 0x80)); v >>>= 7; }
+            out.push(v);
+            return Uint8Array.from(out);
+        };
+        const uvarint64 = (n) => {
+            const out = [];
+            let v = BigInt(n || 0);
+            while (v >= 0x80n) { out.push(Number((v & 0x7fn) | 0x80n)); v >>= 7n; }
+            out.push(Number(v));
+            return Uint8Array.from(out);
+        };
+        const encStr = (s) => {
+            const b = new TextEncoder().encode(s || "");
+            return new Uint8Array([...uvarint(b.length), ...b]);
+        };
+        const encBytes = (arr) => new Uint8Array([...uvarint(arr.length), ...arr]);
+        const hexToBytes = (hex) => {
+            const h = (hex || "").replace(/^0x/i, "");
+            if (!h || h.length % 2) return new Uint8Array(0);
+            const arr = new Uint8Array(h.length / 2);
+            for (let i = 0; i < arr.length; i++) arr[i] = parseInt(h.substr(i * 2, 2), 16);
+            return arr;
+        };
+        const concat = (...arrs) => {
+            let total = 0; arrs.forEach(a => total += a.length);
+            const out = new Uint8Array(total);
+            let off = 0; for (const a of arrs) { out.set(a, off); off += a.length; }
+            return out;
+        };
+        const prefix = new TextEncoder().encode("mirage.core.v1:MsgAnnotate\x00");
+        const tag2 = Uint8Array.from([2]);
+        const tag3 = Uint8Array.from([3]);
+        const tag4 = Uint8Array.from([4]);
+        const tag5 = Uint8Array.from([5]);
+        const tag6 = Uint8Array.from([6]);
+        const tag101 = Uint8Array.from([101]);
+        const tag102 = Uint8Array.from([102]);
+        const tag103 = Uint8Array.from([103]);
+        const tag104 = Uint8Array.from([104]);
+        const tag105 = Uint8Array.from([105]);
+        const tag106 = Uint8Array.from([106]);
+        const tag107 = Uint8Array.from([107]);
+        const mediaParts = [];
+        for (const m of (media || [])) {
+            mediaParts.push(tag106);
+            mediaParts.push(encStr(m));
+        }
+
+        return concat(
+            prefix,
+            tag2, encBytes(pub_bytes || new Uint8Array()),
+            tag3, encBytes(hexToBytes(last_block_hash)),
+            tag4, uvarint(difficulty >>> 0),
+            tag5, uvarint(proof >>> 0),
+            tag6, uvarint64(timestamp || 0),
+            tag101, encStr(topic || ""),
+            tag102, encStr(title || ""),
+            tag103, encStr(content || ""),
+            tag104, encStr(tag || ""),
+            tag105, encStr(override || ""),
+            ...mediaParts,
+            tag107, encStr(appendix || ""),
         );
     }
 
@@ -3504,6 +3617,7 @@ class TransactionHandler {
             else if (action === 'set_biography') msgName = 'MsgSetBiography';
             else if (action === 'report') msgName = 'MsgReport';
             else if (action === 'edit_post') msgName = 'MsgEdit';
+            else if (action === 'annotate_post') msgName = 'MsgAnnotate';
             else if (action === 'upgrade_level') msgName = 'MsgUpgradeLevel';
             else if (action === 'set_auto_renewal') msgName = 'MsgSetAutoRenewal';
             else if (action === 'bridge_burn') msgName = 'MsgBridgeBurn';
@@ -4125,6 +4239,36 @@ class TransactionHandler {
                     media: mediaArr,
                 };
                 endpoint = 'core/edit';
+            } else if (msgName === 'MsgAnnotate') {
+                const topic = transaction.topic || "";
+                const mediaArr = Array.isArray(transaction.media) ? transaction.media : [];
+                const canon = this.canonicalAnnotate({
+                    pub_bytes: pubBytes,
+                    last_block_hash: transaction.last_block_hash,
+                    difficulty: 0,
+                    proof: 0,
+                    timestamp: transaction.timestamp,
+                    topic: topic,
+                    title: transaction.title || "",
+                    content: transaction.content || "",
+                    tag: transaction.tag || "",
+                    override: String(transaction.override || '').toLowerCase(),
+                    media: mediaArr,
+                    appendix: transaction.appendix || "",
+                });
+                const digest = __CosmSha256(canon);
+                const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
+                const sigFixed = sigCompact.toFixedLength();
+                const sigB64 = btoa(Array.from(sigFixed).map(b => String.fromCharCode(b)).join(''));
+                toRelay = {
+                    ...toRelay,
+                    signature: sigB64,
+                    topic: topic,
+                    tag: transaction.tag || "",
+                    media: mediaArr,
+                    appendix: transaction.appendix || "",
+                };
+                endpoint = 'core/annotate';
             } else if (msgName === 'MsgVote') {
                 // Sign relay for vote (must match chain ante_metasig)
                 const uvarint = (n) => {
@@ -5197,6 +5341,40 @@ class TransactionHandler {
                     tag105, encStr(String(transaction.override || "").toLowerCase()),
                     ...mediaParts,
                 );
+            } else if (action === 'annotate_post') {
+                const prefix = new TextEncoder().encode("mirage.core.v1:MsgAnnotate\x00");
+                const tag2 = Uint8Array.from([2]);
+                const tag3 = Uint8Array.from([3]);
+                const tag4 = Uint8Array.from([4]);
+                const tag5 = Uint8Array.from([5]);
+                const tag6 = Uint8Array.from([6]);
+                const tag101 = Uint8Array.from([101]);
+                const tag102 = Uint8Array.from([102]);
+                const tag103 = Uint8Array.from([103]);
+                const tag104 = Uint8Array.from([104]);
+                const tag105 = Uint8Array.from([105]);
+                const tag106 = Uint8Array.from([106]);
+                const tag107 = Uint8Array.from([107]);
+                const mediaParts = [];
+                for (const m of (transaction.media || [])) {
+                    mediaParts.push(tag106);
+                    mediaParts.push(encStr(m));
+                }
+                baseBytes = concat(
+                    prefix,
+                    tag2, encBytes(pubBytes),
+                    tag3, encBytes(hexToBytes(transaction.last_block_hash)),
+                    tag4, uvarint(difficulty),
+                    tag5, uvarint(0),
+                    tag6, uvarint64(transaction.timestamp || 0),
+                    tag101, encStr(transaction.topic || ""),
+                    tag102, encStr(transaction.title || ""),
+                    tag103, encStr(transaction.content || ""),
+                    tag104, encStr(transaction.tag || ""),
+                    tag105, encStr(String(transaction.override || "").toLowerCase()),
+                    ...mediaParts,
+                    tag107, encStr(transaction.appendix || ""),
+                );
             } else if (action === 'upgrade_level') {
                 // upgrade_level should NEVER use PoW - it must be paid with tokens
                 // This branch should not be reached, but handle gracefully
@@ -5215,7 +5393,7 @@ class TransactionHandler {
                     tag100, uvarint(Number(transaction.level) || 0),
                 );
             } else {
-                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, upgrade_level, set_auto_renewal`);
+                throw new Error(`Unknown transaction action: "${action}". Must be one of: create_vote, create_post, create_comment, set_username, enable_agent, disable_agent, set_agents, follow_user, unfollow_user, follow_topic, unfollow_topic, block_post, unblock_post, block_user, unblock_user, block_topic, unblock_topic, delete_post, delete_user, send_tokens, report, edit_post, annotate_post, upgrade_level, set_auto_renewal`);
             }
             const baseHex = bytesToHex(baseBytes);
             const saltHex = String(transaction.last_block_hash || '').toLowerCase();

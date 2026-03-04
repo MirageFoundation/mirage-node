@@ -35,6 +35,7 @@ from shared.datatypes import (
     MsgBridgeAttestBurned,
     MsgBridgeAttestMinted,
     MsgAward,
+    MsgAnnotate,
 )
 from indexer.address_utils import derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import (
@@ -125,6 +126,8 @@ class MessageProcessor:
             self._handle_post(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgEdit":
             self._handle_edit(type_url, value, tx_hash, ts, height)
+        elif type_url == "/mirage.core.v1.MsgAnnotate":
+            self._handle_annotate(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgVote":
             self._handle_vote(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSetUsername":
@@ -823,9 +826,18 @@ class MessageProcessor:
             logger.warning("Rejected edit %s: owner mismatch", tx_hash)
             return
 
-        # Determine if root (target empty in DB)
+        # Determine if root (target empty in DB); enforce target immutability
         existing_topic, _, _, existing_target, _, _, existing_created_at, _existing_media_raw = existing
         is_root = not bool(existing_target)
+
+        # Target immutability: always use the stored target, reject mismatches
+        if target and (existing_target or "").lower() != target.lower():
+            logger.warning(
+                "Rejected edit %s: target mismatch (supplied=%s stored=%s)", tx_hash, target, existing_target
+            )
+            return
+        target = existing_target or ""
+
         media = list(msg_dict.get("media", []) or [])
         logger.debug("MsgEdit media count=%d override=%s", len(media), override)
 
@@ -900,6 +912,93 @@ class MessageProcessor:
                 "owner": owner,
                 "override": override,
                 "is_root": bool(is_root),
+            },
+        )
+
+    def _handle_annotate(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
+        """Handle MsgAnnotate — store agent overlay edit in agent_edits table."""
+        parsed = MsgAnnotate()
+        parsed.ParseFromString(value)
+        msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+        logger.info("MsgAnnotate msg_dict: %s", msg_dict)
+        agent = derive_owner_from_msg(msg_dict)
+        override = str(msg_dict.get("override", "") or "").strip().lower()
+
+        if not override or len(override) != 64:
+            logger.warning("Rejected annotate %s: invalid override", tx_hash)
+            return
+        existing = self.db.get_post(override)
+        if not existing:
+            logger.warning("Rejected annotate %s: override not found", tx_hash)
+            return
+
+        # Enforce agent tier
+        agent_level = self.db.get_user_level(agent)
+        if agent_level < 10:
+            logger.warning("Rejected annotate %s: not agent tier (level=%d)", tx_hash, agent_level)
+            return
+
+        # Sentinel "." means no change (store None); empty string means clear
+        SENTINEL = "."
+
+        def resolve_field(val):
+            if val == SENTINEL:
+                return None
+            return val
+
+        topic = resolve_field(str(msg_dict.get("topic", "") or ""))
+        title = resolve_field(str(msg_dict.get("title", "") or ""))
+        content = resolve_field(str(msg_dict.get("content", "") or ""))
+        tag = resolve_field(str(msg_dict.get("tag", "") or ""))
+        appendix = resolve_field(str(msg_dict.get("appendix", "") or ""))
+
+        # Media: ["."] means no change; [] means clear; list means replace
+        raw_media = list(msg_dict.get("media", []) or [])
+        if len(raw_media) == 1 and raw_media[0] == SENTINEL:
+            media = None
+        else:
+            media = raw_media
+
+        # For comments (target present in DB), ignore topic/title overrides
+        _, _, _, existing_target, _, _, _, _ = existing
+        is_comment = bool(existing_target)
+        if is_comment:
+            topic = None
+            title = None
+
+        logger.info(
+            "MsgAnnotate upsert: agent=%s override=%s topic=%s title=%s appendix=%s media_count=%s",
+            agent,
+            override,
+            topic,
+            title,
+            appendix,
+            len(media) if media is not None else "none",
+        )
+
+        self.db.upsert_agent_edit(
+            post_txhash=override,
+            agent_address=agent,
+            edit_txhash=tx_hash,
+            edited_at=int(ts),
+            topic=topic,
+            title=title,
+            content=content,
+            tag=tag,
+            media=media,
+            appendix=appendix,
+        )
+
+        self.log_yaml(
+            "Agent annotate",
+            {
+                "height": int(height),
+                "txhash": (tx_hash or "").lower(),
+                "timestamp": int(ts),
+                "time_iso": self.iso_timestamp(ts),
+                "agent": agent,
+                "override": override,
+                "is_comment": is_comment,
             },
         )
 

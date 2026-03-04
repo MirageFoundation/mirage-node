@@ -47,6 +47,7 @@ from shared.datatypes import (
     MsgPost,
     MsgVote,
     MsgEdit,
+    MsgAnnotate,
     MsgUpgradeLevel,
     MsgSetAutoRenewal,
     MsgAward,
@@ -60,6 +61,7 @@ from pow import (
     argon2_digest,
     canon_base_post,
     canon_base_edit,
+    canon_base_annotate,
     canon_base_vote,
     canon_base_set_username,
     canon_base_set_biography,
@@ -2764,6 +2766,7 @@ def core_edit():
             return jsonify({"error": "invalid pubkey"}), 400
 
         # Ownership fast-fail (non-governance); ensure the override is owned by signer
+        # and that target cannot be changed (immutable parent reference)
         try:
             conn = connect_db(timeout=10.0, busy_timeout_ms=15000)
             cur = conn.cursor()
@@ -2777,6 +2780,10 @@ def core_edit():
             owner_of_override = (row[0] or "").lower()
             if owner_of_override != user_addr.lower():
                 return jsonify({"error": "forbidden"}), 403
+            stored_target = (row[1] or "").lower()
+            if target.lower() != stored_target:
+                log_event(rid, "edit.target_mismatch", supplied=target, stored=stored_target, override=override)
+                return jsonify({"error": "target mismatch: cannot change post parent"}), 400
         except Exception:
             # If DB check fails, let chain proceed; indexer will enforce
             pass
@@ -2885,6 +2892,193 @@ def core_edit():
         return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
     except Exception as e:
         log_event(rid, "edit.err", error=str(e))
+        msg, status = _classify_exception(str(e))
+        return jsonify({"error": msg}), status
+
+
+def _is_agent(addr: str) -> bool:
+    """Check if user is agent tier (level >= 10) via the indexer database."""
+    addr_lc = (addr or "").strip().lower()
+    if not addr_lc:
+        return False
+    with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT level FROM profiles WHERE LOWER(owner) = LOWER(%s) LIMIT 1", (addr_lc,))
+        row = cur.fetchone()
+        level = int(row[0]) if row and row[0] is not None else 0
+        return level >= 10
+
+
+ANNOTATE_SENTINEL = "."
+
+
+@core_bp.route("/api/core/annotate", methods=["POST"])
+def core_annotate():
+    """Agent-only endpoint to create an overlay edit on an existing post."""
+    rid = next_request_id()
+    log_event(rid, "annotate.begin")
+    try:
+        if is_node_catching_up():
+            return jsonify({"error": "node_catching_up"}), 503
+        data = request.get_json(force=True) or {}
+        pub_b64 = str(data.get("pubkey", "")).strip()
+        sig_b64 = str(data.get("signature", "")).strip()
+        last_block_hash = str(data.get("last_block_hash", "")).strip()
+        difficulty = int(data.get("pow_difficulty", 0))
+        proof = int(data.get("pow", 0))
+        if "timestamp" not in data:
+            return jsonify({"error": "timestamp required"}), 400
+        try:
+            timestamp = int(data.get("timestamp"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid timestamp"}), 400
+        topic = str(data.get("topic", "")).strip()
+        title = str(data.get("title", "")).strip()
+        content = str(data.get("content", "")).strip()
+        override = str(data.get("override", "")).strip().lower()
+        tag = str(data.get("tag", "")).strip()
+        appendix = str(data.get("appendix", "")).strip()
+
+        # Media: list of strings or omitted
+        media_raw = data.get("media", [])
+        if not isinstance(media_raw, list):
+            return jsonify({"error": "media must be a list"}), 400
+        media = [str(m) for m in media_raw]
+
+        # Validate non-sentinel fields for unsafe chars
+        non_sentinel_vals = [v for v in [topic, title, content, tag, appendix] if v != ANNOTATE_SENTINEL]
+        if _has_unsafe_chars(*non_sentinel_vals):
+            return jsonify({"error": "fields contain invalid control characters"}), 400
+
+        # Validate tag if not sentinel
+        if tag != ANNOTATE_SENTINEL and tag not in ALLOWED_TAGS:
+            return jsonify({"error": f"invalid tag: {tag}"}), 400
+
+        # Validate media if not sentinel ["."]
+        is_sentinel_media = len(media) == 1 and media[0] == ANNOTATE_SENTINEL
+        if not is_sentinel_media:
+            if len(media) > 10:
+                return jsonify({"error": f"media exceeds limit: {len(media)} > 10"}), 400
+            for i, media_item in enumerate(media):
+                if len(media_item) > 2048:
+                    return jsonify({"error": f"media[{i}] exceeds length limit: {len(media_item)} > 2048"}), 400
+                if media_item and not media_item.startswith("https://"):
+                    return jsonify({"error": f"media[{i}] must use https://"}), 400
+                if _has_unsafe_chars(media_item):
+                    return jsonify({"error": f"media[{i}] contains invalid control characters"}), 400
+
+        if not (pub_b64 and sig_b64 and override):
+            return jsonify({"error": "missing required fields"}), 400
+        if not override or len(override) != 64 or not all(c in "0123456789abcdef" for c in override.lower()):
+            return jsonify({"error": "invalid override"}), 400
+
+        pub_dec = base64.b64decode(pub_b64)
+        sig_dec = base64.b64decode(sig_b64)
+        if len(sig_dec) == 65:
+            sig_dec = sig_dec[:64]
+        if len(pub_dec) != 33 or len(sig_dec) != 64:
+            return jsonify({"error": "invalid relay fields", "pub_len": len(pub_dec), "sig_len": len(sig_dec)}), 400
+
+        user_addr = derive_address_from_pubkey(pub_dec)
+        if not user_addr:
+            return jsonify({"error": "invalid pubkey"}), 400
+
+        # Enforce agent tier
+        if not _is_agent(user_addr):
+            return jsonify({"error": "agent tier required"}), 403
+
+        # Verify the override post exists
+        with connect_db(timeout=10.0, busy_timeout_ms=15000) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT owner FROM posts WHERE LOWER(txhash)=LOWER(%s) LIMIT 1", (override,))
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return jsonify({"error": "override not found"}), 404
+
+        validator_addr = require_runtime().validator_payer_addr
+
+        # Agents are subscribers — no PoW
+        if int(difficulty) > 0 or int(proof) > 0:
+            log_event(rid, "annotate.pow_rejected", difficulty=int(difficulty), pow=int(proof))
+            return jsonify({"error": "pow not allowed for agents"}), 400
+
+        # Verify signature over canonical signed bytes
+        try:
+            base = canon_base_annotate(
+                pub_dec,
+                last_block_hash,
+                int(difficulty),
+                timestamp,
+                topic,
+                title,
+                content,
+                tag,
+                override,
+                media=media,
+                appendix=appendix,
+            )
+            signed = canon_signed_with_pow(base, int(proof))
+            if not _verify_signature(pub_dec, sig_dec, signed):
+                return jsonify({"error": "invalid signature"}), 400
+        except Exception:
+            return jsonify({"error": "invalid signature"}), 400
+
+        log_event(
+            rid,
+            "annotate.debug",
+            override=override,
+            topic=topic,
+            tag=tag,
+            appendix_len=len(appendix),
+            media_count=len(media),
+        )
+
+        msg = MsgAnnotate()
+        msg.authority = validator_addr
+        msg.envelope_pubkey = pub_dec
+        msg.envelope_block_hash = _hex_to_bytes(last_block_hash)
+        msg.envelope_difficulty = int(difficulty)
+        msg.envelope_pow = int(proof)
+        msg.envelope_timestamp = timestamp
+        msg.envelope_signature = sig_dec
+        msg.topic = topic
+        msg.title = title
+        msg.content = content
+        msg.tag = tag
+        msg.override = override
+        for m in media:
+            msg.media.append(m)
+        msg.appendix = appendix
+
+        any_msg = AnyPB()
+        any_msg.type_url = "/mirage.core.v1.MsgAnnotate"
+        any_msg.value = msg.SerializeToString()
+        body = TxBody(messages=[any_msg], memo="")
+        body_bytes = body.SerializeToString()
+        media_len = sum(len(m) for m in media)
+        content_len = len(topic) + len(title) + len(content) + len(tag) + len(appendix) + media_len
+        gas_est = int(estimate_total_gas_limit(body_bytes, content_len))
+        tx_bytes_est = build_tx_bytes(body_bytes, gas_est)
+        gas_used = int(simulate_gas(tx_bytes_est))
+        gas_limit = max(gas_est, int(gas_used * GAS_BUFFER_MULTIPLIER))
+        tx_bytes = build_tx_bytes(body_bytes, gas_limit)
+        tx_hash, code, height, raw_log = broadcast_tx(tx_bytes)
+        if code != 0:
+            extra = {
+                "height": height,
+                "user_addr": user_addr,
+                "topic": topic,
+                "title": title,
+                "content": content,
+                "tag": tag,
+                "override": override,
+                "appendix_len": len(appendix),
+                "media_count": len(media),
+            }
+            return _tx_error(rid, "core/annotate", "MsgAnnotate", code, tx_hash, raw_log, extra)
+        return jsonify({"tx_hash": tx_hash, "code": code, "height": height, "raw_log": raw_log})
+    except Exception as e:
+        log_event(rid, "annotate.err", error=str(e))
         msg, status = _classify_exception(str(e))
         return jsonify({"error": msg}), status
 

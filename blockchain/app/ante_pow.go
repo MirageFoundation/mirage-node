@@ -332,6 +332,19 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 				}
 			}
 
+		case *coretypes.MsgAnnotate:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if m.EnvelopeDifficulty > 0 || m.EnvelopePow > 0 {
+				ctx.Logger().Error("PoW: MsgAnnotate cannot use PoW")
+				return ctx, fmt.Errorf("MsgAnnotate cannot use PoW")
+			}
+			if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+				ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgAnnotate", "err", err.Error())
+				return ctx, err
+			}
+
 		case *coretypes.MsgSetUsername:
 			if m.Authority == govAuthority {
 				continue

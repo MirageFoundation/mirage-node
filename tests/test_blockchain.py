@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
+import grpc
 import requests
 from cosmpy.aerial.wallet import LocalWallet
 from cosmpy.crypto.keypairs import PrivateKey
@@ -36,6 +37,8 @@ from cosmpy.protos.cosmos.crypto.secp256k1.keys_pb2 import PubKey as SecpPubKey
 from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgBeginRedelegate, MsgDelegate, MsgUndelegate
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import AuthInfo, Fee, ModeInfo, SignerInfo, TxBody, TxRaw
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import SimulateRequest
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
 from google.protobuf.any_pb2 import Any as AnyPB
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +72,7 @@ from shared.canon import (
     canon_base_set_biography as _canon_base_set_biography_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_vote as _canon_base_vote_raw,
+    canon_base_annotate as _canon_base_annotate_raw,
     canon_signed_with_pow,
 )
 from shared.datatypes import (
@@ -99,6 +103,7 @@ from shared.datatypes import (
     MsgUnfollowUser,
     MsgUpgradeLevel,
     MsgVote,
+    MsgAnnotate,
 )
 
 import tests.test_backend as tb
@@ -127,6 +132,9 @@ _lb_bytes = tb._lb_bytes
 WALLETS: dict[str, LocalWallet] = {}
 _VALIDATOR_ADDR: Optional[str] = None
 _GOV_MODULE_ADDR: Optional[str] = None
+_GRPC_TARGET: Optional[str] = None
+_GRPC_CHANNEL = None
+_SIMULATE_MODE_LOGGED = False
 
 
 def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
@@ -207,6 +215,36 @@ def _min_gas_price_umirage() -> float:
         if p.endswith("umirage"):
             return float(p[:-7])
     raise RuntimeError("minimum-gas-prices must include umirage")
+
+
+def _get_grpc_target() -> str:
+    global _GRPC_TARGET
+    if _GRPC_TARGET is not None:
+        return _GRPC_TARGET
+    home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
+    path = os.path.join(home, "config", "app.toml")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"app.toml not found: {path}")
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    addr = str((data.get("grpc") or {}).get("address") or "").strip()
+    if not addr:
+        raise RuntimeError("grpc.address missing in app.toml")
+    parts = addr.rsplit(":", 1)
+    if len(parts) != 2:
+        raise RuntimeError(f"invalid grpc.address: {addr}")
+    host, port = parts[0].strip(), parts[1].strip()
+    if host in ("0.0.0.0", "localhost"):
+        host = "127.0.0.1"
+    _GRPC_TARGET = f"{host}:{port}"
+    return _GRPC_TARGET
+
+
+def _get_grpc_channel():
+    global _GRPC_CHANNEL
+    if _GRPC_CHANNEL is None:
+        _GRPC_CHANNEL = grpc.insecure_channel(_get_grpc_target())
+    return _GRPC_CHANNEL
 
 
 def _get_validator_account_address(backend: str) -> str:
@@ -377,6 +415,80 @@ def _build_tx_bytes(
     auth = AuthInfo(signer_infos=[signer_info], fee=fee)
     tx_raw = TxRaw(body_bytes=body_bytes, auth_info_bytes=auth.SerializeToString(), signatures=[b"\x00"])
     return tx_raw.SerializeToString()
+
+
+_SIMULATE_PY = """import base64
+import os
+import tomllib
+import grpc
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import SimulateRequest
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
+
+tx_bytes = base64.b64decode(os.environ["TX_B64"])
+home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
+path = os.path.join(home, "config", "app.toml")
+if not os.path.isfile(path):
+    raise SystemExit("app.toml not found: " + path)
+with open(path, "rb") as f:
+    data = tomllib.load(f)
+addr = str((data.get("grpc") or {}).get("address") or "").strip()
+if not addr:
+    raise SystemExit("grpc.address missing in app.toml")
+parts = addr.rsplit(":", 1)
+if len(parts) != 2:
+    raise SystemExit("invalid grpc.address: " + addr)
+host, port = parts[0].strip(), parts[1].strip()
+if host in ("0.0.0.0", "localhost"):
+    host = "127.0.0.1"
+target = host + ":" + port
+ch = grpc.insecure_channel(target)
+stub = ServiceStub(ch)
+resp = stub.Simulate(SimulateRequest(tx_bytes=tx_bytes), timeout=10)
+gas_used = int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+if gas_used <= 0:
+    raise SystemExit("simulate returned gas_used=0")
+print(gas_used)
+"""
+
+
+def _simulate_tx_bytes_gas(tx_bytes: bytes, timeout: int = 10) -> int:
+    global _SIMULATE_MODE_LOGGED
+    if _INSIDE_CONTAINER:
+        if not _SIMULATE_MODE_LOGGED:
+            _debug("simulate: using local gRPC")
+            _SIMULATE_MODE_LOGGED = True
+        stub = ServiceStub(_get_grpc_channel())
+        resp = stub.Simulate(SimulateRequest(tx_bytes=tx_bytes), timeout=timeout)
+        gas_used = int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+        if gas_used <= 0:
+            raise RuntimeError("simulate returned gas_used=0")
+        return gas_used
+
+    if not _SIMULATE_MODE_LOGGED:
+        _debug("simulate: using docker exec")
+        _SIMULATE_MODE_LOGGED = True
+    tx_b64 = base64.b64encode(tx_bytes).decode()
+    cmd = f"TX_B64='{tx_b64}' python3 - <<'PY'\n{_SIMULATE_PY}\nPY"
+    code, out = _docker_exec(cmd, timeout=timeout)
+    if code != 0:
+        raise RuntimeError(f"simulate failed: {out}")
+    try:
+        return int(out.strip())
+    except Exception:
+        raise RuntimeError(f"simulate returned non-integer: {out}")
+
+
+def _simulate_tx_gas(
+    msgs: list[tuple[object, str]],
+    gas_limit: int,
+    fee_payer: str,
+    signer_pubkey: bytes,
+    fee_denom: str = "umirage",
+    fee_amount: Optional[int] = None,
+    timeout: int = 10,
+) -> int:
+    tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
+    return _simulate_tx_bytes_gas(tx_bytes, timeout=timeout)
 
 
 def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
@@ -715,6 +827,45 @@ def _build_msg_edit(
     msg.override = override
     for m in media or []:
         msg.media.append(m)
+    return msg
+
+
+def _build_msg_annotate(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: Optional[list[str]] = None,
+    appendix: str = "",
+    pow_val: int = 0,
+) -> MsgAnnotate:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_annotate_raw(
+        pub, lb_bytes, diff, ts, topic, title, content, tag, override, media=media or [], appendix=appendix
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgAnnotate()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.topic = topic
+    msg.title = title
+    msg.content = content
+    msg.tag = tag
+    msg.override = override
+    for m in media or []:
+        msg.media.append(m)
+    msg.appendix = appendix
     return msg
 
 
@@ -2334,7 +2485,15 @@ def test_follow_limits(backend: str) -> None:
         for i, target_addr in enumerate(batch):
             msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
-        gas_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 1.5))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(
+            msgs,
+            sim_limit,
+            fee_payer,
+            sub_pub,
+        )
+        _debug(f"subscriber bulk follow gas: start={start} msgs={len(msgs)} sim_limit={sim_limit} gas_used={sim_gas}")
+        gas_limit = sim_gas
         _, ccode, _, dcode, dlog = _submit_tx(
             msgs,
             gas_limit,
@@ -3369,10 +3528,13 @@ def test_tier_features(backend: str) -> None:
         editing = _tier_int(tier, "editing_time_mins")
 
         if level == 0:
-            if max_enabled == 25 and max_fu == 25 and max_ft == 25:
-                _pass(f"tierfeature.level{level}_list_limits_25")
+            if max_enabled == 5 and max_fu == 25 and max_ft == 25:
+                _pass(f"tierfeature.level{level}_list_limits_5_25_25")
             else:
-                _fail(f"tierfeature.level{level}_list_limits_25", f"agents={max_enabled} fu={max_fu} ft={max_ft}")
+                _fail(
+                    f"tierfeature.level{level}_list_limits_5_25_25",
+                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                )
             if max_bu == 25 and max_bp == 25 and max_bt == 25:
                 _pass(f"tierfeature.level{level}_blocked_limits_25")
             else:
@@ -3390,10 +3552,13 @@ def test_tier_features(backend: str) -> None:
             else:
                 _fail(f"tierfeature.level{level}_editing_10m", f"got={editing}")
         else:
-            if max_enabled == 500 and max_fu == 500 and max_ft == 500:
-                _pass(f"tierfeature.level{level}_list_limits_500")
+            if max_enabled == 50 and max_fu == 500 and max_ft == 500:
+                _pass(f"tierfeature.level{level}_list_limits_50_500_500")
             else:
-                _fail(f"tierfeature.level{level}_list_limits_500", f"agents={max_enabled} fu={max_fu} ft={max_ft}")
+                _fail(
+                    f"tierfeature.level{level}_list_limits_50_500_500",
+                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                )
             if max_bu == 500 and max_bp == 500 and max_bt == 500:
                 _pass(f"tierfeature.level{level}_blocked_limits_500")
             else:
@@ -3599,6 +3764,83 @@ def test_biography(backend: str) -> None:
     _check_deliver_reject("biography.control_chars_rejected", ccode, dcode, dlog)
 
 
+def test_annotate_chain(backend: str) -> None:
+    """Chain-level tests for MsgAnnotate validation."""
+    print(f"\n{_COLOR_BOLD}[ANNOTATE-CHAIN] MsgAnnotate Chain Validation{_COLOR_RESET}")
+
+    agent = WALLETS.get("agent1")
+    free = WALLETS.get("free")
+    if not agent or not free:
+        _skip("annotate_chain.setup", "wallets not available")
+        return
+
+    fee_payer = _VALIDATOR_ADDR or ""
+    signer_pub = agent.public_key().public_key_bytes
+
+    # Get chain params
+    lb, diff, _, _ = _get_pow_params(backend, str(agent.address()))
+    ts = _now_ms()
+
+    # First create a post to annotate (via backend for convenience)
+    txh = tb._do_post(backend, free, "test", f"ChainAnnotateTarget {tb._rand_str(6)}", "content")
+    if not txh:
+        _fail("annotate_chain.create_target")
+        return
+    tb._wait_indexed(backend, str(free.address()), txh)
+    _pass("annotate_chain.create_target")
+
+    # 1. Non-agent submitting annotate should fail
+    msg = _build_msg_annotate(free, lb, 0, ts, ".", ".", ".", ".", txh, appendix="hacker note")
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        free.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.non_agent_rejected", code, log, "agent tier")
+
+    # 2. Agent with valid sentinel should succeed
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="valid note")
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_accept("annotate_chain.agent_annotate_ok", code, log)
+
+    # 3. Invalid relay signature should fail
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="bad sig")
+    msg.envelope_signature = b"\x00" * 64
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_reject("annotate_chain.bad_signature", code, log, "relay signature")
+
+    # 4. Annotate should reject PoW fields
+    msg = _build_msg_annotate(agent, lb, 1, ts, ".", ".", ".", ".", txh, appendix="pow")
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_reject("annotate_chain.pow_rejected", code, log, "pow")
+
+    # 5. Invalid override should fail
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", "invalid", appendix="note")
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_reject("annotate_chain.invalid_override", code, log, "invalid override")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -3620,6 +3862,7 @@ ALL_CATEGORIES = {
     "upgrade_validation": test_upgrade_level_validation,
     "tier_features": test_tier_features,
     "biography": test_biography,
+    "annotate_chain": test_annotate_chain,
 }
 STATELESS_CATEGORIES = {
     "authority",

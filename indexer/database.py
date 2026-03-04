@@ -808,6 +808,29 @@ class DatabaseManager:
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_mentions_post ON mentions(post_txhash)")
 
+                # ========== Agent Edits Table ==========
+                # agent_edits: per-agent overlay edits on posts (MsgAnnotate)
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS agent_edits (
+                        post_txhash TEXT NOT NULL,
+                        agent_address TEXT NOT NULL,
+                        edit_txhash TEXT NOT NULL,
+                        topic TEXT,
+                        title TEXT,
+                        content TEXT,
+                        tag TEXT,
+                        media TEXT,
+                        appendix TEXT,
+                        edited_at BIGINT NOT NULL,
+                        PRIMARY KEY (post_txhash, agent_address)
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_post ON agent_edits(post_txhash)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_agent_edits_agent ON agent_edits(LOWER(agent_address))")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_edits_txhash ON agent_edits(edit_txhash)")
+
     def get_last_height(self) -> int:
         """Get last processed height from meta table."""
         with self._connect() as conn:
@@ -1026,6 +1049,79 @@ class DatabaseManager:
                         media_json,
                     ),
                 )
+
+    def upsert_agent_edit(
+        self,
+        post_txhash: str,
+        agent_address: str,
+        edit_txhash: str,
+        edited_at: int,
+        topic: Optional[str] = None,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        tag: Optional[str] = None,
+        media: Optional[list[str]] = None,
+        appendix: Optional[str] = None,
+    ) -> None:
+        """Insert or update an agent edit overlay. None = no change for that field."""
+        import json as _json
+
+        media_json = _json.dumps(media) if media is not None else None
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO agent_edits(
+                        post_txhash, agent_address, edit_txhash,
+                        topic, title, content, tag, media, appendix, edited_at
+                    )
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(post_txhash, agent_address) DO UPDATE SET
+                        edit_txhash = EXCLUDED.edit_txhash,
+                        topic = COALESCE(EXCLUDED.topic, agent_edits.topic),
+                        title = COALESCE(EXCLUDED.title, agent_edits.title),
+                        content = COALESCE(EXCLUDED.content, agent_edits.content),
+                        tag = COALESCE(EXCLUDED.tag, agent_edits.tag),
+                        media = COALESCE(EXCLUDED.media, agent_edits.media),
+                        appendix = COALESCE(EXCLUDED.appendix, agent_edits.appendix),
+                        edited_at = EXCLUDED.edited_at
+                    """,
+                    (
+                        post_txhash.lower(),
+                        agent_address.lower(),
+                        edit_txhash.lower(),
+                        topic,
+                        title,
+                        content,
+                        tag,
+                        media_json,
+                        appendix,
+                        int(edited_at),
+                    ),
+                )
+
+    def get_agent_edits_for_posts(
+        self,
+        post_txhashes: list[str],
+        agent_addresses: list[str],
+    ) -> list[tuple]:
+        """Fetch agent edits for a batch of posts from specific agents.
+        Returns rows of (post_txhash, agent_address, topic, title, content, tag, media, appendix).
+        """
+        if not post_txhashes or not agent_addresses:
+            return []
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                post_ph = ",".join(["%s"] * len(post_txhashes))
+                agent_ph = ",".join(["%s"] * len(agent_addresses))
+                cur.execute(
+                    f"""SELECT post_txhash, agent_address, topic, title, content, tag, media, appendix
+                        FROM agent_edits
+                        WHERE post_txhash IN ({post_ph})
+                          AND LOWER(agent_address) IN ({agent_ph})""",
+                    [p.lower() for p in post_txhashes] + [a.lower() for a in agent_addresses],
+                )
+                return cur.fetchall()
 
     def insert_mentions(
         self,

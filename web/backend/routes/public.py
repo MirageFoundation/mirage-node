@@ -290,7 +290,10 @@ def _get_enabled_agents(cur, address: str) -> list[str]:
     """Get list of agent addresses enabled by the viewer."""
     if not address:
         return []
-    cur.execute("SELECT agent FROM enabled_agents WHERE owner = %s", (address.lower(),))
+    cur.execute(
+        "SELECT agent FROM enabled_agents WHERE LOWER(owner) = LOWER(%s) ORDER BY position ASC",
+        (address.lower(),),
+    )
     return [row[0].lower() for row in cur.fetchall()]
 
 
@@ -394,6 +397,84 @@ def _topic_is_blocked(topic: str, blocked_exact: set[str], blocked_patterns: tup
             if _re.fullmatch(escaped, topic):
                 return True
     return False
+
+
+def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
+    """Overlay agent edits onto a list of post dicts for this viewer.
+    Replacement fields: topic, title, content, tag, media (first non-None in priority order).
+    Appendix: collect ALL non-empty appendices in agent priority order.
+    """
+    if not viewer or not posts:
+        return posts
+    agents = _get_enabled_agents(cur, viewer)
+    if not agents:
+        return posts
+
+    import json as _json
+
+    post_ids = [p.get("post_id", "").lower() for p in posts if p.get("post_id")]
+    if not post_ids:
+        return posts
+
+    # Batch fetch all edits for these posts from enabled agents
+    agent_ph = ",".join(["%s"] * len(agents))
+    post_ph = ",".join(["%s"] * len(post_ids))
+    cur.execute(
+        f"""SELECT post_txhash, agent_address, topic, title, content, tag, media, appendix
+            FROM agent_edits
+            WHERE post_txhash IN ({post_ph})
+              AND LOWER(agent_address) IN ({agent_ph})""",
+        [p for p in post_ids] + [a.lower() for a in agents],
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return posts
+
+    # Group by post
+    edits_by_post: dict[str, dict[str, dict]] = {}
+    for post_tx, agent_addr, ae_topic, ae_title, ae_content, ae_tag, ae_media_raw, ae_appendix in rows:
+        ptx = (post_tx or "").lower()
+        if ptx not in edits_by_post:
+            edits_by_post[ptx] = {}
+        try:
+            ae_media = _json.loads(ae_media_raw) if ae_media_raw is not None else None
+            if ae_media is not None and not isinstance(ae_media, list):
+                ae_media = None
+        except Exception:
+            ae_media = None
+        edits_by_post[ptx][(agent_addr or "").lower()] = {
+            "topic": ae_topic,
+            "title": ae_title,
+            "content": ae_content,
+            "tag": ae_tag,
+            "media": ae_media,
+            "appendix": ae_appendix,
+        }
+
+    # Apply per post
+    agent_order = [a.lower() for a in agents]
+    for post in posts:
+        pid = (post.get("post_id") or "").lower()
+        if pid not in edits_by_post:
+            continue
+        agent_edits = edits_by_post[pid]
+        applied = {}
+        appendices = []
+        for agent_addr in agent_order:
+            edit = agent_edits.get(agent_addr)
+            if not edit:
+                continue
+            for field in ("topic", "title", "content", "tag", "media"):
+                if field not in applied and edit.get(field) is not None:
+                    post[field] = edit[field]
+                    applied[field] = agent_addr
+            if edit.get("appendix"):
+                appendices.append({"agent": agent_addr, "text": edit["appendix"]})
+        if applied or appendices:
+            post["agent_edited"] = True
+            post["agent_edits_meta"] = applied
+            post["appendices"] = appendices
+    return posts
 
 
 def _blocked_topics_sql(
@@ -4275,6 +4356,8 @@ def get_posts():
                     blocked_topic_prefixes=blocked_topic_prefixes,
                 )
 
+            if resp.get("posts"):
+                _apply_agent_edits(cur, resp["posts"], address)
             conn.close()
             return jsonify(resp)
 
@@ -4562,6 +4645,9 @@ def get_posts():
 
         has_more = (page * limit) < total
 
+        if result:
+            _apply_agent_edits(cur, result, address)
+
         resp = {"posts": result, "total": total, "page": page, "limit": limit, "has_more": has_more}
         total_ms = (time.monotonic() - t_start) * 1000
         if max(total_ms, count_ms, select_ms) > 2000:
@@ -4832,6 +4918,8 @@ def get_user_posts():
                     "user_weight": user_weight_map.get(pid, 0.0),
                 }
             )
+        if result:
+            _apply_agent_edits(cur, result, viewer)
         conn.close()
         has_more = (page * limit) < total
         resp = {"posts": result, "page": page, "limit": limit, "has_more": has_more, "total": total}
@@ -5430,6 +5518,17 @@ def get_comments():
                     apply_awards(n["children"])
 
         apply_awards(children)
+
+        # Apply agent edits to root + all children
+        def _collect_posts(nodes, out):
+            for n in nodes:
+                out.append(n)
+                if n.get("children"):
+                    _collect_posts(n["children"], out)
+
+        all_posts_for_overlay = [root]
+        _collect_posts(children, all_posts_for_overlay)
+        _apply_agent_edits(cur, all_posts_for_overlay, address)
 
         resp = {"root": root, "children": children}
 

@@ -79,6 +79,7 @@ from shared.canon import (  # noqa: E402
     canon_base_report as _canon_base_report_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_biography as _canon_base_set_biography_raw,
+    canon_base_annotate as _canon_base_annotate_raw,
     canon_signed_with_pow,
 )
 
@@ -918,6 +919,60 @@ def _do_edit(
     if not skip_pow:
         payload["pow"] = int(proof)
     code, resp = _post(f"{backend}/api/core/edit", payload)
+    return resp
+
+
+def _do_annotate(
+    backend: str,
+    wallet,
+    override_hash: str,
+    topic: str = ".",
+    title: str = ".",
+    content: str = ".",
+    tag: str = ".",
+    media: list[str] | None = None,
+    appendix: str = ".",
+    pow_difficulty: int = 0,
+    pow_val: int = 0,
+) -> dict:
+    """Agent-only: annotate a post with overlay edits. '.' means no change."""
+    addr = str(wallet.address())
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    pub = wallet.public_key().public_key_bytes
+    ts = _now_ms()
+    media_list = media if media is not None else ["."]
+
+    base = _canon_base_annotate_raw(
+        pub,
+        _lb_bytes(lb),
+        int(pow_difficulty),
+        ts,
+        topic,
+        title,
+        content,
+        tag,
+        override_hash,
+        media=media_list,
+        appendix=appendix,
+    )
+    signed = canon_signed_with_pow(base, int(pow_val))
+    sig = sign_canonical(wallet, signed)
+    payload = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": int(pow_difficulty),
+        "pow": int(pow_val),
+        "topic": topic,
+        "title": title,
+        "content": content,
+        "tag": tag,
+        "override": override_hash,
+        "media": media_list,
+        "appendix": appendix,
+    }
+    code, resp = _post(f"{backend}/api/core/annotate", payload)
     return resp
 
 
@@ -5676,6 +5731,258 @@ def test_agent_behavior(backend: str):
         _fail("agent_behavior.author_post_reappears_after_disable", "still hidden")
 
 
+def test_annotate(backend: str):
+    """Test MsgAnnotate agent overlay edits."""
+    print(f"\n{_COLOR_BOLD}[ANNOTATE] Agent Annotations{_COLOR_RESET}")
+
+    agent = WALLETS.get("agent1")
+    free = WALLETS.get("free")
+    if not agent or not free:
+        _skip("annotate.setup", "agent1 or free wallet not available")
+        return
+
+    agent_addr = str(agent.address())
+    free_addr = str(free.address())
+
+    # 1. Create a test post as the free user
+    topic = "test"
+    title = f"Annotate Target {_rand_str(6)}"
+    content = f"Original content {_rand_str(20)}"
+    txh = _do_post(backend, free, topic, title, content)
+    if not txh:
+        _fail("annotate.create_target_post")
+        return
+    _pass("annotate.create_target_post", tx=txh)
+    if not _wait_indexed(backend, free_addr, txh):
+        _fail("annotate.target_indexed")
+        return
+    _pass("annotate.target_indexed")
+
+    # 2. Non-agent cannot annotate
+    resp = _do_annotate(backend, free, override_hash=txh, title="hacked")
+    if resp.get("error"):
+        _pass("annotate.non_agent_rejected")
+    else:
+        _fail("annotate.non_agent_rejected", f"expected error, got {resp}")
+
+    # 3. Agent can annotate with title override
+    new_title = f"Agent Fixed Title {_rand_str(6)}"
+    resp = _do_annotate(backend, agent, override_hash=txh, title=new_title)
+    if resp.get("tx_hash"):
+        _pass("annotate.agent_title_override", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.agent_title_override", resp.get("error", str(resp)))
+
+    # 4. Agent can annotate with appendix
+    appendix_text = f"Agent note: {_rand_str(10)}"
+    resp = _do_annotate(backend, agent, override_hash=txh, appendix=appendix_text)
+    if resp.get("tx_hash"):
+        _pass("annotate.agent_appendix", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.agent_appendix", resp.get("error", str(resp)))
+
+    # 5. Media sentinel: ["."] = no change
+    resp = _do_annotate(backend, agent, override_hash=txh, media=["."])
+    if resp.get("tx_hash"):
+        _pass("annotate.media_sentinel_no_change", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.media_sentinel_no_change", resp.get("error", str(resp)))
+
+    # 6. Media clear: [] = clear
+    resp = _do_annotate(backend, agent, override_hash=txh, media=[])
+    if resp.get("tx_hash"):
+        _pass("annotate.media_clear", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.media_clear", resp.get("error", str(resp)))
+
+    # 7. Media replace: list of URLs
+    resp = _do_annotate(backend, agent, override_hash=txh, media=["https://example.com/img.jpg"])
+    if resp.get("tx_hash"):
+        _pass("annotate.media_replace", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.media_replace", resp.get("error", str(resp)))
+
+    # 8. Annotate should reject PoW fields
+    resp = _do_annotate(backend, agent, override_hash=txh, pow_difficulty=1, pow_val=1)
+    if resp.get("error"):
+        _pass("annotate.pow_rejected")
+    else:
+        _fail("annotate.pow_rejected", f"expected error, got {resp}")
+
+    # 9. Enable agent for viewer and verify overlay shows up
+    resp = _do_set_agents(backend, free, [agent_addr], skip_pow=False)
+    if resp.get("tx_hash"):
+        _pass("annotate.viewer_sets_agents")
+    else:
+        _fail("annotate.viewer_sets_agents", f"resp={resp}")
+        return
+    time.sleep(5)
+
+    def _find_node(nodes, target_id: str):
+        for n in nodes or []:
+            if str(n.get("post_id", "")).lower() == target_id.lower():
+                return n
+            if n.get("children"):
+                found = _find_node(n["children"], target_id)
+                if found:
+                    return found
+        return None
+
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+    if code != 200:
+        _fail("annotate.overlay_get_comments", f"code={code}")
+        return
+    root = (data or {}).get("root") or {}
+    if root.get("title") == new_title:
+        _pass("annotate.overlay_title_applied")
+    else:
+        _fail("annotate.overlay_title_applied", f"title={root.get('title')}")
+    if root.get("agent_edited") is True:
+        _pass("annotate.overlay_agent_edited_flag")
+    else:
+        _fail("annotate.overlay_agent_edited_flag", f"agent_edited={root.get('agent_edited')}")
+    appendices = root.get("appendices") or []
+    if any(a.get("text") == appendix_text for a in appendices if isinstance(a, dict)):
+        _pass("annotate.overlay_appendix_present")
+    else:
+        _fail("annotate.overlay_appendix_present", f"appendices={appendices}")
+
+    meta = root.get("agent_edits_meta") or {}
+    if meta.get("title", "").lower() == agent_addr.lower():
+        _pass("annotate.overlay_meta_title_agent")
+    else:
+        _fail("annotate.overlay_meta_title_agent", f"meta={meta}")
+
+    # 10. Sentinel no-change should preserve prior title/appendix
+    resp = _do_annotate(backend, agent, override_hash=txh, title=".", appendix=".")
+    if resp.get("tx_hash"):
+        _pass("annotate.no_change_sentinel_tx")
+    else:
+        _fail("annotate.no_change_sentinel_tx", resp.get("error", str(resp)))
+        return
+    time.sleep(5)
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+    root = (data or {}).get("root") or {}
+    if root.get("title") == new_title:
+        _pass("annotate.no_change_preserves_title")
+    else:
+        _fail("annotate.no_change_preserves_title", f"title={root.get('title')}")
+    appendices = root.get("appendices") or []
+    if any(a.get("text") == appendix_text for a in appendices if isinstance(a, dict)):
+        _pass("annotate.no_change_preserves_appendix")
+    else:
+        _fail("annotate.no_change_preserves_appendix", f"appendices={appendices}")
+
+    # 11. Multi-agent priority ordering for title + appendices
+    agent2 = WALLETS.get("agent2")
+    if not agent2:
+        _fail("annotate.agent2_missing", "agent2 wallet not available")
+        return
+    agent2_addr = str(agent2.address())
+    title2 = f"Agent2 Title {_rand_str(6)}"
+    appendix2 = f"Agent2 note {_rand_str(6)}"
+    resp = _do_annotate(backend, agent2, override_hash=txh, title=title2, appendix=appendix2)
+    if resp.get("tx_hash"):
+        _pass("annotate.agent2_title_override", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.agent2_title_override", resp.get("error", str(resp)))
+        return
+    time.sleep(5)
+
+    resp = _do_set_agents(backend, free, [agent2_addr, agent_addr], skip_pow=False)
+    if resp.get("tx_hash"):
+        _pass("annotate.viewer_agent_order_2_1")
+    else:
+        _fail("annotate.viewer_agent_order_2_1", f"resp={resp}")
+        return
+    time.sleep(5)
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+    root = (data or {}).get("root") or {}
+    if root.get("title") == title2:
+        _pass("annotate.priority_title_agent2_wins")
+    else:
+        _fail("annotate.priority_title_agent2_wins", f"title={root.get('title')}")
+    appendices = root.get("appendices") or []
+    if (
+        len(appendices) >= 2
+        and appendices[0].get("agent", "").lower() == agent2_addr.lower()
+        and appendices[1].get("agent", "").lower() == agent_addr.lower()
+    ):
+        _pass("annotate.appendix_order_agent2_first")
+    else:
+        _fail("annotate.appendix_order_agent2_first", f"appendices={appendices}")
+
+    resp = _do_set_agents(backend, free, [agent_addr, agent2_addr], skip_pow=False)
+    if resp.get("tx_hash"):
+        _pass("annotate.viewer_agent_order_1_2")
+    else:
+        _fail("annotate.viewer_agent_order_1_2", f"resp={resp}")
+        return
+    time.sleep(5)
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+    root = (data or {}).get("root") or {}
+    if root.get("title") == new_title:
+        _pass("annotate.priority_title_agent1_wins")
+    else:
+        _fail("annotate.priority_title_agent1_wins", f"title={root.get('title')}")
+
+    # 12. Comment annotations should apply to content
+    comment_tx = _do_post(backend, free, "", "", f"Comment {_rand_str(10)}", target=txh)
+    if not comment_tx:
+        _fail("annotate.comment_setup")
+        return
+    if not _wait_indexed(backend, free_addr, comment_tx):
+        _fail("annotate.comment_indexed")
+        return
+    comment_content = f"Agent comment fix {_rand_str(6)}"
+    resp = _do_annotate(backend, agent, override_hash=comment_tx, content=comment_content)
+    if resp.get("tx_hash"):
+        _pass("annotate.comment_content_override", tx=resp["tx_hash"])
+    else:
+        _fail("annotate.comment_content_override", resp.get("error", str(resp)))
+        return
+    time.sleep(5)
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
+    comment_node = _find_node((data or {}).get("children") or [], comment_tx)
+    if comment_node and comment_node.get("content") == comment_content:
+        _pass("annotate.comment_overlay_applied")
+    else:
+        _fail("annotate.comment_overlay_applied", f"content={comment_node.get('content') if comment_node else None}")
+
+
+def test_edit_target_immutability(backend: str):
+    """Test that MsgEdit cannot change a post's target (parent)."""
+    print(f"\n{_COLOR_BOLD}[EDIT-TARGET] MsgEdit Target Immutability{_COLOR_RESET}")
+
+    free = WALLETS.get("free")
+    if not free:
+        _skip("edit_target.setup", "free wallet not available")
+        return
+
+    free_addr = str(free.address())
+
+    # Create a root post
+    topic = "test"
+    title = f"Root Post {_rand_str(6)}"
+    content = f"Content {_rand_str(10)}"
+    txh = _do_post(backend, free, topic, title, content)
+    if not txh:
+        _fail("edit_target.create_root")
+        return
+    _pass("edit_target.create_root", tx=txh)
+    if not _wait_indexed(backend, free_addr, txh):
+        _fail("edit_target.root_indexed")
+        return
+
+    # Try to edit with a fake target (re-parenting attempt)
+    fake_target = "a" * 64
+    resp = _do_edit(backend, free, override_hash=txh, topic=topic, title=title, content="edited", target=fake_target)
+    if resp.get("error"):
+        _pass("edit_target.mismatch_rejected", msg=resp["error"])
+    else:
+        _fail("edit_target.mismatch_rejected", f"expected rejection, got {resp}")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -5705,6 +6012,8 @@ ALL_CATEGORIES = {
     "content_limits": test_content_limits,
     "profile_fields": test_profile_fields,
     "agent_behavior": test_agent_behavior,
+    "annotate": test_annotate,
+    "edit_target": test_edit_target_immutability,
 }
 
 

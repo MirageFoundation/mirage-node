@@ -454,6 +454,33 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEdit", "err", err.Error())
 				return ctx, err
 			}
+		case *coretypes.MsgAnnotate:
+			if m.Authority == govAuthority {
+				continue // Skip validation for governance
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgAnnotate", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgAnnotate", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(101, m.Topic)
+				w.writeString(102, m.Title)
+				w.writeString(103, m.Content)
+				w.writeString(104, m.Tag)
+				w.writeString(105, m.Override)
+				for _, mediaItem := range m.Media {
+					w.writeString(106, mediaItem)
+				}
+				w.writeString(107, m.Appendix)
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAnnotate", "err", err.Error())
+				return ctx, err
+			}
 		case *coretypes.MsgSetLevel:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance

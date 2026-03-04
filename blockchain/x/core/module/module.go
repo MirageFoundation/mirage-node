@@ -1428,6 +1428,147 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	return &types.MsgEditResponse{}, nil
 }
 
+// Annotate handler: agent-only overlay on an existing post.
+// Sentinel "." means no change; empty string means clear.
+func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*types.MsgAnnotateResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("Annotate: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Annotate")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
+	// Enforce agent tier
+	if userLevel < types.LevelAgent && authority != govAuthority {
+		return nil, fmt.Errorf("annotate requires agent tier (level >= %d), got %d", types.LevelAgent, userLevel)
+	}
+
+	params := am.k.GetParams(sdkCtx)
+
+	// Validate override txhash (the post being annotated)
+	override := strings.ToLower(strings.TrimSpace(req.GetOverride()))
+	if err := validateTxHash(override); err != nil {
+		return nil, fmt.Errorf("invalid override: %w", err)
+	}
+
+	// Annotate never supports PoW
+	if req.GetEnvelopeDifficulty() != 0 || req.GetEnvelopePow() != 0 {
+		sdkCtx.Logger().Error("Annotate: PoW not allowed", "difficulty", req.GetEnvelopeDifficulty(), "pow", req.GetEnvelopePow())
+		return nil, fmt.Errorf("annotate does not allow pow")
+	}
+
+	tierConfig := params.GetTierConfig(types.LevelAgent)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", types.LevelAgent)
+	}
+
+	// Sentinel "." means no change — skip validation for those fields.
+	const sentinel = "."
+
+	// Validate topic (skip if sentinel)
+	topic := strings.TrimSpace(req.GetTopic())
+	if topic != sentinel && topic != "" {
+		if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate title length (skip if sentinel)
+	title := req.GetTitle()
+	if title != sentinel {
+		titleLen := uint64(utf8.RuneCountInString(title))
+		if titleLen > tierConfig.MaxTitleLength {
+			return nil, fmt.Errorf("title exceeds limit: %d > %d", titleLen, tierConfig.MaxTitleLength)
+		}
+	}
+
+	// Validate content length (skip if sentinel)
+	content := req.GetContent()
+	if content != sentinel {
+		contentLen := uint64(utf8.RuneCountInString(content))
+		if contentLen > tierConfig.MaxContentLength {
+			return nil, fmt.Errorf("content exceeds limit: %d > %d", contentLen, tierConfig.MaxContentLength)
+		}
+	}
+
+	// Validate tag (skip if sentinel)
+	tag := strings.TrimSpace(req.GetTag())
+	if tag != sentinel {
+		if err := validateTag(tag); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate appendix length (skip if sentinel)
+	appendix := req.GetAppendix()
+	if appendix != sentinel {
+		appendixLen := uint64(utf8.RuneCountInString(appendix))
+		if appendixLen > tierConfig.MaxContentLength {
+			return nil, fmt.Errorf("appendix exceeds limit: %d > %d", appendixLen, tierConfig.MaxContentLength)
+		}
+	}
+
+	// Validate media (skip if single-element sentinel ["."])
+	media := req.GetMedia()
+	isSentinelMedia := len(media) == 1 && media[0] == sentinel
+	if !isSentinelMedia && len(media) > 0 {
+		if err := validateMsgPostMedia(media); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate non-sentinel fields for unsafe text
+	unsafeChecks := []struct{ name, val string }{
+		{"topic", topic}, {"title", title}, {"content", content},
+		{"tag", tag}, {"appendix", appendix},
+	}
+	for _, c := range unsafeChecks {
+		if c.val != sentinel {
+			if err := rejectUnsafeFields(c.name, c.val); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	sdkCtx.Logger().Info("Annotate",
+		"agent", owner,
+		"override", override,
+		"topic_sentinel", topic == sentinel,
+		"title_sentinel", title == sentinel,
+		"content_sentinel", content == sentinel,
+		"tag_sentinel", tag == sentinel,
+		"appendix_sentinel", appendix == sentinel,
+		"media_sentinel", isSentinelMedia,
+		"media_count", len(media),
+	)
+
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgAnnotateResponse{}, nil
+}
+
 // updateProfileCore is a helper that loads, updates, validates, and persists core profile data only.
 // Lists (EnabledAgents, etc.) are stored separately and should be updated via keeper methods.
 func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn func(*types.ProfileCore) error) error {

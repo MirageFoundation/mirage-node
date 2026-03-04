@@ -4134,6 +4134,34 @@ function ViewPostView({ state, updatePost }) {
                                                 );
                                             })()}
 
+                                            {/* Agent annotation appendices */}
+                                            {!isCollapsed && post.appendices && post.appendices.length > 0 && (
+                                                <div style={{
+                                                    margin: '0.5rem 0',
+                                                    padding: '0.5rem 0.75rem',
+                                                    borderLeft: `3px solid ${theme.colors?.accent || '#6366f1'}`,
+                                                    background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
+                                                    borderRadius: '0 6px 6px 0',
+                                                    fontSize: '0.9em',
+                                                }}>
+                                                    {post.appendices.map((a, idx) => (
+                                                        <div key={idx} style={{ marginBottom: idx < post.appendices.length - 1 ? '0.5rem' : 0 }}>
+                                                            <MarkdownRenderer text={a.text} />
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                            {!isCollapsed && post.agent_edited && (
+                                                <div style={{
+                                                    fontSize: '0.75em',
+                                                    opacity: 0.6,
+                                                    marginTop: '0.25rem',
+                                                    fontStyle: 'italic',
+                                                }}>
+                                                    modified by agent
+                                                </div>
+                                            )}
+
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (
                                                 <>

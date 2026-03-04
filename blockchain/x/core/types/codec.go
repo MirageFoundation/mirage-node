@@ -32,6 +32,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgAward{},
 		// Profile
 		&MsgSetBiography{},
+		// Agent overlays
+		&MsgAnnotate{},
 	}
 	registry.RegisterImplementations((*sdk.Msg)(nil), msgTypes...)
 
@@ -55,6 +57,8 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgAwardResponse{},
 		// Profile
 		&MsgSetBiographyResponse{},
+		// Agent overlays
+		&MsgAnnotateResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
 

@@ -166,6 +166,35 @@ def canon_base_edit(
     return bytes(out)
 
 
+def canon_base_annotate(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: list[str] | None = None,
+    appendix: str = "",
+) -> bytes:
+    out = bytearray(_prefix("MsgAnnotate"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(101, topic or "")
+    out += _enc_str(102, title)
+    out += _enc_str(103, content)
+    out += _enc_str(104, tag)
+    out += _enc_str(105, override)
+    for m in media or []:
+        out += _enc_str(106, m)
+    out += _enc_str(107, appendix)
+    return bytes(out)
+
+
 def canon_base_vote(
     pubkey: bytes,
     last_block_hash: bytes,

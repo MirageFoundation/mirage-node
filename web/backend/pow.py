@@ -130,6 +130,34 @@ def canon_base_edit(
     )
 
 
+def canon_base_annotate(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: list[str] | None = None,
+    appendix: str = "",
+) -> bytes:
+    return canon_shared.canon_base_annotate(
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        topic,
+        title,
+        content,
+        tag,
+        override,
+        media=media,
+        appendix=appendix,
+    )
+
+
 def canon_base_vote(
     pub_dec: bytes,
     last_block_hash: str,
@@ -526,6 +554,7 @@ __all__ = [
     "canon_base_set_biography",
     "canon_base_post",
     "canon_base_edit",
+    "canon_base_annotate",
     "canon_base_vote",
     "canon_base_enable_agent",
     "canon_base_disable_agent",
