@@ -21,11 +21,9 @@ import random
 import shutil
 import string
 import sys
-import threading
 import time
 import tomllib
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -142,7 +140,8 @@ _SIMULATE_MODE_LOGGED = False
 # Per-pubkey tx/gas tracking for the end-of-run cost summary.
 _TX_STATS: dict[str, dict] = {}  # hex(pubkey) -> {"attempted", "paid", "gas_total", "fee_total"}
 _FEE_PAYER_STATS: dict[str, dict] = {}  # fee_payer_addr -> {"attempted", "paid", "gas_total", "fee_total"}
-_TX_STATS_LOCK = threading.Lock()
+
+_MIN_GAS_PRICE_CACHE: Optional[float] = None
 
 
 def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
@@ -180,21 +179,18 @@ class TestResult:
 
 
 RESULTS: list[TestResult] = []
-_RESULTS_LOCK = threading.Lock()
 
 
 def _pass(name: str, **details) -> TestResult:
     r = TestResult(name=name, passed=True, details=details)
-    with _RESULTS_LOCK:
-        RESULTS.append(r)
+    RESULTS.append(r)
     print(f"  {_COLOR_GREEN}PASS{_COLOR_RESET}  {name}")
     return r
 
 
 def _fail(name: str, error: str = "", **details) -> TestResult:
     r = TestResult(name=name, passed=False, error=error, details=details)
-    with _RESULTS_LOCK:
-        RESULTS.append(r)
+    RESULTS.append(r)
     err = f" — {error}" if error else ""
     print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name}{err}")
     return r
@@ -209,6 +205,9 @@ def _rand_hex(n: int) -> str:
 
 
 def _min_gas_price_umirage() -> float:
+    global _MIN_GAS_PRICE_CACHE
+    if _MIN_GAS_PRICE_CACHE is not None:
+        return _MIN_GAS_PRICE_CACHE
     home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
     path = os.path.join(home, "config", "app.toml")
     if not os.path.isfile(path):
@@ -221,7 +220,8 @@ def _min_gas_price_umirage() -> float:
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     for p in parts:
         if p.endswith("umirage"):
-            return float(p[:-7])
+            _MIN_GAS_PRICE_CACHE = float(p[:-7])
+            return _MIN_GAS_PRICE_CACHE
     raise RuntimeError("minimum-gas-prices must include umirage")
 
 
@@ -611,19 +611,18 @@ def _submit_tx(
     tx_hash, check_code, check_log = _broadcast_tx_sync(tx_bytes)
     pk_hex = signer_pubkey.hex()
     fp_key = str(fee_payer or "")
-    with _TX_STATS_LOCK:
-        stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-        stats["attempted"] += 1
-        if check_code == 0:
-            stats["paid"] += 1
-            stats["gas_total"] += int(gas_limit)
-            stats["fee_total"] += actual_fee
-        fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-        fp_stats["attempted"] += 1
-        if check_code == 0:
-            fp_stats["paid"] += 1
-            fp_stats["gas_total"] += int(gas_limit)
-            fp_stats["fee_total"] += actual_fee
+    stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+    stats["attempted"] += 1
+    if check_code == 0:
+        stats["paid"] += 1
+        stats["gas_total"] += int(gas_limit)
+        stats["fee_total"] += actual_fee
+    fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+    fp_stats["attempted"] += 1
+    if check_code == 0:
+        fp_stats["paid"] += 1
+        fp_stats["gas_total"] += int(gas_limit)
+        fp_stats["fee_total"] += actual_fee
     if not wait_deliver or check_code != 0:
         return tx_hash, check_code, check_log, None, None
     deliver_code, deliver_log = _wait_for_tx_result(tx_hash)
@@ -4156,21 +4155,6 @@ ALL_CATEGORIES = {
     "biography": test_biography,
     "annotate_chain": test_annotate_chain,
 }
-STATELESS_CATEGORIES = {
-    "authority",
-    "fee",
-    "staking",
-    "malicious_inputs",
-    "tier_enforcement",
-    "governance",
-    "upgrade_validation",
-    "relay_sig",
-    "pow",
-    "msg_format",
-    "direct_bank",
-    "biography",
-    "annotate_chain",
-}
 
 
 def _query_balance_umirage(addr: str) -> int:
@@ -4198,10 +4182,10 @@ def _query_balance_umirage(addr: str) -> int:
     for b in data.get("balances", []):
         if b.get("denom") == "umirage":
             return int(b.get("amount", 0) or 0)
-    raise RuntimeError(f"umirage balance missing for addr={addr}")
+    return 0
 
 
-def _print_gas_summary(backend: str) -> None:
+def _print_gas_summary() -> None:
     """Print fee payer stats (validator gas paid) and reserve spend stats."""
     if _FEE_PAYER_STATS:
         rows: list[tuple[str, int, int, int, int]] = []
@@ -4240,12 +4224,15 @@ def _print_gas_summary(backend: str) -> None:
             f"{grand_fee_m:>11,.2f} M  {grand_avg_m:>9,.2f} M"
         )
         print(f"{'─' * 86}")
-        print(f"  (Fees are from tx fee amounts; gas limit totals are for paid txs)")
+        print(f"  (Fees = gas_limit × min_gas_price, i.e. max charged — actual gas_used may be lower)")
+        print(f"  (Only accepted txs (CheckTx code=0) are counted in Paid/Gas/Fee columns)")
 
     if not WALLETS:
-        raise RuntimeError("wallets not initialized for reserve spend summary")
+        print(f"{_COLOR_RED}Wallet reserve summary skipped: wallets not initialized{_COLOR_RESET}")
+        return
     if not tb.FAUCET_AMOUNTS:
-        raise RuntimeError("missing faucet amounts for reserve spend summary")
+        print(f"{_COLOR_RED}Wallet reserve summary skipped: faucet amounts missing{_COLOR_RESET}")
+        return
 
     print(f"\n{'─' * 86}")
     print(f"{_COLOR_BOLD}Wallet Reserve Spend Summary{_COLOR_RESET}")
@@ -4372,21 +4359,10 @@ def main() -> int:
         except Exception as e:
             _fail(f"{name}.UNEXPECTED_ERROR", str(e))
 
-    parallel_names = [name for name in to_run if name in STATELESS_CATEGORIES]
-    serial_names = [name for name in to_run if name not in STATELESS_CATEGORIES]
-    if parallel_names:
-        _debug(f"parallel categories: {', '.join(parallel_names)}")
-        if len(parallel_names) == 1:
-            name = parallel_names[0]
-            _run_category(name, to_run[name])
-        else:
-            with ThreadPoolExecutor(max_workers=len(parallel_names)) as pool:
-                futures = {pool.submit(_run_category, name, to_run[name]): name for name in parallel_names}
-                for fut in as_completed(futures):
-                    fut.result()
-    if serial_names:
-        _debug(f"sequential categories: {', '.join(serial_names)}")
-        for name in serial_names:
+    run_names = list(to_run.keys())
+    if run_names:
+        _debug(f"sequential categories: {', '.join(run_names)}")
+        for name in run_names:
             _run_category(name, to_run[name])
 
     passed = sum(1 for r in RESULTS if r.passed)
@@ -4394,7 +4370,10 @@ def main() -> int:
     total = len(RESULTS)
 
     # ── Gas cost summary per wallet ──────────────────────────────
-    _print_gas_summary(backend)
+    try:
+        _print_gas_summary()
+    except Exception as e:
+        print(f"\n{_COLOR_RED}Gas summary failed: {e}{_COLOR_RESET}")
 
     print(f"\n{'=' * 60}")
     if failed:

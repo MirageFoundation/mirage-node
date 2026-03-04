@@ -6249,14 +6249,12 @@ def _parse_cli_json(out: str) -> dict:
 
 
 def _get_tx_fee_umirage(tx_hash: str) -> int:
-    """Return the fee (umirage) paid by a tx hash."""
-    miraged = _miraged_cmd()
-    qcode, qout = _docker_exec(
-        f"{miraged} q tx {tx_hash} --home /root/.mirage/node --node tcp://127.0.0.1:26657 -o json"
-    )
-    if qcode != 0 or not qout:
-        raise RuntimeError(f"tx query failed: hash={tx_hash} exit={qcode} out={str(qout)[:200]}")
-    data = _parse_cli_json(qout)
+    """Return the fee (umirage) paid by a tx hash via REST API."""
+    url = f"http://127.0.0.1:1317/cosmos/tx/v1beta1/txs/{tx_hash.upper()}"
+    r = requests.get(url, timeout=5)
+    if r.status_code != 200:
+        raise RuntimeError(f"tx query failed: hash={tx_hash} status={r.status_code}")
+    data = r.json()
     fee = ((data.get("tx") or {}).get("auth_info") or {}).get("fee") or {}
     for c in fee.get("amount", []):
         if c.get("denom") == "umirage":
@@ -6266,45 +6264,52 @@ def _get_tx_fee_umirage(tx_hash: str) -> int:
 
 def _query_balance_umirage(addr: str) -> int:
     """Query on-chain spendable umirage balance for an address."""
-    try:
-        miraged = _miraged_cmd()
-        qcode, qout = _docker_exec(
-            f"{miraged} q bank balances {addr} --home /root/.mirage/node "
-            f"--node tcp://127.0.0.1:26657 -o json"
-        )
-    except Exception:
-        qcode, qout = -1, ""
+    miraged = _miraged_cmd()
+    qcode, qout = _docker_exec(
+        f"{miraged} q bank balances {addr} --home /root/.mirage/node " f"--node tcp://127.0.0.1:26657 -o json"
+    )
     if qcode != 0 or not qout:
         raise RuntimeError(f"balances query failed: addr={addr} exit={qcode} out={str(qout)[:200]}")
     data = _parse_cli_json(qout)
-    bals = data.get("balances", [])
-    for b in bals:
+    for b in data.get("balances", []):
         if b.get("denom") == "umirage":
             return int(b.get("amount", 0) or 0)
-    raise RuntimeError(f"umirage balance missing for addr={addr}")
+    return 0
 
 
 def _print_validator_fee_summary() -> None:
-    """Print validator gas fees based on tx fee amounts."""
+    """Print validator gas fees based on tx fee amounts (queried via REST)."""
     if not _TX_HASHES:
         return
-    total_fee = 0
-    for txh in _TX_HASHES:
-        fee = _get_tx_fee_umirage(txh)
-        total_fee += fee
 
-    avg_fee = total_fee // len(_TX_HASHES) if _TX_HASHES else 0
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    fees: list[int] = []
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_get_tx_fee_umirage, txh): txh for txh in _TX_HASHES}
+        for fut in as_completed(futures):
+            try:
+                fees.append(fut.result())
+            except Exception as e:
+                if len(errors) < 3:
+                    errors.append(str(e))
+
+    total_fee = sum(fees)
+    avg_fee = total_fee // len(fees) if fees else 0
     total_fee_m = total_fee / 1_000_000
     avg_fee_m = avg_fee / 1_000_000
 
     print(f"\n{'─' * 74}")
     print(f"{_COLOR_BOLD}Validator Gas Fee Summary{_COLOR_RESET}")
     print(f"{'─' * 74}")
-    print(f"  TXs: {len(_TX_HASHES):>6}")
+    print(f"  TXs: {len(fees):>6} (errors: {len(_TX_HASHES) - len(fees):>2})")
     print(f"  Total Fee: {total_fee_m:,.2f} MIRAGE")
     print(f"  Avg Fee / TX: {avg_fee_m:,.4f} MIRAGE")
     print(f"{'─' * 74}")
-    print(f"  (Fees are from tx auth_info.fee.amount)")
+    print(f"  (Fees = gas_limit × min_gas_price from tx auth_info)")
+    if errors:
+        print(f"  (Sample fee errors: {errors})")
 
 
 def _print_wallet_stats(backend: str) -> None:
@@ -6460,8 +6465,14 @@ def main() -> int:
         print(f"{_COLOR_GREEN}{_COLOR_BOLD}RESULT: {passed}/{total} passed, ALL OK{_COLOR_RESET}")
 
     # ── Gas / spend stats ─────────────────────────────────────────
-    _print_validator_fee_summary()
-    _print_wallet_stats(backend)
+    try:
+        _print_validator_fee_summary()
+    except Exception as e:
+        print(f"\n{_COLOR_RED}Validator fee summary failed: {e}{_COLOR_RESET}")
+    try:
+        _print_wallet_stats(backend)
+    except Exception as e:
+        print(f"\n{_COLOR_RED}Wallet stats failed: {e}{_COLOR_RESET}")
 
     return 1 if failed else 0
 
