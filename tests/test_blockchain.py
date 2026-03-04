@@ -46,7 +46,7 @@ REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from shared.client import check_pow_target, compute_pow, get_status, sign_canonical
+from shared.client import _request_with_retries, check_pow_target, compute_pow, get_status, sign_canonical
 from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
@@ -249,7 +249,7 @@ def _get_grpc_channel():
 
 def _get_validator_account_address(backend: str) -> str:
     url = f"{backend}/api/get_node_config"
-    resp = requests.get(url, timeout=10).json()
+    resp = _request_with_retries("GET", url, timeout=10).json()
     addr = str(resp.get("validator_account_address", "")).strip()
     if not addr:
         raise RuntimeError("validator_account_address missing from /api/get_node_config")
@@ -336,7 +336,7 @@ def _get_pow_params(backend: str, address: str | None = None) -> tuple[str, int,
 
 
 def _get_profile_full(backend: str, address: str) -> dict:
-    r = requests.get(f"{backend}/api/get_profile", params={"address": address}, timeout=10)
+    r = _request_with_retries("GET", f"{backend}/api/get_profile", params={"address": address}, timeout=10)
     r.raise_for_status()
     return r.json() or {}
 
@@ -1614,7 +1614,7 @@ def test_staking(backend: str) -> None:
     ts = _now_ms()
     fee_payer = _VALIDATOR_ADDR or ""
 
-    conf = requests.get(f"{backend}/api/get_node_config", timeout=10).json()
+    conf = _request_with_retries("GET", f"{backend}/api/get_node_config", timeout=10).json()
     valoper = str(conf.get("validator_operator_address", "")).strip()
     if not valoper:
         _fail("staking.get_valoper", "validator_operator_address missing")
@@ -2340,28 +2340,28 @@ def test_follow_limits(backend: str) -> None:
     _debug(f"free-tier max_followed_users={max_followed_users}")
     fill_ok = True
     followed_user_targets: list[str] = []
-    for i in range(max_followed_users):
+    chunk_size = 25
+    for start in range(0, max_followed_users, chunk_size):
+        batch_count = min(chunk_size, max_followed_users - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        if i > 0 and i % 10 == 0:
-            print(f"    [{i}/{max_followed_users}] followed users…")
-        target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        followed_user_targets.append(target_addr.lower())
-        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs: list[tuple[object, str]] = []
+        for i in range(batch_count):
+            target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            followed_user_targets.append(target_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.user_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.user_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
+    if fill_ok:
         _pass(f"follow.user_fill ({max_followed_users} followed)")
 
     if fill_ok:
@@ -2386,28 +2386,27 @@ def test_follow_limits(backend: str) -> None:
     _debug(f"free-tier max_followed_topics={max_followed_topics}")
     fill_ok = True
     followed_topic_targets: list[str] = []
-    for i in range(max_followed_topics):
+    for start in range(0, max_followed_topics, chunk_size):
+        batch_count = min(chunk_size, max_followed_topics - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        if i > 0 and i % 10 == 0:
-            print(f"    [{i}/{max_followed_topics}] followed topics…")
-        topic = f"ft{_rand_str(4)}{i}"
-        followed_topic_targets.append(topic)
-        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowTopic")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            topic = f"ft{_rand_str(4)}{start + i}"
+            followed_topic_targets.append(topic)
+            ts = ts_base + i
+            base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgFollowTopic"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.topic_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
+    if fill_ok:
         _pass(f"follow.topic_fill ({max_followed_topics} followed)")
 
     if fill_ok:
@@ -2432,26 +2431,27 @@ def test_follow_limits(backend: str) -> None:
     _debug(f"free-tier max_enabled_agents={max_enabled_agents}")
     fill_ok = True
     enabled_agent_targets: list[str] = []
-    for i in range(max_enabled_agents):
+    for start in range(0, max_enabled_agents, chunk_size):
+        batch_count = min(chunk_size, max_enabled_agents - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        enabled_agent_targets.append(agent_addr.lower())
-        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgEnableAgent")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            enabled_agent_targets.append(agent_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgEnableAgent"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.agent_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.agent_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
+    if fill_ok:
         _pass(f"follow.agent_fill ({max_enabled_agents} enabled)")
 
     if fill_ok:
@@ -3292,25 +3292,29 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     # Fill blocked_users to max + 2 (deque should keep only the newest max)
     blocked_targets: list[str] = []
     total_to_block = max_blocked_users + 2
-    for i in range(total_to_block):
+    chunk_size = 25
+    block_user_ok = True
+    for start in range(0, total_to_block, chunk_size):
+        batch_count = min(chunk_size, total_to_block - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        blocked_targets.append(target_addr.lower())
-        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs: list[tuple[object, str]] = []
+        for i in range(batch_count):
+            target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            blocked_targets.append(target_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockUser"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("hardcap.blocked_user_deque_fill", f"i={i} ccode={ccode} dcode={dcode}")
+            _fail("hardcap.blocked_user_deque_fill", f"chunk_start={start} ccode={ccode} dcode={dcode}")
+            block_user_ok = False
             break
-    else:
+    if block_user_ok:
         _pass(f"hardcap.blocked_user_deque_fill ({total_to_block} blocked, no rejection)")
 
     profile = _get_chain_profile(bw_addr)
@@ -3324,48 +3328,54 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
     blocked_post_targets: list[str] = []
     total_to_block_posts = max_blocked_posts + 2
-    for i in range(total_to_block_posts):
+    block_post_ok = True
+    for start in range(0, total_to_block_posts, chunk_size):
+        batch_count = min(chunk_size, total_to_block_posts - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        fake_hash = _rand_hex(64)
-        blocked_post_targets.append(fake_hash.lower())
-        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockPost")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            fake_hash = _rand_hex(64)
+            blocked_post_targets.append(fake_hash.lower())
+            ts = ts_base + i
+            base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockPost"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("hardcap.blocked_post_deque_fill", f"i={i}")
+            _fail("hardcap.blocked_post_deque_fill", f"chunk_start={start}")
+            block_post_ok = False
             break
-    else:
+    if block_post_ok:
         _pass(f"hardcap.blocked_post_deque_fill ({total_to_block_posts} blocked, no rejection)")
 
     # ── 13.3 blocked_topics deque ──
     max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
     total_to_block_topics = max_blocked_topics + 2
-    for i in range(total_to_block_topics):
+    block_topic_ok = True
+    for start in range(0, total_to_block_topics, chunk_size):
+        batch_count = min(chunk_size, total_to_block_topics - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
-        ts = _now_ms()
-        topic = f"bt{_rand_str(4)}{i}"
-        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgBlockTopic")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            bw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            topic = f"bt{_rand_str(4)}{start + i}"
+            ts = ts_base + i
+            base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockTopic"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = _simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("hardcap.blocked_topic_deque_fill", f"i={i}")
+            _fail("hardcap.blocked_topic_deque_fill", f"chunk_start={start}")
+            block_topic_ok = False
             break
-    else:
+    if block_topic_ok:
         _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
 
     # ── 13.4 Enable agent then disable to verify recovery ──
@@ -3914,6 +3924,12 @@ STATELESS_CATEGORIES = {
     "tier_enforcement",
     "governance",
     "upgrade_validation",
+    "relay_sig",
+    "pow",
+    "msg_format",
+    "direct_bank",
+    "biography",
+    "annotate_chain",
 }
 
 
@@ -3953,7 +3969,7 @@ def main() -> int:
 
     # ── Verify connectivity ───────────────────────────────────────
     try:
-        code = requests.get(f"{backend}/api/get_parameters", timeout=10).status_code
+        code = _request_with_retries("GET", f"{backend}/api/get_parameters", timeout=10).status_code
         if code != 200:
             print(f"\n{_COLOR_RED}Cannot reach backend at {backend} (code={code}){_COLOR_RESET}")
             return 1
