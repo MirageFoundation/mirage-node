@@ -758,7 +758,7 @@ def setup_test_wallets(backend: str) -> bool:
     }
     for name, bio in AGENT_BIOS.items():
         w = WALLETS[name]
-        resp = _do_set_biography(backend, w, bio)
+        resp = _do_set_biography(backend, w, bio, skip_pow=True)
         txh = str(resp.get("tx_hash", "")).lower()
         if txh:
             print(f"  Biography {name}: set ({len(bio)} chars, tx: {txh[:16]}...)")
