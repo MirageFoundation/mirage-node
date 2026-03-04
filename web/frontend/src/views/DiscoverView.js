@@ -353,6 +353,7 @@ export default function DiscoverView({ state }) {
                                                                         : 'primary'
                                                             }
                                                             size="pill"
+                                                            minWidth="follow"
                                                             disabled={isInProgress}
                                                             loading={isInProgress}
                                                             onMouseEnter={() => setHoverTopic(topicLower)}
@@ -400,6 +401,7 @@ export default function DiscoverView({ state }) {
                                                                                 : 'primary'
                                                                     }
                                                                     size="pill"
+                                                                    minWidth="follow"
                                                                     disabled={isInProgress}
                                                                     loading={isInProgress}
                                                                     onMouseEnter={() => setHoverTopic(topicLower)}

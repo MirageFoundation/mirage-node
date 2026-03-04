@@ -5159,10 +5159,10 @@ def test_tier_config_api(backend: str):
 
     # Agent tier (index 2)
     agent = tiers[2]
-    if int(agent.get("period_fee", -1)) == 200_000_000_000:
-        _pass("tierapi.agent_period_fee_200B")
+    if int(agent.get("period_fee", -1)) == 500_000_000_000:
+        _pass("tierapi.agent_period_fee_500B")
     else:
-        _fail("tierapi.agent_period_fee_200B", f"got={agent.get('period_fee')}")
+        _fail("tierapi.agent_period_fee_500B", f"got={agent.get('period_fee')}")
 
     if agent.get("can_be_agent", False):
         _pass("tierapi.agent_can_be_agent_true")

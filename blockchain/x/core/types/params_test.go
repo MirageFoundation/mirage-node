@@ -21,7 +21,7 @@ func TestDefaultTiers(t *testing.T) {
 	require.False(t, tiers[1].CanBeAgent)
 
 	// Agent tier
-	require.Equal(t, uint64(200_000_000_000), tiers[2].PeriodFee)
+	require.Equal(t, uint64(500_000_000_000), tiers[2].PeriodFee)
 	require.Equal(t, uint64(500), tiers[2].MaxBlockedTopics)
 	require.True(t, tiers[2].CanBeAgent)
 }

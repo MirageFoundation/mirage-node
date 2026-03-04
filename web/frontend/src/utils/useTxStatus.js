@@ -57,12 +57,10 @@ export function useTxStatus() {
         }
 
         if (status.status === 'submitting') {
-            // Subscribers have instant tx, no need to show seconds
-            return isSubscriber ? 'Submitting...' : `Submitting (${status.elapsed.toFixed(1)}s)`;
+            return 'Submitting...';
         }
 
-        // Subscribers don't do PoW
-        return isSubscriber ? 'Processing...' : `Solving PoW (${status.elapsed.toFixed(1)}s)`;
+        return 'Processing...';
     }, [status]);
 
     return { status, formatStatusForPosition, getMyQueuePosition, isActive: status.isActive };

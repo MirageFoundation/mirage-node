@@ -137,7 +137,7 @@ EXPECTED_TIERS = [
     {
         "level": 10,
         "name": "Agent",
-        "period_fee": 200_000_000_000,
+        "period_fee": 500_000_000_000,
         "max_enabled_agents": 50,
         "max_followed_users": 500,
         "max_followed_topics": 500,
@@ -283,8 +283,8 @@ def check_core_params() -> None:
         ok(f"params.mint_dynamic_split = {mint_split}")
 
     reserve_pct = float(params.get("subscription_reserve_percent", "0"))
-    if abs(reserve_pct - 0.80) >= 0.01:
-        fail(f"params.subscription_reserve_percent = {reserve_pct} (want 0.80)")
+    if abs(reserve_pct - 0.95) >= 0.01:
+        fail(f"params.subscription_reserve_percent = {reserve_pct} (want 0.95)")
     else:
         ok(f"params.subscription_reserve_percent = {reserve_pct}")
 

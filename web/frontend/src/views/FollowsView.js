@@ -254,6 +254,7 @@ export default function FollowsView({ state }) {
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"
+                                                                minWidth="5.5rem"
                                                                 disabled={isPending}
                                                                 loading={isPending}
                                                                 onClick={(e) => handleUnfollowTopic(e, topic)}
@@ -299,6 +300,7 @@ export default function FollowsView({ state }) {
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"
+                                                                minWidth="5.5rem"
                                                                 disabled={isPending}
                                                                 loading={isPending}
                                                                 onClick={(e) => handleUnfollowUser(e, userAddr)}

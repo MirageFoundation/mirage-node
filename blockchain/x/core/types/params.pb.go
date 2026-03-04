@@ -6,12 +6,13 @@ package types
 import (
 	encoding_binary "encoding/binary"
 	fmt "fmt"
-	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
-	_ "github.com/cosmos/gogoproto/gogoproto"
-	proto "github.com/cosmos/gogoproto/proto"
 	io "io"
 	math "math"
 	math_bits "math/bits"
+
+	_ "github.com/cosmos/cosmos-sdk/types/tx/amino"
+	_ "github.com/cosmos/gogoproto/gogoproto"
+	proto "github.com/cosmos/gogoproto/proto"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -239,7 +240,7 @@ type Params struct {
 	// tiers defines the tier configurations; index 0 = free, 1 = subscriber, 2 = agent
 	Tiers []*TierConfig `protobuf:"bytes,41,rep,name=tiers,proto3" json:"tiers,omitempty"`
 	// subscription_reserve_percent is the fraction of period fee escrowed as gas reserve [0.0, 1.0]
-	// Default: 0.80 (80% of period fee goes to reserve, 20% burned)
+	// Default: 0.95 (95% of period fee goes to reserve, 5% burned)
 	SubscriptionReservePercent float64 `protobuf:"fixed64,42,opt,name=subscription_reserve_percent,json=subscriptionReservePercent,proto3" json:"subscription_reserve_percent,omitempty"`
 	// relay_min_gas_price is the minimum gas price for relay fee calculation (in umirage per gas unit)
 	// Default: 5000 (5000 umirage per gas). Set to match node's minimum-gas-prices.

@@ -403,15 +403,11 @@ function ChangeUsernameView({ state }) {
                                                     fullWidth
                                                     loading={submitting}
                                                 >
-                                                    {userLevel >= 1
-                                                        ? (buttonStatus === "verifying" ? 'Verifying...' :
-                                                            buttonStatus === "submitting" || buttonStatus === "preparing" || buttonStatus === "checking" ? 'Submitting...' :
-                                                                'Change Username')
-                                                        : (buttonStatus === "checking" ? `Checking... (${elapsedTime.toFixed(1)}s)` :
-                                                            buttonStatus === "preparing" ? `Preparing... (${elapsedTime.toFixed(1)}s)` :
-                                                                buttonStatus === "submitting" ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                                    buttonStatus === "verifying" ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
-                                                                        'Change Username')}
+                                                    {buttonStatus === "checking" ? 'Checking...' :
+                                                        buttonStatus === "preparing" ? 'Preparing...' :
+                                                            buttonStatus === "submitting" ? 'Submitting...' :
+                                                                buttonStatus === "verifying" ? 'Verifying...' :
+                                                                    'Change Username'}
                                                 </Button>
                                             </ButtonWrapper>
 

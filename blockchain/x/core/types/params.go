@@ -80,9 +80,9 @@ func DefaultTiers() []*TierConfig {
 			CanHaveBanner:     true,
 			CanHaveFlair:      true,
 		},
-		// Index 2 — Level 10: Agent (200B umirage)
+		// Index 2 — Level 10: Agent (500B umirage)
 		{
-			PeriodFee:         200_000_000_000,
+			PeriodFee:         500_000_000_000,
 			MaxEnabledAgents:  50,
 			MaxFollowedUsers:  500,
 			MaxFollowedTopics: 500,
@@ -154,7 +154,7 @@ func DefaultParams() Params {
 		Tiers: DefaultTiers(),
 
 		// Fraction of period fee escrowed as gas reserve [0,1] (remainder burned)
-		SubscriptionReservePercent: 0.80,
+		SubscriptionReservePercent: 0.95,
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)

@@ -5220,9 +5220,9 @@ class TransactionHandler {
             const intervalId = setInterval(() => {
                 taken += 0.1;
                 if (this.totalTransactions === 0)
-                    updateNotification(`Performing PoW for single tx (${taken.toFixed(1)} secs)`);
+                    updateNotification(`Processing transaction (${taken.toFixed(1)}s)`);
                 else
-                    updateNotification(`Performing PoW for tx ${this.processedTransactions}/${this.totalTransactions} (${taken.toFixed(1)} secs)`);
+                    updateNotification(`Processing tx ${this.processedTransactions}/${this.totalTransactions} (${taken.toFixed(1)}s)`);
             }, 100); // Update every second
 
             // 60-second timeout for PoW

@@ -218,10 +218,9 @@ function VoteSection({ state, post, updatePost, showToggle = true, inline = fals
             }));
         }
 
-        // Show toast for PoW progress (only for free users)
         const userLevel = Number(Storage.load('user_level', '0') || 0);
         if (userLevel === 0) {
-            updateNotification("Solving PoW...", 10);
+            updateNotification("Processing...", 10);
         }
 
         // Submit vote to backend

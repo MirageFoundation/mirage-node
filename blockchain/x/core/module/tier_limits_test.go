@@ -767,7 +767,7 @@ func TestDefaultTiersExactValues(t *testing.T) {
 
 	// Agent tier (index 2)
 	agent := tiers[2]
-	require.Equal(t, uint64(200_000_000_000), agent.PeriodFee)
+	require.Equal(t, uint64(500_000_000_000), agent.PeriodFee)
 	require.Equal(t, uint64(50), agent.MaxEnabledAgents)
 	require.Equal(t, uint64(500), agent.MaxFollowedUsers)
 	require.Equal(t, uint64(500), agent.MaxFollowedTopics)
@@ -803,7 +803,7 @@ func TestGetTierConfigValidLevels(t *testing.T) {
 
 	agent := p.GetTierConfig(10)
 	require.NotNil(t, agent)
-	require.Equal(t, uint64(200_000_000_000), agent.PeriodFee)
+	require.Equal(t, uint64(500_000_000_000), agent.PeriodFee)
 	require.True(t, agent.CanBeAgent)
 
 	admin := p.GetTierConfig(100)

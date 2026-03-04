@@ -1376,13 +1376,14 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 			sdkCtx.Logger().Info("v1.16.0: migrated plist_mods -> plist_agents", "count", migrated)
 
-			// Set new tier defaults (Free=0, Subscriber=1, Agent=10)
+			// Set new tier defaults (Free=0, Subscriber=1, Agent=10) and update reserve
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			params.Tiers = coretypes.DefaultTiers()
+			params.SubscriptionReservePercent = 0.95
 			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
 				return nil, fmt.Errorf("failed to set new tier params: %w", err)
 			}
-			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10)")
+			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10), reserve=95%")
 
 			// Migrate existing profile JSON:
 			// 1. Strip is_moderator field

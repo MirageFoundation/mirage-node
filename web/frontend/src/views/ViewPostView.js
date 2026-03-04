@@ -3691,10 +3691,9 @@ function ViewPostView({ state, updatePost }) {
                                     loading={isBusy}
                                 >
                                     {isBusy
-                                        ? (replySubmitStatus[post.post_id] === 'solving' ? `Solving PoW... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                            replySubmitStatus[post.post_id] === 'submitting' ? `Submitting... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                                replySubmitStatus[post.post_id] === 'verifying' ? `Verifying... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                                    `Solving PoW... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)`)
+                                        ? (replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting...' :
+                                            replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying...' :
+                                                'Processing...')
                                         : (isEdit
                                             ? 'Save Edit'
                                             : (replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'))}
@@ -3848,6 +3847,7 @@ function ViewPostView({ state, updatePost }) {
                                                                 : 'primary'
                                                     }
                                                     size="pill"
+                                                    minWidth="follow"
                                                     onMouseEnter={() => setTopicFollowHover(true)}
                                                     onMouseLeave={() => setTopicFollowHover(false)}
                                                     onClick={() => {

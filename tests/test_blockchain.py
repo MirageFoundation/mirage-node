@@ -20,8 +20,10 @@ import os
 import random
 import string
 import sys
+import threading
 import time
 import tomllib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -162,18 +164,21 @@ class TestResult:
 
 
 RESULTS: list[TestResult] = []
+_RESULTS_LOCK = threading.Lock()
 
 
 def _pass(name: str, **details) -> TestResult:
     r = TestResult(name=name, passed=True, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     print(f"  {_COLOR_GREEN}PASS{_COLOR_RESET}  {name}")
     return r
 
 
 def _fail(name: str, error: str = "", **details) -> TestResult:
     r = TestResult(name=name, passed=False, error=error, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     err = f" — {error}" if error else ""
     print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name}{err}")
     return r
@@ -389,7 +394,7 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
     return tx_hash, code, log
 
 
-def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
+def _wait_for_tx_result(tx_hash: str, timeout: float = 5.0) -> tuple[int, str]:
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
     h = tx_hash.strip().lower().removeprefix("0x")
@@ -397,7 +402,7 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
     start = time.time()
     while (time.time() - start) < timeout:
         payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": hash_b64, "prove": False}}
-        resp = requests.post(COMET_RPC_URL, json=payload, timeout=10).json()
+        resp = requests.post(COMET_RPC_URL, json=payload, timeout=5).json()
         if "result" in resp:
             tx_result = (resp.get("result") or {}).get("tx_result") or {}
             code = int(tx_result.get("code", 0) or 0)
@@ -406,10 +411,10 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
         if "error" in resp:
             err = str(resp["error"])
             if "not found" in err.lower():
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
             raise RuntimeError(f"tx query error: {err}")
-        time.sleep(1)
+        time.sleep(0.5)
     raise RuntimeError(f"tx not found after {timeout}s: {tx_hash}")
 
 
@@ -2150,9 +2155,7 @@ def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
 
-    # Top up wallets before the gas-heavy fill loops
     _topup_wallets(backend, ["free", "sub1"])
-    time.sleep(3)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -3090,7 +3093,6 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
 
     _topup_wallets(backend, ["free", "agent1"])
-    time.sleep(3)
 
     fee_payer = _VALIDATOR_ADDR or ""
 
@@ -3441,7 +3443,7 @@ def test_tier_features(backend: str) -> None:
     pf0 = int(tier0.get("period_fee", -1))
     pf1 = int(tier1.get("period_fee", -1))
     pf10 = int(tier10.get("period_fee", -1))
-    if pf0 == 0 and pf1 == 100_000_000_000 and pf10 == 200_000_000_000:
+    if pf0 == 0 and pf1 == 100_000_000_000 and pf10 == 500_000_000_000:
         _pass("tierfeature.period_fees")
     else:
         _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1} pf10={pf10}")
@@ -3692,11 +3694,16 @@ def main() -> int:
     else:
         to_run = ALL_CATEGORIES
 
-    for name, fn in to_run.items():
+    def _run_category(name: str, fn) -> None:
         try:
             fn(backend)
         except Exception as e:
             _fail(f"{name}.UNEXPECTED_ERROR", str(e))
+
+    with ThreadPoolExecutor(max_workers=len(to_run)) as pool:
+        futures = {pool.submit(_run_category, name, fn): name for name, fn in to_run.items()}
+        for fut in as_completed(futures):
+            fut.result()
 
     passed = sum(1 for r in RESULTS if r.passed)
     failed = sum(1 for r in RESULTS if not r.passed)

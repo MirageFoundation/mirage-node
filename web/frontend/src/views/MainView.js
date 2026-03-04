@@ -2692,7 +2692,7 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                                         : 'primary'
                                             }
                                             size="xs"
-                                            minWidth="4.5rem"
+                                            minWidth="5.5rem"
                                             onMouseEnter={() => setTopicFollowHover(true)}
                                             onMouseLeave={() => setTopicFollowHover(false)}
                                             disabled={isTopicInProgress}

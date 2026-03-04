@@ -631,9 +631,9 @@ function CreateAccountView({ state, setCredentials }) {
                                         size="sm"
                                         loading={submitting}
                                     >
-                                        {buttonStatus === "preparing" ? `Preparing... (${elapsedTime.toFixed(1)}s)` :
-                                            buttonStatus === "submitting" ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                buttonStatus === "verifying" ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
+                                        {buttonStatus === "preparing" ? 'Preparing...' :
+                                            buttonStatus === "submitting" ? 'Submitting...' :
+                                                buttonStatus === "verifying" ? 'Verifying...' :
                                                     'Continue'}
                                     </Button>
                                 </ButtonWrapper>

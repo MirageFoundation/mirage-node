@@ -1091,12 +1091,9 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                     mobileFullWidth
                                                 >
                                                     {isSubmitting
-                                                        ? (limits.willPayFee
-                                                            ? (submitStatus === 'verifying' ? 'Verifying...' : 'Submitting...')
-                                                            : (submitStatus === 'solving' ? `Solving PoW... (${elapsedTime.toFixed(1)}s)` :
-                                                                submitStatus === 'submitting' ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                                    submitStatus === 'verifying' ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
-                                                                        `Processing... (${elapsedTime.toFixed(1)}s)`))
+                                                        ? (submitStatus === 'verifying' ? 'Verifying...' :
+                                                            submitStatus === 'submitting' ? 'Submitting...' :
+                                                                'Processing...')
                                                         : (isEditMode ? 'Save Edit' : 'Submit')}
                                                 </Button>
                                             </div>
