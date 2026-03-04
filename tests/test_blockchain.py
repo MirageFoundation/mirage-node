@@ -144,6 +144,10 @@ _TX_STATS: dict[str, dict] = {}  # hex(pubkey) -> {"attempted", "paid", "gas_tot
 _FEE_PAYER_STATS: dict[str, dict] = {}  # fee_payer_addr -> {"attempted", "paid", "gas_total", "fee_total"}
 _TX_STATS_LOCK = threading.Lock()
 
+# Topup transfer tracking so reserve deltas can be adjusted.
+_TOPUP_SENT: dict[str, int] = {}  # wallet_name -> total umirage sent as topup donor
+_TOPUP_RECEIVED: dict[str, int] = {}  # wallet_name -> total umirage received
+
 _MIN_GAS_PRICE_CACHE: Optional[float] = None
 
 
@@ -2402,6 +2406,8 @@ def _topup_wallets(backend: str, names: list[str], amount: int = 1_000_000) -> N
         )
         label = f"{amount / 1_000_000:,.0f} MIRAGE"
         if ccode == 0 and (dcode is None or dcode == 0):
+            _TOPUP_SENT["agent2"] = _TOPUP_SENT.get("agent2", 0) + amount
+            _TOPUP_RECEIVED[name] = _TOPUP_RECEIVED.get(name, 0) + amount
             _pass(f"topup.{name}", extra=label)
         else:
             _fail(
@@ -2415,7 +2421,7 @@ def test_follow_limits(backend: str) -> None:
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
 
     _topup_wallets(backend, ["free"], amount=1_000_000)
-    _topup_wallets(backend, ["sub1"], amount=100_000_000_000)
+    _topup_wallets(backend, ["sub1"], amount=2_000_000_000_000)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -3397,7 +3403,8 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     """Test that follow/enable lists use hard cap while block lists use deque."""
     print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
 
-    _topup_wallets(backend, ["free", "agent1"])
+    _topup_wallets(backend, ["free"], amount=1_000_000)
+    _topup_wallets(backend, ["agent1"], amount=100_000_000_000)
 
     fee_payer = _VALIDATOR_ADDR or ""
 
@@ -4260,7 +4267,7 @@ def _print_gas_summary() -> None:
         )
         print(f"{'─' * 86}")
         print(f"  (Fees = gas_limit × min_gas_price, i.e. max charged — actual gas_used may be lower)")
-        print(f"  (Only successful DeliverTx are counted)")
+        print(f"  (CheckTx-accepted txs; gas charged at CheckTx regardless of DeliverTx outcome)")
 
     if not WALLETS:
         print(f"{_COLOR_RED}Wallet reserve summary skipped: wallets not initialized{_COLOR_RESET}")
@@ -4272,7 +4279,7 @@ def _print_gas_summary() -> None:
     print(f"\n{'─' * 86}")
     print(f"{_COLOR_BOLD}Wallet Reserve Spend (test transactions only){_COLOR_RESET}")
     print(f"{'─' * 86}")
-    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Reserve Start':>14}  {'Reserve End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Adj. Start':>14}  {'End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
     print(hdr)
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
 
@@ -4283,18 +4290,21 @@ def _print_gas_summary() -> None:
             continue
         pk_hex = w.public_key().public_key_bytes.hex()
         stats = _TX_STATS.get(pk_hex, {"attempted": 0})
-        successful = int(stats.get("paid", 0) or 0)
+        tx_count = int(stats.get("paid", 0) or 0)
         reserve_start = int(tb.POST_SETUP_BALANCES.get(name, 0) or 0)
         reserve_end = _query_balance_umirage(str(w.address()))
-        spent = max(0, reserve_start - reserve_end)
+        topup_in = _TOPUP_RECEIVED.get(name, 0)
+        topup_out = _TOPUP_SENT.get(name, 0)
+        adjusted_start = reserve_start + topup_in - topup_out
+        spent = max(0, adjusted_start - reserve_end)
         spent_m = spent / 1_000_000
-        avg_m = (spent_m / successful) if successful else 0
-        avg_str = f"{avg_m:>11,.2f} M" if successful else f"{'—':>14}"
+        avg_m = (spent_m / tx_count) if tx_count else 0
+        avg_str = f"{avg_m:>11,.2f} M" if tx_count else f"{'—':>14}"
         print(
-            f"  {name:<10} {successful:>5}  {reserve_start / 1_000_000:>11,.1f} M  "
+            f"  {name:<10} {tx_count:>5}  {adjusted_start / 1_000_000:>11,.1f} M  "
             f"{reserve_end / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
         )
-        grand_tx += successful
+        grand_tx += tx_count
         grand_spent += spent
 
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
@@ -4303,8 +4313,8 @@ def _print_gas_summary() -> None:
     grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
     print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  {'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
     print(f"{'─' * 86}")
-    print(f"  (Reserve = balance after subscription, before tests; gas paid by validator)")
-    print(f"  (TX count = successful DeliverTx only; excludes topup.* transfers)")
+    print(f"  (Adjusted Start = post-setup balance + topup received − topup sent)")
+    print(f"  (TX count = CheckTx-accepted; excludes topup.* transfers; gas paid by validator)")
 
 
 def main() -> int:
@@ -4392,6 +4402,8 @@ def main() -> int:
     # Reset tx stats so setup transactions don't appear in the summary.
     _TX_STATS.clear()
     _FEE_PAYER_STATS.clear()
+    _TOPUP_SENT.clear()
+    _TOPUP_RECEIVED.clear()
 
     def _run_category(name: str, fn) -> None:
         try:

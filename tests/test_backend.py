@@ -97,7 +97,6 @@ FAUCET_AMOUNTS: dict[str, int] = {}  # set during setup — umirage fauceted per
 POST_SETUP_BALANCES: dict[str, int] = {}  # balance after subscriptions+bios, before tests start
 
 # Per-pubkey tx tracking for the end-of-run cost summary.
-_TX_COUNTS: dict[str, int] = {}  # base64(pubkey) -> number of relay txs submitted
 _TX_HASHES: list[str] = []
 _TX_HASHES_SEEN: set[str] = set()
 _TX_HASH_OWNER: dict[str, str] = {}  # tx_hash -> base64(pubkey)
@@ -232,7 +231,6 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
             txh = str(body.get("tx_hash", "") or "").lower()
             if pk_b64 and txh:
                 with _TX_STATS_LOCK:
-                    _TX_COUNTS[pk_b64] = _TX_COUNTS.get(pk_b64, 0) + 1
                     if txh not in _TX_HASHES_SEEN:
                         _TX_HASHES.append(txh)
                         _TX_HASHES_SEEN.add(txh)
@@ -729,7 +727,7 @@ def setup_test_wallets(backend: str) -> bool:
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
             "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 700_000_000_000,  # 500,000 MIRAGE (Agent fee) + 200,000 MIRAGE (topup donor budget)
+            "agent2": 3_000_000_000_000,  # 500,000 MIRAGE (Agent fee) + 2,500,000 MIRAGE (topup donor budget)
         }
     )
     try:
@@ -850,7 +848,6 @@ def setup_test_wallets(backend: str) -> bool:
         print(f"  Reserve {name:4s}: {POST_SETUP_BALANCES[name] / 1_000_000:,.1f} MIRAGE")
 
     # Reset tx counters so setup txs (set_username, upgrade, biography) don't count.
-    _TX_COUNTS.clear()
     _TX_HASHES.clear()
     _TX_HASHES_SEEN.clear()
     _TX_HASH_OWNER.clear()
@@ -5946,7 +5943,8 @@ def test_annotate(backend: str):
     free_addr = str(free.address())
 
     # 1. Create a test post as the free user
-    topic = "test"
+    # Use a unique topic to avoid collisions with topic-blocking tests.
+    topic = f"annot{_rand_str(8)}"
     title = f"Annotate Target {_rand_str(6)}"
     content = f"Original content {_rand_str(20)}"
     txh = _do_post(backend, free, topic, title, content)
@@ -6039,9 +6037,19 @@ def test_annotate(backend: str):
             if root.get("agent_edited"):
                 break
     if not root:
-        _fail(
-            "annotate.overlay_get_comments", f"code={code} (post not in get_comments after {int(INDEX_TIMEOUT_SEC)}s)"
-        )
+        # Probe without viewer address to distinguish "missing post" from
+        # viewer-specific filtering (blocked topics/users/posts).
+        pcode, pdata = _get(f"{backend}/api/get_comments", {"post_id": txh})
+        if pcode == 200 and (pdata or {}).get("root"):
+            _fail(
+                "annotate.overlay_get_comments",
+                f"viewer-filtered root (address={free_addr[:12]}...) after {int(INDEX_TIMEOUT_SEC)}s",
+            )
+        else:
+            _fail(
+                "annotate.overlay_get_comments",
+                f"code={code} (post not in get_comments after {int(INDEX_TIMEOUT_SEC)}s)",
+            )
         return
     if root.get("title") == new_title:
         _pass("annotate.overlay_title_applied")
