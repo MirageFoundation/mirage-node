@@ -608,6 +608,7 @@ def _submit_tx(
     fee_denom: str = "umirage",
     fee_amount: Optional[int] = None,
     wait_deliver: bool = False,
+    include_in_stats: bool = True,
 ) -> tuple[str, int, str, Optional[int], Optional[str]]:
     tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
     if fee_amount is None:
@@ -617,19 +618,20 @@ def _submit_tx(
     tx_hash, check_code, check_log = _broadcast_tx_sync(tx_bytes)
     pk_hex = signer_pubkey.hex()
     fp_key = str(fee_payer or "")
-    with _TX_STATS_LOCK:
-        stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-        stats["attempted"] += 1
-        if check_code == 0:
-            stats["paid"] += 1
-            stats["gas_total"] += int(gas_limit)
-            stats["fee_total"] += actual_fee
-        fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
-        fp_stats["attempted"] += 1
-        if check_code == 0:
-            fp_stats["paid"] += 1
-            fp_stats["gas_total"] += int(gas_limit)
-            fp_stats["fee_total"] += actual_fee
+    if include_in_stats:
+        with _TX_STATS_LOCK:
+            stats = _TX_STATS.setdefault(pk_hex, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+            stats["attempted"] += 1
+            if check_code == 0:
+                stats["paid"] += 1
+                stats["gas_total"] += int(gas_limit)
+                stats["fee_total"] += actual_fee
+            fp_stats = _FEE_PAYER_STATS.setdefault(fp_key, {"attempted": 0, "paid": 0, "gas_total": 0, "fee_total": 0})
+            fp_stats["attempted"] += 1
+            if check_code == 0:
+                fp_stats["paid"] += 1
+                fp_stats["gas_total"] += int(gas_limit)
+                fp_stats["fee_total"] += actual_fee
     if not wait_deliver or check_code != 0:
         return tx_hash, check_code, check_log, None, None
     deliver_code, deliver_log = _wait_for_tx_result(tx_hash)
@@ -2376,6 +2378,14 @@ def _topup_wallets(backend: str, names: list[str], amount: int = 1_000_000) -> N
     donor = WALLETS["agent2"]
     donor_addr = str(donor.address())
     fee_payer = _VALIDATOR_ADDR or ""
+    total_needed = int(amount) * max(0, len(names))
+    donor_bal = _query_balance_umirage(donor_addr)
+    if donor_bal < total_needed:
+        _fail(
+            "topup.donor_balance",
+            f"insufficient donor balance: have={donor_bal} need={total_needed} ({amount / 1_000_000:,.0f} MIRAGE × {len(names)})",
+        )
+        return
     for name in names:
         w = WALLETS[name]
         addr = str(w.address())
@@ -2388,6 +2398,7 @@ def _topup_wallets(backend: str, names: list[str], amount: int = 1_000_000) -> N
             fee_payer,
             donor.public_key().public_key_bytes,
             wait_deliver=True,
+            include_in_stats=False,
         )
         label = f"{amount / 1_000_000:,.0f} MIRAGE"
         if ccode == 0 and (dcode is None or dcode == 0):
@@ -2403,7 +2414,8 @@ def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
 
-    _topup_wallets(backend, ["free", "sub1"])
+    _topup_wallets(backend, ["free"], amount=1_000_000)
+    _topup_wallets(backend, ["sub1"], amount=100_000_000_000)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -4221,47 +4233,46 @@ def _print_gas_summary() -> None:
         print(f"\n{'─' * 86}")
         print(f"{_COLOR_BOLD}Fee Payer (Validator) Gas Summary{_COLOR_RESET}")
         print(f"{'─' * 86}")
-        hdr = f"  {'Fee Payer':<14} {'TXs':>6}  {'Paid':>6}  " f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
+        hdr = f"  {'Fee Payer':<14} {'TXs':>6}  " f"{'Gas Limit':>14}  {'Total Fee':>14}  {'Avg Fee':>12}"
         print(hdr)
-        print(f"  {'':─<14} {'':─>6}  {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+        print(f"  {'':─<14} {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
 
-        grand_tx = grand_paid = grand_gas = grand_fee = 0
+        grand_paid = grand_gas = grand_fee = 0
         for label, attempted, paid, gas_total, fee_total in rows:
             avg_fee = fee_total // paid if paid else 0
             fee_mirage = fee_total / 1_000_000
             avg_fee_mirage = avg_fee / 1_000_000
             print(
-                f"  {label:<14} {attempted:>6}  {paid:>6}  {gas_total:>14,}  "
+                f"  {label:<14} {paid:>6}  {gas_total:>14,}  "
                 f"{fee_mirage:>11,.2f} M  {avg_fee_mirage:>9,.2f} M"
             )
-            grand_tx += attempted
             grand_paid += paid
             grand_gas += gas_total
             grand_fee += fee_total
 
-        print(f"  {'':─<14} {'':─>6}  {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
+        print(f"  {'':─<14} {'':─>6}  {'':─>14}  {'':─>14}  {'':─>12}")
         grand_avg_fee = grand_fee // grand_paid if grand_paid else 0
         grand_fee_m = grand_fee / 1_000_000
         grand_avg_m = grand_avg_fee / 1_000_000
         print(
-            f"  {'TOTAL':<14} {grand_tx:>6}  {grand_paid:>6}  {grand_gas:>14,}  "
+            f"  {'TOTAL':<14} {grand_paid:>6}  {grand_gas:>14,}  "
             f"{grand_fee_m:>11,.2f} M  {grand_avg_m:>9,.2f} M"
         )
         print(f"{'─' * 86}")
         print(f"  (Fees = gas_limit × min_gas_price, i.e. max charged — actual gas_used may be lower)")
-        print(f"  (Only accepted txs (CheckTx code=0) are counted in Paid/Gas/Fee columns)")
+        print(f"  (Only successful DeliverTx are counted)")
 
     if not WALLETS:
         print(f"{_COLOR_RED}Wallet reserve summary skipped: wallets not initialized{_COLOR_RESET}")
         return
-    if not tb.FAUCET_AMOUNTS:
-        print(f"{_COLOR_RED}Wallet reserve summary skipped: faucet amounts missing{_COLOR_RESET}")
+    if not tb.POST_SETUP_BALANCES:
+        print(f"{_COLOR_YELLOW}Wallet reserve summary skipped: no post-setup balance snapshot{_COLOR_RESET}")
         return
 
     print(f"\n{'─' * 86}")
-    print(f"{_COLOR_BOLD}Wallet Reserve Spend Summary{_COLOR_RESET}")
+    print(f"{_COLOR_BOLD}Wallet Reserve Spend (test transactions only){_COLOR_RESET}")
     print(f"{'─' * 86}")
-    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Fauceted':>14}  " f"{'Remaining':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Reserve Start':>14}  {'Reserve End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
     print(hdr)
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
 
@@ -4272,27 +4283,28 @@ def _print_gas_summary() -> None:
             continue
         pk_hex = w.public_key().public_key_bytes.hex()
         stats = _TX_STATS.get(pk_hex, {"attempted": 0})
-        attempted = int(stats.get("attempted", 0) or 0)
-        fauceted = int(tb.FAUCET_AMOUNTS.get(name, 0) or 0)
-        remaining = _query_balance_umirage(str(w.address()))
-        spent = max(0, fauceted - remaining)
+        successful = int(stats.get("paid", 0) or 0)
+        reserve_start = int(tb.POST_SETUP_BALANCES.get(name, 0) or 0)
+        reserve_end = _query_balance_umirage(str(w.address()))
+        spent = max(0, reserve_start - reserve_end)
         spent_m = spent / 1_000_000
-        avg_m = (spent_m / attempted) if attempted else 0
-        avg_str = f"{avg_m:>11,.2f} M" if attempted else f"{'—':>14}"
+        avg_m = (spent_m / successful) if successful else 0
+        avg_str = f"{avg_m:>11,.2f} M" if successful else f"{'—':>14}"
         print(
-            f"  {name:<10} {attempted:>5}  {fauceted / 1_000_000:>11,.1f} M  "
-            f"{remaining / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
+            f"  {name:<10} {successful:>5}  {reserve_start / 1_000_000:>11,.1f} M  "
+            f"{reserve_end / 1_000_000:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
         )
-        grand_tx += attempted
+        grand_tx += successful
         grand_spent += spent
 
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
     grand_spent_m = grand_spent / 1_000_000
     grand_avg_m = (grand_spent_m / grand_tx) if grand_tx else 0
     grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
-    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  " f"{'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
+    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  {'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
     print(f"{'─' * 86}")
-    print(f"  (Spent = Fauceted − Remaining = subscriptions + awards + sends; gas paid by validator)")
+    print(f"  (Reserve = balance after subscription, before tests; gas paid by validator)")
+    print(f"  (TX count = successful DeliverTx only; excludes topup.* transfers)")
 
 
 def main() -> int:
@@ -4376,6 +4388,10 @@ def main() -> int:
         to_run = {c: ALL_CATEGORIES[c] for c in cats}
     else:
         to_run = ALL_CATEGORIES
+
+    # Reset tx stats so setup transactions don't appear in the summary.
+    _TX_STATS.clear()
+    _FEE_PAYER_STATS.clear()
 
     def _run_category(name: str, fn) -> None:
         try:

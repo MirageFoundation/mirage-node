@@ -94,11 +94,13 @@ INDEX_TIMEOUT_SEC = 45.0
 # Populated during setup — all wallets are random, non-deterministic
 WALLETS: dict[str, LocalWallet] = {}  # "free", "sub1", "sub2", "agent1", "agent2"
 FAUCET_AMOUNTS: dict[str, int] = {}  # set during setup — umirage fauceted per wallet
+POST_SETUP_BALANCES: dict[str, int] = {}  # balance after subscriptions+bios, before tests start
 
 # Per-pubkey tx tracking for the end-of-run cost summary.
 _TX_COUNTS: dict[str, int] = {}  # base64(pubkey) -> number of relay txs submitted
 _TX_HASHES: list[str] = []
 _TX_HASHES_SEEN: set[str] = set()
+_TX_HASH_OWNER: dict[str, str] = {}  # tx_hash -> base64(pubkey)
 _TX_STATS_LOCK = threading.Lock()
 
 
@@ -234,6 +236,7 @@ def _post(url: str, payload: dict) -> Tuple[int, dict]:
                     if txh not in _TX_HASHES_SEEN:
                         _TX_HASHES.append(txh)
                         _TX_HASHES_SEEN.add(txh)
+                    _TX_HASH_OWNER[txh] = pk_b64
         return r.status_code, body
 
     return 599, {}
@@ -726,7 +729,7 @@ def setup_test_wallets(backend: str) -> bool:
             "sub1": 100_000_000_000 + sub1_spend_budget,  # exact subscription fee + dynamic test spend budget
             "sub2": 100_000_000_000,  #   100,000 MIRAGE  (exact Subscriber fee)
             "agent1": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
-            "agent2": 500_000_000_000,  # 500,000 MIRAGE  (exact Agent fee)
+            "agent2": 700_000_000_000,  # 500,000 MIRAGE (Agent fee) + 200,000 MIRAGE (topup donor budget)
         }
     )
     try:
@@ -838,6 +841,19 @@ def setup_test_wallets(backend: str) -> bool:
             return False
 
     time.sleep(4)
+
+    # Snapshot balances after all setup (subscriptions, bios) so the summary
+    # only reports reserve spend from actual test transactions.
+    POST_SETUP_BALANCES.clear()
+    for name, w in WALLETS.items():
+        POST_SETUP_BALANCES[name] = _query_balance_umirage(str(w.address()))
+        print(f"  Reserve {name:4s}: {POST_SETUP_BALANCES[name] / 1_000_000:,.1f} MIRAGE")
+
+    # Reset tx counters so setup txs (set_username, upgrade, biography) don't count.
+    _TX_COUNTS.clear()
+    _TX_HASHES.clear()
+    _TX_HASHES_SEEN.clear()
+    _TX_HASH_OWNER.clear()
 
     print(f"  {_COLOR_GREEN}Setup complete{_COLOR_RESET}")
     return True
@@ -6012,17 +6028,20 @@ def test_annotate(backend: str):
                     return found
         return None
 
-    # Poll for overlay to appear (indexer needs to process both set_agents and annotate txs)
+    # Poll for overlay to appear (indexer needs to process both set_agents and annotate txs).
+    # First wait for get_comments to find the post (can lag behind get_user_posts under load).
     root = {}
-    for _poll in range(10):
-        time.sleep(2)
+    for _poll in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         if code == 200:
             root = (data or {}).get("root") or {}
             if root.get("agent_edited"):
                 break
     if not root:
-        _fail("annotate.overlay_get_comments", f"code={code}")
+        _fail(
+            "annotate.overlay_get_comments", f"code={code} (post not in get_comments after {int(INDEX_TIMEOUT_SEC)}s)"
+        )
         return
     if root.get("title") == new_title:
         _pass("annotate.overlay_title_applied")
@@ -6054,8 +6073,8 @@ def test_annotate(backend: str):
 
     # Poll for overlays to remain unchanged
     root = {}
-    for _poll in range(10):
-        time.sleep(2)
+    for _poll in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         if code == 200:
             root = (data or {}).get("root") or {}
@@ -6095,8 +6114,8 @@ def test_annotate(backend: str):
 
     # Poll for agent2's overlay to appear
     root = {}
-    for _poll in range(10):
-        time.sleep(2)
+    for _poll in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         if code == 200:
             root = (data or {}).get("root") or {}
@@ -6125,8 +6144,8 @@ def test_annotate(backend: str):
 
     # Poll for agent1-first priority overlay
     root = {}
-    for _poll in range(10):
-        time.sleep(2)
+    for _poll in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         if code == 200:
             root = (data or {}).get("root") or {}
@@ -6155,8 +6174,8 @@ def test_annotate(backend: str):
 
     # Poll for comment overlay
     comment_node = None
-    for _poll in range(10):
-        time.sleep(2)
+    for _poll in range(int(INDEX_TIMEOUT_SEC)):
+        time.sleep(1)
         code, data = _get(f"{backend}/api/get_comments", {"post_id": txh, "address": free_addr})
         comment_node = _find_node((data or {}).get("children") or [], comment_tx)
         if comment_node and comment_node.get("content") == comment_content:
@@ -6237,7 +6256,6 @@ STATELESS_CATEGORIES = {
     "params",
     "search",
     "tier_config_api",
-    "upgrade_validation",
 }
 
 
@@ -6262,18 +6280,38 @@ def _parse_cli_json(out: str) -> dict:
         raise ValueError(f"invalid JSON output: {e}") from e
 
 
-def _get_tx_fee_umirage(tx_hash: str) -> int:
-    """Return the fee (umirage) paid by a tx hash via REST API."""
+def _get_tx_outcome(tx_hash: str) -> tuple[bool, int]:
+    """Return (deliver_success, fee_umirage) for a tx hash via REST API."""
     url = f"http://127.0.0.1:1317/cosmos/tx/v1beta1/txs/{tx_hash.upper()}"
     r = requests.get(url, timeout=5)
     if r.status_code != 200:
         raise RuntimeError(f"tx query failed: hash={tx_hash} status={r.status_code}")
     data = r.json()
+    tx_resp = (data.get("tx_response") or {})
+    code = int(tx_resp.get("code", 0) or 0)
     fee = ((data.get("tx") or {}).get("auth_info") or {}).get("fee") or {}
     for c in fee.get("amount", []):
         if c.get("denom") == "umirage":
-            return int(c.get("amount", 0) or 0)
-    raise RuntimeError(f"umirage fee missing for tx={tx_hash}")
+            return code == 0, int(c.get("amount", 0) or 0)
+    return code == 0, 0
+
+
+def _fetch_tx_outcomes() -> tuple[dict[str, tuple[bool, int]], list[str]]:
+    """Fetch tx outcomes in parallel. Returns {tx_hash: (ok, fee)}, errors."""
+    if not _TX_HASHES:
+        return {}, []
+    outcomes: dict[str, tuple[bool, int]] = {}
+    errors: list[str] = []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_get_tx_outcome, txh): txh for txh in _TX_HASHES}
+        for fut in as_completed(futures):
+            txh = futures[fut]
+            try:
+                outcomes[txh] = fut.result()
+            except Exception as e:
+                if len(errors) < 3:
+                    errors.append(str(e))
+    return outcomes, errors
 
 
 def _query_balance_umirage(addr: str) -> int:
@@ -6291,23 +6329,11 @@ def _query_balance_umirage(addr: str) -> int:
     return 0
 
 
-def _print_validator_fee_summary() -> None:
+def _print_validator_fee_summary(outcomes: dict[str, tuple[bool, int]], errors: list[str]) -> None:
     """Print validator gas fees based on tx fee amounts (queried via REST)."""
-    if not _TX_HASHES:
+    if not outcomes and not _TX_HASHES:
         return
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    fees: list[int] = []
-    errors: list[str] = []
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = {pool.submit(_get_tx_fee_umirage, txh): txh for txh in _TX_HASHES}
-        for fut in as_completed(futures):
-            try:
-                fees.append(fut.result())
-            except Exception as e:
-                if len(errors) < 3:
-                    errors.append(str(e))
+    fees = [fee for ok, fee in outcomes.values() if ok]
 
     total_fee = sum(fees)
     avg_fee = total_fee // len(fees) if fees else 0
@@ -6317,64 +6343,72 @@ def _print_validator_fee_summary() -> None:
     print(f"\n{'─' * 74}")
     print(f"{_COLOR_BOLD}Validator Gas Fee Summary{_COLOR_RESET}")
     print(f"{'─' * 74}")
-    print(f"  TXs: {len(fees):>6} (errors: {len(_TX_HASHES) - len(fees):>2})")
+    print(f"  Successful TXs: {len(fees):>6} (failed: {sum(1 for ok, _ in outcomes.values() if not ok):>2}, query errors: {len(errors):>2})")
     print(f"  Total Fee: {total_fee_m:,.2f} MIRAGE")
     print(f"  Avg Fee / TX: {avg_fee_m:,.4f} MIRAGE")
     print(f"{'─' * 74}")
-    print(f"  (Fees = gas_limit × min_gas_price from tx auth_info)")
+    print(f"  (Successful DeliverTx only; fee from tx auth_info)")
     if errors:
         print(f"  (Sample fee errors: {errors})")
 
 
-def _print_wallet_stats(backend: str) -> None:
-    """Print per-wallet tx count, balance spent, and avg cost per tx."""
+def _print_wallet_stats(outcomes: dict[str, tuple[bool, int]]) -> None:
+    """Print per-wallet reserve spend during tests (excludes subscription cost)."""
     if not WALLETS:
         return
+    if not POST_SETUP_BALANCES:
+        print(f"\n  {_COLOR_YELLOW}Wallet stats skipped: no post-setup balance snapshot{_COLOR_RESET}")
+        return
 
+    # name, tx_count, reserve_start, reserve_end, reserve_spent
     rows: list[tuple[str, int, int, int, int]] = []
     for name in ("free", "sub1", "sub2", "agent1", "agent2"):
         w = WALLETS.get(name)
         if not w:
             continue
         pk_b64 = base64.b64encode(w.public_key().public_key_bytes).decode()
-        tx_count = _TX_COUNTS.get(pk_b64, 0)
-        fauceted = FAUCET_AMOUNTS.get(name, 0)
-        remaining = _query_balance_umirage(str(w.address()))
-        spent = max(0, fauceted - remaining)
-        rows.append((name, tx_count, fauceted, remaining, spent))
+        tx_count = 0
+        for txh, owner_pk in _TX_HASH_OWNER.items():
+            if owner_pk != pk_b64:
+                continue
+            ok, _fee = outcomes.get(txh, (False, 0))
+            if ok:
+                tx_count += 1
+        reserve_start = POST_SETUP_BALANCES.get(name, 0)
+        reserve_end = _query_balance_umirage(str(w.address()))
+        reserve_spent = max(0, reserve_start - reserve_end)
+        rows.append((name, tx_count, reserve_start, reserve_end, reserve_spent))
 
     if not rows:
         return
 
     print(f"\n{'─' * 86}")
-    print(f"{_COLOR_BOLD}Wallet Spend & TX Summary{_COLOR_RESET}")
+    print(f"{_COLOR_BOLD}Wallet Reserve Spend (test transactions only){_COLOR_RESET}")
     print(f"{'─' * 86}")
-    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Fauceted':>14}  " f"{'Remaining':>14}  {'Spent':>14}  {'Avg/TX':>14}"
+    hdr = f"  {'Wallet':<10} {'TXs':>5}  {'Reserve Start':>14}  {'Reserve End':>14}  {'Spent':>14}  {'Avg/TX':>14}"
     print(hdr)
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
 
     grand_tx = grand_spent = 0
-    for name, tx_count, fauceted, remaining, spent in rows:
-        fauceted_m = fauceted / 1_000_000
-        remaining_m = remaining / 1_000_000
-        spent_m = spent / 1_000_000
+    for name, tx_count, reserve_start, reserve_end, reserve_spent in rows:
+        start_m = reserve_start / 1_000_000
+        end_m = reserve_end / 1_000_000
+        spent_m = reserve_spent / 1_000_000
         avg_m = (spent_m / tx_count) if tx_count else 0
         avg_str = f"{avg_m:>11,.2f} M" if tx_count else f"{'—':>14}"
-        print(
-            f"  {name:<10} {tx_count:>5}  {fauceted_m:>11,.1f} M  "
-            f"{remaining_m:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}"
-        )
+        print(f"  {name:<10} {tx_count:>5}  {start_m:>11,.1f} M  " f"{end_m:>11,.1f} M  {spent_m:>11,.1f} M  {avg_str}")
         grand_tx += tx_count
-        grand_spent += spent
+        grand_spent += reserve_spent
 
     print(f"  {'':─<10} {'':─>5}  {'':─>14}  {'':─>14}  {'':─>14}  {'':─>14}")
     grand_spent_m = grand_spent / 1_000_000
     grand_avg_m = (grand_spent_m / grand_tx) if grand_tx else 0
     grand_avg_str = f"{grand_avg_m:>11,.2f} M" if grand_tx else f"{'—':>14}"
-    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  " f"{'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
+    print(f"  {'TOTAL':<10} {grand_tx:>5}  {'':>14}  {'':>14}  {grand_spent_m:>11,.1f} M  {grand_avg_str}")
     print(f"{'─' * 86}")
     print(f"  (Amounts in MIRAGE;  1 MIRAGE = 1,000,000 umirage)")
-    print(f"  (Spent = Fauceted − Remaining = subscription fees + awards + sends;  gas paid by validator)")
+    print(f"  (Reserve = balance after subscription, before tests;  gas paid by validator)")
+    print(f"  (TX count = successful DeliverTx only)")
 
 
 def main() -> int:
@@ -6496,12 +6530,18 @@ def main() -> int:
         print(f"{_COLOR_GREEN}{_COLOR_BOLD}RESULT: {passed}/{total} passed, ALL OK{_COLOR_RESET}")
 
     # ── Gas / spend stats ─────────────────────────────────────────
+    outcomes: dict[str, tuple[bool, int]] = {}
+    outcome_errors: list[str] = []
     try:
-        _print_validator_fee_summary()
+        outcomes, outcome_errors = _fetch_tx_outcomes()
+    except Exception as e:
+        print(f"\n{_COLOR_RED}TX outcome prefetch failed: {e}{_COLOR_RESET}")
+    try:
+        _print_validator_fee_summary(outcomes, outcome_errors)
     except Exception as e:
         print(f"\n{_COLOR_RED}Validator fee summary failed: {e}{_COLOR_RESET}")
     try:
-        _print_wallet_stats(backend)
+        _print_wallet_stats(outcomes)
     except Exception as e:
         print(f"\n{_COLOR_RED}Wallet stats failed: {e}{_COLOR_RESET}")
 
