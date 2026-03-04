@@ -817,20 +817,7 @@ export default function ProfileView({ state }) {
             ? `${profileAddress.slice(0, 10)}...`
             : 'Profile';
 
-    const canHaveBiography = (() => {
-        try {
-            const raw = localStorage.getItem('chainConfig');
-            if (!raw) return false;
-            const cfg = JSON.parse(raw);
-            const tiers = cfg?.tiers;
-            if (!Array.isArray(tiers)) return false;
-            const tier = tiers.find(t => Number(t.level ?? t.index) === userLevel) || tiers[userLevel];
-            if (!tier) return false;
-            return !!tier.can_have_biography;
-        } catch (_) {
-            return false;
-        }
-    })();
+    const canHaveBiography = userLevel > 0;
 
     const BIO_MAX = 512;
 

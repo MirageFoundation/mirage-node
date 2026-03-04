@@ -59,3 +59,6 @@
 
 # CLEANUP!!!
 - now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
+
+# others:
+- REDUCE GAS from 5k to 1k perhaps? analyze gas usage
