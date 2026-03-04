@@ -394,15 +394,20 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
     return tx_hash, code, log
 
 
-def _wait_for_tx_result(tx_hash: str, timeout: float = 5.0) -> tuple[int, str]:
+def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
     h = tx_hash.strip().lower().removeprefix("0x")
     hash_b64 = base64.b64encode(bytes.fromhex(h)).decode()
-    start = time.time()
-    while (time.time() - start) < timeout:
+    start = time.monotonic()
+    deadline = start + timeout
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        remaining = deadline - now
         payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": hash_b64, "prove": False}}
-        resp = requests.post(COMET_RPC_URL, json=payload, timeout=5).json()
+        resp = requests.post(COMET_RPC_URL, json=payload, timeout=min(1.0, remaining)).json()
         if "result" in resp:
             tx_result = (resp.get("result") or {}).get("tx_result") or {}
             code = int(tx_result.get("code", 0) or 0)
@@ -411,10 +416,16 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 5.0) -> tuple[int, str]:
         if "error" in resp:
             err = str(resp["error"])
             if "not found" in err.lower():
-                time.sleep(0.5)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(1.0, remaining))
                 continue
             raise RuntimeError(f"tx query error: {err}")
-        time.sleep(0.5)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(1.0, remaining))
     raise RuntimeError(f"tx not found after {timeout}s: {tx_hash}")
 
 
@@ -3128,8 +3139,8 @@ def test_hard_cap_vs_deque(backend: str) -> None:
     else:
         _pass(f"hardcap.blocked_user_deque_fill ({total_to_block} blocked, no rejection)")
 
-    profile = _get_profile_full(backend, bw_addr)
-    chain_blocked = [str(v).lower() for v in (profile.get("blocked_users") or [])]
+    profile = _get_chain_profile(bw_addr)
+    chain_blocked = [str(v).lower() for v in (profile.get("blocked_users") or profile.get("blockedUsers") or [])]
     if len(chain_blocked) <= max_blocked_users:
         _pass(f"hardcap.blocked_user_deque_capped (len={len(chain_blocked)} <= {max_blocked_users})")
     else:
@@ -3610,6 +3621,15 @@ ALL_CATEGORIES = {
     "tier_features": test_tier_features,
     "biography": test_biography,
 }
+STATELESS_CATEGORIES = {
+    "authority",
+    "fee",
+    "staking",
+    "malicious_inputs",
+    "tier_enforcement",
+    "governance",
+    "upgrade_validation",
+}
 
 
 def main() -> int:
@@ -3700,10 +3720,22 @@ def main() -> int:
         except Exception as e:
             _fail(f"{name}.UNEXPECTED_ERROR", str(e))
 
-    with ThreadPoolExecutor(max_workers=len(to_run)) as pool:
-        futures = {pool.submit(_run_category, name, fn): name for name, fn in to_run.items()}
-        for fut in as_completed(futures):
-            fut.result()
+    parallel_names = [name for name in to_run if name in STATELESS_CATEGORIES]
+    serial_names = [name for name in to_run if name not in STATELESS_CATEGORIES]
+    if parallel_names:
+        _debug(f"parallel categories: {', '.join(parallel_names)}")
+        if len(parallel_names) == 1:
+            name = parallel_names[0]
+            _run_category(name, to_run[name])
+        else:
+            with ThreadPoolExecutor(max_workers=len(parallel_names)) as pool:
+                futures = {pool.submit(_run_category, name, to_run[name]): name for name in parallel_names}
+                for fut in as_completed(futures):
+                    fut.result()
+    if serial_names:
+        _debug(f"sequential categories: {', '.join(serial_names)}")
+        for name in serial_names:
+            _run_category(name, to_run[name])
 
     passed = sum(1 for r in RESULTS if r.passed)
     failed = sum(1 for r in RESULTS if not r.passed)

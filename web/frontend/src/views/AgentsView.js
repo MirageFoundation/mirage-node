@@ -303,7 +303,7 @@ export default function AgentsView({ state }) {
 
     const handleToggle = useCallback(async (agentAddress) => {
         const addr = String(agentAddress || '').toLowerCase();
-        if (!addr || isPending(addr) || isApplyingOrder) return;
+        if (!addr || isPending(addr)) return;
         setErrorMessage('');
 
         if (!viewerAddress) return;
@@ -327,7 +327,7 @@ export default function AgentsView({ state }) {
         }
 
         try {
-            const result = await tx.setAgents(newList);
+            const result = await tx.setAgents(newList, { triggerAgent: addr });
             if (result?.success && mountedRef.current) {
                 setEnabledOrder(newList);
                 setDraftOrder(newList);
@@ -344,7 +344,7 @@ export default function AgentsView({ state }) {
         } catch (err) {
             setErrorMessage(String(err?.message || err || 'Agent update failed.'));
         }
-    }, [isPending, isEnabled, isApplyingOrder, viewerAddress, maxEnabledAgents, enabledOrder, draftOrder, draftDirty, normalizeOrder, setEnabledOrder, setDraftOrder]);
+    }, [isPending, viewerAddress, maxEnabledAgents, enabledOrder, draftOrder, draftDirty, normalizeOrder, setEnabledOrder, setDraftOrder]);
 
     const ordersEqual = useCallback((a, b) => {
         if (a.length !== b.length) return false;
@@ -518,7 +518,7 @@ export default function AgentsView({ state }) {
                                                                 }
                                                                 size="sm"
                                                                 minWidth="8.0rem"
-                                                                disabled={pending || !viewerAddress || isApplyingOrder || loadingEnabled}
+                                                                disabled={pending || !viewerAddress || loadingEnabled}
                                                                 loading={pending}
                                                                 onMouseEnter={() => setHoverAgent(addrLower)}
                                                                 onMouseLeave={() => setHoverAgent(null)}

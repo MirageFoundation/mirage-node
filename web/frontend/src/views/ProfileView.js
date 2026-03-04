@@ -942,7 +942,7 @@ export default function ProfileView({ state }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
                                                     minWidth="follow"
                                                     onMouseEnter={() => setFollowHover(true)}
                                                     onMouseLeave={() => setFollowHover(false)}

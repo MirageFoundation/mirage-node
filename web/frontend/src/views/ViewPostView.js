@@ -3846,7 +3846,7 @@ function ViewPostView({ state, updatePost }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
                                                     minWidth="follow"
                                                     onMouseEnter={() => setTopicFollowHover(true)}
                                                     onMouseLeave={() => setTopicFollowHover(false)}
@@ -3889,7 +3889,7 @@ function ViewPostView({ state, updatePost }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
                                                     minWidth="follow"
                                                     onMouseEnter={() => setTopicFollowHover(true)}
                                                     onMouseLeave={() => setTopicFollowHover(false)}

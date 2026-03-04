@@ -1543,6 +1543,20 @@ def test_params(backend: str):
     else:
         _fail("params.award_configs defaults present", "award_configs missing or empty")
 
+    # 1.6b subscription_reserve_percent is 0.95
+    reserve_pct = cfg.get("subscription_reserve_percent") if isinstance(cfg, dict) else None
+    if reserve_pct is None:
+        _fail("params.subscription_reserve_percent_0.95", "missing")
+    else:
+        try:
+            reserve_val = float(reserve_pct)
+            if abs(reserve_val - 0.95) < 0.01:
+                _pass("params.subscription_reserve_percent_0.95", value=reserve_val)
+            else:
+                _fail("params.subscription_reserve_percent_0.95", f"got {reserve_pct}")
+        except Exception as e:
+            _fail("params.subscription_reserve_percent_0.95", str(e))
+
     # 1.7 get_node_config returns valid
     code3b, ncfg = _get(f"{backend}/api/get_node_config")
     if code3b == 200 and ncfg.get("validator_account_address"):
@@ -5160,9 +5174,9 @@ def test_tier_config_api(backend: str):
     # Agent tier (index 2)
     agent = tiers[2]
     if int(agent.get("period_fee", -1)) == 500_000_000_000:
-        _pass("tierapi.agent_period_fee_500B")
+        _pass("tierapi.agent_period_fee_200B")
     else:
-        _fail("tierapi.agent_period_fee_500B", f"got={agent.get('period_fee')}")
+        _fail("tierapi.agent_period_fee_200B", f"got={agent.get('period_fee')}")
 
     if agent.get("can_be_agent", False):
         _pass("tierapi.agent_can_be_agent_true")

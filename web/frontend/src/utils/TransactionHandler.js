@@ -1148,7 +1148,7 @@ class TransactionHandler {
         });
     }
 
-    setAgents(agents) {
+    setAgents(agents, { triggerAgent } = {}) {
         const publicKey = Storage.load("publicKey", "");
         const seedPhrase = seedVault.getSeed() || "";
         if (!publicKey || !seedPhrase) {
@@ -1161,11 +1161,16 @@ class TransactionHandler {
         }
 
         const normalized = agents.map(a => String(a || "").trim().toLowerCase()).filter(Boolean);
+        const triggerKey = triggerAgent ? String(triggerAgent).toLowerCase() : null;
 
         const queuePosition = this.totalTransactions + 1;
-        this.pendingAgents.set('__set_agents__', { action: 'set_agents', agents: normalized, queuePosition });
+        if (triggerKey) {
+            this.pendingAgents.set(triggerKey, { action: 'set_agents', agents: normalized, queuePosition });
+        } else {
+            this.pendingAgents.set('__set_agents__', { action: 'set_agents', agents: normalized, queuePosition });
+        }
         this._notifyAgentListeners();
-        console.debug("[agents] enqueue set_agents", { count: normalized.length, queuePosition });
+        console.debug("[agents] enqueue set_agents", { count: normalized.length, triggerAgent: triggerKey, queuePosition });
 
         const baseTx = {
             action: 'set_agents',
@@ -1174,12 +1179,17 @@ class TransactionHandler {
 
         return new Promise((resolve) => {
             const wrappedResolve = (result) => {
-                this.pendingAgents.delete('__set_agents__');
+                if (triggerKey) {
+                    this.pendingAgents.delete(triggerKey);
+                } else {
+                    this.pendingAgents.delete('__set_agents__');
+                }
                 this._notifyAgentListeners();
                 console.debug("[agents] resolved set_agents", { success: !!result?.success, error: result?.error });
                 resolve(result);
             };
-            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: '__set_agents__' };
+            const pendingKey = triggerKey || '__set_agents__';
+            const transaction = { ...baseTx, _resolve: wrappedResolve, _agentKey: pendingKey };
             this.transactions.push(transaction);
             this.totalTransactions += 1;
             this.processTransactions();

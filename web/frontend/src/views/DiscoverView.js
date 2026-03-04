@@ -352,7 +352,7 @@ export default function DiscoverView({ state }) {
                                                                         ? 'subtle'
                                                                         : 'primary'
                                                             }
-                                                            size="pill"
+                                                            size="sm"
                                                             minWidth="follow"
                                                             disabled={isInProgress}
                                                             loading={isInProgress}
@@ -400,7 +400,7 @@ export default function DiscoverView({ state }) {
                                                                                 ? 'subtle'
                                                                                 : 'primary'
                                                                     }
-                                                                    size="pill"
+                                                                    size="sm"
                                                                     minWidth="follow"
                                                                     disabled={isInProgress}
                                                                     loading={isInProgress}
