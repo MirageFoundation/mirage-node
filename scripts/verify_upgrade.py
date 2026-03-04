@@ -180,6 +180,10 @@ EXPECTED_AWARD_CONFIGS = [
 
 EXPECTED_PARAMS = {
     "min_difficulty": 10,
+    "pow_message_window": 20,
+    "pow_message_limit": 15,
+    "pow_calm_period_definition": 10,
+    "pow_calm_sequence_threshold": 100,
     "mint_interval": 200,
     "mint_quantity": 5_800_000_000,
     "mint_dynamic_credit_cap": 100,
@@ -192,6 +196,7 @@ EXPECTED_PARAMS = {
     "min_topic_size": 2,
     "max_topic_size": 35,
     "block_hash_window": 10,
+    "pow_difficulty_allowance": 2,
 }
 
 
@@ -303,11 +308,39 @@ def check_core_params() -> None:
     else:
         ok(f"params.mint_dynamic_split = {mint_split}")
 
+    pow_step = float(params.get("pow_difficulty_step", "0"))
+    if abs(pow_step - 0.25) >= 0.01:
+        fail(f"params.pow_difficulty_step = {pow_step} (want 0.25)")
+    else:
+        ok(f"params.pow_difficulty_step = {pow_step}")
+
     reserve_pct = float(params.get("subscription_reserve_percent", "0"))
     if abs(reserve_pct - 0.95) >= 0.01:
         fail(f"params.subscription_reserve_percent = {reserve_pct} (want 0.95)")
     else:
         ok(f"params.subscription_reserve_percent = {reserve_pct}")
+
+    bridge_threshold = float(params.get("bridge_attestation_threshold", "0"))
+    if abs(bridge_threshold - 0.6667) >= 0.01:
+        fail(f"params.bridge_attestation_threshold = {bridge_threshold} (want 0.6667)")
+    else:
+        ok(f"params.bridge_attestation_threshold = {bridge_threshold}")
+
+    bridge_chains = params.get("bridge_chains", [])
+    if not isinstance(bridge_chains, list):
+        fail(f"params.bridge_chains invalid type: {type(bridge_chains).__name__}")
+    else:
+        ok(f"bridge_chains count: {len(bridge_chains)}")
+        for i, chain in enumerate(bridge_chains):
+            cid = str(chain.get("chain_id", "")).strip()
+            if not cid:
+                fail(f"bridge_chains[{i}].chain_id missing")
+            enabled = chain.get("enabled")
+            if not isinstance(enabled, bool):
+                fail(f"bridge_chains[{i}].enabled not bool: {enabled}")
+            fee = int(chain.get("fee", 0) or 0)
+            if fee < 0:
+                fail(f"bridge_chains[{i}].fee negative: {fee}")
 
     # ── Award configs ──
     award_configs = params.get("award_configs", [])
@@ -463,6 +496,7 @@ def check_profiles() -> None:
         "flair": 0,
     }
     stale_field_hits: dict[str, int] = {f: 0 for f in REMOVED_PROFILE_FIELDS}
+    self_agent_violations: list[str] = []
 
     for p in profiles:
         lvl = p.get("level", 0)
@@ -480,6 +514,10 @@ def check_profiles() -> None:
         for removed_field in REMOVED_PROFILE_FIELDS:
             if removed_field in p:
                 stale_field_hits[removed_field] += 1
+        owner = str(p.get("owner", "")).lower()
+        agents = [str(a).lower() for a in (p.get("enabled_agents") or [])]
+        if owner and owner in agents:
+            self_agent_violations.append(owner[:20])
 
     dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
     ok(f"Level distribution: {dist}")
@@ -510,12 +548,6 @@ def check_profiles() -> None:
     if not stale_any:
         ok("No stale pre-v1.16.0 profile fields present")
 
-    self_agent_violations = []
-    for p in profiles:
-        owner = str(p.get("owner", "")).lower()
-        agents = [str(a).lower() for a in (p.get("enabled_agents") or [])]
-        if owner and owner in agents:
-            self_agent_violations.append(owner[:20])
     if self_agent_violations:
         fail(f"{len(self_agent_violations)} profiles have themselves as enabled agent: {self_agent_violations[:5]}")
     else:

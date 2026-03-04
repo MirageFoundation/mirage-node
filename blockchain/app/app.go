@@ -275,7 +275,7 @@ func New(
 					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
 					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
 					*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
-					*coretypes.MsgSetBiography:
+					*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
 						containsMeta = true
 					}
 				}

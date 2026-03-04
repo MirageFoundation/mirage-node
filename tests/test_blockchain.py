@@ -1284,6 +1284,14 @@ def _check_reject(
     _fail(name, f"code={code} log={log[:200]}")
 
 
+def _check_accept(name: str, code: int, log: str) -> None:
+    """Check that a tx was accepted at CheckTx (code == 0)."""
+    if code == 0:
+        _pass(name)
+    else:
+        _fail(name, f"code={code} log={log[:200]}")
+
+
 def _check_deliver_reject(name: str, check_code: int, deliver_code: Optional[int], deliver_log: Optional[str]) -> None:
     if check_code != 0:
         _pass(name)  # Rejected at CheckTx — still a valid rejection
@@ -2510,6 +2518,13 @@ def test_follow_limits(backend: str) -> None:
             break
     if bulk_ok:
         _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} filled to limit)")
+        # Verify subscriber level persists after bulk follow (reserve should not be over-charged)
+        after_profile = _get_profile_full(backend, sub_addr)
+        after_level = int(after_profile.get("level", 0) or 0)
+        if after_level == 1:
+            _pass("follow.subscriber_level_persist")
+        else:
+            _fail("follow.subscriber_level_persist", f"level={after_level}")
         # Now verify overflow is REJECTED
         lb, _, _, _ = _get_pow_params(backend, sub_addr)
         ts = _now_ms()
@@ -3817,23 +3832,24 @@ def test_annotate_chain(backend: str) -> None:
 
     # 1. Non-agent submitting annotate should fail
     msg = _build_msg_annotate(free, lb, 0, ts, ".", ".", ".", ".", txh, appendix="hacker note")
-    _, code, log, _, _ = _submit_tx(
+    tx_hash, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgAnnotate")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         free.public_key().public_key_bytes,
     )
-    _check_reject("annotate_chain.non_agent_rejected", code, log, "agent tier")
+    _check_reject("annotate_chain.non_agent_rejected", code, log, "agent tier", tx_hash)
 
     # 2. Agent with valid sentinel should succeed
     msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="valid note")
-    _, code, log, _, _ = _submit_tx(
+    _, code, log, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgAnnotate")],
         DEFAULT_GAS_LIMIT,
         fee_payer,
         signer_pub,
+        wait_deliver=True,
     )
-    _check_accept("annotate_chain.agent_annotate_ok", code, log)
+    _check_deliver_accept("annotate_chain.agent_annotate_ok", code, dcode, dlog)
 
     # 3. Invalid relay signature should fail
     msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="bad sig")
