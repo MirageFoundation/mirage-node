@@ -539,24 +539,24 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 			_ = am.k.SetProfileCore(sdkCtx, owner, bz)
 		}
 
-		// Store all list fields separately (only if not empty)
+		// Store all list fields as per-entry keys
 		if len(ip.EnabledAgents) > 0 {
-			_ = am.k.SetProfileEnabledAgents(sdkCtx, owner, ip.EnabledAgents)
+			_ = am.k.ReplaceAllEnabledAgents(sdkCtx, owner, ip.EnabledAgents)
 		}
-		if len(ip.FollowedUsers) > 0 {
-			_ = am.k.SetProfileFollowedUsers(sdkCtx, owner, ip.FollowedUsers)
+		for _, u := range ip.FollowedUsers {
+			_, _ = am.k.AddFollowedUser(sdkCtx, owner, u)
 		}
-		if len(ip.FollowedTopics) > 0 {
-			_ = am.k.SetProfileFollowedTopics(sdkCtx, owner, ip.FollowedTopics)
+		for _, t := range ip.FollowedTopics {
+			_, _ = am.k.AddFollowedTopic(sdkCtx, owner, t)
 		}
-		if len(ip.BlockedUsers) > 0 {
-			_ = am.k.SetProfileBlockedUsers(sdkCtx, owner, ip.BlockedUsers)
+		for _, u := range ip.BlockedUsers {
+			_, _ = am.k.AddBlockedUserDeque(sdkCtx, owner, u, 0) // 0 = no cap during genesis import
 		}
-		if len(ip.BlockedPosts) > 0 {
-			_ = am.k.SetProfileBlockedPosts(sdkCtx, owner, ip.BlockedPosts)
+		for _, p := range ip.BlockedPosts {
+			_, _ = am.k.AddBlockedPostDeque(sdkCtx, owner, p, 0)
 		}
-		if len(ip.BlockedTopics) > 0 {
-			_ = am.k.SetProfileBlockedTopics(sdkCtx, owner, ip.BlockedTopics)
+		for _, t := range ip.BlockedTopics {
+			_, _ = am.k.AddBlockedTopicDeque(sdkCtx, owner, t, 0)
 		}
 	}
 }
@@ -1006,13 +1006,13 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			continue // Skip invalid profiles
 		}
 
-		// Load all lists for this profile
-		agents, _ := am.k.GetProfileEnabledAgents(sdkCtx, core.Owner)
-		users, _ := am.k.GetProfileFollowedUsers(sdkCtx, core.Owner)
-		topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, core.Owner)
-		blockedUsers, _ := am.k.GetProfileBlockedUsers(sdkCtx, core.Owner)
-		blockedPosts, _ := am.k.GetProfileBlockedPosts(sdkCtx, core.Owner)
-		blockedTopics, _ := am.k.GetProfileBlockedTopics(sdkCtx, core.Owner)
+		// Load all lists via per-entry iterators
+		agents, _ := am.k.ListEnabledAgentsOrdered(sdkCtx, core.Owner)
+		users, _ := am.k.ListFollowedUsers(sdkCtx, core.Owner)
+		topics, _ := am.k.ListFollowedTopics(sdkCtx, core.Owner)
+		blockedUsers, _ := am.k.ListBlockedUsers(sdkCtx, core.Owner)
+		blockedPosts, _ := am.k.ListBlockedPosts(sdkCtx, core.Owner)
+		blockedTopics, _ := am.k.ListBlockedTopics(sdkCtx, core.Owner)
 
 		profiles = append(profiles, &types.QueryProfileResponse{
 			Owner:              core.Owner,
@@ -1617,7 +1617,7 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 	}
 
 	// Validate core fields (need to get agents count for validation)
-	agents, _ := am.k.GetProfileEnabledAgents(sdkCtx, owner)
+	agents, _ := am.k.ListEnabledAgentsOrdered(sdkCtx, owner)
 	tierConfig := params.GetTierConfig(int(core.Level))
 	maxAgents := uint64(5)
 	if tierConfig != nil {
@@ -1658,23 +1658,23 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	// Convert to full profile
 	prof := core.ToProfile()
 
-	// Load lists
-	if agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner); err == nil {
+	// Load lists via per-entry iterators
+	if agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner); err == nil {
 		prof.EnabledAgents = agents
 	}
-	if users, err := am.k.GetProfileFollowedUsers(sdkCtx, owner); err == nil {
+	if users, err := am.k.ListFollowedUsers(sdkCtx, owner); err == nil {
 		prof.FollowedUsers = users
 	}
-	if topics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner); err == nil {
+	if topics, err := am.k.ListFollowedTopics(sdkCtx, owner); err == nil {
 		prof.FollowedTopics = topics
 	}
-	if blocked, err := am.k.GetProfileBlockedUsers(sdkCtx, owner); err == nil {
+	if blocked, err := am.k.ListBlockedUsers(sdkCtx, owner); err == nil {
 		prof.BlockedUsers = blocked
 	}
-	if posts, err := am.k.GetProfileBlockedPosts(sdkCtx, owner); err == nil {
+	if posts, err := am.k.ListBlockedPosts(sdkCtx, owner); err == nil {
 		prof.BlockedPosts = posts
 	}
-	if blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner); err == nil {
+	if blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner); err == nil {
 		prof.BlockedTopics = blockedTopics
 	}
 
@@ -1929,26 +1929,17 @@ func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) 
 		maxAgents = int(tierConfig.MaxEnabledAgents)
 	}
 
-	agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner)
+	has, err := am.k.HasEnabledAgent(sdkCtx, owner, agent)
 	if err != nil {
-		agents = []string{}
+		return nil, err
 	}
-
-	for _, a := range agents {
-		if a == agent {
-			return &types.MsgEnableAgentResponse{}, nil
-		}
+	if has {
+		return &types.MsgEnableAgentResponse{}, nil
 	}
-
-	if len(agents) >= maxAgents {
+	if int(am.k.CountEnabledAgents(sdkCtx, owner)) >= maxAgents {
 		return nil, fmt.Errorf("enabled agents limit reached (%d); disable an agent first", maxAgents)
 	}
-
-	agents = append(agents, agent)
-	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, agents); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("EnableAgent: failed to save enabled agents", "owner", owner, "err", err.Error())
-		sdkCtx.Logger().Info(logDelimiter)
+	if _, err := am.k.AddEnabledAgent(sdkCtx, owner, agent); err != nil {
 		return nil, err
 	}
 
@@ -2006,22 +1997,7 @@ func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent
 		userLevel = int(core.Level)
 	}
 
-	agents, err := am.k.GetProfileEnabledAgents(sdkCtx, owner)
-	if err != nil {
-		agents = []string{}
-	}
-
-	newAgents := make([]string, 0, len(agents))
-	for _, a := range agents {
-		if a != agent {
-			newAgents = append(newAgents, a)
-		}
-	}
-
-	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, newAgents); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("DisableAgent: failed to save enabled agents", "owner", owner, "err", err.Error())
-		sdkCtx.Logger().Info(logDelimiter)
+	if err := am.k.RemoveEnabledAgent(sdkCtx, owner, agent); err != nil {
 		return nil, err
 	}
 
@@ -2110,7 +2086,7 @@ func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*ty
 		normalized = append(normalized, a)
 	}
 
-	if err := am.k.SetProfileEnabledAgents(sdkCtx, owner, normalized); err != nil {
+	if err := am.k.ReplaceAllEnabledAgents(sdkCtx, owner, normalized); err != nil {
 		sdkCtx.Logger().Info(logDelimiter)
 		sdkCtx.Logger().Error("SetAgents: failed to save enabled agents", "owner", owner, "err", err.Error())
 		sdkCtx.Logger().Info(logDelimiter)
@@ -2173,17 +2149,8 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 		maxPosts = tierConfig.MaxBlockedPosts
 	}
 
-	posts, _ := am.k.GetProfileBlockedPosts(sdkCtx, owner)
-	for _, p := range posts {
-		if p == target {
-			return &types.MsgBlockPostResponse{}, nil
-		}
-	}
-	posts = append(posts, target)
-	if uint64(len(posts)) > maxPosts {
-		posts = posts[len(posts)-int(maxPosts):]
-	}
-	if err := am.k.SetProfileBlockedPosts(sdkCtx, owner, posts); err != nil {
+	// O(1) add with automatic deque eviction of oldest when over cap
+	if _, err := am.k.AddBlockedPostDeque(sdkCtx, owner, target, uint32(maxPosts)); err != nil {
 		return nil, err
 	}
 
@@ -2226,14 +2193,7 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 		return nil, err
 	}
 
-	posts, _ := am.k.GetProfileBlockedPosts(sdkCtx, owner)
-	newPosts := make([]string, 0, len(posts))
-	for _, p := range posts {
-		if p != target {
-			newPosts = append(newPosts, p)
-		}
-	}
-	if err := am.k.SetProfileBlockedPosts(sdkCtx, owner, newPosts); err != nil {
+	if err := am.k.RemoveBlockedPost(sdkCtx, owner, target); err != nil {
 		return nil, err
 	}
 
@@ -2279,27 +2239,8 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, err
 	}
 
-	followedUsers, err := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	if err != nil {
-		return nil, err
-	}
-	if len(followedUsers) > 0 {
-		newFollowedUsers := make([]string, 0, len(followedUsers))
-		removed := false
-		for _, u := range followedUsers {
-			if u == target {
-				removed = true
-				continue
-			}
-			newFollowedUsers = append(newFollowedUsers, u)
-		}
-		if removed {
-			if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newFollowedUsers); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("BlockUser removed follow", "owner", owner, "target", target)
-		}
-	}
+	// Mutual exclusion: blocking a user removes them from followed list (O(1))
+	_ = am.k.RemoveFollowedUser(sdkCtx, owner, target)
 
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(10)
@@ -2307,17 +2248,7 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		maxUsers = tierConfig.MaxBlockedUsers
 	}
 
-	users, _ := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	for _, u := range users {
-		if u == target {
-			return &types.MsgBlockUserResponse{}, nil
-		}
-	}
-	users = append(users, target)
-	if uint64(len(users)) > maxUsers {
-		users = users[len(users)-int(maxUsers):]
-	}
-	if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, users); err != nil {
+	if _, err := am.k.AddBlockedUserDeque(sdkCtx, owner, target, uint32(maxUsers)); err != nil {
 		return nil, err
 	}
 
@@ -2362,14 +2293,7 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 		return nil, err
 	}
 
-	users, _ := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	newUsers := make([]string, 0, len(users))
-	for _, u := range users {
-		if u != target {
-			newUsers = append(newUsers, u)
-		}
-	}
-	if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newUsers); err != nil {
+	if err := am.k.RemoveBlockedUser(sdkCtx, owner, target); err != nil {
 		return nil, err
 	}
 
@@ -2418,25 +2342,14 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		sdkCtx.Logger().Debug("BlockTopic wildcard", "owner", owner, "pattern", topic)
 	}
 
-	followedTopics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner)
+	// Mutual exclusion: blocking a topic pattern removes matching followed topics.
+	followedTopics, err := am.k.ListFollowedTopics(sdkCtx, owner)
 	if err != nil {
 		return nil, err
 	}
-	if len(followedTopics) > 0 {
-		newFollowedTopics := make([]string, 0, len(followedTopics))
-		removedCount := 0
-		for _, t := range followedTopics {
-			if topicMatchesPattern(t, topic) {
-				removedCount++
-				continue
-			}
-			newFollowedTopics = append(newFollowedTopics, t)
-		}
-		if removedCount > 0 {
-			if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newFollowedTopics); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("BlockTopic removed follows", "owner", owner, "pattern", topic, "count", removedCount)
+	for _, t := range followedTopics {
+		if topicMatchesPattern(t, topic) {
+			_ = am.k.RemoveFollowedTopic(sdkCtx, owner, t)
 		}
 	}
 
@@ -2446,17 +2359,7 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		maxTopics = tierConfig.MaxBlockedTopics
 	}
 
-	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
-	for _, t := range topics {
-		if t == topic {
-			return &types.MsgBlockTopicResponse{}, nil
-		}
-	}
-	topics = append(topics, topic)
-	if uint64(len(topics)) > maxTopics {
-		topics = topics[len(topics)-int(maxTopics):]
-	}
-	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, topics); err != nil {
+	if _, err := am.k.AddBlockedTopicDeque(sdkCtx, owner, topic, uint32(maxTopics)); err != nil {
 		return nil, err
 	}
 
@@ -2502,14 +2405,7 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
-	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
-	newTopics := make([]string, 0, len(topics))
-	for _, t := range topics {
-		if t != topic {
-			newTopics = append(newTopics, t)
-		}
-	}
-	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newTopics); err != nil {
+	if err := am.k.RemoveBlockedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 
@@ -2569,26 +2465,9 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		userLevel = int(core.Level)
 	}
 
-	blockedUsers, err := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	if err != nil {
+	// Mutual exclusion: following a user removes them from the blocked list (O(1) delete)
+	if err := am.k.RemoveBlockedUser(sdkCtx, owner, user); err != nil {
 		return nil, err
-	}
-	if len(blockedUsers) > 0 {
-		newBlockedUsers := make([]string, 0, len(blockedUsers))
-		removed := false
-		for _, u := range blockedUsers {
-			if u == user {
-				removed = true
-				continue
-			}
-			newBlockedUsers = append(newBlockedUsers, u)
-		}
-		if removed {
-			if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newBlockedUsers); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("FollowUser removed block", "owner", owner, "user", user)
-		}
 	}
 
 	tierConfig := params.GetTierConfig(userLevel)
@@ -2597,17 +2476,20 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		maxUsers = tierConfig.MaxFollowedUsers
 	}
 
-	users, _ := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	for _, u := range users {
-		if u == user {
-			return &types.MsgFollowUserResponse{}, nil
-		}
+	// O(1) duplicate check
+	has, err := am.k.HasFollowedUser(sdkCtx, owner, user)
+	if err != nil {
+		return nil, err
 	}
-	if uint64(len(users)) >= maxUsers {
+	if has {
+		return &types.MsgFollowUserResponse{}, nil
+	}
+	// O(1) cap check
+	if uint64(am.k.CountFollowedUsers(sdkCtx, owner)) >= maxUsers {
 		return nil, fmt.Errorf("followed users limit reached (%d); unfollow a user first", maxUsers)
 	}
-	users = append(users, user)
-	if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, users); err != nil {
+	// O(1) write
+	if _, err := am.k.AddFollowedUser(sdkCtx, owner, user); err != nil {
 		return nil, err
 	}
 
@@ -2666,14 +2548,8 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 		userLevel = int(core.Level)
 	}
 
-	users, _ := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	newUsers := make([]string, 0, len(users))
-	for _, u := range users {
-		if u != user {
-			newUsers = append(newUsers, u)
-		}
-	}
-	if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newUsers); err != nil {
+	// O(1) remove — idempotent, no error if not present
+	if err := am.k.RemoveFollowedUser(sdkCtx, owner, user); err != nil {
 		return nil, err
 	}
 
@@ -2733,25 +2609,15 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
-	blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	// Mutual exclusion: following a topic removes matching blocked topic patterns.
+	// Must iterate blocked topics because of wildcard pattern matching.
+	blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner)
 	if err != nil {
 		return nil, err
 	}
-	if len(blockedTopics) > 0 {
-		newBlockedTopics := make([]string, 0, len(blockedTopics))
-		removedCount := 0
-		for _, t := range blockedTopics {
-			if topicMatchesPattern(topic, t) {
-				removedCount++
-				continue
-			}
-			newBlockedTopics = append(newBlockedTopics, t)
-		}
-		if removedCount > 0 {
-			if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newBlockedTopics); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("FollowTopic removed blocks", "owner", owner, "topic", topic, "count", removedCount)
+	for _, t := range blockedTopics {
+		if topicMatchesPattern(topic, t) {
+			_ = am.k.RemoveBlockedTopic(sdkCtx, owner, t)
 		}
 	}
 
@@ -2761,17 +2627,17 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		maxTopics = tierConfig.MaxFollowedTopics
 	}
 
-	topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, owner)
-	for _, t := range topics {
-		if t == topic {
-			return &types.MsgFollowTopicResponse{}, nil
-		}
+	has, err := am.k.HasFollowedTopic(sdkCtx, owner, topic)
+	if err != nil {
+		return nil, err
 	}
-	if uint64(len(topics)) >= maxTopics {
+	if has {
+		return &types.MsgFollowTopicResponse{}, nil
+	}
+	if uint64(am.k.CountFollowedTopics(sdkCtx, owner)) >= maxTopics {
 		return nil, fmt.Errorf("followed topics limit reached (%d); unfollow a topic first", maxTopics)
 	}
-	topics = append(topics, topic)
-	if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, topics); err != nil {
+	if _, err := am.k.AddFollowedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 
@@ -2830,14 +2696,7 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 		userLevel = int(core.Level)
 	}
 
-	topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, owner)
-	newTopics := make([]string, 0, len(topics))
-	for _, t := range topics {
-		if t != topic {
-			newTopics = append(newTopics, t)
-		}
-	}
-	if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newTopics); err != nil {
+	if err := am.k.RemoveFollowedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 

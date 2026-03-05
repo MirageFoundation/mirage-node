@@ -22,18 +22,58 @@ Fields:
 - `avatar` (string): Avatar URL
 - `banner` (string): Banner URL
 
-### List Fields (Stored Separately)
+### List Fields (Per-Entry KV Storage)
 
-For performance, list fields are stored at separate KV prefixes rather than in ProfileCore:
+All six profile lists use **per-entry KV keys** for O(1) add/remove/has operations.
+Three flavors of the same underlying pattern:
 
-| Prefix | Description | Keeper Methods |
-|--------|-------------|----------------|
-| `plist_agents/{owner}` | Agents the user has enabled | `SetProfileEnabledAgents`, `GetProfileEnabledAgents` |
-| `followed_users/{owner}` | Users the user follows | `SetProfileFollowedUsers`, `GetProfileFollowedUsers` |
-| `followed_topics/{owner}` | Topics the user follows | `SetProfileFollowedTopics`, `GetProfileFollowedTopics` |
-| `blocked_users/{owner}` | Users the user has blocked | `SetProfileBlockedUsers`, `GetProfileBlockedUsers` |
-| `blocked_posts/{owner}` | Posts the user has blocked | `SetProfileBlockedPosts`, `GetProfileBlockedPosts` |
-| `blocked_topics/{owner}` | Topics the user has blocked | `SetProfileBlockedTopics`, `GetProfileBlockedTopics` |
+#### Unordered Set (followed_users, followed_topics)
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `{prefix}{owner}/{entry}` | `[]byte{1}` (sentinel) | One key per entry |
+| `{prefix}{owner}\x00c` | `uint32` big-endian | Entry count |
+
+- **Has**: single KV Get — O(1)
+- **Add**: Get count → check cap → Set entry + increment count — O(1)
+- **Remove**: Delete entry + decrement count — O(1)
+- **List**: prefix iterator — O(n)
+
+#### Ordered Set (enabled_agents)
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `ea/{owner}/{agent}` | `uint64` big-endian (position) | One key per agent |
+| `ea/{owner}\x00c` | `uint32` big-endian | Entry count |
+| `ea/{owner}\x00s` | `uint64` big-endian | Next position to assign |
+
+- **AddAgent**: assign next position, increment seq and count — O(1)
+- **RemoveAgent**: delete entry, decrement count — O(1). Gaps in position are fine.
+- **ListOrdered**: prefix iterate, sort by position — O(n log n), n ≤ 50
+- **ReplaceAll**: delete all + write with positions 0..n-1, reset seq — O(n)
+
+#### Deque (blocked_users, blocked_posts, blocked_topics)
+
+Same as ordered set but with **eviction**: when over cap, the entry with the lowest sequence is deleted.
+
+| Key | Value | Description |
+|-----|-------|-------------|
+| `{prefix}{owner}/{entry}` | `uint64` big-endian (sequence) | One key per entry |
+| `{prefix}{owner}\x00c` | `uint32` big-endian | Entry count |
+| `{prefix}{owner}\x00s` | `uint64` big-endian | Next sequence |
+
+#### Prefix Table
+
+| Prefix | List Type | Keeper Methods |
+|--------|-----------|----------------|
+| `fu/` | Followed users (unordered set) | `AddFollowedUser`, `RemoveFollowedUser`, `HasFollowedUser`, `CountFollowedUsers`, `ListFollowedUsers`, `DeleteAllFollowedUsers` |
+| `ft/` | Followed topics (unordered set) | `AddFollowedTopic`, `RemoveFollowedTopic`, `HasFollowedTopic`, `CountFollowedTopics`, `ListFollowedTopics`, `DeleteAllFollowedTopics` |
+| `ea/` | Enabled agents (ordered set) | `AddEnabledAgent`, `RemoveEnabledAgent`, `HasEnabledAgent`, `CountEnabledAgents`, `ListEnabledAgentsOrdered`, `ReplaceAllEnabledAgents`, `DeleteAllEnabledAgents` |
+| `bu/` | Blocked users (deque) | `AddBlockedUserDeque`, `RemoveBlockedUser`, `HasBlockedUser`, `CountBlockedUsers`, `ListBlockedUsers`, `DeleteAllBlockedUsers` |
+| `bp/` | Blocked posts (deque) | `AddBlockedPostDeque`, `RemoveBlockedPost`, `HasBlockedPost`, `CountBlockedPosts`, `ListBlockedPosts`, `DeleteAllBlockedPosts` |
+| `bt/` | Blocked topics (deque) | `AddBlockedTopicDeque`, `RemoveBlockedTopic`, `HasBlockedTopic`, `CountBlockedTopics`, `ListBlockedTopics`, `DeleteAllBlockedTopics` |
+
+Legacy JSON-blob prefixes (`plist_agents/`, `plist_users/`, etc.) are kept for compile-time compatibility with the v1.3.0-tiers historical upgrade handler and for migration reads.
 
 ## Genesis Export/Import
 
@@ -41,7 +81,7 @@ For performance, list fields are stored at separate KV prefixes rather than in P
 
 Exports ALL key-value pairs from the module's KV store into `raw_state`. This includes:
 - All ProfileCore data
-- All list fields
+- All per-entry list keys
 - Username claims
 - Subscriptions index
 - Any other KV pairs
@@ -68,7 +108,7 @@ message InitialProfile {
 }
 ```
 
-This allows backfilling profiles from external sources (like the indexer DB) when the chain export is incomplete.
+For `initial_profiles`, lists are written as per-entry keys using `ReplaceAllEnabledAgents`, `AddFollowedUser`, `AddBlockedUserDeque`, etc.
 
 ## Indexer Database
 
@@ -98,9 +138,9 @@ The `get_profile` API returns scalar fields from the chain and list fields from 
 ### List Fields
 
 1. Add new prefix constant in `x/core/types/keys.go`
-2. Add `Set` and `Get` methods in `x/core/keeper/keeper.go`
+2. Add public per-entry methods in `x/core/keeper/keeper.go` (using the generic `addSetEntry`/`addDequeEntry`/`addOrderedEntry` helpers)
 3. Add field to `InitialProfile` in `genesis.proto`
-4. Update `InitGenesis` to import the new list
+4. Update `InitGenesis` to import the new list using per-entry methods
 5. Run `make proto-gen`
 6. If needed for backfill, add table to indexer DB and update reset script
 
@@ -110,4 +150,3 @@ The `get_profile` API returns scalar fields from the chain and list fields from 
 - Internal Go code often uses `int` for level comparisons
 - Cast with `int(core.Level)` when needed
 - The `Profile` struct in `types/types.go` uses `int32` to match
-

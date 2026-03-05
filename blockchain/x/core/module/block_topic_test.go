@@ -149,7 +149,7 @@ func TestBlockTopicNormalizesAndDedups(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	topics, err := mk.GetProfileBlockedTopics(ctx, owner)
+	topics, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	t.Logf("[debug] blocked topics=%v", topics)
 	require.Equal(t, []string{"topic1"}, topics)
@@ -175,7 +175,7 @@ func TestBlockTopicCapsToTierLimit(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	topics, err := mk.GetProfileBlockedTopics(ctx, owner)
+	topics, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	t.Logf("[debug] capped blocked topics=%v", topics)
 	require.Equal(t, []string{"beta", "gamma", "delta"}, topics)
@@ -186,7 +186,7 @@ func TestBlockTopicCapsToTierLimit(t *testing.T) {
 		Topic:          "Gamma",
 	})
 	require.NoError(t, err)
-	topics, err = mk.GetProfileBlockedTopics(ctx, owner)
+	topics, err = mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"beta", "gamma", "delta"}, topics)
 }
@@ -214,7 +214,9 @@ func TestUnblockTopicRemovesEntry(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	setProfileLevel(t, mk, ctx, owner, 0)
-	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha", "beta", "gamma"}))
+	for _, t2 := range []string{"alpha", "beta", "gamma"} {
+		_, _ = mk.AddBlockedTopicDeque(ctx, owner, t2, 0)
+	}
 
 	_, err := am.UnblockTopic(ctx, &types.MsgUnblockTopic{
 		Authority:      "not-gov",
@@ -223,7 +225,7 @@ func TestUnblockTopicRemovesEntry(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	topics, err := mk.GetProfileBlockedTopics(ctx, owner)
+	topics, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	t.Logf("[debug] unblocked topics=%v", topics)
 	require.Equal(t, []string{"alpha", "gamma"}, topics)
@@ -234,7 +236,7 @@ func TestUnblockTopicRemovesEntry(t *testing.T) {
 		Topic:          "delta",
 	})
 	require.NoError(t, err)
-	topics, err = mk.GetProfileBlockedTopics(ctx, owner)
+	topics, err = mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha", "gamma"}, topics)
 }
@@ -246,7 +248,8 @@ func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha", "beta"}))
+	_, _ = mk.AddFollowedTopic(ctx, owner, "alpha")
+	_, _ = mk.AddFollowedTopic(ctx, owner, "beta")
 
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
 		Authority:      "not-gov",
@@ -255,11 +258,11 @@ func TestBlockTopicRemovesFollowedTopic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	followed, err := mk.ListFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"beta"}, followed)
 
-	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, blocked)
 }
@@ -298,7 +301,9 @@ func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"beer", "beerman123", "wine"}))
+	_, _ = mk.AddFollowedTopic(ctx, owner, "beer")
+	_, _ = mk.AddFollowedTopic(ctx, owner, "beerman123")
+	_, _ = mk.AddFollowedTopic(ctx, owner, "wine")
 
 	_, err := am.BlockTopic(ctx, &types.MsgBlockTopic{
 		Authority:      "not-gov",
@@ -307,11 +312,11 @@ func TestBlockTopicWildcardRemovesFollowedTopics(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	followed, err := mk.ListFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"wine"}, followed)
 
-	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"beer*"}, blocked)
 }
@@ -323,7 +328,8 @@ func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha", "beta"}))
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "alpha", 0)
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "beta", 0)
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
 		Authority:      "not-gov",
@@ -333,11 +339,11 @@ func TestFollowTopicRemovesBlockedTopic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"beta"}, blocked)
 
-	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	followed, err := mk.ListFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, followed)
 }
@@ -349,7 +355,8 @@ func TestFollowTopicRemovesBlockedWildcard(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"beer*", "wine"}))
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "beer*", 0)
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "wine", 0)
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
 		Authority:      "not-gov",
@@ -359,11 +366,11 @@ func TestFollowTopicRemovesBlockedWildcard(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"wine"}, blocked)
 
-	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	followed, err := mk.ListFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"beerman123"}, followed)
 }
@@ -376,7 +383,7 @@ func TestBlockUserRemovesFollowedUser(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
-	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
+	_, _ = mk.AddFollowedUser(ctx, owner, target)
 
 	_, err := am.BlockUser(ctx, &types.MsgBlockUser{
 		Authority:      "not-gov",
@@ -385,11 +392,11 @@ func TestBlockUserRemovesFollowedUser(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	followed, err := mk.ListFollowedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, followed)
 
-	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	blocked, err := mk.ListBlockedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{target}, blocked)
 }
@@ -402,7 +409,7 @@ func TestFollowUserRemovesBlockedUser(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
-	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
+	_, _ = mk.AddBlockedUserDeque(ctx, owner, target, 0)
 
 	_, err := am.FollowUser(ctx, &types.MsgFollowUser{
 		Authority:      "not-gov",
@@ -412,11 +419,11 @@ func TestFollowUserRemovesBlockedUser(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	blocked, err := mk.ListBlockedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, blocked)
 
-	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	followed, err := mk.ListFollowedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{target}, followed)
 }
@@ -429,8 +436,8 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
 	target := testAccAddressString()
-	require.NoError(t, mk.SetProfileFollowedUsers(ctx, owner, []string{target}))
-	require.NoError(t, mk.SetProfileBlockedUsers(ctx, owner, []string{target}))
+	_, _ = mk.AddFollowedUser(ctx, owner, target)
+	_, _ = mk.AddBlockedUserDeque(ctx, owner, target, 0)
 
 	_, err := am.BlockUser(ctx, &types.MsgBlockUser{
 		Authority:      "not-gov",
@@ -439,11 +446,11 @@ func TestBlockUserAlreadyBlockedStillRemovesFollow(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	followed, err := mk.GetProfileFollowedUsers(ctx, owner)
+	followed, err := mk.ListFollowedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, followed)
 
-	blocked, err := mk.GetProfileBlockedUsers(ctx, owner)
+	blocked, err := mk.ListBlockedUsers(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{target}, blocked)
 }
@@ -455,8 +462,8 @@ func TestFollowTopicAlreadyFollowedStillRemovesBlock(t *testing.T) {
 
 	pub, owner := testPubkeyOwner()
 	ensureUsername(t, mk, ctx, owner, "Anon-testuser")
-	require.NoError(t, mk.SetProfileFollowedTopics(ctx, owner, []string{"alpha"}))
-	require.NoError(t, mk.SetProfileBlockedTopics(ctx, owner, []string{"alpha"}))
+	_, _ = mk.AddFollowedTopic(ctx, owner, "alpha")
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "alpha", 0)
 
 	_, err := am.FollowTopic(ctx, &types.MsgFollowTopic{
 		Authority:      "not-gov",
@@ -466,11 +473,11 @@ func TestFollowTopicAlreadyFollowedStillRemovesBlock(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	blocked, err := mk.GetProfileBlockedTopics(ctx, owner)
+	blocked, err := mk.ListBlockedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Empty(t, blocked)
 
-	followed, err := mk.GetProfileFollowedTopics(ctx, owner)
+	followed, err := mk.ListFollowedTopics(ctx, owner)
 	require.NoError(t, err)
 	require.Equal(t, []string{"alpha"}, followed)
 }

@@ -337,13 +337,13 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	_ = mk.SetProfileCore(ctx, owner, bz)
 	_ = mk.ClaimUsername(ctx, "listuser", owner)
 
-	// Populate all profile list KV entries
-	_ = mk.SetProfileEnabledAgents(ctx, owner, []string{"agent1", "agent2"})
-	_ = mk.SetProfileFollowedUsers(ctx, owner, []string{"user1"})
-	_ = mk.SetProfileFollowedTopics(ctx, owner, []string{"topic1"})
-	_ = mk.SetProfileBlockedUsers(ctx, owner, []string{"blocked1"})
-	_ = mk.SetProfileBlockedPosts(ctx, owner, []string{"txhash1"})
-	_ = mk.SetProfileBlockedTopics(ctx, owner, []string{"btopic1"})
+	// Populate all profile list KV entries using per-entry methods
+	_ = mk.ReplaceAllEnabledAgents(ctx, owner, []string{"agent1", "agent2"})
+	_, _ = mk.AddFollowedUser(ctx, owner, "user1")
+	_, _ = mk.AddFollowedTopic(ctx, owner, "topic1")
+	_, _ = mk.AddBlockedUserDeque(ctx, owner, "blocked1", 0)
+	_, _ = mk.AddBlockedPostDeque(ctx, owner, "txhash1", 0)
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "btopic1", 0)
 
 	req := &types.MsgDeleteUser{
 		Authority:      testAccAddressString(),
@@ -357,22 +357,22 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	}()
 
 	// All lists should be cleaned up
-	agents, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	agents, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Empty(t, agents, "enabled agents should be empty")
 
-	users, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	users, _ := mk.ListFollowedUsers(ctx, owner)
 	require.Empty(t, users, "followed users should be empty")
 
-	topics, _ := mk.GetProfileFollowedTopics(ctx, owner)
+	topics, _ := mk.ListFollowedTopics(ctx, owner)
 	require.Empty(t, topics, "followed topics should be empty")
 
-	blockedUsers, _ := mk.GetProfileBlockedUsers(ctx, owner)
+	blockedUsers, _ := mk.ListBlockedUsers(ctx, owner)
 	require.Empty(t, blockedUsers, "blocked users should be empty")
 
-	blockedPosts, _ := mk.GetProfileBlockedPosts(ctx, owner)
+	blockedPosts, _ := mk.ListBlockedPosts(ctx, owner)
 	require.Empty(t, blockedPosts, "blocked posts should be empty")
 
-	blockedTopics, _ := mk.GetProfileBlockedTopics(ctx, owner)
+	blockedTopics, _ := mk.ListBlockedTopics(ctx, owner)
 	require.Empty(t, blockedTopics, "blocked topics should be empty")
 }
 

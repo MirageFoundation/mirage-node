@@ -49,12 +49,11 @@ func TestEnableAgentHardCapFreeTier(t *testing.T) {
 	require.NotNil(t, freeTier)
 	maxAgents := int(freeTier.MaxEnabledAgents) // 5
 
-	// Fill to max
-	agents := make([]string, maxAgents)
+	// Fill to max using per-entry methods
 	for i := 0; i < maxAgents; i++ {
-		agents[i] = genAddr(byte(i + 1))
+		_, err := mk.AddEnabledAgent(ctx, owner, genAddr(byte(i+1)))
+		require.NoError(t, err)
 	}
-	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, agents))
 
 	// Next enable should be rejected
 	_, err := am.EnableAgent(ctx, &types.MsgEnableAgent{
@@ -67,7 +66,7 @@ func TestEnableAgentHardCapFreeTier(t *testing.T) {
 	require.Contains(t, err.Error(), "limit reached")
 
 	// Verify list unchanged
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Len(t, got, maxAgents)
 }
 
@@ -81,12 +80,11 @@ func TestEnableAgentHardCapSubscriberTier(t *testing.T) {
 	require.NotNil(t, subTier)
 	require.Equal(t, uint64(50), subTier.MaxEnabledAgents)
 
-	// Pre-fill to max with mock data
-	agents := make([]string, 50)
+	// Pre-fill to max with per-entry keys
 	for i := 0; i < 50; i++ {
-		agents[i] = fmt.Sprintf("mirage1agent%04d", i)
+		_, err := mk.AddEnabledAgent(ctx, owner, fmt.Sprintf("mirage1agent%04d", i))
+		require.NoError(t, err)
 	}
-	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, agents))
 
 	// Should reject
 	_, err := am.EnableAgent(ctx, &types.MsgEnableAgent{
@@ -137,7 +135,7 @@ func TestEnableAgentSucceedsAfterDisable(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Equal(t, []string{agentA, agentC, agentD}, got)
 }
 
@@ -161,7 +159,7 @@ func TestEnableAgentIdempotent(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Equal(t, []string{agent}, got)
 }
 
@@ -221,8 +219,8 @@ func TestFollowUserSucceedsAfterUnfollow(t *testing.T) {
 	_, err = am.FollowUser(ctx, &types.MsgFollowUser{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, User: c})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileFollowedUsers(ctx, owner)
-	require.Equal(t, []string{b, c}, got)
+	got, _ := mk.ListFollowedUsers(ctx, owner)
+	require.ElementsMatch(t, []string{b, c}, got)
 }
 
 func TestFollowUserIdempotent(t *testing.T) {
@@ -241,7 +239,7 @@ func TestFollowUserIdempotent(t *testing.T) {
 	_, err = am.FollowUser(ctx, &types.MsgFollowUser{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, User: user})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	got, _ := mk.ListFollowedUsers(ctx, owner)
 	require.Equal(t, []string{user}, got)
 }
 
@@ -294,8 +292,8 @@ func TestFollowTopicSucceedsAfterUnfollow(t *testing.T) {
 	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "gamma"})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileFollowedTopics(ctx, owner)
-	require.Equal(t, []string{"beta", "gamma"}, got)
+	got, _ := mk.ListFollowedTopics(ctx, owner)
+	require.ElementsMatch(t, []string{"beta", "gamma"}, got)
 }
 
 func TestFollowTopicIdempotent(t *testing.T) {
@@ -312,7 +310,7 @@ func TestFollowTopicIdempotent(t *testing.T) {
 	_, err = am.FollowTopic(ctx, &types.MsgFollowTopic{Authority: "not-gov", EnvelopePubkey: pub, Target: owner, Topic: "alpha"})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileFollowedTopics(ctx, owner)
+	got, _ := mk.ListFollowedTopics(ctx, owner)
 	require.Equal(t, []string{"alpha"}, got)
 }
 
@@ -336,7 +334,7 @@ func TestBlockPostDequeEviction(t *testing.T) {
 		require.NoError(t, err, "blocking %s should succeed (deque)", h)
 	}
 
-	got, _ := mk.GetProfileBlockedPosts(ctx, owner)
+	got, _ := mk.ListBlockedPosts(ctx, owner)
 	require.Len(t, got, 3, "deque should cap at 3")
 	require.Equal(t, []string{genTxHash(2), genTxHash(3), genTxHash(4)}, got, "oldest should be evicted")
 }
@@ -355,7 +353,7 @@ func TestBlockPostDequeEvictsOldestNotNewest(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	got, _ := mk.GetProfileBlockedPosts(ctx, owner)
+	got, _ := mk.ListBlockedPosts(ctx, owner)
 	require.Equal(t, []string{h2, h3}, got, "first entry should have been evicted")
 }
 
@@ -379,7 +377,7 @@ func TestBlockUserDequeEviction(t *testing.T) {
 		require.NoError(t, err, "blocking should always succeed (deque)")
 	}
 
-	got, _ := mk.GetProfileBlockedUsers(ctx, owner)
+	got, _ := mk.ListBlockedUsers(ctx, owner)
 	require.Len(t, got, 3)
 	require.Equal(t, []string{genAddr(2), genAddr(3), genAddr(4)}, got)
 }
@@ -403,7 +401,7 @@ func TestBlockTopicDequeEviction(t *testing.T) {
 		require.NoError(t, err, "blocking should always succeed (deque)")
 	}
 
-	got, _ := mk.GetProfileBlockedTopics(ctx, owner)
+	got, _ := mk.ListBlockedTopics(ctx, owner)
 	require.Equal(t, []string{"beta", "gamma"}, got, "oldest should be evicted")
 }
 
@@ -501,7 +499,7 @@ func TestSetAgentsBasic(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Equal(t, []string{a1, a2, a3}, got)
 }
 
@@ -516,7 +514,7 @@ func TestSetAgentsPreservesOrder(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Equal(t, []string{a3, a1, a2}, got)
 }
 
@@ -524,7 +522,7 @@ func TestSetAgentsEmptyClears(t *testing.T) {
 	mk, ctx, am := setupModule(t)
 	pub, owner := testPubkeyOwner()
 
-	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, []string{genAddr(1), genAddr(2)}))
+	require.NoError(t, mk.ReplaceAllEnabledAgents(ctx, owner, []string{genAddr(1), genAddr(2)}))
 
 	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
 		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
@@ -532,7 +530,7 @@ func TestSetAgentsEmptyClears(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Len(t, got, 0)
 }
 
@@ -574,7 +572,7 @@ func TestSetAgentsReplacesExisting(t *testing.T) {
 	pub, owner := testPubkeyOwner()
 
 	a1, a2, a3 := genAddr(1), genAddr(2), genAddr(3)
-	require.NoError(t, mk.SetProfileEnabledAgents(ctx, owner, []string{a1, a2}))
+	require.NoError(t, mk.ReplaceAllEnabledAgents(ctx, owner, []string{a1, a2}))
 
 	_, err := am.SetAgents(ctx, &types.MsgSetAgents{
 		Authority: "not-gov", EnvelopePubkey: pub, Target: owner,
@@ -582,7 +580,7 @@ func TestSetAgentsReplacesExisting(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, _ := mk.GetProfileEnabledAgents(ctx, owner)
+	got, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
 	require.Equal(t, []string{a3, a1}, got)
 }
 
@@ -875,7 +873,7 @@ func TestBlockUserDequeKeepsNewest(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	got, _ := mk.GetProfileBlockedUsers(ctx, owner)
+	got, _ := mk.ListBlockedUsers(ctx, owner)
 	require.Len(t, got, 5)
 	// Should be addresses 4,5,6,7,8
 	for i, addr := range got {
@@ -899,7 +897,7 @@ func TestBlockPostDequeKeepsNewest(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	got, _ := mk.GetProfileBlockedPosts(ctx, owner)
+	got, _ := mk.ListBlockedPosts(ctx, owner)
 	require.Len(t, got, 4)
 	require.Equal(t, []string{genTxHash(4), genTxHash(5), genTxHash(6), genTxHash(7)}, got)
 }
@@ -937,10 +935,10 @@ func TestHardCapVsDequeContrast(t *testing.T) {
 	_, err = am.BlockUser(ctx, &types.MsgBlockUser{Authority: "not-gov", EnvelopePubkey: pub, Target: genAddr(12)})
 	require.NoError(t, err, "block should succeed with deque eviction")
 
-	got, _ := mk.GetProfileBlockedUsers(ctx, owner)
+	got, _ := mk.ListBlockedUsers(ctx, owner)
 	require.Equal(t, []string{genAddr(11), genAddr(12)}, got, "oldest block evicted")
 
-	followed, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	followed, _ := mk.ListFollowedUsers(ctx, owner)
 	require.Len(t, followed, 2, "followed list unchanged after failed 3rd follow")
 }
 
@@ -1019,7 +1017,7 @@ func TestRequireUsernamePassesWithUsername(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	followed, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	followed, _ := mk.ListFollowedUsers(ctx, owner)
 	require.Equal(t, []string{genAddr(1)}, followed)
 }
 

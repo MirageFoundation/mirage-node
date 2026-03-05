@@ -1443,6 +1443,90 @@ func (app *App) RegisterUpgradeHandlers() {
 				sdkCtx.Logger().Info("v1.16.0: migrated profiles (is_moderator removal + level remap)", "count", migrated)
 			}
 
+			// ── Migrate JSON blob lists → per-entry KV keys ────────────────
+			//
+			// For each legacy prefix we: read the JSON []string blob, write
+			// individual per-entry keys at the new prefix, then delete the old key.
+			//
+			// Unordered sets (followed_users, followed_topics):
+			//   Entry: {newPrefix}{owner}/{entry} → []byte{1}
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//
+			// Ordered set (enabled_agents):
+			//   Entry: {newPrefix}{owner}/{agent} → uint64 BE (position)
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//   Seq:   {newPrefix}{owner}\x00s    → uint64 BE (next position)
+			//
+			// Deque (blocked_users, blocked_posts, blocked_topics):
+			//   Entry: {newPrefix}{owner}/{entry} → uint64 BE (sequence)
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//   Seq:   {newPrefix}{owner}\x00s    → uint64 BE (next sequence)
+
+			putU32 := func(v uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, v); return b }
+			putU64 := func(v uint64) []byte { b := make([]byte, 8); binary.BigEndian.PutUint64(b, v); return b }
+			sentinel := []byte{1}
+
+			type listMigration struct {
+				oldPrefix string
+				newPrefix string
+				ordered   bool // true = store uint64 position/sequence, false = store sentinel
+			}
+			migrations := []listMigration{
+				{coretypes.ProfileFollowedUsersPrefix, coretypes.FollowedUsersPrefix, false},
+				{coretypes.ProfileFollowedTopicsPrefix, coretypes.FollowedTopicsPrefix, false},
+				{coretypes.ProfileEnabledAgentsPrefix, coretypes.EnabledAgentsPrefix, true},
+				{coretypes.ProfileBlockedUsersPrefix, coretypes.BlockedUsersPrefix, true},
+				{coretypes.ProfileBlockedPostsPrefix, coretypes.BlockedPostsPrefix, true},
+				{coretypes.ProfileBlockedTopicsPrefix, coretypes.BlockedTopicsPrefix, true},
+			}
+
+			for _, lm := range migrations {
+				oldPfx := []byte(lm.oldPrefix)
+				iter, iterErr := store.Iterator(oldPfx, storetypes.PrefixEndBytes(oldPfx))
+				if iterErr != nil {
+					sdkCtx.Logger().Error("v1.16.0: list migration iterator error", "prefix", lm.oldPrefix, "err", iterErr)
+					continue
+				}
+				var oldKeys [][]byte
+				var owners []string
+				var lists [][]string
+				for ; iter.Valid(); iter.Next() {
+					k := iter.Key()
+					owner := string(k[len(oldPfx):])
+					var items []string
+					if err := json.Unmarshal(iter.Value(), &items); err != nil {
+						sdkCtx.Logger().Error("v1.16.0: failed to unmarshal list", "prefix", lm.oldPrefix, "owner", owner, "err", err)
+						continue
+					}
+					oldKeys = append(oldKeys, append([]byte(nil), k...))
+					owners = append(owners, owner)
+					lists = append(lists, items)
+				}
+				iter.Close()
+
+				listMigrated := 0
+				for i, owner := range owners {
+					items := lists[i]
+					for idx, entry := range items {
+						ek := []byte(lm.newPrefix + owner + "/" + entry)
+						if lm.ordered {
+							_ = store.Set(ek, putU64(uint64(idx)))
+						} else {
+							_ = store.Set(ek, sentinel)
+						}
+					}
+					ck := []byte(lm.newPrefix + owner + coretypes.SetCountSuffix)
+					_ = store.Set(ck, putU32(uint32(len(items))))
+					if lm.ordered && len(items) > 0 {
+						sk := []byte(lm.newPrefix + owner + coretypes.DequeSeqSuffix)
+						_ = store.Set(sk, putU64(uint64(len(items))))
+					}
+					_ = store.Delete(oldKeys[i])
+					listMigrated++
+				}
+				sdkCtx.Logger().Info("v1.16.0: migrated list", "old_prefix", lm.oldPrefix, "new_prefix", lm.newPrefix, "profiles", listMigrated)
+			}
+
 			sdkCtx.Logger().Info("Upgrade to v1.16.0 complete")
 			return toVM, nil
 		},
