@@ -1485,20 +1485,20 @@ func (app *App) RegisterUpgradeHandlers() {
 				iter, iterErr := store.Iterator(oldPfx, storetypes.PrefixEndBytes(oldPfx))
 				if iterErr != nil {
 					sdkCtx.Logger().Error("v1.16.0: list migration iterator error", "prefix", lm.oldPrefix, "err", iterErr)
-					continue
+					return toVM, iterErr
 				}
 				var oldKeys [][]byte
 				var owners []string
 				var lists [][]string
 				for ; iter.Valid(); iter.Next() {
-					k := iter.Key()
-					owner := string(k[len(oldPfx):])
+					key := iter.Key()
+					owner := string(key[len(oldPfx):])
 					var items []string
 					if err := json.Unmarshal(iter.Value(), &items); err != nil {
 						sdkCtx.Logger().Error("v1.16.0: failed to unmarshal list", "prefix", lm.oldPrefix, "owner", owner, "err", err)
-						continue
+						return toVM, err
 					}
-					oldKeys = append(oldKeys, append([]byte(nil), k...))
+					oldKeys = append(oldKeys, append([]byte(nil), key...))
 					owners = append(owners, owner)
 					lists = append(lists, items)
 				}
@@ -1510,18 +1510,39 @@ func (app *App) RegisterUpgradeHandlers() {
 					for idx, entry := range items {
 						ek := []byte(lm.newPrefix + owner + "/" + entry)
 						if lm.ordered {
-							_ = store.Set(ek, putU64(uint64(idx)))
+							if err := store.Set(ek, putU64(uint64(idx))); err != nil {
+								return toVM, err
+							}
 						} else {
-							_ = store.Set(ek, sentinel)
+							if err := store.Set(ek, sentinel); err != nil {
+								return toVM, err
+							}
 						}
 					}
 					ck := []byte(lm.newPrefix + owner + coretypes.SetCountSuffix)
-					_ = store.Set(ck, putU32(uint32(len(items))))
+					if len(items) > 0 {
+						if err := store.Set(ck, putU32(uint32(len(items)))); err != nil {
+							return toVM, err
+						}
+					} else {
+						if err := store.Delete(ck); err != nil {
+							return toVM, err
+						}
+					}
 					if lm.ordered && len(items) > 0 {
 						sk := []byte(lm.newPrefix + owner + coretypes.DequeSeqSuffix)
-						_ = store.Set(sk, putU64(uint64(len(items))))
+						if err := store.Set(sk, putU64(uint64(len(items)))); err != nil {
+							return toVM, err
+						}
+					} else if lm.ordered {
+						sk := []byte(lm.newPrefix + owner + coretypes.DequeSeqSuffix)
+						if err := store.Delete(sk); err != nil {
+							return toVM, err
+						}
 					}
-					_ = store.Delete(oldKeys[i])
+					if err := store.Delete(oldKeys[i]); err != nil {
+						return toVM, err
+					}
 					listMigrated++
 				}
 				sdkCtx.Logger().Info("v1.16.0: migrated list", "old_prefix", lm.oldPrefix, "new_prefix", lm.newPrefix, "profiles", listMigrated)

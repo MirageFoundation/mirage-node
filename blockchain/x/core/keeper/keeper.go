@@ -432,11 +432,17 @@ func (k Keeper) deleteAllSetEntries(ctx sdk.Context, prefix, owner string) error
 		keys = append(keys, append([]byte(nil), it.Key()...))
 	}
 	it.Close()
-	for _, k := range keys {
-		_ = store.Delete(k)
+	for _, key := range keys {
+		if err := store.Delete(key); err != nil {
+			return err
+		}
 	}
-	_ = store.Delete(countKey(prefix, owner))
-	_ = store.Delete(seqKey(prefix, owner))
+	if err := store.Delete(countKey(prefix, owner)); err != nil {
+		return err
+	}
+	if err := store.Delete(seqKey(prefix, owner)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -566,9 +572,13 @@ func (k Keeper) addDequeEntry(ctx sdk.Context, prefix, owner, entry string, maxC
 		// Decrement count after eviction
 		cnt--
 		if cnt == 0 {
-			_ = store.Delete(ck)
+			if err := store.Delete(ck); err != nil {
+				return true, err
+			}
 		} else {
-			_ = store.Set(ck, putUint32(cnt))
+			if err := store.Set(ck, putUint32(cnt)); err != nil {
+				return true, err
+			}
 		}
 	}
 	return true, nil
@@ -1741,26 +1751,54 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 	}
 
 	// Delete profile core KV
-	_ = store.Delete(k.profileKey(addr))
+	if err := store.Delete(k.profileKey(addr)); err != nil {
+		return "", nil, err
+	}
 
 	// Delete all per-entry list keys (prefix-range delete + count + seq for each list)
-	_ = k.DeleteAllEnabledAgents(ctx, addr)
-	_ = k.DeleteAllFollowedUsers(ctx, addr)
-	_ = k.DeleteAllFollowedTopics(ctx, addr)
-	_ = k.DeleteAllBlockedUsers(ctx, addr)
-	_ = k.DeleteAllBlockedPosts(ctx, addr)
-	_ = k.DeleteAllBlockedTopics(ctx, addr)
+	if err := k.DeleteAllEnabledAgents(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllFollowedUsers(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllFollowedTopics(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedUsers(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedPosts(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedTopics(ctx, addr); err != nil {
+		return "", nil, err
+	}
 	// Also delete legacy blob keys in case they exist (pre-migration data)
-	_ = store.Delete(k.profileEnabledAgentsKey(addr))
-	_ = store.Delete(k.profileFollowedUsersKey(addr))
-	_ = store.Delete(k.profileFollowedTopicsKey(addr))
-	_ = store.Delete(k.profileBlockedUsersKey(addr))
-	_ = store.Delete(k.profileBlockedPostsKey(addr))
-	_ = store.Delete(k.profileBlockedTopicsKey(addr))
+	if err := store.Delete(k.profileEnabledAgentsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileFollowedUsersKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileFollowedTopicsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedUsersKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedPostsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedTopicsKey(addr)); err != nil {
+		return "", nil, err
+	}
 
 	// Release username mapping
 	if username != "" {
-		_ = k.ReleaseUsername(ctx, username, addr)
+		if err := k.ReleaseUsername(ctx, username, addr); err != nil {
+			return "", nil, err
+		}
 		usernameReleased = username
 	}
 
