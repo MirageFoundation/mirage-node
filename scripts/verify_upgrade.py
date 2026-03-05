@@ -188,7 +188,7 @@ EXPECTED_PARAMS = {
     "mint_quantity": 5_800_000_000,
     "mint_dynamic_credit_cap": 100,
     "subscription_period": 43200,
-    "relay_min_gas_price": 5000,
+    "relay_min_gas_price": 1000,
     "relay_max_gas_fee": 500_000_000,
     "max_envelope_age": 60,
     "min_username_size": 3,

@@ -122,10 +122,8 @@ def _send_tokens_via_cli(
     amount_str = f"{amount}umirage"
 
     # Get the actual minimum gas price from the node config
-    try:
-        gas_price = int(min_gas_price_umirage())
-    except Exception:
-        gas_price = 5000  # Fallback to reasonable default
+    gas_price = int(min_gas_price_umirage())
+    logger.debug("reward_distributor: using min gas price %s umirage", gas_price)
 
     cmd = [
         miraged,

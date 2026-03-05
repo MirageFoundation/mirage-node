@@ -1380,10 +1380,11 @@ func (app *App) RegisterUpgradeHandlers() {
 			params := app.CoreKeeper.GetParams(sdkCtx)
 			params.Tiers = coretypes.DefaultTiers()
 			params.SubscriptionReservePercent = 0.95
+			params.RelayMinGasPrice = 1000
 			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
 				return nil, fmt.Errorf("failed to set new tier params: %w", err)
 			}
-			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10), reserve=95%")
+			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10), reserve=95%, relay_min_gas_price=1000")
 
 			// Migrate existing profile JSON:
 			// 1. Strip is_moderator field

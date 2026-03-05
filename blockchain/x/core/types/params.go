@@ -158,7 +158,7 @@ func DefaultParams() Params {
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
-		RelayMinGasPrice: 5000,
+		RelayMinGasPrice: 1000,
 
 		// Max fee deducted per relayed tx in umirage (500 MIRAGE cap)
 		RelayMaxGasFee: 500_000_000,

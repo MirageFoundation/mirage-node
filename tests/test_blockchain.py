@@ -3352,7 +3352,7 @@ def test_direct_bank(backend: str) -> None:
                 "--gas-adjustment",
                 "1.5",
                 "--gas-prices",
-                "5000umirage",
+                "1000umirage",
                 "-o",
                 "json",
             ],

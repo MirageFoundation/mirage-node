@@ -461,7 +461,7 @@ def _faucet(backend: str, address: str, amount: int = 500_000_000) -> bool:
             "--gas-adjustment",
             "1.5",
             "--gas-prices",
-            "5000umirage",
+            "1000umirage",
             "-o",
             "json",
         ]

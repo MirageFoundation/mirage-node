@@ -211,10 +211,9 @@ func validateAppConfig(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Validate minimum-gas-prices is exactly "5000umirage"
-	// This is critical for v1.8.0 economics - the relay fee math expects this exact value
+	// Validate minimum-gas-prices is exactly "1000umirage"
 	minGasPrices := strings.TrimSpace(appConfig.MinGasPrices)
-	const requiredMinGasPrice = "5000umirage"
+	const requiredMinGasPrice = "1000umirage"
 	if minGasPrices != requiredMinGasPrice {
 		return errors.New(
 			"FATAL: minimum-gas-prices must be exactly \"" + requiredMinGasPrice + "\" in app.toml.\n" +
