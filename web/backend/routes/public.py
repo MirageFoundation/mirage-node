@@ -445,6 +445,13 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
         [p for p in post_ids] + [a.lower() for a in agents],
     )
     rows = cur.fetchall()
+    logger.debug(
+        "apply_agent_edits: viewer=%s agents=%d posts=%d rows=%d",
+        viewer_lower,
+        len(agents),
+        len(post_ids),
+        len(rows),
+    )
     if not rows:
         return posts
 
