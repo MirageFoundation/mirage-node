@@ -497,6 +497,11 @@ def check_profiles() -> None:
     }
     stale_field_hits: dict[str, int] = {f: 0 for f in REMOVED_PROFILE_FIELDS}
     self_agent_violations: list[str] = []
+    list_type_errors: list[str] = []
+    list_cap_violations: list[str] = []
+    list_dupe_violations: list[str] = []
+
+    tier_caps = {t["level"]: t for t in EXPECTED_TIERS}
 
     for p in profiles:
         lvl = p.get("level", 0)
@@ -515,9 +520,40 @@ def check_profiles() -> None:
             if removed_field in p:
                 stale_field_hits[removed_field] += 1
         owner = str(p.get("owner", "")).lower()
-        agents = [str(a).lower() for a in (p.get("enabled_agents") or [])]
-        if owner and owner in agents:
-            self_agent_violations.append(owner[:20])
+        agents = p.get("enabled_agents")
+        if isinstance(agents, list):
+            agents_lc = [str(a).lower() for a in agents]
+            if owner and owner in agents_lc:
+                self_agent_violations.append(owner[:20])
+
+        # ── List field validation (type, duplicates, cap per tier) ──
+        if lvl in tier_caps:
+            caps = tier_caps[lvl]
+        else:
+            caps = None
+
+        list_fields = {
+            "enabled_agents": ("max_enabled_agents", p.get("enabled_agents")),
+            "followed_users": ("max_followed_users", p.get("followed_users")),
+            "followed_topics": ("max_followed_topics", p.get("followed_topics")),
+            "blocked_users": ("max_blocked_users", p.get("blocked_users")),
+            "blocked_posts": ("max_blocked_posts", p.get("blocked_posts")),
+            "blocked_topics": ("max_blocked_topics", p.get("blocked_topics")),
+        }
+
+        for list_name, (cap_key, raw_list) in list_fields.items():
+            if list_name not in p:
+                continue
+            if not isinstance(raw_list, list):
+                list_type_errors.append(f"{owner[:20]}:{list_name}={type(raw_list).__name__}")
+                continue
+            if len(raw_list) != len(set(map(str, raw_list))):
+                list_dupe_violations.append(f"{owner[:20]}:{list_name}")
+            if caps is not None:
+                max_allowed = int(caps.get(cap_key, 0))
+                if len(raw_list) > max_allowed:
+                    list_cap_violations.append(f"{owner[:20]}:{list_name}={len(raw_list)} (cap {max_allowed})")
+            debug(f"Profile {owner[:12]} {list_name} count={len(raw_list)}")
 
     dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
     ok(f"Level distribution: {dist}")
@@ -552,6 +588,21 @@ def check_profiles() -> None:
         fail(f"{len(self_agent_violations)} profiles have themselves as enabled agent: {self_agent_violations[:5]}")
     else:
         ok("No profiles have themselves as enabled agent")
+
+    if list_type_errors:
+        fail(f"{len(list_type_errors)} list fields have invalid types: {list_type_errors[:5]}")
+    else:
+        ok("All list fields are JSON arrays")
+
+    if list_dupe_violations:
+        fail(f"{len(list_dupe_violations)} profiles have duplicate list entries: {list_dupe_violations[:5]}")
+    else:
+        ok("No duplicate entries in profile lists")
+
+    if list_cap_violations:
+        fail(f"{len(list_cap_violations)} profiles exceed tier list caps: {list_cap_violations[:5]}")
+    else:
+        ok("All profile lists are within tier caps")
 
 
 # ── Main ───────────────────────────────────────────────────
