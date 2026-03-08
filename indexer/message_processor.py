@@ -1158,7 +1158,6 @@ class MessageProcessor:
                 )
         except Exception as e:
             logger.error("Error handling MsgSetUsername: %s", e, exc_info=True)
-            raise
 
     def _handle_set_biography(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetBiography — update biography in profiles table."""
@@ -1266,7 +1265,6 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgEnableAgent: %s", e, exc_info=True)
-            raise
 
     def _handle_disable_agent(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDisableAgent."""
@@ -1281,7 +1279,6 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
-            raise
 
     def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetAgents."""
@@ -1296,7 +1293,6 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
-            raise
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""
@@ -1320,7 +1316,6 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgFollowUser: %s", e, exc_info=True)
-            raise
 
     def _handle_unfollow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowUser."""
@@ -1342,7 +1337,6 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowUser: %s", e, exc_info=True)
-            raise
 
     def _handle_follow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowTopic."""
@@ -1367,7 +1361,6 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgFollowTopic: %s", e, exc_info=True)
-            raise
 
     def _handle_unfollow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowTopic."""
@@ -1389,7 +1382,6 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowTopic: %s", e, exc_info=True)
-            raise
 
     def _handle_block_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockPost."""
