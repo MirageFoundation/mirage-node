@@ -1307,9 +1307,9 @@ class MessageProcessor:
                 logger.warning("Rejected follow_user: missing owner or user")
                 return
 
-            self._refresh_followed_users(owner, ts)
             self.db.unblock_user(owner, user)
             logger.debug("Follow user removed block: owner=%s user=%s", owner, user)
+            self._refresh_followed_users(owner, ts)
             self.log_yaml(
                 "Follow user",
                 {"owner": owner, "user": user, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1351,10 +1351,10 @@ class MessageProcessor:
                 logger.warning("Rejected follow_topic: missing owner or topic")
                 return
 
-            self._refresh_followed_topics(owner, ts)
             removed = self.db.unblock_topics_matching(owner, topic)
             if removed > 0:
                 logger.debug("Follow topic removed block(s): owner=%s topic=%s removed=%d", owner, topic, removed)
+            self._refresh_followed_topics(owner, ts)
             self.log_yaml(
                 "Follow topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},

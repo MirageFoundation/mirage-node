@@ -125,6 +125,24 @@ class ChainClient:
         data = r.json()
         if not isinstance(data, dict):
             raise RuntimeError(f"query_profile_full invalid response: {type(data).__name__}")
+        # Normalize list fields to always be present, even when empty.
+        alias_map = {
+            "enabled_agents": "enabledAgents",
+            "followed_users": "followedUsers",
+            "followed_topics": "followedTopics",
+            "blocked_users": "blockedUsers",
+            "blocked_posts": "blockedPosts",
+            "blocked_topics": "blockedTopics",
+        }
+        for key, alias in alias_map.items():
+            if key not in data and alias in data:
+                logger.error("query_profile_full alias used: %s -> %s", alias, key)
+                data[key] = data[alias]
+            if key not in data or data[key] is None:
+                logger.error("query_profile_full missing list %s, defaulting to empty list", key)
+                data[key] = []
+            if not isinstance(data[key], list):
+                raise RuntimeError(f"query_profile_full invalid {key} type: {type(data[key]).__name__}")
         return data
 
     def list_profiles_subspace(self) -> list[dict]:
