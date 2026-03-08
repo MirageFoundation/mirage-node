@@ -18,7 +18,7 @@ Every user-initiated action on the chain now requires a username. Posting, votin
 
 ### Fairer Fees, Bigger Rewards
 
-Relay gas is now metered per message instead of per transaction. Previously, batching multiple actions into a single transaction overcharged your reserve because the full transaction gas was deducted for each message. Now each action pays only for the gas it actually consumed, capped at 500 MIRAGE per message. Vote weights align with the new tier structure — Subscribers and Agents vote at 1.33x, Free at 1.0x. The reward multiplier now counts flash quests and achievements alongside daily quests, so short-burst challenges and long-term milestones both help you earn faster. At fifty completed quests your multiplier hits 5x, whether those came from daily routines, timed flash challenges, or achievement unlocks.
+Relay gas is now metered per message instead of per transaction. Previously, batching multiple actions into a single transaction overcharged your reserve because the full transaction gas was deducted for each message. Now each action pays only for the gas it actually consumed, capped at 500 MIRAGE per message. On top of that, the minimum gas price dropped from 5,000 to 1,000 umirage per gas unit — a five-fold reduction that makes every action on the network noticeably cheaper. Vote weights align with the new tier structure — Subscribers and Agents vote at 1.33x, Free at 1.0x. The reward multiplier now counts flash quests and achievements alongside daily quests, so short-burst challenges and long-term milestones both help you earn faster. At fifty completed quests your multiplier hits 5x, whether those came from daily routines, timed flash challenges, or achievement unlocks.
 
 ### Smoother Operations
 

@@ -114,36 +114,45 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
-    def query_profile_full(self, addr: str, timeout: int = HTTP_TIMEOUT_SHORT) -> dict:
-        """Query full profile (including per-entry lists) via REST gRPC-gateway."""
-        rest_url = self._derive_rest_url(self.jsonrpc_url)
-        url = f"{rest_url}/mirage/core/v1/profile/{addr.lower()}"
-        logger.debug("query_profile_full url=%s", url)
-        r = requests.get(url, timeout=timeout)
-        if r.status_code != 200:
-            raise RuntimeError(f"query_profile_full failed: {r.status_code} {r.text}")
-        data = r.json()
-        if not isinstance(data, dict):
-            raise RuntimeError(f"query_profile_full invalid response: {type(data).__name__}")
-        # Normalize list fields to always be present, even when empty.
-        alias_map = {
-            "enabled_agents": "enabledAgents",
-            "followed_users": "followedUsers",
-            "followed_topics": "followedTopics",
-            "blocked_users": "blockedUsers",
-            "blocked_posts": "blockedPosts",
-            "blocked_topics": "blockedTopics",
+    def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Query full profile (including per-entry lists) via gRPC."""
+        from shared.datatypes import QueryProfileRequest, QueryProfileResponse
+
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/GetProfile",
+                request_serializer=QueryProfileRequest.SerializeToString,
+                response_deserializer=QueryProfileResponse.FromString,
+            )
+            resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
+
+        profile = {
+            "owner": str(resp.owner),
+            "username": str(resp.username),
+            "level": int(resp.level),
+            "created_at": int(resp.created_at),
+            "subscription_expiry": int(resp.subscription_expiry),
+            "auto_renew": bool(resp.auto_renew),
+            "reserve_funds": int(resp.reserve_funds),
+            "biography": str(resp.biography),
+            "avatar": str(resp.avatar),
+            "banner": str(resp.banner),
+            "flair": str(resp.flair),
+            "enabled_agents": list(resp.enabled_agents),
+            "followed_users": list(resp.followed_users),
+            "followed_topics": list(resp.followed_topics),
+            "blocked_users": list(resp.blocked_users),
+            "blocked_posts": list(resp.blocked_posts),
+            "blocked_topics": list(resp.blocked_topics),
         }
-        for key, alias in alias_map.items():
-            if key not in data and alias in data:
-                logger.error("query_profile_full alias used: %s -> %s", alias, key)
-                data[key] = data[alias]
-            if key not in data or data[key] is None:
-                logger.error("query_profile_full missing list %s, defaulting to empty list", key)
-                data[key] = []
-            if not isinstance(data[key], list):
-                raise RuntimeError(f"query_profile_full invalid {key} type: {type(data[key]).__name__}")
-        return data
+        logger.debug(
+            "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
+            addr,
+            len(profile["enabled_agents"]),
+            len(profile["followed_users"]),
+            len(profile["followed_topics"]),
+        )
+        return profile
 
     def list_profiles_subspace(self) -> list[dict]:
         """

@@ -574,6 +574,32 @@ def _build_pool():
     add_f(msg_diff, "current_height", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
     add_f(msg_diff, "pow_base_bits", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
+    # QueryProfileRequest
+    msg_profile_req = file_proto.message_type.add()
+    msg_profile_req.name = "QueryProfileRequest"
+    add_f(msg_profile_req, "address", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # QueryProfileResponse
+    msg_profile_resp = file_proto.message_type.add()
+    msg_profile_resp.name = "QueryProfileResponse"
+    add_f(msg_profile_resp, "owner", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "username", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "level", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(msg_profile_resp, "created_at", 4, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_profile_resp, "subscription_expiry", 5, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_profile_resp, "auto_renew", 6, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_profile_resp, "reserve_funds", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_profile_resp, "biography", 9, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "avatar", 10, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "banner", 11, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "enabled_agents", 12, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "followed_users", 13, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "followed_topics", 14, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_users", 15, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_posts", 16, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_topics", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "flair", 18, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # BridgeChainStatus
     msg_bridge_chain_status = file_proto.message_type.add()
     msg_bridge_chain_status.name = "BridgeChainStatus"
@@ -726,6 +752,8 @@ QueryParamsRequest = _get_message_class("mirage.core.v1.QueryParamsRequest")
 QueryParamsResponse = _get_message_class("mirage.core.v1.QueryParamsResponse")
 QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyRequest")
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
+QueryProfileRequest = _get_message_class("mirage.core.v1.QueryProfileRequest")
+QueryProfileResponse = _get_message_class("mirage.core.v1.QueryProfileResponse")
 BridgeChainStatus = _get_message_class("mirage.core.v1.BridgeChainStatus")
 QueryBridgeStatusRequest = _get_message_class("mirage.core.v1.QueryBridgeStatusRequest")
 QueryBridgeStatusResponse = _get_message_class("mirage.core.v1.QueryBridgeStatusResponse")
