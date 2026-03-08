@@ -506,11 +506,13 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
                     post[field] = edit[field]
                     applied[field] = agent_addr
             if edit.get("appendix"):
-                appendices.append({
-                    "agent": agent_addr,
-                    "agent_username": agent_username_map.get(agent_addr, ""),
-                    "text": edit["appendix"],
-                })
+                appendices.append(
+                    {
+                        "agent": agent_addr,
+                        "agent_username": agent_username_map.get(agent_addr, ""),
+                        "text": edit["appendix"],
+                    }
+                )
         if applied or appendices:
             post["agent_edited"] = True
             post["agent_edits_meta"] = applied
@@ -2395,45 +2397,6 @@ def get_tx_status():
                             "topic": post_row[1] or "",
                             "title": post_row[2] or "",
                         }
-                    else:
-                        # Check profiles for account/username changes
-                        cur.execute(
-                            "SELECT owner, username FROM profiles WHERE LOWER(txhash) = %s",
-                            (tx_hash,),
-                        )
-                        profile_row = cur.fetchone()
-                        if profile_row:
-                            tx_type = "profile"
-                            details = {
-                                "owner": profile_row[0],
-                                "username": profile_row[1] or "",
-                            }
-                        else:
-                            # Check followed_users
-                            cur.execute(
-                                "SELECT owner, target FROM followed_users WHERE LOWER(txhash) = %s",
-                                (tx_hash,),
-                            )
-                            follow_user_row = cur.fetchone()
-                            if follow_user_row:
-                                tx_type = "follow_user"
-                                details = {
-                                    "owner": follow_user_row[0],
-                                    "target": follow_user_row[1],
-                                }
-                            else:
-                                # Check preferences for topic follows
-                                cur.execute(
-                                    "SELECT owner, pref_value FROM preferences WHERE LOWER(txhash) = %s AND pref_type = 'topic'",
-                                    (tx_hash,),
-                                )
-                                pref_row = cur.fetchone()
-                                if pref_row:
-                                    tx_type = "follow_topic"
-                                    details = {
-                                        "owner": pref_row[0],
-                                        "topic": pref_row[1],
-                                    }
 
         except Exception as db_err:
             log_event(rid, "get_tx_status.db_error", tx_hash=tx_hash, error=str(db_err))
