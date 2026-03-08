@@ -1125,26 +1125,19 @@ class MessageProcessor:
             level = 0
             agents = []
 
-            # Query full profile via REST (includes core fields + per-entry lists)
             profile = self.chain.query_profile_full(addr)
-            if profile:
-                username = str(profile.get("username", username))
-                level = int(profile.get("level", 0))
-                agents = profile.get("enabled_agents") or profile.get("enabledAgents") or []
-            else:
-                # Fallback: query core profile via ABCI (lists not available via legacy keys)
-                key_hex = (f"profiles/{addr}").encode().hex()
-                resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-                result = resp_data.get("result")
-                if result:
-                    response = result.get("response")
-                    if response:
-                        val_b64 = response.get("value")
-                        if val_b64:
-                            js = base64.b64decode(val_b64).decode()
-                            prof = json.loads(js)
-                            username = str(prof.get("username", username))
-                            level = int(prof.get("level", 0))
+            if "username" not in profile:
+                raise RuntimeError(f"missing username for {addr}")
+            if "level" not in profile:
+                raise RuntimeError(f"missing level for {addr}")
+            if "enabled_agents" not in profile:
+                raise RuntimeError(f"missing enabled_agents for {addr}")
+            username = str(profile["username"])
+            level = int(profile["level"])
+            agents = profile["enabled_agents"]
+            if not isinstance(agents, list):
+                raise RuntimeError(f"invalid enabled_agents for {addr}")
+            logger.debug("set_username profile loaded addr=%s agents=%d", addr, len(agents))
 
             old = self.db.get_profile(addr)
             self.db.upsert_profile(addr, username, level, ts)
@@ -1165,6 +1158,7 @@ class MessageProcessor:
                 )
         except Exception as e:
             logger.error("Error handling MsgSetUsername: %s", e, exc_info=True)
+            raise
 
     def _handle_set_biography(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetBiography — update biography in profiles table."""
@@ -1198,10 +1192,13 @@ class MessageProcessor:
 
     def _refresh_enabled_agents(self, addr: str, ts: int):
         """Query full profile via REST and replace enabled_agents in DB."""
-        agents: list[str] = []
         profile = self.chain.query_profile_full(addr)
-        if profile:
-            agents = profile.get("enabled_agents") or profile.get("enabledAgents") or []
+        if "enabled_agents" not in profile:
+            raise RuntimeError(f"missing enabled_agents for {addr}")
+        agents = profile["enabled_agents"]
+        if not isinstance(agents, list):
+            raise RuntimeError(f"invalid enabled_agents for {addr}")
+        logger.debug("refresh_enabled_agents addr=%s agents=%d", addr, len(agents))
         self.db.set_enabled_agents(addr, agents)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
@@ -1216,10 +1213,13 @@ class MessageProcessor:
 
     def _refresh_followed_users(self, addr: str, ts: int):
         """Query full profile via REST and replace followed_users in DB."""
-        users: list[str] = []
         profile = self.chain.query_profile_full(addr)
-        if profile:
-            users = profile.get("followed_users") or profile.get("followedUsers") or []
+        if "followed_users" not in profile:
+            raise RuntimeError(f"missing followed_users for {addr}")
+        users = profile["followed_users"]
+        if not isinstance(users, list):
+            raise RuntimeError(f"invalid followed_users for {addr}")
+        logger.debug("refresh_followed_users addr=%s users=%d", addr, len(users))
         self.db.set_followed_users(addr, users)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
@@ -1234,10 +1234,13 @@ class MessageProcessor:
 
     def _refresh_followed_topics(self, addr: str, ts: int):
         """Query full profile via REST and replace followed_topics in DB."""
-        topics: list[str] = []
         profile = self.chain.query_profile_full(addr)
-        if profile:
-            topics = profile.get("followed_topics") or profile.get("followedTopics") or []
+        if "followed_topics" not in profile:
+            raise RuntimeError(f"missing followed_topics for {addr}")
+        topics = profile["followed_topics"]
+        if not isinstance(topics, list):
+            raise RuntimeError(f"invalid followed_topics for {addr}")
+        logger.debug("refresh_followed_topics addr=%s topics=%d", addr, len(topics))
         self.db.set_followed_topics(addr, topics)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
@@ -1263,6 +1266,7 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgEnableAgent: %s", e, exc_info=True)
+            raise
 
     def _handle_disable_agent(self, type_url: str, value: bytes, ts: int):
         """Handle MsgDisableAgent."""
@@ -1277,6 +1281,7 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
+            raise
 
     def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
         """Handle MsgSetAgents."""
@@ -1291,6 +1296,7 @@ class MessageProcessor:
             self._refresh_enabled_agents(owner, ts)
         except Exception as e:
             logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
+            raise
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""
@@ -1314,6 +1320,7 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgFollowUser: %s", e, exc_info=True)
+            raise
 
     def _handle_unfollow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowUser."""
@@ -1335,6 +1342,7 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowUser: %s", e, exc_info=True)
+            raise
 
     def _handle_follow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowTopic."""
@@ -1359,6 +1367,7 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgFollowTopic: %s", e, exc_info=True)
+            raise
 
     def _handle_unfollow_topic(self, type_url: str, value: bytes, ts: int):
         """Handle MsgUnfollowTopic."""
@@ -1380,6 +1389,7 @@ class MessageProcessor:
             )
         except Exception as e:
             logger.error("Error handling MsgUnfollowTopic: %s", e, exc_info=True)
+            raise
 
     def _handle_block_post(self, type_url: str, value: bytes, ts: int):
         """Handle MsgBlockPost."""

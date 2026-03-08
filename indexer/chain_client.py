@@ -61,15 +61,12 @@ class ChainClient:
         for path in ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]:
             if path in base_rpc:
                 base_rpc = base_rpc.replace(path, "")
-        if "://" in base_rpc:
-            protocol, rest = base_rpc.split("://", 1)
-            if ":" in rest:
-                host, _ = rest.rsplit(":", 1)
-                return f"http://{host}:1317"
-            else:
-                return f"http://{rest}:1317"
-        else:
-            return base_rpc.replace(":26657", ":1317")
+        parsed = _up.urlparse(base_rpc)
+        if not parsed.scheme:
+            raise ValueError(f"RPC URL missing scheme: {jsonrpc_url}")
+        if not parsed.hostname:
+            raise ValueError(f"RPC URL missing host: {jsonrpc_url}")
+        return f"{parsed.scheme}://{parsed.hostname}:1317"
 
     def get_status(self) -> dict:
         """Get chain status."""
@@ -117,17 +114,18 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
-    def query_profile_full(self, addr: str, timeout: int = HTTP_TIMEOUT_SHORT) -> dict | None:
+    def query_profile_full(self, addr: str, timeout: int = HTTP_TIMEOUT_SHORT) -> dict:
         """Query full profile (including per-entry lists) via REST gRPC-gateway."""
-        try:
-            rest_url = self._derive_rest_url(self.jsonrpc_url)
-            url = f"{rest_url}/mirage/core/v1/profile/{addr.lower()}"
-            r = requests.get(url, timeout=timeout)
-            if r.status_code == 200:
-                return r.json()
-        except Exception as e:
-            logger.debug("query_profile_full failed for %s: %s", addr, e)
-        return None
+        rest_url = self._derive_rest_url(self.jsonrpc_url)
+        url = f"{rest_url}/mirage/core/v1/profile/{addr.lower()}"
+        logger.debug("query_profile_full url=%s", url)
+        r = requests.get(url, timeout=timeout)
+        if r.status_code != 200:
+            raise RuntimeError(f"query_profile_full failed: {r.status_code} {r.text}")
+        data = r.json()
+        if not isinstance(data, dict):
+            raise RuntimeError(f"query_profile_full invalid response: {type(data).__name__}")
+        return data
 
     def list_profiles_subspace(self) -> list[dict]:
         """
