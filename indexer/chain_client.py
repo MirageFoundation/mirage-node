@@ -117,6 +117,18 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
+    def query_profile_full(self, addr: str, timeout: int = HTTP_TIMEOUT_SHORT) -> dict | None:
+        """Query full profile (including per-entry lists) via REST gRPC-gateway."""
+        try:
+            rest_url = self._derive_rest_url(self.jsonrpc_url)
+            url = f"{rest_url}/mirage/core/v1/profile/{addr.lower()}"
+            r = requests.get(url, timeout=timeout)
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            logger.debug("query_profile_full failed for %s: %s", addr, e)
+        return None
+
     def list_profiles_subspace(self) -> list[dict]:
         """
         List all profiles stored in the chain KV.

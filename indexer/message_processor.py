@@ -1123,33 +1123,28 @@ class MessageProcessor:
                 return
 
             level = 0
-
-            # Query profile core (without lists)
-            key_hex = (f"profiles/{addr}").encode().hex()
-            resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-            result = resp_data.get("result")
-            if result:
-                response = result.get("response")
-                if response:
-                    val_b64 = response.get("value")
-                    if val_b64:
-                        js = base64.b64decode(val_b64).decode()
-                        prof = json.loads(js)
-                        username = str(prof.get("username", username))
-                        level = int(prof.get("level", 0))
-
-            # Query enabled agents separately (split storage)
             agents = []
-            agents_key_hex = (f"plist_agents/{addr}").encode().hex()
-            agents_resp = self.chain.abci_query('"/store/core/key"', f"0x{agents_key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-            agents_result = agents_resp.get("result")
-            if agents_result:
-                agents_response = agents_result.get("response")
-                if agents_response:
-                    agents_val_b64 = agents_response.get("value")
-                    if agents_val_b64:
-                        agents_js = base64.b64decode(agents_val_b64).decode()
-                        agents = json.loads(agents_js) if agents_js else []
+
+            # Query full profile via REST (includes core fields + per-entry lists)
+            profile = self.chain.query_profile_full(addr)
+            if profile:
+                username = str(profile.get("username", username))
+                level = int(profile.get("level", 0))
+                agents = profile.get("enabled_agents") or profile.get("enabledAgents") or []
+            else:
+                # Fallback: query core profile via ABCI (lists not available via legacy keys)
+                key_hex = (f"profiles/{addr}").encode().hex()
+                resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
+                result = resp_data.get("result")
+                if result:
+                    response = result.get("response")
+                    if response:
+                        val_b64 = response.get("value")
+                        if val_b64:
+                            js = base64.b64decode(val_b64).decode()
+                            prof = json.loads(js)
+                            username = str(prof.get("username", username))
+                            level = int(prof.get("level", 0))
 
             old = self.db.get_profile(addr)
             self.db.upsert_profile(addr, username, level, ts)
@@ -1202,18 +1197,11 @@ class MessageProcessor:
             logger.error("Error handling MsgSetBiography: %s", e, exc_info=True)
 
     def _refresh_enabled_agents(self, addr: str, ts: int):
-        """Query plist_agents/{addr} from chain and replace DB (full mirror)."""
+        """Query full profile via REST and replace enabled_agents in DB."""
         agents: list[str] = []
-        key_hex = (f"plist_agents/{addr}").encode().hex()
-        resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-        result = resp_data.get("result")
-        if result:
-            response = result.get("response")
-            if response:
-                val_b64 = response.get("value")
-                if val_b64:
-                    js = base64.b64decode(val_b64).decode()
-                    agents = json.loads(js) if js else []
+        profile = self.chain.query_profile_full(addr)
+        if profile:
+            agents = profile.get("enabled_agents") or profile.get("enabledAgents") or []
         self.db.set_enabled_agents(addr, agents)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
@@ -1227,18 +1215,11 @@ class MessageProcessor:
         )
 
     def _refresh_followed_users(self, addr: str, ts: int):
-        """Query plist_users/{addr} from chain and replace DB (full mirror)."""
+        """Query full profile via REST and replace followed_users in DB."""
         users: list[str] = []
-        key_hex = (f"plist_users/{addr}").encode().hex()
-        resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-        result = resp_data.get("result")
-        if result:
-            response = result.get("response")
-            if response:
-                val_b64 = response.get("value")
-                if val_b64:
-                    js = base64.b64decode(val_b64).decode()
-                    users = json.loads(js) if js else []
+        profile = self.chain.query_profile_full(addr)
+        if profile:
+            users = profile.get("followed_users") or profile.get("followedUsers") or []
         self.db.set_followed_users(addr, users)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
@@ -1252,18 +1233,11 @@ class MessageProcessor:
         )
 
     def _refresh_followed_topics(self, addr: str, ts: int):
-        """Query plist_topics/{addr} from chain and replace DB (full mirror)."""
+        """Query full profile via REST and replace followed_topics in DB."""
         topics: list[str] = []
-        key_hex = (f"plist_topics/{addr}").encode().hex()
-        resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-        result = resp_data.get("result")
-        if result:
-            response = result.get("response")
-            if response:
-                val_b64 = response.get("value")
-                if val_b64:
-                    js = base64.b64decode(val_b64).decode()
-                    topics = json.loads(js) if js else []
+        profile = self.chain.query_profile_full(addr)
+        if profile:
+            topics = profile.get("followed_topics") or profile.get("followedTopics") or []
         self.db.set_followed_topics(addr, topics)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
