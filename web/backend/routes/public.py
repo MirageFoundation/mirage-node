@@ -476,6 +476,18 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
             "appendix": ae_appendix,
         }
 
+    # Resolve agent addresses -> usernames in one batch query
+    all_agent_addrs = list({a.lower() for edits in edits_by_post.values() for a in edits})
+    agent_username_map: dict[str, str] = {}
+    if all_agent_addrs:
+        addr_ph = ",".join(["%s"] * len(all_agent_addrs))
+        cur.execute(
+            f"SELECT LOWER(owner), username FROM profiles WHERE LOWER(owner) IN ({addr_ph}) AND username != '' AND deleted_at IS NULL",
+            all_agent_addrs,
+        )
+        for row in cur.fetchall():
+            agent_username_map[row[0]] = row[1]
+
     # Apply per post
     agent_order = [a.lower() for a in agents]
     for post in eligible_posts:
@@ -494,7 +506,11 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
                     post[field] = edit[field]
                     applied[field] = agent_addr
             if edit.get("appendix"):
-                appendices.append({"agent": agent_addr, "text": edit["appendix"]})
+                appendices.append({
+                    "agent": agent_addr,
+                    "agent_username": agent_username_map.get(agent_addr, ""),
+                    "text": edit["appendix"],
+                })
         if applied or appendices:
             post["agent_edited"] = True
             post["agent_edits_meta"] = applied

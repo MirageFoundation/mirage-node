@@ -4143,22 +4143,35 @@ function ViewPostView({ state, updatePost }) {
                                             })()}
 
                                             {/* Agent annotation appendices */}
-                                            {!isCollapsed && post.appendices && post.appendices.length > 0 && (
-                                                <div style={{
-                                                    margin: '0.5rem 0',
-                                                    padding: '0.5rem 0.75rem',
-                                                    borderLeft: `3px solid ${theme.colors?.accent || '#6366f1'}`,
-                                                    background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
-                                                    borderRadius: '0 6px 6px 0',
-                                                    fontSize: '0.9em',
-                                                }}>
-                                                    {post.appendices.map((a, idx) => (
-                                                        <div key={idx} style={{ marginBottom: idx < post.appendices.length - 1 ? '0.5rem' : 0 }}>
-                                                            <MarkdownRenderer text={a.text} />
+                                            {!isCollapsed && post.appendices && post.appendices.length > 0 &&
+                                                post.appendices.map((a, idx) => {
+                                                    const label = a.agent_username || a.agent || 'Agent';
+                                                    return (
+                                                        <div key={`appx-${idx}`} style={{ margin: '0.5rem 0' }}>
+                                                            <div style={{ marginBottom: '0.2rem' }}>
+                                                                <Link
+                                                                    to={`/u/${label}`}
+                                                                    style={{
+                                                                        textDecoration: 'underline',
+                                                                        fontSize: '0.75rem',
+                                                                        color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888',
+                                                                    }}
+                                                                >@{label}</Link>
+                                                                <span style={{ color: theme.colors?.textMuted || '#888', fontSize: '0.75rem' }}>:</span>
+                                                            </div>
+                                                            <div style={{
+                                                                padding: '0.4rem 0.65rem',
+                                                                borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
+                                                                background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
+                                                                borderRadius: '0 6px 6px 0',
+                                                                fontSize: '0.85em',
+                                                            }}>
+                                                                <MarkdownRenderer text={a.text} />
+                                                            </div>
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            )}
+                                                    );
+                                                })
+                                            }
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (
                                                 <>
