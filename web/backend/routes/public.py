@@ -1318,33 +1318,46 @@ def _get_home_feed_newest(
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
-    # Over-fetch to account for blocked/tag filtering, then take the page slice
     bt_clause, bt_params = _blocked_topics_sql(blocked_topics or set(), blocked_topic_prefixes or tuple())
-    fetch_limit = limit * page * 2
-    cur.execute(
-        f"""SELECT {_POST_COLS}
-        FROM posts p
-        LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
-        WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
-        {bt_clause}
-        ORDER BY p.created_at DESC
-        LIMIT %s""",
-        bt_params + [fetch_limit],
-    )
 
+    # We need (page * limit) + 1 surviving posts to fill the page and know if there's more.
+    # Blocked/tag filtering can discard a large fraction, so we fetch in batches using
+    # cursor-based pagination (created_at < ?) to avoid scanning the entire table.
+    need = page * limit + 1
     seen: set[str] = set()
-    posts = []
-    for row in cur.fetchall():
-        post = _row_to_post(
-            row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes
+    posts: list[dict] = []
+    batch_size = max(500, need * 3)
+    last_ts = None
+
+    while len(posts) < need:
+        ts_clause = "AND p.created_at < %s" if last_ts is not None else ""
+        ts_params = [last_ts] if last_ts is not None else []
+        cur.execute(
+            f"""SELECT {_POST_COLS}
+            FROM posts p
+            LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(p.owner)
+            WHERE {_ROOT_FILTER} AND {_TOPIC_FILTER} AND p.deleted = false
+            {bt_clause} {ts_clause}
+            ORDER BY p.created_at DESC
+            LIMIT %s""",
+            bt_params + ts_params + [batch_size],
         )
-        if post:
-            posts.append(post)
+        rows = cur.fetchall()
+        if not rows:
+            break
+        for row in rows:
+            post = _row_to_post(
+                row, blocked_posts, blocked_users, allowed_tags, seen, blocked_topics, blocked_topic_prefixes
+            )
+            if post:
+                posts.append(post)
+        last_ts = rows[-1][2]
+        if len(rows) < batch_size:
+            break
 
     if not posts:
         return {"posts": [], "total": 0, "page": page, "limit": limit, "has_more": False}
 
-    # Paginate first, then only load stats for the page slice
     start = (page - 1) * limit
     end = start + limit
     page_posts = posts[start:end] if start < len(posts) else []
