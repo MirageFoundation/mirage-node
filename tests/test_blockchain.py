@@ -18,13 +18,18 @@ import json
 import math
 import os
 import random
+import shutil
 import string
 import sys
+import threading
 import time
 import tomllib
+import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Optional
 
+import grpc
 import requests
 from cosmpy.aerial.wallet import LocalWallet
 from cosmpy.crypto.keypairs import PrivateKey
@@ -34,6 +39,8 @@ from cosmpy.protos.cosmos.crypto.secp256k1.keys_pb2 import PubKey as SecpPubKey
 from cosmpy.protos.cosmos.staking.v1beta1.tx_pb2 import MsgBeginRedelegate, MsgDelegate, MsgUndelegate
 from cosmpy.protos.cosmos.tx.signing.v1beta1.signing_pb2 import SignMode
 from cosmpy.protos.cosmos.tx.v1beta1.tx_pb2 import AuthInfo, Fee, ModeInfo, SignerInfo, TxBody, TxRaw
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import SimulateRequest
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
 from google.protobuf.any_pb2 import Any as AnyPB
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +48,7 @@ REPO_ROOT = os.path.abspath(os.path.join(THIS_DIR, ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from shared.client import check_pow_target, compute_pow, get_status, sign_canonical
+from shared.client import _request_with_retries, check_pow_target, compute_pow, get_status, sign_canonical
 from shared.canon import (
     canon_base_block_post as _canon_base_block_post_raw,
     canon_base_block_topic as _canon_base_block_topic_raw,
@@ -57,14 +64,17 @@ from shared.canon import (
     canon_base_unfollow_user as _canon_base_unfollow_user_raw,
     canon_base_follow_topic as _canon_base_follow_topic_raw,
     canon_base_unfollow_topic as _canon_base_unfollow_topic_raw,
-    canon_base_follow_moderator as _canon_base_follow_moderator_raw,
-    canon_base_unfollow_moderator as _canon_base_unfollow_moderator_raw,
+    canon_base_enable_agent as _canon_base_enable_agent_raw,
+    canon_base_disable_agent as _canon_base_disable_agent_raw,
+    canon_base_set_agents as _canon_base_set_agents_raw,
     canon_base_post as _canon_base_post_raw,
     canon_base_send_tokens as _canon_base_send_tokens_raw,
     canon_base_set_auto_renewal as _canon_base_set_auto_renewal_raw,
     canon_base_set_username as _canon_base_set_username_raw,
+    canon_base_set_biography as _canon_base_set_biography_raw,
     canon_base_upgrade_level as _canon_base_upgrade_level_raw,
     canon_base_vote as _canon_base_vote_raw,
+    canon_base_annotate as _canon_base_annotate_raw,
     canon_signed_with_pow,
 )
 from shared.datatypes import (
@@ -76,7 +86,7 @@ from shared.datatypes import (
     MsgDelete,
     MsgDeleteUser,
     MsgEdit,
-    MsgFollowModerator,
+    MsgEnableAgent,
     MsgFollowTopic,
     MsgFollowUser,
     MsgMintTokens,
@@ -85,14 +95,17 @@ from shared.datatypes import (
     MsgSetAutoRenewal,
     MsgSetLevel,
     MsgSetUsername,
+    MsgSetBiography,
     MsgUnblockPost,
     MsgUnblockTopic,
     MsgUnblockUser,
-    MsgUnfollowModerator,
+    MsgDisableAgent,
+    MsgSetAgents,
     MsgUnfollowTopic,
     MsgUnfollowUser,
     MsgUpgradeLevel,
     MsgVote,
+    MsgAnnotate,
 )
 
 import tests.test_backend as tb
@@ -101,6 +114,8 @@ DEFAULT_BACKEND = tb.DEFAULT_BACKEND
 COMET_RPC_URL = "http://127.0.0.1:26657"
 DEFAULT_GAS_LIMIT = 200000
 FILL_GAS_LIMIT = 1000000  # Higher gas for fill-loop txs (keeper iterates growing lists)
+FILL_GAS_BUFFER = 1.3  # Multiplier on simulated gas for fill loops (block-to-block variance)
+ESTIMATED_CHECKTX_TOTAL = 230  # Update if suite adds/removes tx submissions
 
 _COLOR_GREEN = "\033[92m"
 _COLOR_RED = "\033[91m"
@@ -121,6 +136,11 @@ _lb_bytes = tb._lb_bytes
 WALLETS: dict[str, LocalWallet] = {}
 _VALIDATOR_ADDR: Optional[str] = None
 _GOV_MODULE_ADDR: Optional[str] = None
+_GRPC_TARGET: Optional[str] = None
+_GRPC_CHANNEL = None
+_SIMULATE_MODE_LOGGED = False
+
+_MIN_GAS_PRICE_CACHE: Optional[float] = None
 
 
 def _compute_pow_quiet(base: bytes, diff: int, base_bits: int, pow_factor: float, lb: str) -> int:
@@ -158,18 +178,21 @@ class TestResult:
 
 
 RESULTS: list[TestResult] = []
+_RESULTS_LOCK = threading.Lock()
 
 
 def _pass(name: str, **details) -> TestResult:
     r = TestResult(name=name, passed=True, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     print(f"  {_COLOR_GREEN}PASS{_COLOR_RESET}  {name}")
     return r
 
 
 def _fail(name: str, error: str = "", **details) -> TestResult:
     r = TestResult(name=name, passed=False, error=error, details=details)
-    RESULTS.append(r)
+    with _RESULTS_LOCK:
+        RESULTS.append(r)
     err = f" — {error}" if error else ""
     print(f"  {_COLOR_RED}FAIL{_COLOR_RESET}  {name}{err}")
     return r
@@ -184,6 +207,9 @@ def _rand_hex(n: int) -> str:
 
 
 def _min_gas_price_umirage() -> float:
+    global _MIN_GAS_PRICE_CACHE
+    if _MIN_GAS_PRICE_CACHE is not None:
+        return _MIN_GAS_PRICE_CACHE
     home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
     path = os.path.join(home, "config", "app.toml")
     if not os.path.isfile(path):
@@ -196,13 +222,44 @@ def _min_gas_price_umirage() -> float:
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     for p in parts:
         if p.endswith("umirage"):
-            return float(p[:-7])
+            _MIN_GAS_PRICE_CACHE = float(p[:-7])
+            return _MIN_GAS_PRICE_CACHE
     raise RuntimeError("minimum-gas-prices must include umirage")
+
+
+def _get_grpc_target() -> str:
+    global _GRPC_TARGET
+    if _GRPC_TARGET is not None:
+        return _GRPC_TARGET
+    home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
+    path = os.path.join(home, "config", "app.toml")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"app.toml not found: {path}")
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    addr = str((data.get("grpc") or {}).get("address") or "").strip()
+    if not addr:
+        raise RuntimeError("grpc.address missing in app.toml")
+    parts = addr.rsplit(":", 1)
+    if len(parts) != 2:
+        raise RuntimeError(f"invalid grpc.address: {addr}")
+    host, port = parts[0].strip(), parts[1].strip()
+    if host in ("0.0.0.0", "localhost"):
+        host = "127.0.0.1"
+    _GRPC_TARGET = f"{host}:{port}"
+    return _GRPC_TARGET
+
+
+def _get_grpc_channel():
+    global _GRPC_CHANNEL
+    if _GRPC_CHANNEL is None:
+        _GRPC_CHANNEL = grpc.insecure_channel(_get_grpc_target())
+    return _GRPC_CHANNEL
 
 
 def _get_validator_account_address(backend: str) -> str:
     url = f"{backend}/api/get_node_config"
-    resp = requests.get(url, timeout=10).json()
+    resp = _request_with_retries("GET", url, timeout=10).json()
     addr = str(resp.get("validator_account_address", "")).strip()
     if not addr:
         raise RuntimeError("validator_account_address missing from /api/get_node_config")
@@ -245,6 +302,28 @@ def _get_gov_module_address() -> str:
     return addr
 
 
+def _parse_cli_json(out: str) -> dict | None:
+    """Extract the first top-level JSON object from CLI output that may
+    contain log lines before/after the JSON."""
+    idx = out.find("{")
+    if idx < 0:
+        return None
+    depth = 0
+    end = idx
+    for i in range(idx, len(out)):
+        if out[i] == "{":
+            depth += 1
+        elif out[i] == "}":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    try:
+        return json.loads(out[idx:end])
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 def _get_chain_params() -> dict:
     code, out = _run_miraged(
         ["q", "core", "params", "--home", "/root/.mirage/node", "--node", "tcp://127.0.0.1:26657", "-o", "json"],
@@ -252,20 +331,20 @@ def _get_chain_params() -> dict:
     )
     if code != 0 or not out:
         raise RuntimeError(f"failed to query core params: {out[:200]}")
-    # miraged may print log lines before the JSON — find the first '{'
-    idx = out.find("{")
-    if idx < 0:
+    data = _parse_cli_json(out)
+    if not data:
         raise RuntimeError(f"core params query: no JSON in output: {out[:200]}")
-    data = json.loads(out[idx:])
     return data.get("params") or data
 
 
 def _get_tier_config(level: int) -> dict:
+    """Map user level to tier array index: 0->0, 1->1, 10->2, 100+->2."""
     params = _get_chain_params()
     tiers = params.get("tiers") or []
-    idx = int(level)
+    idx_map = {0: 0, 1: 1, 10: 2}
+    idx = idx_map.get(int(level), 2 if int(level) >= 100 else -1)
     if idx < 0 or idx >= len(tiers):
-        raise RuntimeError(f"tier index {idx} not in params")
+        raise RuntimeError(f"tier index {idx} (level={level}) not in params")
     return tiers[idx]
 
 
@@ -276,20 +355,71 @@ def _tier_int(tier: dict, key: str) -> int:
 
 
 def _get_pow_params(backend: str, address: str | None = None) -> tuple[str, int, int, float]:
+    # Prefer direct chain query (uncached) over backend /api/get_parameters
+    # which has a 3-second cache TTL that causes stale params in bulk loops.
+    # The difficulty query returns: current_difficulty, latest_block_hash,
+    # min_difficulty (= pow_base_bits) — everything we need except pow_factor.
+    code, out = _run_miraged(
+        ["q", "core", "difficulty", "--home", "/root/.mirage/node", "--node", "tcp://127.0.0.1:26657", "-o", "json"],
+        timeout=10,
+    )
+    if code == 0 and out:
+        data = _parse_cli_json(out)
+        if data:
+            lb = str(data.get("latest_block_hash", "") or "").strip().lower()
+            raw_diff = data.get("current_difficulty")
+            base_bits = int(data.get("min_difficulty", 0) or 0)
+            if lb and raw_diff is not None and base_bits > 0:
+                try:
+                    params = _get_chain_params()
+                    pow_factor = float(params.get("pow_difficulty_step", 0) or 0)
+                except Exception:
+                    pow_factor = 0.0
+                if pow_factor <= 0:
+                    st = get_status(backend, address=address)
+                    pow_factor = float(st.get("pow_factor", 0.25) or 0.25)
+                return lb, int(raw_diff), base_bits, pow_factor
+
+    # Fallback: use the backend HTTP endpoint.
     st = get_status(backend, address=address)
     lb = str(st.get("last_block_hash", "") or "")
     diff = int(st.get("pow_difficulty", 0) or 0)
     base_bits = int(st.get("pow_base_bits", 0) or 0)
-    pow_factor = float(st.get("pow_factor", 0.25))
+    pow_factor = float(st.get("pow_factor", 0.25) or 0.25)
     if not lb:
         raise RuntimeError("missing last_block_hash from get_status")
     return lb, diff, base_bits, pow_factor
 
 
 def _get_profile_full(backend: str, address: str) -> dict:
-    r = requests.get(f"{backend}/api/get_profile", params={"address": address}, timeout=10)
+    r = _request_with_retries("GET", f"{backend}/api/get_profile", params={"address": address}, timeout=10)
     r.raise_for_status()
     return r.json() or {}
+
+
+def _get_chain_profile(address: str) -> dict:
+    """Query the chain directly for a profile (bypasses indexer)."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "core",
+            "profile",
+            address.lower(),
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0 or not out:
+        raise RuntimeError(f"failed to query chain profile: {out[:200]}")
+    data = _parse_cli_json(out)
+    if not data:
+        raise RuntimeError(f"chain profile query: no JSON in output: {out[:200]}")
+    return data
 
 
 def _assert_capped_deque(name: str, got: list[str], expected: list[str]) -> None:
@@ -342,6 +472,80 @@ def _build_tx_bytes(
     return tx_raw.SerializeToString()
 
 
+_SIMULATE_PY = """import base64
+import os
+import tomllib
+import grpc
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import SimulateRequest
+from cosmpy.protos.cosmos.tx.v1beta1.service_pb2_grpc import ServiceStub
+
+tx_bytes = base64.b64decode(os.environ["TX_B64"])
+home = os.path.join(os.path.expanduser("~"), ".mirage", "node")
+path = os.path.join(home, "config", "app.toml")
+if not os.path.isfile(path):
+    raise SystemExit("app.toml not found: " + path)
+with open(path, "rb") as f:
+    data = tomllib.load(f)
+addr = str((data.get("grpc") or {}).get("address") or "").strip()
+if not addr:
+    raise SystemExit("grpc.address missing in app.toml")
+parts = addr.rsplit(":", 1)
+if len(parts) != 2:
+    raise SystemExit("invalid grpc.address: " + addr)
+host, port = parts[0].strip(), parts[1].strip()
+if host in ("0.0.0.0", "localhost"):
+    host = "127.0.0.1"
+target = host + ":" + port
+ch = grpc.insecure_channel(target)
+stub = ServiceStub(ch)
+resp = stub.Simulate(SimulateRequest(tx_bytes=tx_bytes), timeout=10)
+gas_used = int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+if gas_used <= 0:
+    raise SystemExit("simulate returned gas_used=0")
+print(gas_used)
+"""
+
+
+def _simulate_tx_bytes_gas(tx_bytes: bytes, timeout: int = 10) -> int:
+    global _SIMULATE_MODE_LOGGED
+    if _INSIDE_CONTAINER:
+        if not _SIMULATE_MODE_LOGGED:
+            _debug("simulate: using local gRPC")
+            _SIMULATE_MODE_LOGGED = True
+        stub = ServiceStub(_get_grpc_channel())
+        resp = stub.Simulate(SimulateRequest(tx_bytes=tx_bytes), timeout=timeout)
+        gas_used = int(getattr(getattr(resp, "gas_info", None), "gas_used", 0) or 0)
+        if gas_used <= 0:
+            raise RuntimeError("simulate returned gas_used=0")
+        return gas_used
+
+    if not _SIMULATE_MODE_LOGGED:
+        _debug("simulate: using docker exec")
+        _SIMULATE_MODE_LOGGED = True
+    tx_b64 = base64.b64encode(tx_bytes).decode()
+    cmd = f"TX_B64='{tx_b64}' python3 - <<'PY'\n{_SIMULATE_PY}\nPY"
+    code, out = _docker_exec(cmd, timeout=timeout)
+    if code != 0:
+        raise RuntimeError(f"simulate failed: {out}")
+    try:
+        return int(out.strip())
+    except Exception:
+        raise RuntimeError(f"simulate returned non-integer: {out}")
+
+
+def _simulate_tx_gas(
+    msgs: list[tuple[object, str]],
+    gas_limit: int,
+    fee_payer: str,
+    signer_pubkey: bytes,
+    fee_denom: str = "umirage",
+    fee_amount: Optional[int] = None,
+    timeout: int = 10,
+) -> int:
+    tx_bytes = _build_tx_bytes(msgs, gas_limit, fee_payer, signer_pubkey, fee_denom, fee_amount)
+    return _simulate_tx_bytes_gas(tx_bytes, timeout=timeout)
+
+
 def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
     tx_b64 = base64.b64encode(tx_bytes).decode()
     payload = {"jsonrpc": "2.0", "id": 1, "method": "broadcast_tx_sync", "params": {"tx": tx_b64}}
@@ -357,15 +561,20 @@ def _broadcast_tx_sync(tx_bytes: bytes) -> tuple[str, int, str]:
     return tx_hash, code, log
 
 
-def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
+def _wait_for_tx_result(tx_hash: str, timeout: float = 10.0) -> tuple[int, str]:
     if not tx_hash:
         raise RuntimeError("missing tx_hash for wait")
     h = tx_hash.strip().lower().removeprefix("0x")
     hash_b64 = base64.b64encode(bytes.fromhex(h)).decode()
-    start = time.time()
-    while (time.time() - start) < timeout:
+    start = time.monotonic()
+    deadline = start + timeout
+    while True:
+        now = time.monotonic()
+        if now >= deadline:
+            break
+        remaining = deadline - now
         payload = {"jsonrpc": "2.0", "id": 1, "method": "tx", "params": {"hash": hash_b64, "prove": False}}
-        resp = requests.post(COMET_RPC_URL, json=payload, timeout=10).json()
+        resp = requests.post(COMET_RPC_URL, json=payload, timeout=min(1.0, remaining)).json()
         if "result" in resp:
             tx_result = (resp.get("result") or {}).get("tx_result") or {}
             code = int(tx_result.get("code", 0) or 0)
@@ -374,10 +583,16 @@ def _wait_for_tx_result(tx_hash: str, timeout: float = 15.0) -> tuple[int, str]:
         if "error" in resp:
             err = str(resp["error"])
             if "not found" in err.lower():
-                time.sleep(1)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                time.sleep(min(1.0, remaining))
                 continue
             raise RuntimeError(f"tx query error: {err}")
-        time.sleep(1)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(1.0, remaining))
     raise RuntimeError(f"tx not found after {timeout}s: {tx_hash}")
 
 
@@ -495,6 +710,32 @@ def _build_msg_set_username(
     msg.envelope_signature = sig
     msg.target = target
     msg.username = username
+    return msg
+
+
+def _build_msg_set_biography(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    biography: str,
+    pow_val: int = 0,
+) -> MsgSetBiography:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_biography_raw(pub, lb_bytes, diff, ts, target, biography)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetBiography()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    msg.biography = biography
     return msg
 
 
@@ -641,6 +882,45 @@ def _build_msg_edit(
     msg.override = override
     for m in media or []:
         msg.media.append(m)
+    return msg
+
+
+def _build_msg_annotate(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: Optional[list[str]] = None,
+    appendix: str = "",
+    pow_val: int = 0,
+) -> MsgAnnotate:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_annotate_raw(
+        pub, lb_bytes, diff, ts, topic, title, content, tag, override, media=media or [], appendix=appendix
+    )
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgAnnotate()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.topic = topic
+    msg.title = title
+    msg.content = content
+    msg.tag = tag
+    msg.override = override
+    for m in media or []:
+        msg.media.append(m)
+    msg.appendix = appendix
     return msg
 
 
@@ -846,20 +1126,20 @@ def _build_msg_unfollow_topic(
     return msg
 
 
-def _build_msg_follow_moderator(
+def _build_msg_enable_agent(
     wallet: LocalWallet,
     lb: str,
     diff: int,
     ts: int,
     target: str,
-    moderator: str,
+    agent: str,
     pow_val: int = 0,
-) -> MsgFollowModerator:
+) -> MsgEnableAgent:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_follow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    base = _canon_base_enable_agent_raw(pub, lb_bytes, diff, ts, target, agent)
     sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgFollowModerator()
+    msg = MsgEnableAgent()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -868,24 +1148,24 @@ def _build_msg_follow_moderator(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.target = target
-    msg.moderator = moderator
+    msg.agent = agent
     return msg
 
 
-def _build_msg_unfollow_moderator(
+def _build_msg_disable_agent(
     wallet: LocalWallet,
     lb: str,
     diff: int,
     ts: int,
     target: str,
-    moderator: str,
+    agent: str,
     pow_val: int = 0,
-) -> MsgUnfollowModerator:
+) -> MsgDisableAgent:
     pub = wallet.public_key().public_key_bytes
     lb_bytes = _lb_bytes(lb)
-    base = _canon_base_unfollow_moderator_raw(pub, lb_bytes, diff, ts, target, moderator)
+    base = _canon_base_disable_agent_raw(pub, lb_bytes, diff, ts, target, agent)
     sig = _sign_relay(wallet, base, pow_val)
-    msg = MsgUnfollowModerator()
+    msg = MsgDisableAgent()
     msg.authority = _VALIDATOR_ADDR or ""
     msg.envelope_pubkey = pub
     msg.envelope_block_hash = lb_bytes
@@ -894,7 +1174,34 @@ def _build_msg_unfollow_moderator(
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = sig
     msg.target = target
-    msg.moderator = moderator
+    msg.agent = agent
+    return msg
+
+
+def _build_msg_set_agents(
+    wallet: LocalWallet,
+    lb: str,
+    diff: int,
+    ts: int,
+    target: str,
+    agents: list[str],
+    pow_val: int = 0,
+) -> MsgSetAgents:
+    pub = wallet.public_key().public_key_bytes
+    lb_bytes = _lb_bytes(lb)
+    base = _canon_base_set_agents_raw(pub, lb_bytes, diff, ts, target, agents)
+    sig = _sign_relay(wallet, base, pow_val)
+    msg = MsgSetAgents()
+    msg.authority = _VALIDATOR_ADDR or ""
+    msg.envelope_pubkey = pub
+    msg.envelope_block_hash = lb_bytes
+    msg.envelope_difficulty = int(diff)
+    msg.envelope_pow = int(pow_val)
+    msg.envelope_timestamp = int(ts)
+    msg.envelope_signature = sig
+    msg.target = target
+    for a in agents:
+        msg.agents.append(a)
     return msg
 
 
@@ -1030,6 +1337,14 @@ def _check_reject(
             _fail(name, f"deliver wait failed: {e}")
         return
     _fail(name, f"code={code} log={log[:200]}")
+
+
+def _check_accept(name: str, code: int, log: str) -> None:
+    """Check that a tx was accepted at CheckTx (code == 0)."""
+    if code == 0:
+        _pass(name)
+    else:
+        _fail(name, f"code={code} log={log[:200]}")
 
 
 def _check_deliver_reject(name: str, check_code: int, deliver_code: Optional[int], deliver_log: Optional[str]) -> None:
@@ -1354,7 +1669,7 @@ def test_staking(backend: str) -> None:
     ts = _now_ms()
     fee_payer = _VALIDATOR_ADDR or ""
 
-    conf = requests.get(f"{backend}/api/get_node_config", timeout=10).json()
+    conf = _request_with_retries("GET", f"{backend}/api/get_node_config", timeout=10).json()
     valoper = str(conf.get("validator_operator_address", "")).strip()
     if not valoper:
         _fail("staking.get_valoper", "validator_operator_address missing")
@@ -1669,8 +1984,8 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_post_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_posts") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_posts") or chain_profile.get("blockedPosts") or [])]
         expected = (blocked_post_targets + [over_target])[-max_blocked_posts:]
         _assert_capped_deque("msg.block_post_overflow_deque", got, expected)
 
@@ -1715,8 +2030,8 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_user_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_users") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [str(v).lower() for v in (chain_profile.get("blocked_users") or chain_profile.get("blockedUsers") or [])]
         expected = (blocked_user_targets + [over_target.lower()])[-max_blocked_users:]
         _assert_capped_deque("msg.block_user_overflow_deque", got, expected)
 
@@ -1761,8 +2076,10 @@ def test_msg_validation(backend: str) -> None:
             wait_deliver=True,
         )
         _check_deliver_accept("msg.block_topic_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, bw_addr)
-        got = [str(v).lower() for v in (profile.get("blocked_topics") or [])]
+        chain_profile = _get_chain_profile(bw_addr)
+        got = [
+            str(v).lower() for v in (chain_profile.get("blocked_topics") or chain_profile.get("blockedTopics") or [])
+        ]
         expected = (blocked_topic_targets + [over_topic.lower()])[-max_blocked_topics:]
         _assert_capped_deque("msg.block_topic_overflow_deque", got, expected)
 
@@ -2027,42 +2344,66 @@ def test_msg_validation(backend: str) -> None:
     _check_deliver_accept("msg.award_valid", ccode, dcode, dlog)
 
 
-def _topup_wallets(backend: str, names: list[str], amount: int = 10_000_000_000) -> None:
-    """Top up test wallets via MsgSendTokens (same as UI donate) before gas-heavy tests.
+def _required_validator_fee_budget_umirage() -> int:
+    min_gas_price = _min_gas_price_umirage()
+    per_tx_fee = int(math.ceil(int(DEFAULT_GAS_LIMIT) * min_gas_price))
+    total = per_tx_fee * int(ESTIMATED_CHECKTX_TOTAL)
+    _debug(
+        "validator fee budget: "
+        f"min_gas_price={min_gas_price} per_tx={per_tx_fee / 1_000_000:,.0f} MIRAGE "
+        f"estimated_txs={ESTIMATED_CHECKTX_TOTAL} total={total / 1_000_000:,.0f} MIRAGE"
+    )
+    return total
 
-    Uses the sub3 wallet (highest residual balance) as the donor.
-    Default: 10,000 MIRAGE per wallet.
-    """
-    donor = WALLETS["sub3"]
-    donor_addr = str(donor.address())
-    fee_payer = _VALIDATOR_ADDR or ""
-    for name in names:
-        w = WALLETS[name]
-        addr = str(w.address())
-        lb, _, _, _ = _get_pow_params(backend, donor_addr)
-        ts = _now_ms()
-        msg = _build_msg_send_tokens(donor, lb, 0, ts, donor_addr, addr, amount, pow_val=0)
-        _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgSendTokens")],
-            DEFAULT_GAS_LIMIT,
-            fee_payer,
-            donor.public_key().public_key_bytes,
-            wait_deliver=True,
+
+def _query_spendable_umirage(addr: str) -> int:
+    """Query on-chain spendable umirage balance for an address."""
+    code, out = _run_miraged(
+        [
+            "q",
+            "bank",
+            "spendable-balances",
+            addr,
+            "--home",
+            "/root/.mirage/node",
+            "--node",
+            "tcp://127.0.0.1:26657",
+            "-o",
+            "json",
+        ],
+        timeout=10,
+    )
+    if code != 0:
+        raise RuntimeError(f"spendable balance query failed: exit={code} out={out[:200]}")
+    data = _parse_cli_json(out)
+    balances = data.get("balances") or []
+    for entry in balances:
+        if entry.get("denom") == "umirage":
+            return int(entry.get("amount", 0) or 0)
+    return 0
+
+
+def _validate_validator_funds() -> bool:
+    """Fail fast if the validator fee payer cannot cover the suite."""
+    if not _VALIDATOR_ADDR:
+        _fail("validator.funds", "validator address not set")
+        return False
+    required = _required_validator_fee_budget_umirage()
+    balance = _query_spendable_umirage(_VALIDATOR_ADDR)
+    if balance < required:
+        _fail(
+            "validator.funds",
+            f"insufficient fee balance: have={balance} need={required} "
+            f"({balance / 1_000_000:,.0f} MIRAGE < {required / 1_000_000:,.0f} MIRAGE)",
         )
-        label = f"{amount / 1_000_000:,.0f} MIRAGE"
-        if ccode == 0 and (dcode is None or dcode == 0):
-            _pass(f"topup.{name}", extra=label)
-        else:
-            _fail(f"topup.{name}", f"send_tokens failed ({label}) check={ccode} deliver={dcode} log={str(dlog or '')[:120]}")
+        return False
+    _debug(f"validator spendable={balance / 1_000_000:,.0f} MIRAGE (ok)")
+    return True
 
 
 def test_follow_limits(backend: str) -> None:
     """Test follow/unfollow tier limits and mutual exclusion at chain level."""
     print(f"\n{_COLOR_BOLD}[8] Follow limits & mutual exclusion{_COLOR_RESET}")
-
-    # Top up wallets before the gas-heavy fill loops
-    _topup_wallets(backend, ["free", "sub1"])
-    time.sleep(3)
 
     # Use the FREE wallet (tier 0) so we hit the real free-tier ceiling
     # and can verify overflow is rejected.
@@ -2072,36 +2413,48 @@ def test_follow_limits(backend: str) -> None:
     fee_payer = _VALIDATOR_ADDR or ""
     tier0 = _get_tier_config(0)
 
+    # Query chain (not indexer) for accurate pre-existing list counts.
+    fw_chain_profile = _get_chain_profile(fw_addr)
+    existing_followed_users = fw_chain_profile.get("followed_users") or fw_chain_profile.get("followedUsers") or []
+    existing_followed_topics = fw_chain_profile.get("followed_topics") or fw_chain_profile.get("followedTopics") or []
+    existing_enabled_agents = fw_chain_profile.get("enabled_agents") or fw_chain_profile.get("enabledAgents") or []
+
     # 8.1 Fill free-tier max_followed_users + overflow
     max_followed_users = _tier_int(tier0, "max_followed_users")
-    _debug(f"free-tier max_followed_users={max_followed_users}")
+    remaining_followed_users = max(0, max_followed_users - len(existing_followed_users))
+    _debug(
+        f"free-tier max_followed_users={max_followed_users} existing={len(existing_followed_users)} remaining={remaining_followed_users}"
+    )
     fill_ok = True
     followed_user_targets: list[str] = []
-    for i in range(max_followed_users):
+    chunk_size = 25
+    for start in range(0, remaining_followed_users, chunk_size):
+        batch_count = min(chunk_size, remaining_followed_users - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        if i > 0 and i % 10 == 0:
-            print(f"    [{i}/{max_followed_users}] followed users…")
-        target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        followed_user_targets.append(target_addr.lower())
-        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowUser")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs: list[tuple[object, str]] = []
+        for i in range(batch_count):
+            target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            followed_user_targets.append(target_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.user_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.user_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
-        _pass(f"follow.user_fill ({max_followed_users} followed)")
+    if fill_ok:
+        _pass(
+            f"follow.user_fill ({len(existing_followed_users) + remaining_followed_users}/{max_followed_users} followed)"
+        )
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
@@ -2115,42 +2468,43 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.user_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
-        expected = (followed_user_targets + [over_addr.lower()])[-max_followed_users:]
-        _assert_capped_deque("follow.user_overflow_deque", got, expected)
+        _check_deliver_reject("follow.user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.2 Fill free-tier max_followed_topics + overflow
     max_followed_topics = _tier_int(tier0, "max_followed_topics")
-    _debug(f"free-tier max_followed_topics={max_followed_topics}")
+    remaining_followed_topics = max(0, max_followed_topics - len(existing_followed_topics))
+    _debug(
+        f"free-tier max_followed_topics={max_followed_topics} existing={len(existing_followed_topics)} remaining={remaining_followed_topics}"
+    )
     fill_ok = True
     followed_topic_targets: list[str] = []
-    for i in range(max_followed_topics):
+    for start in range(0, remaining_followed_topics, chunk_size):
+        batch_count = min(chunk_size, remaining_followed_topics - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        if i > 0 and i % 10 == 0:
-            print(f"    [{i}/{max_followed_topics}] followed topics…")
-        topic = f"ft{_rand_str(4)}{i}"
-        followed_topic_targets.append(topic)
-        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowTopic")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            topic = f"ft{_rand_str(4)}{start + i}"
+            followed_topic_targets.append(topic)
+            ts = ts_base + i
+            base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgFollowTopic"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.topic_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.topic_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
-        _pass(f"follow.topic_fill ({max_followed_topics} followed)")
+    if fill_ok:
+        _pass(
+            f"follow.topic_fill ({len(existing_followed_topics) + remaining_followed_topics}/{max_followed_topics} followed)"
+        )
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_topic = f"ft{_rand_str(4)}over"
@@ -2164,71 +2518,72 @@ def test_follow_limits(backend: str) -> None:
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.topic_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_topics") or [])]
-        expected = (followed_topic_targets + [over_topic.lower()])[-max_followed_topics:]
-        _assert_capped_deque("follow.topic_overflow_deque", got, expected)
+        _check_deliver_reject("follow.topic_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.3 Fill free-tier max_followed_mods + overflow
-    max_followed_mods = _tier_int(tier0, "max_followed_mods")
-    _debug(f"free-tier max_followed_mods={max_followed_mods}")
+    # 8.3 Fill free-tier max_enabled_agents + overflow
+    max_enabled_agents = _tier_int(tier0, "max_enabled_agents")
+    remaining_enabled_agents = max(0, max_enabled_agents - len(existing_enabled_agents))
+    _debug(
+        f"free-tier max_enabled_agents={max_enabled_agents} existing={len(existing_enabled_agents)} remaining={remaining_enabled_agents}"
+    )
     fill_ok = True
-    followed_mod_targets: list[str] = []
-    for i in range(max_followed_mods):
+    enabled_agent_targets: list[str] = []
+    for start in range(0, remaining_enabled_agents, chunk_size):
+        batch_count = min(chunk_size, remaining_enabled_agents - start)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
-        ts = _now_ms()
-        mod_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        followed_mod_targets.append(mod_addr.lower())
-        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, mod_addr)
-        proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, mod_addr, pow_val=proof)
-        _, ccode, _, dcode, _ = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowModerator")],
-            FILL_GAS_LIMIT,
-            fee_payer,
-            fw_pub,
-            wait_deliver=True,
-        )
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            enabled_agent_targets.append(agent_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgEnableAgent"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, _ = _submit_tx(msgs, sim_gas, fee_payer, fw_pub, wait_deliver=True)
         if ccode != 0 or dcode != 0:
-            _fail("follow.mod_fill", f"index={i} check={ccode} deliver={dcode}")
+            _fail("follow.agent_fill", f"chunk_start={start} check={ccode} deliver={dcode}")
             fill_ok = False
             break
-    else:
-        _pass(f"follow.mod_fill ({max_followed_mods} followed)")
+    if fill_ok:
+        _pass(
+            f"follow.agent_fill ({len(existing_enabled_agents) + remaining_enabled_agents}/{max_enabled_agents} enabled)"
+        )
 
     if fill_ok:
+        # Overflow should be REJECTED (hard cap, not deque)
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
-        over_mod = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        base = _canon_base_follow_moderator_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_mod)
+        over_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_agent)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_moderator(fw, lb, diff, ts, fw_addr, over_mod, pow_val=proof)
+        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, over_agent, pow_val=proof)
         _, ccode, _, dcode, dlog = _submit_tx(
-            [(msg, "/mirage.core.v1.MsgFollowModerator")],
+            [(msg, "/mirage.core.v1.MsgEnableAgent")],
             FILL_GAS_LIMIT,
             fee_payer,
             fw_pub,
             wait_deliver=True,
         )
-        _check_deliver_accept("follow.mod_overflow (capped)", ccode, dcode, dlog)
-        profile = _get_profile_full(backend, fw_addr)
-        got = [str(v).lower() for v in (profile.get("followed_moderators") or [])]
-        expected = (followed_mod_targets + [over_mod.lower()])[-max_followed_mods:]
-        _assert_capped_deque("follow.mod_overflow_deque", got, expected)
+        _check_deliver_reject("follow.agent_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
-    # 8.3b Subscriber bulk fill (no PoW): submit many follow-user messages in
-    # multi-message tx chunks, then verify tier-1 deque capping behavior.
+    # 8.3b Subscriber bulk fill (no PoW): submit follow-user messages up to
+    # the tier limit, then verify overflow is rejected (hard cap).
     sub = WALLETS["sub1"]
     sub_addr = str(sub.address())
     sub_pub = sub.public_key().public_key_bytes
     sub_tier = _get_tier_config(1)
     sub_max_followed_users = _tier_int(sub_tier, "max_followed_users")
-    bulk_targets = [
-        str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(sub_max_followed_users + 1)
-    ]
-    before_profile = _get_profile_full(backend, sub_addr)
-    before_followed = [str(v).lower() for v in (before_profile.get("followed_users") or [])]
+    sub_chain_profile = _get_chain_profile(sub_addr)
+    before_followed = sub_chain_profile.get("followed_users") or sub_chain_profile.get("followedUsers") or []
+    remaining = max(0, sub_max_followed_users - len(before_followed))
+    _debug(
+        f"subscriber tier1 max_followed_users={sub_max_followed_users} existing={len(before_followed)} remaining={remaining}"
+    )
+    bulk_targets = [str(LocalWallet(PrivateKey(), prefix="mirage").address()).lower() for _ in range(remaining)]
     chunk_size = 25
     bulk_ok = True
     _debug(f"subscriber tier1 bulk follow users: total={len(bulk_targets)} chunk_size={chunk_size}")
@@ -2240,7 +2595,15 @@ def test_follow_limits(backend: str) -> None:
         for i, target_addr in enumerate(batch):
             msg = _build_msg_follow_user(sub, lb, 0, ts_base + i, sub_addr, target_addr, pow_val=0)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
-        gas_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 1.5))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        try:
+            sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, sub_pub) * FILL_GAS_BUFFER)
+        except Exception as sim_err:
+            _fail("follow.subscriber_bulk_user_fill", f"simulate failed at chunk_start={start}: {str(sim_err)[:200]}")
+            bulk_ok = False
+            break
+        _debug(f"subscriber bulk follow gas: start={start} msgs={len(msgs)} sim_limit={sim_limit} gas_used={sim_gas}")
+        gas_limit = sim_gas
         _, ccode, _, dcode, dlog = _submit_tx(
             msgs,
             gas_limit,
@@ -2256,14 +2619,30 @@ def test_follow_limits(backend: str) -> None:
             bulk_ok = False
             break
     if bulk_ok:
-        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} in chunks)")
-        profile = _get_profile_full(backend, sub_addr)
-        got = [str(v).lower() for v in (profile.get("followed_users") or [])]
-        expected = (before_followed + bulk_targets)[-sub_max_followed_users:]
-        _assert_capped_deque("follow.subscriber_bulk_user_overflow_deque", got, expected)
+        _pass(f"follow.subscriber_bulk_user_fill ({len(bulk_targets)} filled to limit)")
+        # Verify subscriber level persists after bulk follow (reserve should not be over-charged)
+        after_profile = _get_profile_full(backend, sub_addr)
+        after_level = int(after_profile.get("level", 0) or 0)
+        if after_level == 1:
+            _pass("follow.subscriber_level_persist")
+        else:
+            _fail("follow.subscriber_level_persist", f"level={after_level}")
+        # Now verify overflow is REJECTED
+        lb, _, _, _ = _get_pow_params(backend, sub_addr)
+        ts = _now_ms()
+        over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+        msg = _build_msg_follow_user(sub, lb, 0, ts, sub_addr, over_addr, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgFollowUser")],
+            FILL_GAS_LIMIT,
+            fee_payer,
+            sub_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_reject("follow.subscriber_bulk_user_overflow_rejected (hard cap)", ccode, dcode, dlog)
 
     # 8.4 Follow user removes blocked user (mutual exclusion)
-    w_mx = WALLETS["sub3"]
+    w_mx = WALLETS["agent1"]
     w_mx_addr = str(w_mx.address())
     lb, _, _, _ = _get_pow_params(backend, w_mx_addr)
     ts = _now_ms()
@@ -2664,7 +3043,7 @@ def test_tier_enforcement(backend: str) -> None:
 
     fee_payer = _VALIDATOR_ADDR or ""
 
-    for level, wallet_name in [(0, "free"), (1, "sub1"), (2, "sub2"), (3, "sub3")]:
+    for level, wallet_name in [(0, "free"), (1, "sub1"), (1, "sub2"), (10, "agent1")]:
         w = WALLETS[wallet_name]
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(w.address()))
         ts = _now_ms()
@@ -2810,7 +3189,7 @@ def test_governance_reject(backend: str) -> None:
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = b"\x00" * 64
     msg.target = w1_addr
-    msg.level = 2
+    msg.level = 10
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetLevel")],
         DEFAULT_GAS_LIMIT,
@@ -2869,7 +3248,7 @@ def test_governance_reject(backend: str) -> None:
     msg.envelope_timestamp = int(ts)
     msg.envelope_signature = b"\x00" * 64
     msg.target = w1_addr
-    msg.level = 2
+    msg.level = 10
     _, ccode, clog, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetLevel")],
         DEFAULT_GAS_LIMIT,
@@ -2923,77 +3302,839 @@ def test_direct_bank(backend: str) -> None:
     print(f"\n{_COLOR_BOLD}[13] Direct bank send (bypass check){_COLOR_RESET}")
     kb = _keyring_backend()
     key_name = f"directbank{_rand_str(6)}"
+    key_home = tempfile.mkdtemp(prefix="mirage_directbank_")
+    _debug(f"direct_bank keyring_home={key_home}")
 
-    code, out = _run_miraged(
-        ["keys", "add", key_name, "--home", "/root/.mirage/node", "--keyring-backend", kb, "--output", "json"],
-        timeout=10,
-    )
-    if code != 0 or not out:
-        _fail("direct_bank.key_add", f"exit={code} out={out[:200]}")
-        return
     try:
-        idx = out.find("{")
-        if idx < 0:
-            raise ValueError("no JSON object in output")
-        addr = str(json.loads(out[idx:]).get("address", "")).strip()
-    except Exception as e:
-        _fail("direct_bank.key_add", f"parse error: {e}")
-        return
-    if not addr:
-        _fail("direct_bank.key_add", "missing address")
-        return
+        code, out = _run_miraged(
+            ["keys", "add", key_name, "--home", key_home, "--keyring-backend", kb, "--output", "json"],
+            timeout=10,
+        )
+        if code != 0 or not out:
+            _fail("direct_bank.key_add", f"exit={code} out={out[:200]}")
+            return
+        try:
+            idx = out.find("{")
+            if idx < 0:
+                raise ValueError("no JSON object in output")
+            addr = str(json.loads(out[idx:]).get("address", "")).strip()
+        except Exception as e:
+            _fail("direct_bank.key_add", f"parse error: {e}")
+            return
+        if not addr:
+            _fail("direct_bank.key_add", "missing address")
+            return
 
-    if not tb._faucet(backend, addr, 5_000_000):
-        _fail("direct_bank.faucet", "faucet failed")
-        return
+        if not tb._faucet(backend, addr, 5_000_000):
+            _fail("direct_bank.faucet", "faucet failed")
+            return
 
-    target = str(WALLETS["free"].address())
-    code, out = _run_miraged(
-        [
-            "tx",
-            "bank",
-            "send",
-            addr,
-            target,
-            "1umirage",
-            "--home",
-            "/root/.mirage/node",
-            "--keyring-backend",
-            kb,
-            "--chain-id",
-            "mirage-1",
-            "--node",
-            "tcp://127.0.0.1:26657",
-            "--yes",
-            "--gas",
-            "auto",
-            "--gas-adjustment",
-            "1.5",
-            "--gas-prices",
-            "5000umirage",
-            "-o",
-            "json",
-        ],
-        timeout=30,
-    )
-    if code != 0 or not out:
-        _fail("direct_bank.msg_send_blocked", f"exit={code} out={out[:200]}")
-        return
-    try:
-        # miraged may print log lines before the JSON — find the last '{'
-        json_start = out.rfind("{")
-        if json_start < 0:
-            raise ValueError("no JSON object in output")
-        resp = json.loads(out[json_start:])
-        tx_code = int(resp.get("code", 1))
-    except Exception as e:
-        _fail("direct_bank.msg_send_blocked", f"parse error: {e}")
-        return
+        target = str(WALLETS["free"].address())
+        code, out = _run_miraged(
+            [
+                "tx",
+                "bank",
+                "send",
+                addr,
+                target,
+                "1umirage",
+                "--home",
+                key_home,
+                "--keyring-backend",
+                kb,
+                "--chain-id",
+                "mirage-1",
+                "--node",
+                "tcp://127.0.0.1:26657",
+                "--yes",
+                "--gas",
+                "auto",
+                "--gas-adjustment",
+                "1.5",
+                "--gas-prices",
+                "1000umirage",
+                "-o",
+                "json",
+            ],
+            timeout=30,
+        )
+        if code != 0 or not out:
+            _fail("direct_bank.msg_send_blocked", f"exit={code} out={out[:200]}")
+            return
+        try:
+            # miraged may print log lines before the JSON — find the last '{'
+            json_start = out.rfind("{")
+            if json_start < 0:
+                raise ValueError("no JSON object in output")
+            resp = json.loads(out[json_start:])
+            tx_code = int(resp.get("code", 1))
+        except Exception as e:
+            _fail("direct_bank.msg_send_blocked", f"parse error: {e}")
+            return
 
-    if tx_code == 0:
-        _fail("direct_bank.msg_send_blocked", "direct MsgSend succeeded (bypass allowed)")
+        if tx_code == 0:
+            _fail("direct_bank.msg_send_blocked", "direct MsgSend succeeded (bypass allowed)")
+        else:
+            _pass("direct_bank.msg_send_blocked")
+    finally:
+        if os.path.isdir(key_home):
+            shutil.rmtree(key_home)
+
+
+def test_hard_cap_vs_deque(backend: str) -> None:
+    """Test that follow/enable lists use hard cap while block lists use deque."""
+    print(f"\n{_COLOR_BOLD}[13] Hard cap vs deque behavior{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # ── 13.1 blocked_users deque: block more than limit, oldest evicted ──
+    bw = WALLETS["free"]
+    bw_addr = str(bw.address())
+    bw_pub = bw.public_key().public_key_bytes
+    tier0 = _get_tier_config(0)
+    max_blocked_users = _tier_int(tier0, "max_blocked_users")
+    _debug(f"free-tier max_blocked_users={max_blocked_users}")
+
+    # Fill blocked_users to max + 2 (deque should keep only the newest max)
+    blocked_targets: list[str] = []
+    total_to_block = max_blocked_users + 2
+    chunk_size = 25
+    block_user_ok = True
+    for start in range(0, total_to_block, chunk_size):
+        batch_count = min(chunk_size, total_to_block - start)
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts_base = _now_ms()
+        msgs: list[tuple[object, str]] = []
+        for i in range(batch_count):
+            target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+            blocked_targets.append(target_addr.lower())
+            ts = ts_base + i
+            base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockUser"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_user_deque_fill", f"chunk_start={start} ccode={ccode} dcode={dcode}")
+            block_user_ok = False
+            break
+    if block_user_ok:
+        _pass(f"hardcap.blocked_user_deque_fill ({total_to_block} blocked, no rejection)")
+
+    profile = _get_chain_profile(bw_addr)
+    chain_blocked = [str(v).lower() for v in (profile.get("blocked_users") or profile.get("blockedUsers") or [])]
+    if len(chain_blocked) <= max_blocked_users:
+        _pass(f"hardcap.blocked_user_deque_capped (len={len(chain_blocked)} <= {max_blocked_users})")
     else:
-        _pass("direct_bank.msg_send_blocked")
+        _fail(f"hardcap.blocked_user_deque_capped", f"len={len(chain_blocked)} > {max_blocked_users}")
+
+    # ── 13.2 blocked_posts deque ──
+    max_blocked_posts = _tier_int(tier0, "max_blocked_posts")
+    blocked_post_targets: list[str] = []
+    total_to_block_posts = max_blocked_posts + 2
+    block_post_ok = True
+    for start in range(0, total_to_block_posts, chunk_size):
+        batch_count = min(chunk_size, total_to_block_posts - start)
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            fake_hash = _rand_hex(64)
+            blocked_post_targets.append(fake_hash.lower())
+            ts = ts_base + i
+            base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockPost"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_post_deque_fill", f"chunk_start={start}")
+            block_post_ok = False
+            break
+    if block_post_ok:
+        _pass(f"hardcap.blocked_post_deque_fill ({total_to_block_posts} blocked, no rejection)")
+
+    # ── 13.3 blocked_topics deque ──
+    max_blocked_topics = _tier_int(tier0, "max_blocked_topics")
+    total_to_block_topics = max_blocked_topics + 2
+    block_topic_ok = True
+    for start in range(0, total_to_block_topics, chunk_size):
+        batch_count = min(chunk_size, total_to_block_topics - start)
+        lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
+        ts_base = _now_ms()
+        msgs = []
+        for i in range(batch_count):
+            topic = f"bt{_rand_str(4)}{start + i}"
+            ts = ts_base + i
+            base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+            proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
+            msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof)
+            msgs.append((msg, "/mirage.core.v1.MsgBlockTopic"))
+        sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
+        sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
+        _, ccode, _, dcode, dlog = _submit_tx(msgs, sim_gas, fee_payer, bw_pub, wait_deliver=True)
+        if ccode != 0 or dcode != 0:
+            _fail("hardcap.blocked_topic_deque_fill", f"chunk_start={start}")
+            block_topic_ok = False
+            break
+    if block_topic_ok:
+        _pass(f"hardcap.blocked_topic_deque_fill ({total_to_block_topics} blocked, no rejection)")
+
+    # ── 13.4 Enable agent then disable to verify recovery ──
+    aw = WALLETS["agent1"]
+    aw_addr = str(aw.address())
+    aw_pub = aw.public_key().public_key_bytes
+    tier10 = _get_tier_config(10)
+    # Use a smaller test: enable 2 agents, disable 1, enable 1 new one
+    agent1 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    agent2 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    agent3 = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+
+    for agent in [agent1, agent2]:
+        lb, _, _, _ = _get_pow_params(backend, aw_addr)
+        ts = _now_ms()
+        msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgEnableAgent")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            aw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_accept(f"hardcap.enable_agent_{agent[:8]}", ccode, dcode, dlog)
+
+    # Disable agent1
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_disable_agent(aw, lb, 0, ts, aw_addr, agent1, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgDisableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.disable_agent_recovery", ccode, dcode, dlog)
+
+    # Enable agent3 (should work since we freed a slot)
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_enable_agent(aw, lb, 0, ts, aw_addr, agent3, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.enable_after_disable", ccode, dcode, dlog)
+
+    # ── 13.5 SetAgents atomic list replacement ──
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    new_agents = [agent3, agent2]
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, new_agents, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_atomic", ccode, dcode, dlog)
+
+    # Verify order is preserved (indexer should reflect chain state)
+    profile = _get_profile_full(backend, aw_addr)
+    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    if got_agents == [agent3.lower(), agent2.lower()]:
+        _pass("hardcap.set_agents_order_preserved")
+    else:
+        _fail("hardcap.set_agents_order_preserved", f"got={got_agents[:6]}")
+
+    # Idempotent set (same list) should succeed
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent3, agent2], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_idempotent", ccode, dcode, dlog)
+
+    # Duplicate agent should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, agent2], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_duplicate_rejected", ccode, dcode, dlog)
+
+    # Invalid agent address should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, ["invalid_address"], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_invalid_address", ccode, dcode, dlog)
+
+    # Self-as-agent should be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [aw_addr], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_self_rejected", ccode, dcode, dlog)
+
+    # Self mixed with valid agents should also be rejected
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [agent2, aw_addr], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("hardcap.set_agents_self_mixed_rejected", ccode, dcode, dlog)
+
+    # ── 13.6 SetAgents clear all ──
+    lb, _, _, _ = _get_pow_params(backend, aw_addr)
+    ts = _now_ms()
+    msg = _build_msg_set_agents(aw, lb, 0, ts, aw_addr, [], pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        aw_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("hardcap.set_agents_clear", ccode, dcode, dlog)
+
+    profile = _get_profile_full(backend, aw_addr)
+    got_agents = [str(a).lower() for a in (profile.get("enabled_agents") or [])]
+    if got_agents:
+        _fail("hardcap.set_agents_clear_empty", f"count={len(got_agents)}")
+    else:
+        _pass("hardcap.set_agents_clear_empty")
+
+
+def test_upgrade_level_validation(backend: str) -> None:
+    """Test that only levels 1 and 10 can be self-upgraded to."""
+    print(f"\n{_COLOR_BOLD}[14] Upgrade level validation{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+    fw = WALLETS["free"]
+    fw_addr = str(fw.address())
+    fw_pub = fw.public_key().public_key_bytes
+
+    # 14.1 Invalid levels should be rejected
+    for invalid_level in [0, 2, 3, 4, 5, 6, 7, 8, 9, 11, 50, 99, 100]:
+        lb, _, _, _ = _get_pow_params(backend, fw_addr)
+        ts = _now_ms()
+        msg = _build_msg_upgrade_level(fw, lb, 0, ts, invalid_level, pow_val=0)
+        _, ccode, _, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgUpgradeLevel")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            fw_pub,
+            wait_deliver=True,
+        )
+        _check_deliver_reject(f"upgrade.invalid_level_{invalid_level}", ccode, dcode, dlog)
+
+
+def test_tier_features(backend: str) -> None:
+    """Test tier-specific features: can_remove_anon, content limits."""
+    print(f"\n{_COLOR_BOLD}[15] Tier feature enforcement{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # 15.1 Verify all tier configs are accessible and have correct values
+    for level in [0, 1, 10]:
+        tier = _get_tier_config(level)
+        max_enabled = _tier_int(tier, "max_enabled_agents")
+        max_fu = _tier_int(tier, "max_followed_users")
+        max_ft = _tier_int(tier, "max_followed_topics")
+        max_bu = _tier_int(tier, "max_blocked_users")
+        max_bp = _tier_int(tier, "max_blocked_posts")
+        max_bt = _tier_int(tier, "max_blocked_topics")
+        max_title = _tier_int(tier, "max_title_length")
+        max_content = _tier_int(tier, "max_content_length")
+        editing = _tier_int(tier, "editing_time_mins")
+
+        if level == 0:
+            if max_enabled == 5 and max_fu == 25 and max_ft == 25:
+                _pass(f"tierfeature.level{level}_list_limits_5_25_25")
+            else:
+                _fail(
+                    f"tierfeature.level{level}_list_limits_5_25_25",
+                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                )
+            if max_bu == 25 and max_bp == 25 and max_bt == 25:
+                _pass(f"tierfeature.level{level}_blocked_limits_25")
+            else:
+                _fail(f"tierfeature.level{level}_blocked_limits_25", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+            if max_title == 150:
+                _pass(f"tierfeature.level{level}_max_title_150")
+            else:
+                _fail(f"tierfeature.level{level}_max_title_150", f"got={max_title}")
+            if max_content == 1000:
+                _pass(f"tierfeature.level{level}_max_content_1000")
+            else:
+                _fail(f"tierfeature.level{level}_max_content_1000", f"got={max_content}")
+            if editing == 10:
+                _pass(f"tierfeature.level{level}_editing_10m")
+            else:
+                _fail(f"tierfeature.level{level}_editing_10m", f"got={editing}")
+        else:
+            if max_enabled == 50 and max_fu == 500 and max_ft == 500:
+                _pass(f"tierfeature.level{level}_list_limits_50_500_500")
+            else:
+                _fail(
+                    f"tierfeature.level{level}_list_limits_50_500_500",
+                    f"agents={max_enabled} fu={max_fu} ft={max_ft}",
+                )
+            if max_bu == 500 and max_bp == 500 and max_bt == 500:
+                _pass(f"tierfeature.level{level}_blocked_limits_500")
+            else:
+                _fail(f"tierfeature.level{level}_blocked_limits_500", f"bu={max_bu} bp={max_bp} bt={max_bt}")
+            if max_title == 300:
+                _pass(f"tierfeature.level{level}_max_title_300")
+            else:
+                _fail(f"tierfeature.level{level}_max_title_300", f"got={max_title}")
+            if max_content == 20000:
+                _pass(f"tierfeature.level{level}_max_content_20000")
+            else:
+                _fail(f"tierfeature.level{level}_max_content_20000", f"got={max_content}")
+            if editing == 360:
+                _pass(f"tierfeature.level{level}_editing_360m")
+            else:
+                _fail(f"tierfeature.level{level}_editing_360m", f"got={editing}")
+
+    # 15.2 Verify boolean flags
+    tier0 = _get_tier_config(0)
+    tier1 = _get_tier_config(1)
+    tier10 = _get_tier_config(10)
+
+    can_be_agent_0 = tier0.get("can_be_agent", False)
+    can_be_agent_1 = tier1.get("can_be_agent", False)
+    can_be_agent_10 = tier10.get("can_be_agent", False)
+    if not can_be_agent_0 and not can_be_agent_1 and can_be_agent_10:
+        _pass("tierfeature.can_be_agent_only_level10")
+    else:
+        _fail("tierfeature.can_be_agent_only_level10", f"t0={can_be_agent_0} t1={can_be_agent_1} t10={can_be_agent_10}")
+
+    can_remove_anon_0 = tier0.get("can_remove_anon", False)
+    can_remove_anon_1 = tier1.get("can_remove_anon", False)
+    can_remove_anon_10 = tier10.get("can_remove_anon", False)
+    if not can_remove_anon_0 and can_remove_anon_1 and can_remove_anon_10:
+        _pass("tierfeature.can_remove_anon")
+    else:
+        _fail("tierfeature.can_remove_anon", f"t0={can_remove_anon_0} t1={can_remove_anon_1} t10={can_remove_anon_10}")
+
+    for flag in ["can_have_biography", "can_have_avatar", "can_have_banner", "can_have_flair"]:
+        v0 = tier0.get(flag, False)
+        v1 = tier1.get(flag, False)
+        v10 = tier10.get(flag, False)
+        if not v0 and v1 and v10:
+            _pass(f"tierfeature.{flag}")
+        else:
+            _fail(f"tierfeature.{flag}", f"t0={v0} t1={v1} t10={v10}")
+
+    # 15.3 vote_weight
+    vw0 = float(tier0.get("vote_weight", 0))
+    vw1 = float(tier1.get("vote_weight", 0))
+    vw10 = float(tier10.get("vote_weight", 0))
+    if abs(vw0 - 1.0) < 0.01 and abs(vw1 - 1.33) < 0.01 and abs(vw10 - 1.33) < 0.01:
+        _pass("tierfeature.vote_weights")
+    else:
+        _fail("tierfeature.vote_weights", f"vw0={vw0} vw1={vw1} vw10={vw10}")
+
+    # 15.4 period_fee
+    pf0 = int(tier0.get("period_fee", -1))
+    pf1 = int(tier1.get("period_fee", -1))
+    pf10 = int(tier10.get("period_fee", -1))
+    if pf0 == 0 and pf1 == 100_000_000_000 and pf10 == 500_000_000_000:
+        _pass("tierfeature.period_fees")
+    else:
+        _fail("tierfeature.period_fees", f"pf0={pf0} pf1={pf1} pf10={pf10}")
+
+    # 15.5 Only 3 tiers exist
+    params = _get_chain_params()
+    num_tiers = len(params.get("tiers") or [])
+    if num_tiers == 3:
+        _pass("tierfeature.exactly_3_tiers")
+    else:
+        _fail("tierfeature.exactly_3_tiers", f"got {num_tiers}")
+
+    # 15.6 Free user content limit is enforced at chain
+    fw = WALLETS["free"]
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
+    ts = _now_ms()
+    topic = f"tf{_rand_str(4)}"
+    over_content = "x" * 1050
+    pub = fw.public_key().public_key_bytes
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [])
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    msg = _build_msg_post(fw, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof))
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("tierfeature.free_content_over_1000_rejected", ccode, dcode, dlog)
+
+    # 15.7 Subscriber can post content > 1000
+    sw = WALLETS["sub1"]
+    lb, _, _, _ = _get_pow_params(backend, str(sw.address()))
+    ts = _now_ms()
+    topic2 = f"tf{_rand_str(4)}"
+    long_content = "x" * 1050
+    msg = _build_msg_post(sw, lb, 0, ts, topic2, "Title", long_content, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgPost")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sw.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("tierfeature.sub_content_1050_accepted", ccode, dcode, dlog)
+
+
+def test_biography(backend: str) -> None:
+    """Test MsgSetBiography: subscriber can set, free user rejected, length limit."""
+    print(f"\n{_COLOR_BOLD}[16] Biography{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # 16.1 Subscriber sets biography (should succeed)
+    sub = WALLETS["sub1"]
+    lb, _, _, _ = _get_pow_params(backend, str(sub.address()))
+    ts = _now_ms()
+    bio_text = "Hello, I am a subscriber!"
+    msg = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), bio_text, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("biography.subscriber_set", ccode, dcode, dlog)
+
+    # 16.2 Subscriber clears biography (empty string should succeed)
+    ts = _now_ms()
+    msg2 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), "", pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg2, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("biography.subscriber_clear", ccode, dcode, dlog)
+
+    # 16.3 Agent (level 10) sets biography (should succeed)
+    agent = WALLETS["agent1"]
+    lb, _, _, _ = _get_pow_params(backend, str(agent.address()))
+    ts = _now_ms()
+    agent_bio = (
+        "This is a test agent biography.\n"
+        "Agents operate at level 10 with expanded capabilities.\n"
+        "This biography was set during automated testing."
+    )
+    msg_agent = _build_msg_set_biography(agent, lb, 0, ts, str(agent.address()), agent_bio, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg_agent, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        agent.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("biography.agent_set", ccode, dcode, dlog)
+
+    # 16.4 Free user sets biography with PoW (should be rejected by tier gate)
+    fw = WALLETS["free"]
+    lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
+    ts = _now_ms()
+    pub = fw.public_key().public_key_bytes
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), diff, ts, str(fw.address()), "free bio")
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    msg3 = _build_msg_set_biography(fw, lb, diff, ts, str(fw.address()), "free bio", pow_val=int(proof))
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg3, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.free_user_rejected", ccode, dcode, dlog)
+
+    # 16.5 Biography too long (> 512 chars) rejected
+    ts = _now_ms()
+    long_bio = "x" * 600
+    msg4 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), long_bio, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg4, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.too_long_rejected", ccode, dcode, dlog)
+
+    # 16.6 Biography with control characters rejected (NUL, BEL, etc.)
+    ts = _now_ms()
+    bad_bio = "Hello\x00World"
+    msg5 = _build_msg_set_biography(sub, lb, 0, ts, str(sub.address()), bad_bio, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg5, "/mirage.core.v1.MsgSetBiography")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        sub.public_key().public_key_bytes,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("biography.control_chars_rejected", ccode, dcode, dlog)
+
+
+def test_annotate_chain(backend: str) -> None:
+    """Chain-level tests for MsgAnnotate validation."""
+    print(f"\n{_COLOR_BOLD}[ANNOTATE-CHAIN] MsgAnnotate Chain Validation{_COLOR_RESET}")
+
+    agent = WALLETS.get("agent1")
+    free = WALLETS.get("free")
+    if not agent or not free:
+        _fail("annotate_chain.setup", "wallets not available")
+        return
+
+    fee_payer = _VALIDATOR_ADDR or ""
+    signer_pub = agent.public_key().public_key_bytes
+
+    # Get chain params
+    lb, diff, _, _ = _get_pow_params(backend, str(agent.address()))
+    ts = _now_ms()
+
+    # First create a post to annotate (via backend for convenience)
+    txh = tb._do_post(backend, free, "test", f"ChainAnnotateTarget {tb._rand_str(6)}", "content")
+    if not txh:
+        _fail("annotate_chain.create_target")
+        return
+    tb._wait_indexed(backend, str(free.address()), txh)
+    _pass("annotate_chain.create_target")
+
+    # 1. Non-agent submitting annotate should fail
+    msg = _build_msg_annotate(free, lb, 0, ts, ".", ".", ".", ".", txh, appendix="hacker note")
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        free.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.non_agent_rejected", code, log, "agent tier", tx_hash)
+
+    # 2. Agent with valid sentinel should succeed
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="valid note")
+    _, code, log, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("annotate_chain.agent_annotate_ok", code, dcode, dlog)
+
+    # 3. Invalid relay signature should fail
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", txh, appendix="bad sig")
+    msg.envelope_signature = b"\x00" * 64
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_reject("annotate_chain.bad_signature", code, log, "relay signature")
+
+    # 4. Annotate should reject PoW fields
+    msg = _build_msg_annotate(agent, lb, 1, ts, ".", ".", ".", ".", txh, appendix="pow")
+    _, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+    )
+    _check_reject("annotate_chain.pow_rejected", code, log, "pow")
+
+    # 5. Invalid override should fail (rejected at DeliverTx, not CheckTx)
+    msg = _build_msg_annotate(agent, lb, 0, ts, ".", ".", ".", ".", "invalid", appendix="note")
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.invalid_override", ccode, dcode, dlog)
+
+    # 6. Title exceeding MaxTitleLength should be rejected
+    tier_agent = _get_tier_config(10)
+    max_title = _tier_int(tier_agent, "max_title_length")
+    over_title = "A" * (max_title + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", over_title, ".", ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.title_too_long", ccode, dcode, dlog)
+
+    # 7. Content exceeding MaxContentLength should be rejected
+    max_content = _tier_int(tier_agent, "max_content_length")
+    over_content = "B" * (max_content + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", ".", over_content, ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.content_too_long", ccode, dcode, dlog)
+
+    # 8. Appendix exceeding MaxContentLength should be rejected
+    over_appendix = "C" * (max_content + 1)
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix=over_appendix)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.appendix_too_long", ccode, dcode, dlog)
+
+    # 9. Title exactly at limit should succeed
+    exact_title = "D" * max_title
+    msg = _build_msg_annotate(agent, lb, 0, _now_ms(), ".", exact_title, ".", ".", txh)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_accept("annotate_chain.title_at_limit_ok", ccode, dcode, dlog)
+
+    # 10. Subscriber (level 1) submitting annotate should fail
+    sub = WALLETS.get("sub1")
+    if sub:
+        msg = _build_msg_annotate(sub, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="sub note")
+        tx_hash, code, log, _, _ = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgAnnotate")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            sub.public_key().public_key_bytes,
+        )
+        _check_reject("annotate_chain.subscriber_rejected", code, log, "agent tier", tx_hash)
+
+    # 11. No-username wallet submitting annotate should fail
+    noname_wallet = LocalWallet(PrivateKey(), prefix="mirage")
+    msg = _build_msg_annotate(noname_wallet, lb, 0, _now_ms(), ".", ".", ".", ".", txh, appendix="x")
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgAnnotate")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.no_username_rejected", code, log, "username", tx_hash)
+
+    # 12. EnableAgent self-enable (agent == owner) — chain should reject
+    agent_addr = str(agent.address())
+    msg = _build_msg_enable_agent(agent, lb, 0, _now_ms(), agent_addr, agent_addr, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    if ccode != 0 or (dcode is not None and dcode != 0):
+        _pass("annotate_chain.self_enable_rejected")
+    else:
+        _fail("annotate_chain.self_enable_rejected", f"BUG: EnableAgent allows self-enable (SetAgents rejects it)")
+
+    # 13. SetAgents with more than tier max should be rejected
+    max_agents = _tier_int(tier_agent, "max_enabled_agents")
+    over_agents = [str(LocalWallet(PrivateKey(), prefix="mirage").address()) for _ in range(max_agents + 1)]
+    msg = _build_msg_set_agents(agent, lb, 0, _now_ms(), agent_addr, over_agents, pow_val=0)
+    _, ccode, _, dcode, dlog = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT * 5,
+        fee_payer,
+        signer_pub,
+        wait_deliver=True,
+    )
+    _check_deliver_reject("annotate_chain.set_agents_over_max", ccode, dcode, dlog)
+
+    # 14. EnableAgent without username should fail
+    noname_wallet2 = LocalWallet(PrivateKey(), prefix="mirage")
+    noname_addr = str(noname_wallet2.address())
+    random_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
+    lb2, diff2, base_bits2, pow_factor2 = _get_pow_params(backend, noname_addr)
+    ts2 = _now_ms()
+    base2 = _canon_base_enable_agent_raw(
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb2), diff2, ts2, noname_addr, random_agent
+    )
+    proof2 = _compute_pow_quiet(base2, diff2, base_bits2, pow_factor2, lb2)
+    msg = _build_msg_enable_agent(noname_wallet2, lb2, diff2, ts2, noname_addr, random_agent, pow_val=proof2)
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgEnableAgent")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet2.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.enable_no_username", code, log, "username", tx_hash)
+
+    # 15. SetAgents without username should fail
+    lb3, diff3, base_bits3, pow_factor3 = _get_pow_params(backend, noname_addr)
+    ts3 = _now_ms()
+    base3 = _canon_base_set_agents_raw(
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb3), diff3, ts3, noname_addr, [random_agent]
+    )
+    proof3 = _compute_pow_quiet(base3, diff3, base_bits3, pow_factor3, lb3)
+    msg = _build_msg_set_agents(noname_wallet2, lb3, diff3, ts3, noname_addr, [random_agent], pow_val=proof3)
+    tx_hash, code, log, _, _ = _submit_tx(
+        [(msg, "/mirage.core.v1.MsgSetAgents")],
+        DEFAULT_GAS_LIMIT,
+        fee_payer,
+        noname_wallet2.public_key().public_key_bytes,
+    )
+    _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
 # =========================================================================
@@ -3013,6 +4154,28 @@ ALL_CATEGORIES = {
     "tier_enforcement": test_tier_enforcement,
     "auto_renewal": test_chain_auto_renewal,
     "governance": test_governance_reject,
+    "hard_cap_vs_deque": test_hard_cap_vs_deque,
+    "upgrade_validation": test_upgrade_level_validation,
+    "tier_features": test_tier_features,
+    "biography": test_biography,
+    "annotate_chain": test_annotate_chain,
+}
+
+
+STATELESS_CATEGORIES = {
+    "authority",
+    "fee",
+    "staking",
+    "malicious_inputs",
+    "tier_enforcement",
+    "governance",
+    "upgrade_validation",
+    "relay_sig",
+    "pow",
+    "msg_format",
+    "direct_bank",
+    "biography",
+    "annotate_chain",
 }
 
 
@@ -3052,7 +4215,7 @@ def main() -> int:
 
     # ── Verify connectivity ───────────────────────────────────────
     try:
-        code = requests.get(f"{backend}/api/get_parameters", timeout=10).status_code
+        code = _request_with_retries("GET", f"{backend}/api/get_parameters", timeout=10).status_code
         if code != 200:
             print(f"\n{_COLOR_RED}Cannot reach backend at {backend} (code={code}){_COLOR_RESET}")
             return 1
@@ -3087,6 +4250,10 @@ def main() -> int:
         print(f"\n{_COLOR_RED}ABORT: Cannot resolve validator/gov addresses: {e}{_COLOR_RESET}")
         return 1
 
+    if not _validate_validator_funds():
+        print(f"\n{_COLOR_RED}ABORT: Validator fee payer is underfunded.{_COLOR_RESET}")
+        return 1
+
     if args.category:
         cats = [c.strip() for c in args.category.split(",")]
         for c in cats:
@@ -3098,11 +4265,28 @@ def main() -> int:
     else:
         to_run = ALL_CATEGORIES
 
-    for name, fn in to_run.items():
+    def _run_category(name: str, fn) -> None:
         try:
             fn(backend)
         except Exception as e:
             _fail(f"{name}.UNEXPECTED_ERROR", str(e))
+
+    parallel_names = [name for name in to_run if name in STATELESS_CATEGORIES]
+    serial_names = [name for name in to_run if name not in STATELESS_CATEGORIES]
+    if parallel_names:
+        _debug(f"parallel categories: {', '.join(parallel_names)}")
+        if len(parallel_names) == 1:
+            name = parallel_names[0]
+            _run_category(name, to_run[name])
+        else:
+            with ThreadPoolExecutor(max_workers=len(parallel_names)) as pool:
+                futures = {pool.submit(_run_category, name, to_run[name]): name for name in parallel_names}
+                for fut in as_completed(futures):
+                    fut.result()
+    if serial_names:
+        _debug(f"sequential categories: {', '.join(serial_names)}")
+        for name in serial_names:
+            _run_category(name, to_run[name])
 
     passed = sum(1 for r in RESULTS if r.passed)
     failed = sum(1 for r in RESULTS if not r.passed)

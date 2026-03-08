@@ -2123,6 +2123,14 @@ function CardView({ state, post, updatePost, showContent = false, footer = null 
                                     )}
                                 </>
                             )}
+                            {post.agent_edited && (
+                                <>
+                                    <MetaSeparator>·</MetaSeparator>
+                                    <span style={{ opacity: 0.5, fontStyle: 'italic' }}>
+                                        agent modified
+                                    </span>
+                                </>
+                            )}
                         </MetaInfoRowLeft>
                         <MenuContainer ref={menuRef}>
                             <MenuButton

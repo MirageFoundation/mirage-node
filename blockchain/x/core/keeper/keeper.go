@@ -48,8 +48,8 @@ func (k Keeper) relayCreditKey(valoper string) []byte {
 }
 
 // Profile list key functions
-func (k Keeper) profileFollowedModsKey(addr string) []byte {
-	return []byte(types.ProfileFollowedModsPrefix + addr)
+func (k Keeper) profileEnabledAgentsKey(addr string) []byte {
+	return []byte(types.ProfileEnabledAgentsPrefix + addr)
 }
 func (k Keeper) profileFollowedUsersKey(addr string) []byte {
 	return []byte(types.ProfileFollowedUsersPrefix + addr)
@@ -98,32 +98,32 @@ func (k Keeper) GetProfile(ctx sdk.Context, addr string) ([]byte, bool, error) {
 
 // Profile list getters/setters
 
-func (k Keeper) SetProfileFollowedMods(ctx sdk.Context, addr string, mods []string) error {
+func (k Keeper) SetProfileEnabledAgents(ctx sdk.Context, addr string, agents []string) error {
 	store := k.storeService.OpenKVStore(ctx)
-	if len(mods) == 0 {
-		return store.Delete(k.profileFollowedModsKey(addr))
+	if len(agents) == 0 {
+		return store.Delete(k.profileEnabledAgentsKey(addr))
 	}
-	bz, err := json.Marshal(mods)
+	bz, err := json.Marshal(agents)
 	if err != nil {
 		return err
 	}
-	return store.Set(k.profileFollowedModsKey(addr), bz)
+	return store.Set(k.profileEnabledAgentsKey(addr), bz)
 }
 
-func (k Keeper) GetProfileFollowedMods(ctx sdk.Context, addr string) ([]string, error) {
+func (k Keeper) GetProfileEnabledAgents(ctx sdk.Context, addr string) ([]string, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	bz, err := store.Get(k.profileFollowedModsKey(addr))
+	bz, err := store.Get(k.profileEnabledAgentsKey(addr))
 	if err != nil {
 		return nil, err
 	}
 	if len(bz) == 0 {
 		return []string{}, nil
 	}
-	var mods []string
-	if err := json.Unmarshal(bz, &mods); err != nil {
+	var agents []string
+	if err := json.Unmarshal(bz, &agents); err != nil {
 		return nil, err
 	}
-	return mods, nil
+	return agents, nil
 }
 
 func (k Keeper) SetProfileFollowedUsers(ctx sdk.Context, addr string, users []string) error {
@@ -264,6 +264,519 @@ func (k Keeper) GetProfileBlockedTopics(ctx sdk.Context, addr string) ([]string,
 		return nil, err
 	}
 	return topics, nil
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Per-entry KV helpers — O(1) add/remove/has, O(n) list
+// ═══════════════════════════════════════════════════════════════════════
+//
+// Three flavors share the same key layout:
+//
+//   Entry key:  {prefix}{owner}/{entry}  → value (sentinel, position, or sequence)
+//   Count key:  {prefix}{owner}\x00c     → uint32 big-endian
+//   Seq key:    {prefix}{owner}\x00s     → uint64 big-endian  (ordered/deque only)
+//
+// See types/keys.go for prefix definitions.
+
+func entryKey(prefix, owner, entry string) []byte {
+	return []byte(prefix + owner + "/" + entry)
+}
+
+func countKey(prefix, owner string) []byte {
+	return []byte(prefix + owner + types.SetCountSuffix)
+}
+
+func seqKey(prefix, owner string) []byte {
+	return []byte(prefix + owner + types.DequeSeqSuffix)
+}
+
+// entryPrefix returns the prefix for iterating all entries of a given owner,
+// i.e. {prefix}{owner}/ — note the trailing slash which separates owner from entry.
+func entryPrefix(prefix, owner string) []byte {
+	return []byte(prefix + owner + "/")
+}
+
+var sentinelValue = []byte{1}
+
+func putUint32(v uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, v); return b }
+func getUint32(b []byte) uint32 {
+	if len(b) < 4 {
+		return 0
+	}
+	return binary.BigEndian.Uint32(b)
+}
+func putUint64(v uint64) []byte { b := make([]byte, 8); binary.BigEndian.PutUint64(b, v); return b }
+func getUint64(b []byte) uint64 {
+	if len(b) < 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(b)
+}
+
+// prefixEndBytes returns the end key for a prefix range scan (increment last byte).
+func prefixEndBytes(prefix []byte) []byte {
+	if len(prefix) == 0 {
+		return nil
+	}
+	end := make([]byte, len(prefix))
+	copy(end, prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		end[i]++
+		if end[i] != 0 {
+			return end
+		}
+	}
+	return nil // overflow — prefix was all 0xFF
+}
+
+// ── Unordered set helpers (followed_users, followed_topics) ────────────
+
+// addSetEntry adds an entry to an unordered set. Returns false if already present.
+// Writes the entry first, then increments the count (crash-safety: orphan entry
+// is harmless and will be counted on next List call).
+func (k Keeper) addSetEntry(ctx sdk.Context, prefix, owner, entry string) (bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	ek := entryKey(prefix, owner, entry)
+	existing, err := store.Get(ek)
+	if err != nil {
+		return false, err
+	}
+	if len(existing) > 0 {
+		return false, nil // already present
+	}
+	if err := store.Set(ek, sentinelValue); err != nil {
+		return false, err
+	}
+	// Increment count
+	ck := countKey(prefix, owner)
+	cb, _ := store.Get(ck)
+	cnt := getUint32(cb) + 1
+	return true, store.Set(ck, putUint32(cnt))
+}
+
+// removeSetEntry removes an entry from an unordered set. Idempotent — no error if absent.
+func (k Keeper) removeSetEntry(ctx sdk.Context, prefix, owner, entry string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	ek := entryKey(prefix, owner, entry)
+	existing, err := store.Get(ek)
+	if err != nil {
+		return err
+	}
+	if len(existing) == 0 {
+		return nil // not present
+	}
+	if err := store.Delete(ek); err != nil {
+		return err
+	}
+	ck := countKey(prefix, owner)
+	cb, _ := store.Get(ck)
+	cnt := getUint32(cb)
+	if cnt > 0 {
+		cnt--
+	}
+	if cnt == 0 {
+		return store.Delete(ck)
+	}
+	return store.Set(ck, putUint32(cnt))
+}
+
+func (k Keeper) hasSetEntry(ctx sdk.Context, prefix, owner, entry string) (bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	b, err := store.Get(entryKey(prefix, owner, entry))
+	if err != nil {
+		return false, err
+	}
+	return len(b) > 0, nil
+}
+
+func (k Keeper) countSetEntries(ctx sdk.Context, prefix, owner string) uint32 {
+	store := k.storeService.OpenKVStore(ctx)
+	b, _ := store.Get(countKey(prefix, owner))
+	return getUint32(b)
+}
+
+// listSetEntries returns all entries for an owner (unordered).
+func (k Keeper) listSetEntries(ctx sdk.Context, prefix, owner string) ([]string, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	pfx := entryPrefix(prefix, owner)
+	it, err := store.Iterator(pfx, prefixEndBytes(pfx))
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+
+	pfxLen := len(pfx)
+	var out []string
+	for ; it.Valid(); it.Next() {
+		key := it.Key()
+		if len(key) > pfxLen {
+			out = append(out, string(key[pfxLen:]))
+		}
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return out, nil
+}
+
+// deleteAllSetEntries removes all entries, the count key, and the seq key for an owner.
+func (k Keeper) deleteAllSetEntries(ctx sdk.Context, prefix, owner string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	pfx := entryPrefix(prefix, owner)
+	it, err := store.Iterator(pfx, prefixEndBytes(pfx))
+	if err != nil {
+		return err
+	}
+	var keys [][]byte
+	for ; it.Valid(); it.Next() {
+		keys = append(keys, append([]byte(nil), it.Key()...))
+	}
+	it.Close()
+	for _, key := range keys {
+		if err := store.Delete(key); err != nil {
+			return err
+		}
+	}
+	if err := store.Delete(countKey(prefix, owner)); err != nil {
+		return err
+	}
+	if err := store.Delete(seqKey(prefix, owner)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ── Ordered set helpers (enabled_agents) ───────────────────────────────
+
+// addOrderedEntry adds an entry with a monotonically increasing position.
+// Returns false if already present.
+func (k Keeper) addOrderedEntry(ctx sdk.Context, prefix, owner, entry string) (bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	ek := entryKey(prefix, owner, entry)
+	existing, err := store.Get(ek)
+	if err != nil {
+		return false, err
+	}
+	if len(existing) > 0 {
+		return false, nil // already present
+	}
+	// Get next sequence (position)
+	sk := seqKey(prefix, owner)
+	sb, _ := store.Get(sk)
+	seq := getUint64(sb)
+	if err := store.Set(ek, putUint64(seq)); err != nil {
+		return false, err
+	}
+	if err := store.Set(sk, putUint64(seq+1)); err != nil {
+		return false, err
+	}
+	ck := countKey(prefix, owner)
+	cb, _ := store.Get(ck)
+	cnt := getUint32(cb) + 1
+	return true, store.Set(ck, putUint32(cnt))
+}
+
+// removeOrderedEntry removes an entry. Gaps in position values are harmless.
+func (k Keeper) removeOrderedEntry(ctx sdk.Context, prefix, owner, entry string) error {
+	return k.removeSetEntry(ctx, prefix, owner, entry)
+}
+
+// listOrderedEntries returns entries sorted by their position value (ascending).
+func (k Keeper) listOrderedEntries(ctx sdk.Context, prefix, owner string) ([]string, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	pfx := entryPrefix(prefix, owner)
+	it, err := store.Iterator(pfx, prefixEndBytes(pfx))
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+
+	pfxLen := len(pfx)
+	type kv struct {
+		entry string
+		pos   uint64
+	}
+	var items []kv
+	for ; it.Valid(); it.Next() {
+		key := it.Key()
+		if len(key) > pfxLen {
+			items = append(items, kv{entry: string(key[pfxLen:]), pos: getUint64(it.Value())})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].pos < items[j].pos })
+	out := make([]string, len(items))
+	for i, kv := range items {
+		out[i] = kv.entry
+	}
+	return out, nil
+}
+
+// replaceAllOrderedEntries deletes all existing entries and writes new ones
+// with positions 0, 1, 2, ... Resets seq = len(entries).
+func (k Keeper) replaceAllOrderedEntries(ctx sdk.Context, prefix, owner string, entries []string) error {
+	if err := k.deleteAllSetEntries(ctx, prefix, owner); err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	for i, e := range entries {
+		if err := store.Set(entryKey(prefix, owner, e), putUint64(uint64(i))); err != nil {
+			return err
+		}
+	}
+	if err := store.Set(countKey(prefix, owner), putUint32(uint32(len(entries)))); err != nil {
+		return err
+	}
+	return store.Set(seqKey(prefix, owner), putUint64(uint64(len(entries))))
+}
+
+// ── Deque helpers (blocked_users, blocked_posts, blocked_topics) ───────
+
+// addDequeEntry adds an entry with a monotonically increasing sequence.
+// If the entry already exists, it is a no-op (returns false).
+// If count >= maxCap after adding, the entry with the lowest sequence is evicted.
+func (k Keeper) addDequeEntry(ctx sdk.Context, prefix, owner, entry string, maxCap uint32) (bool, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	ek := entryKey(prefix, owner, entry)
+	existing, err := store.Get(ek)
+	if err != nil {
+		return false, err
+	}
+	if len(existing) > 0 {
+		return false, nil // already present — idempotent
+	}
+	// Assign next sequence
+	sk := seqKey(prefix, owner)
+	sb, _ := store.Get(sk)
+	seq := getUint64(sb)
+	if err := store.Set(ek, putUint64(seq)); err != nil {
+		return false, err
+	}
+	if err := store.Set(sk, putUint64(seq+1)); err != nil {
+		return false, err
+	}
+	// Increment count
+	ck := countKey(prefix, owner)
+	cb, _ := store.Get(ck)
+	cnt := getUint32(cb) + 1
+	if err := store.Set(ck, putUint32(cnt)); err != nil {
+		return false, err
+	}
+	// Evict oldest if over cap
+	if maxCap > 0 && cnt > maxCap {
+		if err := k.evictLowestSeq(ctx, prefix, owner); err != nil {
+			return true, err
+		}
+		// Decrement count after eviction
+		cnt--
+		if cnt == 0 {
+			if err := store.Delete(ck); err != nil {
+				return true, err
+			}
+		} else {
+			if err := store.Set(ck, putUint32(cnt)); err != nil {
+				return true, err
+			}
+		}
+	}
+	return true, nil
+}
+
+// evictLowestSeq iterates all entries for an owner and deletes the one
+// with the smallest sequence value.
+func (k Keeper) evictLowestSeq(ctx sdk.Context, prefix, owner string) error {
+	store := k.storeService.OpenKVStore(ctx)
+	pfx := entryPrefix(prefix, owner)
+	it, err := store.Iterator(pfx, prefixEndBytes(pfx))
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+
+	var minKey []byte
+	var minSeq uint64
+	first := true
+	for ; it.Valid(); it.Next() {
+		s := getUint64(it.Value())
+		if first || s < minSeq {
+			minKey = append([]byte(nil), it.Key()...)
+			minSeq = s
+			first = false
+		}
+	}
+	if minKey != nil {
+		return store.Delete(minKey)
+	}
+	return nil
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Public per-entry methods for each list type
+// ═══════════════════════════════════════════════════════════════════════
+
+// ── Followed Users (unordered set, hard cap) ───────────────────────────
+
+func (k Keeper) AddFollowedUser(ctx sdk.Context, owner, user string) (bool, error) {
+	return k.addSetEntry(ctx, types.FollowedUsersPrefix, owner, user)
+}
+
+func (k Keeper) RemoveFollowedUser(ctx sdk.Context, owner, user string) error {
+	return k.removeSetEntry(ctx, types.FollowedUsersPrefix, owner, user)
+}
+
+func (k Keeper) HasFollowedUser(ctx sdk.Context, owner, user string) (bool, error) {
+	return k.hasSetEntry(ctx, types.FollowedUsersPrefix, owner, user)
+}
+
+func (k Keeper) CountFollowedUsers(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.FollowedUsersPrefix, owner)
+}
+
+func (k Keeper) ListFollowedUsers(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listSetEntries(ctx, types.FollowedUsersPrefix, owner)
+}
+
+func (k Keeper) DeleteAllFollowedUsers(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.FollowedUsersPrefix, owner)
+}
+
+// ── Followed Topics (unordered set, hard cap) ──────────────────────────
+
+func (k Keeper) AddFollowedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
+	return k.addSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
+}
+
+func (k Keeper) RemoveFollowedTopic(ctx sdk.Context, owner, topic string) error {
+	return k.removeSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
+}
+
+func (k Keeper) HasFollowedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
+	return k.hasSetEntry(ctx, types.FollowedTopicsPrefix, owner, topic)
+}
+
+func (k Keeper) CountFollowedTopics(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.FollowedTopicsPrefix, owner)
+}
+
+func (k Keeper) ListFollowedTopics(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listSetEntries(ctx, types.FollowedTopicsPrefix, owner)
+}
+
+func (k Keeper) DeleteAllFollowedTopics(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.FollowedTopicsPrefix, owner)
+}
+
+// ── Enabled Agents (ordered set, hard cap) ─────────────────────────────
+
+func (k Keeper) AddEnabledAgent(ctx sdk.Context, owner, agent string) (bool, error) {
+	return k.addOrderedEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
+}
+
+func (k Keeper) RemoveEnabledAgent(ctx sdk.Context, owner, agent string) error {
+	return k.removeOrderedEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
+}
+
+func (k Keeper) HasEnabledAgent(ctx sdk.Context, owner, agent string) (bool, error) {
+	return k.hasSetEntry(ctx, types.EnabledAgentsPrefix, owner, agent)
+}
+
+func (k Keeper) CountEnabledAgents(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.EnabledAgentsPrefix, owner)
+}
+
+// ListEnabledAgentsOrdered returns agents sorted by the order they were enabled.
+func (k Keeper) ListEnabledAgentsOrdered(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listOrderedEntries(ctx, types.EnabledAgentsPrefix, owner)
+}
+
+// ReplaceAllEnabledAgents atomically replaces the entire agents list,
+// preserving the order of the provided slice.
+func (k Keeper) ReplaceAllEnabledAgents(ctx sdk.Context, owner string, agents []string) error {
+	return k.replaceAllOrderedEntries(ctx, types.EnabledAgentsPrefix, owner, agents)
+}
+
+func (k Keeper) DeleteAllEnabledAgents(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.EnabledAgentsPrefix, owner)
+}
+
+// ── Blocked Users (deque) ──────────────────────────────────────────────
+
+func (k Keeper) AddBlockedUserDeque(ctx sdk.Context, owner, user string, maxCap uint32) (bool, error) {
+	return k.addDequeEntry(ctx, types.BlockedUsersPrefix, owner, user, maxCap)
+}
+
+func (k Keeper) RemoveBlockedUser(ctx sdk.Context, owner, user string) error {
+	return k.removeSetEntry(ctx, types.BlockedUsersPrefix, owner, user)
+}
+
+func (k Keeper) HasBlockedUser(ctx sdk.Context, owner, user string) (bool, error) {
+	return k.hasSetEntry(ctx, types.BlockedUsersPrefix, owner, user)
+}
+
+func (k Keeper) CountBlockedUsers(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.BlockedUsersPrefix, owner)
+}
+
+func (k Keeper) ListBlockedUsers(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listOrderedEntries(ctx, types.BlockedUsersPrefix, owner)
+}
+
+func (k Keeper) DeleteAllBlockedUsers(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.BlockedUsersPrefix, owner)
+}
+
+// ── Blocked Posts (deque) ──────────────────────────────────────────────
+
+func (k Keeper) AddBlockedPostDeque(ctx sdk.Context, owner, txhash string, maxCap uint32) (bool, error) {
+	return k.addDequeEntry(ctx, types.BlockedPostsPrefix, owner, txhash, maxCap)
+}
+
+func (k Keeper) RemoveBlockedPost(ctx sdk.Context, owner, txhash string) error {
+	return k.removeSetEntry(ctx, types.BlockedPostsPrefix, owner, txhash)
+}
+
+func (k Keeper) HasBlockedPost(ctx sdk.Context, owner, txhash string) (bool, error) {
+	return k.hasSetEntry(ctx, types.BlockedPostsPrefix, owner, txhash)
+}
+
+func (k Keeper) CountBlockedPosts(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.BlockedPostsPrefix, owner)
+}
+
+func (k Keeper) ListBlockedPosts(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listOrderedEntries(ctx, types.BlockedPostsPrefix, owner)
+}
+
+func (k Keeper) DeleteAllBlockedPosts(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.BlockedPostsPrefix, owner)
+}
+
+// ── Blocked Topics (deque) ─────────────────────────────────────────────
+
+func (k Keeper) AddBlockedTopicDeque(ctx sdk.Context, owner, topic string, maxCap uint32) (bool, error) {
+	return k.addDequeEntry(ctx, types.BlockedTopicsPrefix, owner, topic, maxCap)
+}
+
+func (k Keeper) RemoveBlockedTopic(ctx sdk.Context, owner, topic string) error {
+	return k.removeSetEntry(ctx, types.BlockedTopicsPrefix, owner, topic)
+}
+
+func (k Keeper) HasBlockedTopic(ctx sdk.Context, owner, topic string) (bool, error) {
+	return k.hasSetEntry(ctx, types.BlockedTopicsPrefix, owner, topic)
+}
+
+func (k Keeper) CountBlockedTopics(ctx sdk.Context, owner string) uint32 {
+	return k.countSetEntries(ctx, types.BlockedTopicsPrefix, owner)
+}
+
+func (k Keeper) ListBlockedTopics(ctx sdk.Context, owner string) ([]string, error) {
+	return k.listOrderedEntries(ctx, types.BlockedTopicsPrefix, owner)
+}
+
+func (k Keeper) DeleteAllBlockedTopics(ctx sdk.Context, owner string) error {
+	return k.deleteAllSetEntries(ctx, types.BlockedTopicsPrefix, owner)
 }
 
 // GetAllProfiles returns all profiles from the store
@@ -1238,19 +1751,54 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 	}
 
 	// Delete profile core KV
-	_ = store.Delete(k.profileKey(addr))
+	if err := store.Delete(k.profileKey(addr)); err != nil {
+		return "", nil, err
+	}
 
-	// Delete all profile list keys
-	_ = store.Delete(k.profileFollowedModsKey(addr))
-	_ = store.Delete(k.profileFollowedUsersKey(addr))
-	_ = store.Delete(k.profileFollowedTopicsKey(addr))
-	_ = store.Delete(k.profileBlockedUsersKey(addr))
-	_ = store.Delete(k.profileBlockedPostsKey(addr))
-	_ = store.Delete(k.profileBlockedTopicsKey(addr))
+	// Delete all per-entry list keys (prefix-range delete + count + seq for each list)
+	if err := k.DeleteAllEnabledAgents(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllFollowedUsers(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllFollowedTopics(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedUsers(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedPosts(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	if err := k.DeleteAllBlockedTopics(ctx, addr); err != nil {
+		return "", nil, err
+	}
+	// Also delete legacy blob keys in case they exist (pre-migration data)
+	if err := store.Delete(k.profileEnabledAgentsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileFollowedUsersKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileFollowedTopicsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedUsersKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedPostsKey(addr)); err != nil {
+		return "", nil, err
+	}
+	if err := store.Delete(k.profileBlockedTopicsKey(addr)); err != nil {
+		return "", nil, err
+	}
 
 	// Release username mapping
 	if username != "" {
-		_ = k.ReleaseUsername(ctx, username, addr)
+		if err := k.ReleaseUsername(ctx, username, addr); err != nil {
+			return "", nil, err
+		}
 		usernameReleased = username
 	}
 

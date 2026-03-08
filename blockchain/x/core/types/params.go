@@ -4,90 +4,101 @@ import (
 	"fmt"
 )
 
+// Valid user levels. Only these levels can be assigned to a profile.
+// Levels 2-9 are reserved for future subscription tiers.
+const (
+	LevelFree       = 0
+	LevelSubscriber = 1
+	LevelAgent      = 10
+	LevelAdminMin   = 100
+)
+
+// ValidSubscriptionLevels are the levels users can self-upgrade to via MsgUpgradeLevel.
+var ValidSubscriptionLevels = map[int]bool{
+	LevelSubscriber: true,
+	LevelAgent:      true,
+}
+
+// LevelToTierIndex maps a user level to the index in the Tiers array.
+// Returns -1 for invalid/unsupported levels.
+func LevelToTierIndex(level int) int {
+	switch {
+	case level == LevelFree:
+		return 0
+	case level == LevelSubscriber:
+		return 1
+	case level == LevelAgent:
+		return 2
+	case level >= LevelAdminMin:
+		return 2 // admins get agent-tier capabilities
+	default:
+		return -1
+	}
+}
+
 // DefaultTiers returns the default tier configurations.
-// Index 0 = Free, 1 = Trusted, 2 = Established, 3 = Distinguished
-// Pricing assumes $0.00001/MIRAGE (post 10,000x multiplier economics)
+// Index 0 = Free (level 0), 1 = Subscriber (level 1), 2 = Agent (level 10)
 func DefaultTiers() []*TierConfig {
 	return []*TierConfig{
-		// Level 0: Free
+		// Index 0 — Level 0: Free
 		{
-			PeriodFee:           0,
-			MaxFollowedMods:     5,
-			MaxFollowedUsers:    25,
-			MaxFollowedTopics:   50,
-			MaxBlockedUsers:     10,
-			MaxBlockedPosts:     25,
-			MaxBlockedTopics:    10,
-			MaxTitleLength:      130,
-			MaxContentLength:    1000,
-			EditingTimeMins:     10,
-			ArchiveDurationDays: 30,
-			VoteWeight:          1.0,
-			EligibleForMod:      false,
-			CanChangeName:       false,
-			CanHaveBiography:    false,
-			CanHaveAvatar:       false,
-			CanHaveBanner:       false,
+			PeriodFee:         0,
+			MaxEnabledAgents:  5,
+			MaxFollowedUsers:  25,
+			MaxFollowedTopics: 25,
+			MaxBlockedUsers:   25,
+			MaxBlockedPosts:   25,
+			MaxBlockedTopics:  25,
+			MaxTitleLength:    150,
+			MaxContentLength:  1000,
+			EditingTimeMins:   10,
+			VoteWeight:        1.0,
+			CanBeAgent:        false,
+			CanRemoveAnon:     false,
+			CanHaveBiography:  false,
+			CanHaveAvatar:     false,
+			CanHaveBanner:     false,
+			CanHaveFlair:      false,
 		},
-		// Level 1: Trusted (100K MIRAGE = $1/mo at $0.00001/MIRAGE)
+		// Index 1 — Level 1: Subscriber (100B umirage)
 		{
-			PeriodFee:           100_000_000_000,
-			MaxFollowedMods:     10,
-			MaxFollowedUsers:    125,
-			MaxFollowedTopics:   250,
-			MaxBlockedUsers:     125,
-			MaxBlockedPosts:     100,
-			MaxBlockedTopics:    125,
-			MaxTitleLength:      165,
-			MaxContentLength:    2000,
-			EditingTimeMins:     60,
-			ArchiveDurationDays: 90,
-			VoteWeight:          1.15,
-			EligibleForMod:      false,
-			CanChangeName:       true,
-			CanHaveBiography:    true,
-			CanHaveAvatar:       true,
-			CanHaveBanner:       true,
+			PeriodFee:         100_000_000_000,
+			MaxEnabledAgents:  50,
+			MaxFollowedUsers:  500,
+			MaxFollowedTopics: 500,
+			MaxBlockedUsers:   500,
+			MaxBlockedPosts:   500,
+			MaxBlockedTopics:  500,
+			MaxTitleLength:    300,
+			MaxContentLength:  20000,
+			EditingTimeMins:   360,
+			VoteWeight:        1.33,
+			CanBeAgent:        false,
+			CanRemoveAnon:     true,
+			CanHaveBiography:  true,
+			CanHaveAvatar:     true,
+			CanHaveBanner:     true,
+			CanHaveFlair:      true,
 		},
-		// Level 2: Established (200K MIRAGE = $2/mo at $0.00001/MIRAGE)
+		// Index 2 — Level 10: Agent (500B umirage)
 		{
-			PeriodFee:           200_000_000_000,
-			MaxFollowedMods:     25,
-			MaxFollowedUsers:    500,
-			MaxFollowedTopics:   500,
-			MaxBlockedUsers:     500,
-			MaxBlockedPosts:     200,
-			MaxBlockedTopics:    500,
-			MaxTitleLength:      200,
-			MaxContentLength:    5000,
-			EditingTimeMins:     360,
-			ArchiveDurationDays: 180,
-			VoteWeight:          1.30,
-			EligibleForMod:      true,
-			CanChangeName:       true,
-			CanHaveBiography:    true,
-			CanHaveAvatar:       true,
-			CanHaveBanner:       true,
-		},
-		// Level 3: Distinguished (300K MIRAGE = $3/mo at $0.00001/MIRAGE)
-		{
-			PeriodFee:           300_000_000_000,
-			MaxFollowedMods:     50,
-			MaxFollowedUsers:    1000,
-			MaxFollowedTopics:   1000,
-			MaxBlockedUsers:     1000,
-			MaxBlockedPosts:     500,
-			MaxBlockedTopics:    1000,
-			MaxTitleLength:      250,
-			MaxContentLength:    25000,
-			EditingTimeMins:     720,
-			ArchiveDurationDays: 365,
-			VoteWeight:          1.45,
-			EligibleForMod:      true,
-			CanChangeName:       true,
-			CanHaveBiography:    true,
-			CanHaveAvatar:       true,
-			CanHaveBanner:       true,
+			PeriodFee:         500_000_000_000,
+			MaxEnabledAgents:  50,
+			MaxFollowedUsers:  500,
+			MaxFollowedTopics: 500,
+			MaxBlockedUsers:   500,
+			MaxBlockedPosts:   500,
+			MaxBlockedTopics:  500,
+			MaxTitleLength:    300,
+			MaxContentLength:  20000,
+			EditingTimeMins:   360,
+			VoteWeight:        1.33,
+			CanBeAgent:        true,
+			CanRemoveAnon:     true,
+			CanHaveBiography:  true,
+			CanHaveAvatar:     true,
+			CanHaveBanner:     true,
+			CanHaveFlair:      true,
 		},
 	}
 }
@@ -103,14 +114,14 @@ func DefaultAwardConfigs() []*AwardConfig {
 }
 
 // DefaultParams returns a default set of parameters.
-// These defaults reflect v1.8.0 economics (post 10,000x multiplier).
+// These defaults reflect v1.16.0 economics (Free=0, Subscriber=1, Agent=10).
 func DefaultParams() Params {
 	return Params{
 		// Minting
-		MintInterval:         200,         // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
+		MintInterval:         200,             // in blocks; one block = every 3 secs, i.e. every 10 mins we mint
 		MintQuantity:         125_000_000_000, // 125,000 MIRAGE per 10min
-		MintDynamicCreditCap: 25,          // default cap per interval per validator (same as default PowMessageLimit)
-		MintDynamicSplit:     0.5,         // 50% dynamic by default
+		MintDynamicCreditCap: 25,              // default cap per interval per validator (same as default PowMessageLimit)
+		MintDynamicSplit:     0.5,             // 50% dynamic by default
 
 		// min_difficulty defines the base PoW target: base_target = 2^(256 - min_difficulty)
 		MinDifficulty: 10,
@@ -143,11 +154,11 @@ func DefaultParams() Params {
 		Tiers: DefaultTiers(),
 
 		// Fraction of period fee escrowed as gas reserve [0,1] (remainder burned)
-		SubscriptionReservePercent: 0.80,
+		SubscriptionReservePercent: 0.95,
 
 		// Min gas price for relayed txs in umirage per gas unit
 		// Fee = gasConsumed * RelayMinGasPrice (no divisor)
-		RelayMinGasPrice: 5000,
+		RelayMinGasPrice: 1000,
 
 		// Max fee deducted per relayed tx in umirage (500 MIRAGE cap)
 		RelayMaxGasFee: 500_000_000,
@@ -228,7 +239,7 @@ func (p Params) Validate() error {
 		return fmt.Errorf("tiers must not be empty")
 	}
 	// Free tier (index 0) must have 0 monthly fee
-	if len(p.Tiers) > 0 && p.Tiers[0].PeriodFee != 0 {
+	if p.Tiers[0].PeriodFee != 0 {
 		return fmt.Errorf("tier 0 (free) must have period_fee = 0")
 	}
 	for i, tier := range p.Tiers {
@@ -273,17 +284,16 @@ func (p Params) GetAwardConfig(name string) *AwardConfig {
 	return nil
 }
 
-// GetTierConfig returns the tier config for the given level.
-// Returns the free tier for negative levels, highest tier for levels exceeding max.
+// GetTierConfig returns the tier config for the given user level.
+// Maps user levels (0, 1, 10, 100+) to tier array indices (0, 1, 2).
+// Returns nil for invalid levels (2-9, negative).
 func (p Params) GetTierConfig(level int) *TierConfig {
 	if len(p.Tiers) == 0 {
 		return nil
 	}
-	if level < 0 {
-		return p.Tiers[0]
+	idx := LevelToTierIndex(level)
+	if idx < 0 || idx >= len(p.Tiers) {
+		return nil
 	}
-	if level >= len(p.Tiers) {
-		return p.Tiers[len(p.Tiers)-1]
-	}
-	return p.Tiers[level]
+	return p.Tiers[idx]
 }

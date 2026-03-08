@@ -21,20 +21,20 @@ type Profile struct {
 	SubscriptionExpiry int64  `json:"subscription_expiry"`
 	AutoRenew          bool   `json:"auto_renew"`
 	ReserveFunds       uint64 `json:"reserve_funds"`
-	IsModerator        bool   `json:"is_moderator"`
 
 	// Social lists (stored separately, loaded on demand)
-	FollowedModerators []string `json:"followed_moderators"`
-	FollowedUsers      []string `json:"followed_users"`
-	FollowedTopics     []string `json:"followed_topics"`
-	BlockedUsers       []string `json:"blocked_users"`
-	BlockedPosts       []string `json:"blocked_posts"`
-	BlockedTopics      []string `json:"blocked_topics"`
+	EnabledAgents  []string `json:"enabled_agents"`
+	FollowedUsers  []string `json:"followed_users"`
+	FollowedTopics []string `json:"followed_topics"`
+	BlockedUsers   []string `json:"blocked_users"`
+	BlockedPosts   []string `json:"blocked_posts"`
+	BlockedTopics  []string `json:"blocked_topics"`
 
 	// Profile customization
 	Biography string `json:"biography"`
 	Avatar    string `json:"avatar"`
 	Banner    string `json:"banner"`
+	Flair     string `json:"flair"`
 }
 
 // ToCore extracts the core scalar fields from a full Profile
@@ -47,10 +47,10 @@ func (p *Profile) ToCore() *ProfileCore {
 		SubscriptionExpiry: p.SubscriptionExpiry,
 		AutoRenew:          p.AutoRenew,
 		ReserveFunds:       p.ReserveFunds,
-		IsModerator:        p.IsModerator,
 		Biography:          p.Biography,
 		Avatar:             p.Avatar,
 		Banner:             p.Banner,
+		Flair:              p.Flair,
 	}
 }
 
@@ -64,11 +64,11 @@ func (c *ProfileCore) ToProfile() Profile {
 		SubscriptionExpiry: c.SubscriptionExpiry,
 		AutoRenew:          c.AutoRenew,
 		ReserveFunds:       c.ReserveFunds,
-		IsModerator:        c.IsModerator,
 		Biography:          c.Biography,
 		Avatar:             c.Avatar,
 		Banner:             c.Banner,
-		FollowedModerators: []string{},
+		Flair:              c.Flair,
+		EnabledAgents:      []string{},
 		FollowedUsers:      []string{},
 		FollowedTopics:     []string{},
 		BlockedUsers:       []string{},
@@ -77,7 +77,7 @@ func (c *ProfileCore) ToProfile() Profile {
 	}
 }
 
-func (p Profile) ValidateBasic(minSize, maxSize uint64, maxModerators uint64) error {
+func (p Profile) ValidateBasic(minSize, maxSize uint64, maxAgents uint64) error {
 	usernameLen := uint64(len(p.Username))
 	if usernameLen < minSize {
 		return fmt.Errorf("username too short: %d < %d", usernameLen, minSize)
@@ -85,13 +85,12 @@ func (p Profile) ValidateBasic(minSize, maxSize uint64, maxModerators uint64) er
 	if usernameLen > maxSize {
 		return fmt.Errorf("username too long: %d > %d", usernameLen, maxSize)
 	}
-	// Allow only alphanumeric and '-'
 	valid := regexp.MustCompile(`^[A-Za-z0-9-]+$`)
 	if p.Username != "" && !valid.MatchString(p.Username) {
 		return fmt.Errorf("invalid username")
 	}
-	if uint64(len(p.FollowedModerators)) > maxModerators {
-		return fmt.Errorf("too many followed moderators: %d > %d", len(p.FollowedModerators), maxModerators)
+	if uint64(len(p.EnabledAgents)) > maxAgents {
+		return fmt.Errorf("too many enabled agents: %d > %d", len(p.EnabledAgents), maxAgents)
 	}
 	if len(p.Biography) > 512 {
 		return fmt.Errorf("biography too long")
@@ -101,6 +100,9 @@ func (p Profile) ValidateBasic(minSize, maxSize uint64, maxModerators uint64) er
 	}
 	if len(p.Banner) > 512 {
 		return fmt.Errorf("banner too long")
+	}
+	if len(p.Flair) > 20 {
+		return fmt.Errorf("flair too long")
 	}
 	return nil
 }

@@ -54,9 +54,9 @@ _REQUIRED_INT_PARAMS = [
 
 # Required float params
 _REQUIRED_FLOAT_PARAMS = [
-    "mint_dynamic_fraction",
+    "mint_dynamic_split",
     "pow_factor",
-    "subscription_reserve_fraction",
+    "subscription_reserve_percent",
     "bridge_attestation_threshold",
 ]
 

@@ -166,14 +166,19 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForAward(v.(*coretypes.MsgAward)) },
 		},
 		{
-			name: "MsgFollowModerator",
-			obj:  &coretypes.MsgFollowModerator{},
-			fn:   func(v interface{}) []byte { return buildCanonForFollowModerator(v.(*coretypes.MsgFollowModerator)) },
+			name: "MsgEnableAgent",
+			obj:  &coretypes.MsgEnableAgent{},
+			fn:   func(v interface{}) []byte { return buildCanonForEnableAgent(v.(*coretypes.MsgEnableAgent)) },
 		},
 		{
-			name: "MsgUnfollowModerator",
-			obj:  &coretypes.MsgUnfollowModerator{},
-			fn:   func(v interface{}) []byte { return buildCanonForUnfollowModerator(v.(*coretypes.MsgUnfollowModerator)) },
+			name: "MsgDisableAgent",
+			obj:  &coretypes.MsgDisableAgent{},
+			fn:   func(v interface{}) []byte { return buildCanonForDisableAgent(v.(*coretypes.MsgDisableAgent)) },
+		},
+		{
+			name: "MsgSetAgents",
+			obj:  &coretypes.MsgSetAgents{},
+			fn:   func(v interface{}) []byte { return buildCanonForSetAgents(v.(*coretypes.MsgSetAgents)) },
 		},
 		{
 			name: "MsgFollowUser",
@@ -234,6 +239,11 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			name: "MsgUpgradeLevel",
 			obj:  &coretypes.MsgUpgradeLevel{},
 			fn:   func(v interface{}) []byte { return buildCanonForUpgradeLevel(v.(*coretypes.MsgUpgradeLevel)) },
+		},
+		{
+			name: "MsgSetBiography",
+			obj:  &coretypes.MsgSetBiography{},
+			fn:   func(v interface{}) []byte { return buildCanonForSetBiography(v.(*coretypes.MsgSetBiography)) },
 		},
 	}
 

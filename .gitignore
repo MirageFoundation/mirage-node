@@ -64,6 +64,8 @@ referrals/analysis/
 referrals/airdrop_pending.csv
 referrals/payout_history.csv
 
+# agent examples
+mirage-bots
 
 # Scripts - node-operator scripts are tracked; internal admin tools are not.
 # Everything on disk still gets packaged by Docker (COPY scripts/).
@@ -85,6 +87,7 @@ scripts/*
 !scripts/show_balances.py
 !scripts/migrate_pebbledb.py
 !scripts/submit_proposal.py
+!scripts/verify_upgrade.py
 !scripts/check_grpc.py
 !scripts/manage_invites.py
 !scripts/assign_all_quests.py

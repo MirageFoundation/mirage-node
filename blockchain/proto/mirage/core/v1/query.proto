@@ -104,13 +104,14 @@ message QueryProfileResponse {
   int64 subscription_expiry = 5;
   bool auto_renew = 6;
   uint64 reserve_funds = 7;
-  bool is_moderator = 8;
+  reserved 8;
   string biography = 9;
   string avatar = 10;
   string banner = 11;
-  
+  string flair = 18;
+
   // Lists (stored separately but returned together for convenience)
-  repeated string followed_moderators = 12;
+  repeated string enabled_agents = 12;
   repeated string followed_users = 13;
   repeated string followed_topics = 14;
   repeated string blocked_users = 15;

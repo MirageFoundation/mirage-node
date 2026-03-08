@@ -109,44 +109,86 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetUsername", "err", err.Error())
 				return ctx, err
 			}
-		case *coretypes.MsgFollowModerator:
+		case *coretypes.MsgSetBiography:
 			if m.Authority == govAuthority {
 				continue
 			}
 			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgFollowModerator", "err", err.Error())
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
-			if err := verifyRelaySignature("MsgFollowModerator", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+			if err := verifyRelaySignature("MsgSetBiography", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
 				w.writeBytes(3, m.EnvelopeBlockHash)
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeString(100, m.Target)
-				w.writeString(101, m.Moderator)
+				w.writeString(101, m.Biography)
 			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgFollowModerator", "err", err.Error())
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetBiography", "err", err.Error())
 				return ctx, err
 			}
-		case *coretypes.MsgUnfollowModerator:
+		case *coretypes.MsgEnableAgent:
 			if m.Authority == govAuthority {
 				continue
 			}
 			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
-				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgUnfollowModerator", "err", err.Error())
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgEnableAgent", "err", err.Error())
 				return ctx, err
 			}
-			if err := verifyRelaySignature("MsgUnfollowModerator", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+			if err := verifyRelaySignature("MsgEnableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
 				w.writeBytes(2, m.EnvelopePubkey)
 				w.writeBytes(3, m.EnvelopeBlockHash)
 				w.writeUvarint(4, m.EnvelopeDifficulty)
 				w.writeUvarint(5, m.EnvelopePow)
 				w.writeUvarint(6, m.EnvelopeTimestamp)
 				w.writeString(100, m.Target)
-				w.writeString(101, m.Moderator)
+				w.writeString(101, m.Agent)
 			}); err != nil {
-				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgUnfollowModerator", "err", err.Error())
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEnableAgent", "err", err.Error())
+				return ctx, err
+			}
+		case *coretypes.MsgDisableAgent:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgDisableAgent", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgDisableAgent", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(100, m.Target)
+				w.writeString(101, m.Agent)
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDisableAgent", "err", err.Error())
+				return ctx, err
+			}
+		case *coretypes.MsgSetAgents:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgSetAgents", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgSetAgents", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(100, m.Target)
+				for _, agent := range m.Agents {
+					w.writeString(101, agent)
+				}
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgSetAgents", "err", err.Error())
 				return ctx, err
 			}
 		case *coretypes.MsgFollowUser:
@@ -410,6 +452,33 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				}
 			}); err != nil {
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgEdit", "err", err.Error())
+				return ctx, err
+			}
+		case *coretypes.MsgAnnotate:
+			if m.Authority == govAuthority {
+				continue // Skip validation for governance
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgAnnotate", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgAnnotate", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(101, m.Topic)
+				w.writeString(102, m.Title)
+				w.writeString(103, m.Content)
+				w.writeString(104, m.Tag)
+				w.writeString(105, m.Override)
+				for _, mediaItem := range m.Media {
+					w.writeString(106, mediaItem)
+				}
+				w.writeString(107, m.Appendix)
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgAnnotate", "err", err.Error())
 				return ctx, err
 			}
 		case *coretypes.MsgSetLevel:

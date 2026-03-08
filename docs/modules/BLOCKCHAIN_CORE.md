@@ -235,7 +235,7 @@ The `PowDecorator` enforces Proof-of-Work for free-tier users. This is the key i
 
 **Tier-Based PoW Bypass:**
 - Free users (level 0): Must provide valid PoW
-- Paid users (level 1-3): Skip PoW, pay from escrowed reserve
+- Paid users (level 1, 10): Skip PoW, pay from escrowed reserve
 - Admins (level >= 100): Pay from on-chain balance
 
 ### RelaySigDecorator: Meta-Signature Verification
@@ -284,7 +284,7 @@ The `x/core` module contains all Mirage-specific application logic. It is the he
 
 **Profile Messages:**
 - `MsgSetUsername`: Claim or change username
-- `MsgFollowModerator`, `MsgUnfollowModerator`: Manage trusted moderators
+- `MsgEnableAgent`, `MsgDisableAgent`: Manage enabled agents
 - `MsgFollowUser`, `MsgUnfollowUser`: Manage followed users
 - `MsgFollowTopic`, `MsgUnfollowTopic`: Manage followed topics
 - `MsgBlockUser`, `MsgUnblockUser`: Personal blocking
@@ -314,7 +314,7 @@ The module stores state under prefixed keys in the KV store:
 | Prefix | Purpose |
 |--------|---------|
 | `profile/` | Core profile data (JSON serialized) |
-| `profile_mods/` | Followed moderators list |
+| `plist_agents/` | Enabled agents list |
 | `profile_users/` | Followed users list |
 | `profile_topics/` | Followed topics list |
 | `profile_blocked_users/` | Blocked users list |
@@ -371,9 +371,8 @@ The tier system serves multiple purposes:
 | Level | Name | Monthly Fee | Key Features |
 |-------|------|-------------|--------------|
 | 0 | Free | 0 | PoW required, limited content length, "Anon-" username prefix |
-| 1 | Trusted | 100K MIRAGE | No PoW, custom username, biography, avatar |
-| 2 | Established | 200K MIRAGE | Moderator eligibility, extended topic blocking, longer content |
-| 3 | Distinguished | 300K MIRAGE | Maximum limits, highest vote weight |
+| 1 | Subscriber | 100K MIRAGE | No PoW, custom username, biography, avatar |
+| 2 | Agent | 200K MIRAGE | Agent eligibility, extended topic blocking, longer content |
 | 100+ | Admin | N/A | Governance-assigned, special privileges |
 
 ### Subscription Lifecycle

@@ -1,0 +1,16 @@
+{
+    "messages": [
+        {
+            "@type": "/mirage.core.v1.MsgUpdateParams",
+            "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
+            "params": {
+                "pow_message_limit": "9999999"
+            }
+        }
+    ],
+    "metadata": "",
+    "deposit": "auto",
+    "title": "Set PoW message limit",
+    "summary": "Increase the PoW message limit to 9,999,999.",
+    "expedited": true
+}

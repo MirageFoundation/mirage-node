@@ -63,6 +63,19 @@ def canon_base_set_username(
     )
 
 
+def canon_base_set_biography(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    biography: str,
+) -> bytes:
+    return canon_shared.canon_base_set_biography(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, biography
+    )
+
+
 def canon_base_post(
     pub_dec: bytes,
     last_block_hash: str,
@@ -117,6 +130,34 @@ def canon_base_edit(
     )
 
 
+def canon_base_annotate(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: list[str] | None = None,
+    appendix: str = "",
+) -> bytes:
+    return canon_shared.canon_base_annotate(
+        pub_dec,
+        _hex_to_bytes(last_block_hash),
+        int(difficulty),
+        int(timestamp),
+        topic,
+        title,
+        content,
+        tag,
+        override,
+        media=media,
+        appendix=appendix,
+    )
+
+
 def canon_base_vote(
     pub_dec: bytes,
     last_block_hash: str,
@@ -130,29 +171,42 @@ def canon_base_vote(
     )
 
 
-def canon_base_follow_moderator(
+def canon_base_enable_agent(
     pub_dec: bytes,
     last_block_hash: str,
     difficulty: int,
     timestamp: int,
     target: str,
-    moderator: str,
+    agent: str,
 ) -> bytes:
-    return canon_shared.canon_base_follow_moderator(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, moderator
+    return canon_shared.canon_base_enable_agent(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent
     )
 
 
-def canon_base_unfollow_moderator(
+def canon_base_disable_agent(
     pub_dec: bytes,
     last_block_hash: str,
     difficulty: int,
     timestamp: int,
     target: str,
-    moderator: str,
+    agent: str,
 ) -> bytes:
-    return canon_shared.canon_base_unfollow_moderator(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, moderator
+    return canon_shared.canon_base_disable_agent(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent
+    )
+
+
+def canon_base_set_agents(
+    pub_dec: bytes,
+    last_block_hash: str,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    agents: list[str],
+) -> bytes:
+    return canon_shared.canon_base_set_agents(
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agents
     )
 
 
@@ -497,11 +551,14 @@ def decode_any(s: str) -> bytes:
 __all__ = [
     "uvarint",
     "canon_base_set_username",
+    "canon_base_set_biography",
     "canon_base_post",
     "canon_base_edit",
+    "canon_base_annotate",
     "canon_base_vote",
-    "canon_base_follow_moderator",
-    "canon_base_unfollow_moderator",
+    "canon_base_enable_agent",
+    "canon_base_disable_agent",
+    "canon_base_set_agents",
     "canon_base_follow_user",
     "canon_base_unfollow_user",
     "canon_base_follow_topic",

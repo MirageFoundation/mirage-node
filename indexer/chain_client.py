@@ -61,15 +61,12 @@ class ChainClient:
         for path in ["/block_results", "/block", "/status", "/abci_query", "/tx_search"]:
             if path in base_rpc:
                 base_rpc = base_rpc.replace(path, "")
-        if "://" in base_rpc:
-            protocol, rest = base_rpc.split("://", 1)
-            if ":" in rest:
-                host, _ = rest.rsplit(":", 1)
-                return f"http://{host}:1317"
-            else:
-                return f"http://{rest}:1317"
-        else:
-            return base_rpc.replace(":26657", ":1317")
+        parsed = _up.urlparse(base_rpc)
+        if not parsed.scheme:
+            raise ValueError(f"RPC URL missing scheme: {jsonrpc_url}")
+        if not parsed.hostname:
+            raise ValueError(f"RPC URL missing host: {jsonrpc_url}")
+        return f"{parsed.scheme}://{parsed.hostname}:1317"
 
     def get_status(self) -> dict:
         """Get chain status."""
@@ -117,11 +114,51 @@ class ChainClient:
         r.raise_for_status()
         return r.json()
 
+    def query_profile_full(self, addr: str, timeout: int = GRPC_TIMEOUT) -> dict:
+        """Query full profile (including per-entry lists) via gRPC."""
+        from shared.datatypes import QueryProfileRequest, QueryProfileResponse
+
+        with grpc.insecure_channel(self.grpc_target) as channel:
+            method = channel.unary_unary(
+                "/mirage.core.v1.Query/GetProfile",
+                request_serializer=QueryProfileRequest.SerializeToString,
+                response_deserializer=QueryProfileResponse.FromString,
+            )
+            resp = method(QueryProfileRequest(address=str(addr).lower()), timeout=timeout)
+
+        profile = {
+            "owner": str(resp.owner),
+            "username": str(resp.username),
+            "level": int(resp.level),
+            "created_at": int(resp.created_at),
+            "subscription_expiry": int(resp.subscription_expiry),
+            "auto_renew": bool(resp.auto_renew),
+            "reserve_funds": int(resp.reserve_funds),
+            "biography": str(resp.biography),
+            "avatar": str(resp.avatar),
+            "banner": str(resp.banner),
+            "flair": str(resp.flair),
+            "enabled_agents": list(resp.enabled_agents),
+            "followed_users": list(resp.followed_users),
+            "followed_topics": list(resp.followed_topics),
+            "blocked_users": list(resp.blocked_users),
+            "blocked_posts": list(resp.blocked_posts),
+            "blocked_topics": list(resp.blocked_topics),
+        }
+        logger.debug(
+            "query_profile_full grpc addr=%s agents=%d users=%d topics=%d",
+            addr,
+            len(profile["enabled_agents"]),
+            len(profile["followed_users"]),
+            len(profile["followed_topics"]),
+        )
+        return profile
+
     def list_profiles_subspace(self) -> list[dict]:
         """
         List all profiles stored in the chain KV.
         Tries ABCI subspace query first, falls back to REST API pagination.
-        Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, is_moderator, biography, avatar, banner }
+        Returns list of dicts: { owner, username, level, subscription_expiry, auto_renew, biography, avatar, banner, flair }
         """
         # Try ABCI subspace query first
         try:

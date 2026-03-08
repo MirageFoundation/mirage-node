@@ -126,6 +126,8 @@ LOCAL_EVIDENCE_PARAMS = {
     "max_age_duration": str(LOCAL_RETENTION_SECONDS * 1_000_000_000),
     "max_bytes": "1048576",
 }
+EXTRA_VALIDATOR_FUNDS_MIRAGE = 10_000_000
+EXTRA_VALIDATOR_FUNDS_UMIRAGE = EXTRA_VALIDATOR_FUNDS_MIRAGE * 1_000_000
 
 
 def ensure_mirage_tmp() -> Path:
@@ -330,11 +332,34 @@ def extract_backup(backup_tar: Path) -> tuple[Path, str, Path]:
     return extract_dir, image_ref, backup_root
 
 
+def _convert_pebbledb_to_goleveldb(backup_root: Path) -> None:
+    """Convert application.db from PebbleDB to GoLevelDB if needed.
+
+    Older miraged binaries have a bug where the export command doesn't load
+    app.toml, so they default to GoLevelDB regardless of config. This converts
+    the database so the image binary can open it.
+    """
+    convert_db = ROOT / "blockchain" / "bin" / "convert-db"
+    if not convert_db.exists():
+        status("Building convert-db tool...")
+        run(["make", "build-convert-db"], cwd=str(ROOT / "blockchain"))
+
+    app_db = backup_root / "node" / "data" / "application.db"
+    options_files = list(app_db.glob("OPTIONS-*")) if app_db.exists() else []
+    if not options_files:
+        return  # GoLevelDB doesn't have OPTIONS files, no conversion needed
+
+    status("Converting application.db PebbleDB → GoLevelDB for export compatibility...")
+    run([str(convert_db), "--reverse", str(backup_root / "node" / "data"), "application"])
+
+
 def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     status("Running chain export from backup data...")
     export_path = backup_root / "export.json"
     if export_path.exists():
         export_path.unlink()
+
+    _convert_pebbledb_to_goleveldb(backup_root)
 
     status("Running export in isolated container (skip entrypoint)...")
     export_cmd = (
@@ -431,6 +456,17 @@ def stage_backup_into_container(backup_root: Path, export_path: Path) -> Path:
                 "bash",
                 "-lc",
                 "docker exec mirage sed -i 's/^DOMAIN=.*/DOMAIN=/' /root/.mirage/env/node.env 2>/dev/null || true",
+            ]
+        )
+        # Enable open registration without invite codes for local testnet
+        run(
+            [
+                "bash",
+                "-lc",
+                "docker exec mirage sed -i "
+                "'s/^REGISTRATION_ENABLED=.*/REGISTRATION_ENABLED=true/; "
+                "s/^REGISTRATION_INVITE_CODE_REQUIRED=.*/REGISTRATION_INVITE_CODE_REQUIRED=false/' "
+                "/root/.mirage/env/backend.env 2>/dev/null || true",
             ]
         )
 
@@ -587,8 +623,9 @@ def find_validator_by_consensus_pubkey(validators: list, cons_pub_b64: str) -> d
 def load_profiles_from_indexer_db() -> list:
     """Load user profiles from the SQL dump file.
 
-    Returns profiles in InitialProfile format:
-    {core: {owner, username, level, biography, avatar, ...}, followed_moderators: [...]}
+    Returns profiles in InitialProfile format matching the IMAGE binary's schema.
+    The image binary may predate field renames (e.g. followed_moderators → enabled_agents),
+    so we detect which proto fields the image knows and use the matching names.
     """
     status("Loading profiles from indexer dump...")
     # Parse the SQL dump file directly instead of querying PostgreSQL
@@ -633,14 +670,17 @@ except Exception as e:
     exit(0)
 
 profiles_data = parse_copy_data(content, "profiles", [])
-followed_mods_data = parse_copy_data(content, "followed_mods", [])
+# Support both new (enabled_agents) and old (followed_mods) schema for backup compatibility
+enabled_agents_data = parse_copy_data(content, "enabled_agents", [])
+if not enabled_agents_data:
+    enabled_agents_data = parse_copy_data(content, "followed_mods", [])
 
-mods_map = {}
-for row in followed_mods_data:
+agents_map = {}
+for row in enabled_agents_data:
     owner = (row.get("owner") or "").lower()
-    mod = row.get("moderator") or ""
-    if owner and mod:
-        mods_map.setdefault(owner, []).append(mod)
+    agent = row.get("agent") or row.get("moderator") or ""  # moderator for old schema
+    if owner and agent:
+        agents_map.setdefault(owner, []).append(agent)
 
 profiles = []
 now = int(time.time())
@@ -656,7 +696,9 @@ for row in profiles_data:
     bio = row.get("biography") or ""
     avatar = row.get("avatar") or ""
     owner_key = owner.lower()
-    # Build InitialProfile format with nested core
+    # Build InitialProfile format with nested core.
+    # Use old field name (followed_moderators) for compatibility with pre-v1.16 binaries.
+    # The upgrade handler will migrate to the new schema.
     profiles.append({
         "core": {
             "owner": owner,
@@ -665,7 +707,7 @@ for row in profiles_data:
             "biography": bio,
             "avatar": avatar,
         },
-        "followed_moderators": mods_map.get(owner_key, []),
+        "followed_moderators": agents_map.get(owner_key, []),
     })
 
 print(json.dumps(profiles))
@@ -701,7 +743,9 @@ def find_module_account_address(auth_accounts: list, module_name: str) -> str | 
     return None
 
 
-def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple[str, str, str, str]:
+def transform_to_single_validator(
+    export_path: Path, cons_pub_b64: str, *, easy_difficulty: bool = False
+) -> tuple[str, str, str, str]:
     status("Building single-validator genesis...")
     with open(export_path, "r", encoding="utf-8") as f:
         gen = json.load(f)
@@ -746,6 +790,12 @@ def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple
         core_state["raw_state"] = raw_state
         status(f"Injected bridge_sequence/solana={solana_last_seq} into genesis raw_state")
 
+    if easy_difficulty:
+        core_params = core_state.get("params") or {}
+        core_params["pow_message_limit"] = "9999999"
+        core_state["params"] = core_params
+        status("Easy difficulty: set pow_message_limit=9999999")
+
     app_state["core"] = core_state
 
     auth_accounts = auth.get("accounts") or []
@@ -767,6 +817,13 @@ def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple
     val_addr = convert_bech32_prefix(valoper, "mirage")
     valcons = compute_valcons_from_pubkey_b64(cons_pub_b64)
     status(f"Using validator: {valoper} (account {val_addr})")
+    extra_validator_funds = EXTRA_VALIDATOR_FUNDS_UMIRAGE
+    if extra_validator_funds <= 0:
+        raise RuntimeError("EXTRA_VALIDATOR_FUNDS_MIRAGE must be a positive integer")
+    status(
+        f"DEBUG: Extra validator funds configured: {EXTRA_VALIDATOR_FUNDS_MIRAGE} MIRAGE "
+        f"({extra_validator_funds} umirage)"
+    )
 
     total_bonded_base = 0
     for v in validators:
@@ -850,12 +907,44 @@ def transform_to_single_validator(export_path: Path, cons_pub_b64: str) -> tuple
             continue
         else:
             new_balances.append(bal)
+    val_balance_before = None
+    for bal in new_balances:
+        if bal.get("address") != val_addr:
+            continue
+        coins = bal.get("coins")
+        if not isinstance(coins, list):
+            raise RuntimeError("invalid coins for validator balance (expected list)")
+        for coin in coins:
+            if coin.get("denom") != "umirage":
+                continue
+            amount_raw = coin.get("amount")
+            if amount_raw is None:
+                raise RuntimeError("missing amount for validator umirage balance")
+            if not str(amount_raw).isdigit():
+                raise RuntimeError(f"invalid validator umirage balance amount: {amount_raw!r}")
+            val_balance_before = int(amount_raw)
+            coin["amount"] = str(val_balance_before + extra_validator_funds)
+            break
+        else:
+            val_balance_before = 0
+            coins.append({"denom": "umirage", "amount": str(extra_validator_funds)})
+        bal["coins"] = coins
+        break
+    if val_balance_before is None:
+        new_balances.append(
+            {"address": val_addr, "coins": [{"denom": "umirage", "amount": str(extra_validator_funds)}]}
+        )
+        val_balance_before = 0
+    status(
+        "DEBUG: Added extra validator funds: "
+        f"{val_balance_before} -> {val_balance_before + extra_validator_funds} umirage"
+    )
     bank["balances"] = new_balances
 
-    supply_delta = (total_bonded - old_bonded_balance) - old_not_bonded_balance
+    supply_delta = (total_bonded - old_bonded_balance) - old_not_bonded_balance + extra_validator_funds
     status(
         f"Supply delta: {supply_delta} (bonded: {old_bonded_balance} -> {total_bonded}, "
-        f"not_bonded: {old_not_bonded_balance} -> 0)"
+        f"not_bonded: {old_not_bonded_balance} -> 0, extra_validator_funds: {extra_validator_funds})"
     )
     supply_list = bank.get("supply") or []
     for c in supply_list:
@@ -1057,6 +1146,11 @@ def main():
     parser.add_argument("--user", default="root", help="SSH user (default: root)")
     parser.add_argument("--file", dest="backup_file", default=None, help="Use local backup tarball (skip remote)")
     parser.add_argument("--latest", action="store_true", help="Use the latest backup from ~/.mirage/backups/")
+    parser.add_argument(
+        "--easy-difficulty",
+        action="store_true",
+        help="Set pow_message_limit to 9999999 so difficulty never increases",
+    )
     args = parser.parse_args()
 
     status("Reset local testnet: BEGIN")
@@ -1091,7 +1185,9 @@ def main():
 
     # Step 6: Transform genesis to single-validator
     cons_pub_b64 = read_priv_validator_pubkey_b64()
-    new_genesis, val_addr, valoper, valcons_addr = transform_to_single_validator(export_path, cons_pub_b64)
+    new_genesis, val_addr, valoper, valcons_addr = transform_to_single_validator(
+        export_path, cons_pub_b64, easy_difficulty=args.easy_difficulty
+    )
 
     # Step 7: Prepare node directory (genesis, identity files, fresh data, postgres, indexer)
     prepare_local_node(new_genesis)

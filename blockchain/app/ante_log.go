@@ -45,10 +45,12 @@ func (d LoggingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 			logger.Info("--> Tx MsgSend", "phase", phase, "tx", hash, "from", m.FromAddress, "to", m.ToAddress, "amount", m.Amount.String())
 		case *coretypes.MsgSetUsername:
 			logger.Info("--> Tx SetUsername", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "username", m.Username)
-		case *coretypes.MsgFollowModerator:
-			logger.Info("--> Tx FollowModerator", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "moderator", m.Moderator)
-		case *coretypes.MsgUnfollowModerator:
-			logger.Info("--> Tx UnfollowModerator", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "moderator", m.Moderator)
+		case *coretypes.MsgEnableAgent:
+			logger.Info("--> Tx EnableAgent", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "agent", m.Agent)
+		case *coretypes.MsgDisableAgent:
+			logger.Info("--> Tx DisableAgent", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "agent", m.Agent)
+		case *coretypes.MsgSetAgents:
+			logger.Info("--> Tx SetAgents", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "count", len(m.Agents))
 		case *coretypes.MsgPost:
 			logger.Info("--> Tx Post", "phase", phase, "tx", hash, "signer", m.Authority, "topic", m.Topic, "target", m.Target, "tag", m.Tag)
 		case *coretypes.MsgEdit:
@@ -79,6 +81,8 @@ func (d LoggingDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, 
 			logger.Info("--> Tx SetLevel", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "level", m.Level)
 		case *coretypes.MsgAward:
 			logger.Info("--> Tx Award", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "award_type", m.AwardType)
+		case *coretypes.MsgSetBiography:
+			logger.Info("--> Tx SetBiography", "phase", phase, "tx", hash, "signer", m.Authority, "target", m.Target, "bio_len", len(m.Biography))
 		default:
 			logger.Info("--> Tx Msg", "phase", phase, "tx", hash, "type", sdk.MsgTypeURL(msg))
 		}

@@ -213,6 +213,7 @@ The indexer handles all `mirage.core.v1` message types, routing each to a specia
 TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgPost": MsgPost,
     "/mirage.core.v1.MsgEdit": MsgEdit,
+    "/mirage.core.v1.MsgAnnotate": MsgAnnotate,
     "/mirage.core.v1.MsgVote": MsgVote,
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
     "/mirage.core.v1.MsgDelete": MsgDelete,
@@ -311,7 +312,6 @@ CREATE TABLE profiles (
     created_at BIGINT NOT NULL DEFAULT 0,
     subscription_expiry BIGINT NOT NULL DEFAULT 0,
     auto_renew BOOLEAN NOT NULL DEFAULT FALSE,
-    is_moderator BOOLEAN NOT NULL DEFAULT FALSE,
     biography TEXT NOT NULL DEFAULT '',
     avatar TEXT NOT NULL DEFAULT '',
     banner TEXT NOT NULL DEFAULT ''
@@ -340,6 +340,21 @@ CREATE TABLE user_similarity_cache (
     computed_at BIGINT NOT NULL,
     expires_at BIGINT NOT NULL,
     PRIMARY KEY (owner, similar_user)
+);
+
+-- Agent edit overlays (MsgAnnotate)
+CREATE TABLE agent_edits (
+    post_txhash TEXT NOT NULL,
+    agent_address TEXT NOT NULL,
+    edit_txhash TEXT NOT NULL,
+    topic TEXT,             -- NULL = no change; '' = clear
+    title TEXT,
+    content TEXT,
+    tag TEXT,
+    media TEXT,             -- JSON list or NULL
+    appendix TEXT,          -- Agent commentary note
+    edited_at BIGINT NOT NULL,
+    PRIMARY KEY (post_txhash, agent_address)
 );
 
 -- Per-user per-topic voting stats (for vote weighting)
@@ -537,7 +552,7 @@ def _sync_profiles_from_chain(self):
 - Indexer database could have stale data from delayed processing
 - Profile updates via governance proposals might not emit events
 - Ensures consistency after indexer downtime
-- Lists (followed users/topics/mods) are NOT synced (tracked via messages)
+- Lists (followed users/topics/agents) are NOT synced (tracked via messages)
 
 ### Subscription Event Handling
 

@@ -60,13 +60,25 @@ func bridgeBurn(ctx sdk.Context, k bridgeBurnKeeper, req *types.MsgBridgeBurn, d
 		return nil, err
 	}
 
-	// Get user level for gas fee
+	// Require username before any bridge operation
 	var userLevel int
-	if bz, found, _ := k.GetProfileCore(ctx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
+	bz, found, err := k.GetProfileCore(ctx, owner)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
 	}
+	if !found {
+		ctx.Logger().Debug("requireUsername: no profile", "owner", owner, "action", "BridgeBurn")
+		return nil, fmt.Errorf("username required: no profile found for %s", owner)
+	}
+	var profileCore types.ProfileCore
+	if err := json.Unmarshal(bz, &profileCore); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	if profileCore.Username == "" {
+		ctx.Logger().Debug("requireUsername: empty username", "owner", owner, "action", "BridgeBurn")
+		return nil, fmt.Errorf("username required: set a username before calling BridgeBurn")
+	}
+	userLevel = int(profileCore.Level)
 
 	// Validate amount
 	amount := req.GetAmount()

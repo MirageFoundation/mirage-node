@@ -86,6 +86,24 @@ def canon_base_set_username(
     return bytes(out)
 
 
+def canon_base_set_biography(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    biography: str,
+) -> bytes:
+    out = bytearray(_prefix("MsgSetBiography"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    out += _enc_str(101, biography)
+    return bytes(out)
+
+
 # NOTE: Authority (tag 1) is NOT included - it's set by backend to validator address
 # NOTE: Pow (tag 5) is included AFTER envelope fields (2-4) but BEFORE timestamp (6)
 # to match Go ante_metasig.go canonical order
@@ -148,6 +166,35 @@ def canon_base_edit(
     return bytes(out)
 
 
+def canon_base_annotate(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    topic: str,
+    title: str,
+    content: str,
+    tag: str,
+    override: str,
+    media: list[str] | None = None,
+    appendix: str = "",
+) -> bytes:
+    out = bytearray(_prefix("MsgAnnotate"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(101, topic or "")
+    out += _enc_str(102, title)
+    out += _enc_str(103, content)
+    out += _enc_str(104, tag)
+    out += _enc_str(105, override)
+    for m in media or []:
+        out += _enc_str(106, m)
+    out += _enc_str(107, appendix)
+    return bytes(out)
+
+
 def canon_base_vote(
     pubkey: bytes,
     last_block_hash: bytes,
@@ -169,39 +216,58 @@ def canon_base_vote(
     return bytes(out)
 
 
-def canon_base_follow_moderator(
+def canon_base_enable_agent(
     pubkey: bytes,
     last_block_hash: bytes,
     difficulty: int,
     timestamp: int,
     target: str,
-    moderator: str,
+    agent: str,
 ) -> bytes:
-    out = bytearray(_prefix("MsgFollowModerator"))
+    out = bytearray(_prefix("MsgEnableAgent"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
     out += _enc_str(100, target)
-    out += _enc_str(101, moderator)
+    out += _enc_str(101, agent)
     return bytes(out)
 
 
-def canon_base_unfollow_moderator(
+def canon_base_disable_agent(
     pubkey: bytes,
     last_block_hash: bytes,
     difficulty: int,
     timestamp: int,
     target: str,
-    moderator: str,
+    agent: str,
 ) -> bytes:
-    out = bytearray(_prefix("MsgUnfollowModerator"))
+    out = bytearray(_prefix("MsgDisableAgent"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
     out += _enc_str(100, target)
-    out += _enc_str(101, moderator)
+    out += _enc_str(101, agent)
+    return bytes(out)
+
+
+def canon_base_set_agents(
+    pubkey: bytes,
+    last_block_hash: bytes,
+    difficulty: int,
+    timestamp: int,
+    target: str,
+    agents: list[str],
+) -> bytes:
+    out = bytearray(_prefix("MsgSetAgents"))
+    out += _enc_bytes(2, pubkey)
+    out += _enc_bytes(3, last_block_hash)
+    out += _enc_u64(4, difficulty)
+    out += _enc_u64(6, timestamp)
+    out += _enc_str(100, target)
+    for a in agents or []:
+        out += _enc_str(101, a)
     return bytes(out)
 
 

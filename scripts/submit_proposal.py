@@ -525,6 +525,12 @@ def main():
         args.remove("--no-confirm")
         no_confirm = True
 
+    # Safety: --no-confirm must never be used with remote mode
+    remaining_mode = next((a for a in args if a.lower() in ("local", "remote")), None)
+    if no_confirm and remaining_mode and remaining_mode.lower() == "remote":
+        print("ERROR: --no-confirm is not allowed for remote mode", file=sys.stderr)
+        return 1
+
     if len(args) < 2:
         print("Usage: python3 submit_proposal.py <local|remote> <proposal_file_or_name> [--dry-run]")
         print("\nAvailable proposals:")
@@ -608,6 +614,13 @@ def main():
     info(f"\nProposal: {title}")
     info(f"Messages: {num_msgs}, Expedited: {is_expedited}")
     info(f"Endpoint: {rpc_endpoint}")
+
+    if not is_expedited and not dry_run:
+        info("WARNING: Proposal is NOT expedited — it will use the standard (slow) voting period.")
+        resp = input("Type 'confirm' to proceed with non-expedited proposal, or Ctrl+C to abort: ")
+        if resp.strip().lower() != "confirm":
+            info("Aborted.")
+            return 1
 
     if dry_run:
         info("\n[DRY RUN] No transactions will be broadcast.")
@@ -827,13 +840,14 @@ def main():
             deposit_amount = explicit_deposit
             deposit_source = "explicit"
 
-    # Update proposal with calculated deposit
+    # Update proposal with calculated deposit — always write to a temp file
+    # so the original proposal JSON is never modified.
     if proposal_json:
         proposal_json["deposit"] = f"{deposit_amount}umirage"
-        # Write updated proposal to temp file
-        if proposal_file:
-            with open(proposal_file, "w", encoding="utf-8") as wf:
-                json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
+        tmpdir = tempfile.mkdtemp(prefix="mirage_proposal_")
+        proposal_file = Path(tmpdir) / proposal_file.name
+        with open(proposal_file, "w", encoding="utf-8") as wf:
+            json.dump(proposal_json, wf, ensure_ascii=False, indent=2)
 
     # Fee = gas * gas_price (5000 umirage per gas unit)
     gas_price = 5000

@@ -196,7 +196,7 @@ function CreateAccountView({ state, setCredentials }) {
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
     const [statusStartTime, setStatusStartTime] = useState(null);
-    const [elapsedTime, setElapsedTime] = useState(0);
+    const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
 
@@ -631,9 +631,9 @@ function CreateAccountView({ state, setCredentials }) {
                                         size="sm"
                                         loading={submitting}
                                     >
-                                        {buttonStatus === "preparing" ? `Preparing... (${elapsedTime.toFixed(1)}s)` :
-                                            buttonStatus === "submitting" ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                buttonStatus === "verifying" ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
+                                        {buttonStatus === "preparing" ? 'Preparing...' :
+                                            buttonStatus === "submitting" ? 'Submitting...' :
+                                                buttonStatus === "verifying" ? 'Verifying...' :
                                                     'Continue'}
                                     </Button>
                                 </ButtonWrapper>

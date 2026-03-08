@@ -1174,7 +1174,7 @@ function ViewPostView({ state, updatePost }) {
     const [replyThumbLoading, setReplyThumbLoading] = useState({}); // { postId: boolean }
     const [replySubmitError, setReplySubmitError] = useState({}); // { postId: string }
     const [replySubmitStartTime, setReplySubmitStartTime] = useState({}); // { postId: number }
-    const [replyElapsedTime, setReplyElapsedTime] = useState({}); // { postId: number }
+    const [, setReplyElapsedTime] = useState({}); // { postId: number }
     const [replySubmitStatus, setReplySubmitStatus] = useState({}); // { postId: 'idle'|'solving'|'submitting'|'verifying' }
     const replyErrorClearTimeoutRef = useRef({}); // { postId: timeoutId }
     const mobileReplyOverlayRef = useRef(null);
@@ -1239,7 +1239,7 @@ function ViewPostView({ state, updatePost }) {
             const chain = JSON.parse(localStorage.getItem('chainConfig') || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = Math.min(userLevel, tiers.length - 1);
+            const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : (userLevel === 10 || userLevel >= 100) ? 2 : 0;
             const tier = tiers[tierIndex] || {};
 
             return {
@@ -3691,10 +3691,9 @@ function ViewPostView({ state, updatePost }) {
                                     loading={isBusy}
                                 >
                                     {isBusy
-                                        ? (replySubmitStatus[post.post_id] === 'solving' ? `Solving PoW... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                            replySubmitStatus[post.post_id] === 'submitting' ? `Submitting... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                                replySubmitStatus[post.post_id] === 'verifying' ? `Verifying... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)` :
-                                                    `Solving PoW... (${(replyElapsedTime[post.post_id] || 0).toFixed(1)}s)`)
+                                        ? (replySubmitStatus[post.post_id] === 'submitting' ? 'Submitting...' :
+                                            replySubmitStatus[post.post_id] === 'verifying' ? 'Verifying...' :
+                                                'Processing')
                                         : (isEdit
                                             ? 'Save Edit'
                                             : (replyIsUploading[post.post_id] ? 'Uploading…' : 'Submit'))}
@@ -3847,7 +3846,8 @@ function ViewPostView({ state, updatePost }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
+                                                    minWidth="follow"
                                                     onMouseEnter={() => setTopicFollowHover(true)}
                                                     onMouseLeave={() => setTopicFollowHover(false)}
                                                     onClick={() => {
@@ -3889,7 +3889,7 @@ function ViewPostView({ state, updatePost }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
                                                     minWidth="follow"
                                                     onMouseEnter={() => setTopicFollowHover(true)}
                                                     onMouseLeave={() => setTopicFollowHover(false)}
@@ -4064,6 +4064,14 @@ function ViewPostView({ state, updatePost }) {
                                                             </span>
                                                         </>
                                                     )}
+                                                    {post.agent_edited && (
+                                                        <>
+                                                            <MetaSeparator>·</MetaSeparator>
+                                                            <span style={{ opacity: 0.5, fontStyle: 'italic' }}>
+                                                                agent modified
+                                                            </span>
+                                                        </>
+                                                    )}
                                                 </MetaInfoRowLeft>
                                                 {renderPostMenu(post)}
                                             </DesktopMetaInfoRow>
@@ -4134,6 +4142,36 @@ function ViewPostView({ state, updatePost }) {
                                                 );
                                             })()}
 
+                                            {/* Agent annotation appendices */}
+                                            {!isCollapsed && post.appendices && post.appendices.length > 0 &&
+                                                post.appendices.map((a, idx) => {
+                                                    const label = a.agent_username || a.agent || 'Agent';
+                                                    return (
+                                                        <div key={`appx-${idx}`} style={{ margin: '0.5rem 0' }}>
+                                                            <div style={{ marginBottom: '0.2rem' }}>
+                                                                <Link
+                                                                    to={`/u/${label}`}
+                                                                    style={{
+                                                                        textDecoration: 'underline',
+                                                                        fontSize: '0.6rem',
+                                                                        color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888',
+                                                                    }}
+                                                                >@{label}</Link>
+                                                                <span style={{ color: theme.colors?.textMuted || '#888', fontSize: '0.6rem' }}>:</span>
+                                                            </div>
+                                                            <div style={{
+                                                                padding: '0.4rem 0.65rem',
+                                                                borderLeft: `3px solid ${theme.colors?.border || '#444'}`,
+                                                                background: theme.colors?.cardBg || 'rgba(99,102,241,0.05)',
+                                                                borderRadius: '0 6px 6px 0',
+                                                                fontSize: '0.85em',
+                                                            }}>
+                                                                <MarkdownRenderer text={a.text} />
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            }
                                             {/* Action bar with horizontal votes */}
                                             {!isCollapsed && (
                                                 <>

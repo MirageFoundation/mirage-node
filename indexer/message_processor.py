@@ -12,8 +12,10 @@ from shared.datatypes import (
     MsgEdit,
     MsgVote,
     MsgSetUsername,
-    MsgFollowModerator,
-    MsgUnfollowModerator,
+    MsgSetBiography,
+    MsgEnableAgent,
+    MsgDisableAgent,
+    MsgSetAgents,
     MsgFollowUser,
     MsgUnfollowUser,
     MsgFollowTopic,
@@ -33,8 +35,9 @@ from shared.datatypes import (
     MsgBridgeAttestBurned,
     MsgBridgeAttestMinted,
     MsgAward,
+    MsgAnnotate,
 )
-from indexer.address_utils import derive_owner_from_msg, derive_owner_from_dict
+from indexer.address_utils import addr_from_pubkey, derive_owner_from_msg, derive_owner_from_dict
 from indexer.params import (
     get_max_topic_size,
     get_max_content_size,
@@ -81,8 +84,10 @@ TYPE_URL_TO_PROTO = {
     "/mirage.core.v1.MsgEdit": MsgEdit,
     "/mirage.core.v1.MsgVote": MsgVote,
     "/mirage.core.v1.MsgSetUsername": MsgSetUsername,
-    "/mirage.core.v1.MsgFollowModerator": MsgFollowModerator,
-    "/mirage.core.v1.MsgUnfollowModerator": MsgUnfollowModerator,
+    "/mirage.core.v1.MsgSetBiography": MsgSetBiography,
+    "/mirage.core.v1.MsgEnableAgent": MsgEnableAgent,
+    "/mirage.core.v1.MsgDisableAgent": MsgDisableAgent,
+    "/mirage.core.v1.MsgSetAgents": MsgSetAgents,
     "/mirage.core.v1.MsgFollowUser": MsgFollowUser,
     "/mirage.core.v1.MsgUnfollowUser": MsgUnfollowUser,
     "/mirage.core.v1.MsgFollowTopic": MsgFollowTopic,
@@ -121,14 +126,20 @@ class MessageProcessor:
             self._handle_post(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgEdit":
             self._handle_edit(type_url, value, tx_hash, ts, height)
+        elif type_url == "/mirage.core.v1.MsgAnnotate":
+            self._handle_annotate(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgVote":
             self._handle_vote(type_url, value, tx_hash, ts, height)
         elif type_url == "/mirage.core.v1.MsgSetUsername":
             self._handle_set_username(type_url, value, ts)
-        elif type_url == "/mirage.core.v1.MsgFollowModerator":
-            self._handle_follow_moderator(type_url, value, ts)
-        elif type_url == "/mirage.core.v1.MsgUnfollowModerator":
-            self._handle_unfollow_moderator(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgSetBiography":
+            self._handle_set_biography(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgEnableAgent":
+            self._handle_enable_agent(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgDisableAgent":
+            self._handle_disable_agent(type_url, value, ts)
+        elif type_url == "/mirage.core.v1.MsgSetAgents":
+            self._handle_set_agents(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgFollowUser":
             self._handle_follow_user(type_url, value, ts)
         elif type_url == "/mirage.core.v1.MsgUnfollowUser":
@@ -815,9 +826,18 @@ class MessageProcessor:
             logger.warning("Rejected edit %s: owner mismatch", tx_hash)
             return
 
-        # Determine if root (target empty in DB)
+        # Determine if root (target empty in DB); enforce target immutability
         existing_topic, _, _, existing_target, _, _, existing_created_at, _existing_media_raw = existing
         is_root = not bool(existing_target)
+
+        # Target immutability: always use the stored target, reject mismatches
+        if target and (existing_target or "").lower() != target.lower():
+            logger.warning(
+                "Rejected edit %s: target mismatch (supplied=%s stored=%s)", tx_hash, target, existing_target
+            )
+            return
+        target = existing_target or ""
+
         media = list(msg_dict.get("media", []) or [])
         logger.debug("MsgEdit media count=%d override=%s", len(media), override)
 
@@ -892,6 +912,111 @@ class MessageProcessor:
                 "owner": owner,
                 "override": override,
                 "is_root": bool(is_root),
+            },
+        )
+
+    def _handle_annotate(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
+        """Handle MsgAnnotate — store agent overlay edit in agent_edits table."""
+        parsed = MsgAnnotate()
+        parsed.ParseFromString(value)
+        agent = addr_from_pubkey(parsed.envelope_pubkey)
+        if not agent:
+            logger.warning("Rejected annotate %s: invalid envelope_pubkey", tx_hash)
+            return
+        override = str(parsed.override or "").strip().lower()
+
+        if not override or len(override) != 64:
+            logger.warning("Rejected annotate %s: invalid override", tx_hash)
+            return
+        existing = self.db.get_post(override)
+        if not existing:
+            logger.warning("Rejected annotate %s: override not found", tx_hash)
+            return
+
+        # Enforce agent tier
+        agent_level = self.db.get_user_level(agent)
+        if agent_level < 10:
+            logger.warning("Rejected annotate %s: not agent tier (level=%d)", tx_hash, agent_level)
+            return
+
+        # Sentinel "." means no change (store None); empty string means clear
+        SENTINEL = "."
+
+        def resolve_field(val):
+            if val == SENTINEL:
+                return None
+            return val
+
+        topic_raw = str(parsed.topic or "")
+        title_raw = str(parsed.title or "")
+        content_raw = str(parsed.content or "")
+        tag_raw = str(parsed.tag or "")
+        appendix_raw = str(parsed.appendix or "")
+
+        topic = resolve_field(topic_raw)
+        title = resolve_field(title_raw)
+        content = resolve_field(content_raw)
+        tag = resolve_field(tag_raw)
+        appendix = resolve_field(appendix_raw)
+
+        # Media: ["."] means no change; [] means clear; list means replace
+        raw_media = list(parsed.media or [])
+        if len(raw_media) == 1 and raw_media[0] == SENTINEL:
+            media = None
+        else:
+            media = raw_media
+
+        logger.debug(
+            "MsgAnnotate parsed: tx=%s agent=%s override=%s title_len=%d content_len=%d appendix_len=%d media_count=%d",
+            tx_hash,
+            agent,
+            override,
+            len(title_raw),
+            len(content_raw),
+            len(appendix_raw),
+            len(raw_media),
+        )
+
+        # For comments (target present in DB), ignore topic/title overrides
+        _, _, _, existing_target, _, _, _, _ = existing
+        is_comment = bool(existing_target)
+        if is_comment:
+            topic = None
+            title = None
+
+        logger.info(
+            "MsgAnnotate upsert: agent=%s override=%s topic=%s title=%s appendix=%s media_count=%s",
+            agent,
+            override,
+            topic,
+            title,
+            appendix,
+            len(media) if media is not None else "none",
+        )
+
+        self.db.upsert_agent_edit(
+            post_txhash=override,
+            agent_address=agent,
+            edit_txhash=tx_hash,
+            edited_at=int(ts),
+            topic=topic,
+            title=title,
+            content=content,
+            tag=tag,
+            media=media,
+            appendix=appendix,
+        )
+
+        self.log_yaml(
+            "Agent annotate",
+            {
+                "height": int(height),
+                "txhash": (tx_hash or "").lower(),
+                "timestamp": int(ts),
+                "time_iso": self.iso_timestamp(ts),
+                "agent": agent,
+                "override": override,
+                "is_comment": is_comment,
             },
         )
 
@@ -998,37 +1123,25 @@ class MessageProcessor:
                 return
 
             level = 0
+            agents = []
 
-            # Query profile core (without lists)
-            key_hex = (f"profiles/{addr}").encode().hex()
-            resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-            result = resp_data.get("result")
-            if result:
-                response = result.get("response")
-                if response:
-                    val_b64 = response.get("value")
-                    if val_b64:
-                        js = base64.b64decode(val_b64).decode()
-                        prof = json.loads(js)
-                        username = str(prof.get("username", username))
-                        level = int(prof.get("level", 0))
-
-            # Query followed moderators separately (split storage)
-            moderators = []
-            mods_key_hex = (f"plist_mods/{addr}").encode().hex()
-            mods_resp = self.chain.abci_query('"/store/core/key"', f"0x{mods_key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-            mods_result = mods_resp.get("result")
-            if mods_result:
-                mods_response = mods_result.get("response")
-                if mods_response:
-                    mods_val_b64 = mods_response.get("value")
-                    if mods_val_b64:
-                        mods_js = base64.b64decode(mods_val_b64).decode()
-                        moderators = json.loads(mods_js) if mods_js else []
+            profile = self.chain.query_profile_full(addr)
+            if "username" not in profile:
+                raise RuntimeError(f"missing username for {addr}")
+            if "level" not in profile:
+                raise RuntimeError(f"missing level for {addr}")
+            if "enabled_agents" not in profile:
+                raise RuntimeError(f"missing enabled_agents for {addr}")
+            username = str(profile["username"])
+            level = int(profile["level"])
+            agents = profile["enabled_agents"]
+            if not isinstance(agents, list):
+                raise RuntimeError(f"invalid enabled_agents for {addr}")
+            logger.debug("set_username profile loaded addr=%s agents=%d", addr, len(agents))
 
             old = self.db.get_profile(addr)
             self.db.upsert_profile(addr, username, level, ts)
-            self.db.set_moderators(addr, moderators)
+            self.db.set_enabled_agents(addr, agents)
 
             new_tuple = (username, level)
             if not old or old != new_tuple:
@@ -1040,64 +1153,146 @@ class MessageProcessor:
                         "time_iso": self.iso_timestamp(ts),
                         "username": username,
                         "level": level,
-                        "moderators": moderators,
+                        "enabled_agents": agents,
                     },
                 )
         except Exception as e:
             logger.error("Error handling MsgSetUsername: %s", e, exc_info=True)
 
-    def _refresh_followed_mods(self, addr: str, ts: int):
-        moderators: list[str] = []
-        # With split storage, followed_moderators are in plist_mods/{addr}
-        key_hex = (f"plist_mods/{addr}").encode().hex()
-        resp_data = self.chain.abci_query('"/store/core/key"', f"0x{key_hex}", timeout=HTTP_TIMEOUT_SHORT)
-        result = resp_data.get("result")
-        if result:
-            response = result.get("response")
-            if response:
-                val_b64 = response.get("value")
-                if val_b64:
-                    js = base64.b64decode(val_b64).decode()
-                    moderators = json.loads(js) if js else []
-        self.db.set_moderators(addr, moderators)
+    def _handle_set_biography(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgSetBiography — update biography in profiles table."""
+        try:
+            parsed = MsgSetBiography()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+
+            addr = str(msg_dict.get("target", ""))
+            if not addr:
+                return
+            biography = str(msg_dict.get("biography", ""))
+
+            # Query chain for the authoritative profile (biography is persisted in ProfileCore)
+            profile_data = self._query_chain_profile(addr)
+            if profile_data:
+                biography = profile_data.get("biography", "") or ""
+
+            self.db.update_profile_biography(addr, biography, ts)
+            self.log_yaml(
+                "Updated biography",
+                {
+                    "address": addr,
+                    "timestamp": int(ts),
+                    "time_iso": self.iso_timestamp(ts),
+                    "biography_len": len(biography),
+                },
+            )
+        except Exception as e:
+            logger.error("Error handling MsgSetBiography: %s", e, exc_info=True)
+
+    def _refresh_enabled_agents(self, addr: str, ts: int):
+        """Query full profile via REST and replace enabled_agents in DB."""
+        profile = self.chain.query_profile_full(addr)
+        if "enabled_agents" not in profile:
+            raise RuntimeError(f"missing enabled_agents for {addr}")
+        agents = profile["enabled_agents"]
+        if not isinstance(agents, list):
+            raise RuntimeError(f"invalid enabled_agents for {addr}")
+        logger.debug("refresh_enabled_agents addr=%s agents=%d", addr, len(agents))
+        self.db.set_enabled_agents(addr, agents)
         self.db.update_profile_timestamp(addr, ts)
         self.log_yaml(
-            "Updated followed moderators",
+            "Updated enabled agents",
             {
                 "address": addr,
                 "timestamp": int(ts),
                 "time_iso": self.iso_timestamp(ts),
-                "moderators": moderators,
+                "agents": agents,
             },
         )
 
-    def _handle_follow_moderator(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgFollowModerator."""
-        try:
-            parsed = MsgFollowModerator()
-            parsed.ParseFromString(value)
-            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
-            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
-            if not owner:
-                logger.warning("Rejected follow_moderator: missing owner")
-                return
-            self._refresh_followed_mods(owner, ts)
-        except Exception as e:
-            logger.error("Error handling MsgFollowModerator: %s", e, exc_info=True)
+    def _refresh_followed_users(self, addr: str, ts: int):
+        """Query full profile via REST and replace followed_users in DB."""
+        profile = self.chain.query_profile_full(addr)
+        if "followed_users" not in profile:
+            raise RuntimeError(f"missing followed_users for {addr}")
+        users = profile["followed_users"]
+        if not isinstance(users, list):
+            raise RuntimeError(f"invalid followed_users for {addr}")
+        logger.debug("refresh_followed_users addr=%s users=%d", addr, len(users))
+        self.db.set_followed_users(addr, users)
+        self.db.update_profile_timestamp(addr, ts)
+        self.log_yaml(
+            "Updated followed users",
+            {
+                "address": addr,
+                "timestamp": int(ts),
+                "time_iso": self.iso_timestamp(ts),
+                "users": users,
+            },
+        )
 
-    def _handle_unfollow_moderator(self, type_url: str, value: bytes, ts: int):
-        """Handle MsgUnfollowModerator."""
+    def _refresh_followed_topics(self, addr: str, ts: int):
+        """Query full profile via REST and replace followed_topics in DB."""
+        profile = self.chain.query_profile_full(addr)
+        if "followed_topics" not in profile:
+            raise RuntimeError(f"missing followed_topics for {addr}")
+        topics = profile["followed_topics"]
+        if not isinstance(topics, list):
+            raise RuntimeError(f"invalid followed_topics for {addr}")
+        logger.debug("refresh_followed_topics addr=%s topics=%d", addr, len(topics))
+        self.db.set_followed_topics(addr, topics)
+        self.db.update_profile_timestamp(addr, ts)
+        self.log_yaml(
+            "Updated followed topics",
+            {
+                "address": addr,
+                "timestamp": int(ts),
+                "time_iso": self.iso_timestamp(ts),
+                "topics": topics,
+            },
+        )
+
+    def _handle_enable_agent(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgEnableAgent."""
         try:
-            parsed = MsgUnfollowModerator()
+            parsed = MsgEnableAgent()
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
             if not owner:
-                logger.warning("Rejected unfollow_moderator: missing owner")
+                logger.warning("Rejected enable_agent: missing owner")
                 return
-            self._refresh_followed_mods(owner, ts)
+            self._refresh_enabled_agents(owner, ts)
         except Exception as e:
-            logger.error("Error handling MsgUnfollowModerator: %s", e, exc_info=True)
+            logger.error("Error handling MsgEnableAgent: %s", e, exc_info=True)
+
+    def _handle_disable_agent(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgDisableAgent."""
+        try:
+            parsed = MsgDisableAgent()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
+            if not owner:
+                logger.warning("Rejected disable_agent: missing owner")
+                return
+            self._refresh_enabled_agents(owner, ts)
+        except Exception as e:
+            logger.error("Error handling MsgDisableAgent: %s", e, exc_info=True)
+
+    def _handle_set_agents(self, type_url: str, value: bytes, ts: int):
+        """Handle MsgSetAgents."""
+        try:
+            parsed = MsgSetAgents()
+            parsed.ParseFromString(value)
+            msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
+            owner = msg_dict.get("target", "") or derive_owner_from_msg(msg_dict)
+            if not owner:
+                logger.warning("Rejected set_agents: missing owner")
+                return
+            self._refresh_enabled_agents(owner, ts)
+        except Exception as e:
+            logger.error("Error handling MsgSetAgents: %s", e, exc_info=True)
 
     def _handle_follow_user(self, type_url: str, value: bytes, ts: int):
         """Handle MsgFollowUser."""
@@ -1112,9 +1307,9 @@ class MessageProcessor:
                 logger.warning("Rejected follow_user: missing owner or user")
                 return
 
-            self.db.follow_user(owner, user)
             self.db.unblock_user(owner, user)
             logger.debug("Follow user removed block: owner=%s user=%s", owner, user)
+            self._refresh_followed_users(owner, ts)
             self.log_yaml(
                 "Follow user",
                 {"owner": owner, "user": user, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1135,7 +1330,7 @@ class MessageProcessor:
                 logger.warning("Rejected unfollow_user: missing owner or user")
                 return
 
-            self.db.unfollow_user(owner, user)
+            self._refresh_followed_users(owner, ts)
             self.log_yaml(
                 "Unfollow user",
                 {"owner": owner, "user": user, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1156,10 +1351,10 @@ class MessageProcessor:
                 logger.warning("Rejected follow_topic: missing owner or topic")
                 return
 
-            self.db.follow_topic(owner, topic)
             removed = self.db.unblock_topics_matching(owner, topic)
             if removed > 0:
                 logger.debug("Follow topic removed block(s): owner=%s topic=%s removed=%d", owner, topic, removed)
+            self._refresh_followed_topics(owner, ts)
             self.log_yaml(
                 "Follow topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1180,7 +1375,7 @@ class MessageProcessor:
                 logger.warning("Rejected unfollow_topic: missing owner or topic")
                 return
 
-            self.db.unfollow_topic(owner, topic)
+            self._refresh_followed_topics(owner, ts)
             self.log_yaml(
                 "Unfollow topic",
                 {"owner": owner, "topic": topic, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1498,10 +1693,10 @@ class MessageProcessor:
                 auto_renew = bool(profile_data.get("auto_renew", False))
                 username = profile_data.get("username") or None
                 created_at = int(profile_data.get("created_at", 0) or 0)
-                is_moderator = bool(profile_data.get("is_moderator", False))
                 biography = profile_data.get("biography", "") or ""
                 avatar = profile_data.get("avatar", "") or ""
                 banner = profile_data.get("banner", "") or ""
+                flair = profile_data.get("flair", "") or ""
 
                 self.db.upsert_profile_full(
                     owner,
@@ -1510,10 +1705,10 @@ class MessageProcessor:
                     created_at,
                     subscription_expiry,
                     auto_renew,
-                    is_moderator,
                     biography,
                     avatar,
                     banner,
+                    flair,
                     ts,
                 )
                 self.log_yaml(
@@ -1568,10 +1763,10 @@ class MessageProcessor:
                 auto_renew = bool(profile_data.get("auto_renew", requested_flag))
                 username = profile_data.get("username") or None
                 created_at = int(profile_data.get("created_at", 0) or 0)
-                is_moderator = bool(profile_data.get("is_moderator", False))
                 biography = profile_data.get("biography", "") or ""
                 avatar = profile_data.get("avatar", "") or ""
                 banner = profile_data.get("banner", "") or ""
+                flair = profile_data.get("flair", "") or ""
 
                 self.db.upsert_profile_full(
                     owner,
@@ -1580,10 +1775,10 @@ class MessageProcessor:
                     created_at,
                     subscription_expiry,
                     auto_renew,
-                    is_moderator,
                     biography,
                     avatar,
                     banner,
+                    flair,
                     ts,
                 )
                 self.log_yaml(
@@ -1601,10 +1796,11 @@ class MessageProcessor:
                 existing = self.db.get_profile(owner)
                 if existing:
                     # Fallback: only toggle auto_renew flag when chain query fails
+                    level = existing[1] if len(existing) > 1 else 0
                     self.db.update_profile_subscription(
                         owner,
-                        existing.level,
-                        existing.subscription_expiry,
+                        level,
+                        0,
                         requested_flag,
                         ts,
                     )

@@ -3,17 +3,19 @@ package core
 import (
 	"bytes"
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
-	"cosmossdk.io/log"
 	"cosmossdk.io/core/store"
+	"cosmossdk.io/log"
+	storetypes "cosmossdk.io/store/types"
 	"github.com/cosmos/cosmos-sdk/codec"
 	codectypes "github.com/cosmos/cosmos-sdk/codec/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
-	"github.com/gogo/protobuf/proto"
 	slashingkeeper "github.com/cosmos/cosmos-sdk/x/slashing/keeper"
+	"github.com/gogo/protobuf/proto"
 
 	"mirage/x/core/keeper"
 	"mirage/x/core/types"
@@ -56,22 +58,65 @@ func (m *mockKVStore) Delete(key []byte) error {
 }
 
 func (m *mockKVStore) Iterator(start, end []byte) (store.Iterator, error) {
-	return &mockIterator{}, nil
+	return newSortedMockIterator(m.store, start, end, false), nil
 }
 
 func (m *mockKVStore) ReverseIterator(start, end []byte) (store.Iterator, error) {
-	return &mockIterator{}, nil
+	return newSortedMockIterator(m.store, start, end, true), nil
 }
 
-type mockIterator struct{}
+// sortedMockIterator iterates over map keys in lexicographic order within [start, end).
+type sortedMockIterator struct {
+	keys    []string
+	values  [][]byte
+	pos     int
+	start   []byte
+	end     []byte
+	reverse bool
+}
 
-func (m *mockIterator) Domain() ([]byte, []byte) { return nil, nil }
-func (m *mockIterator) Valid() bool              { return false }
-func (m *mockIterator) Next()                    {}
-func (m *mockIterator) Key() []byte              { return nil }
-func (m *mockIterator) Value() []byte            { return nil }
-func (m *mockIterator) Close() error             { return nil }
-func (m *mockIterator) Error() error             { return nil }
+func newSortedMockIterator(data map[string][]byte, start, end []byte, reverse bool) *sortedMockIterator {
+	var filtered []string
+	for k := range data {
+		kb := []byte(k)
+		if start != nil && bytes.Compare(kb, start) < 0 {
+			continue
+		}
+		if end != nil && bytes.Compare(kb, end) >= 0 {
+			continue
+		}
+		filtered = append(filtered, k)
+	}
+	sort.Strings(filtered)
+	if reverse {
+		for i, j := 0, len(filtered)-1; i < j; i, j = i+1, j-1 {
+			filtered[i], filtered[j] = filtered[j], filtered[i]
+		}
+	}
+	vals := make([][]byte, len(filtered))
+	for i, k := range filtered {
+		vals[i] = data[k]
+	}
+	return &sortedMockIterator{keys: filtered, values: vals, pos: 0, start: start, end: end, reverse: reverse}
+}
+
+func (it *sortedMockIterator) Domain() ([]byte, []byte) { return it.start, it.end }
+func (it *sortedMockIterator) Valid() bool               { return it.pos < len(it.keys) }
+func (it *sortedMockIterator) Next()                     { it.pos++ }
+func (it *sortedMockIterator) Key() []byte {
+	if it.pos < len(it.keys) {
+		return []byte(it.keys[it.pos])
+	}
+	return nil
+}
+func (it *sortedMockIterator) Value() []byte {
+	if it.pos < len(it.values) {
+		return it.values[it.pos]
+	}
+	return nil
+}
+func (it *sortedMockIterator) Close() error { return nil }
+func (it *sortedMockIterator) Error() error { return nil }
 
 // mockKeeper wraps keeper.Keeper to override IsValidatorBonded for testing
 type mockKeeper struct {
@@ -113,11 +158,11 @@ func testValoperAddressString() string {
 
 // Helper to create a mock SDK context
 func newMockContext() sdk.Context {
-	// Create a minimal context for testing
 	return sdk.Context{}.
 		WithContext(context.Background()).
 		WithBlockHeight(100).
 		WithEventManager(sdk.NewEventManager()).
+		WithGasMeter(storetypes.NewInfiniteGasMeter()).
 		WithLogger(log.NewNopLogger())
 }
 
@@ -1130,7 +1175,7 @@ func TestThresholdWithOddTotalPower(t *testing.T) {
 }
 
 // =============================================================================
-// MintAttestation Consistency Tests  
+// MintAttestation Consistency Tests
 // =============================================================================
 
 // TestMintAttestationDestinationTxConsistency tests that the first destination_tx is preserved

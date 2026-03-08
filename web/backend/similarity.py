@@ -153,6 +153,11 @@ def get_or_compute_similarities(cur, viewer: str) -> list:
                 """
                 INSERT INTO user_similarity_cache(owner, similar_user, similarity, shared_dims, computed_at, expires_at)
                 VALUES(%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (owner, similar_user) DO UPDATE SET
+                    similarity = EXCLUDED.similarity,
+                    shared_dims = EXCLUDED.shared_dims,
+                    computed_at = EXCLUDED.computed_at,
+                    expires_at = EXCLUDED.expires_at
                 """,
                 (viewer_lower, other_user, sim, shared, now_ts, expires_at),
             )

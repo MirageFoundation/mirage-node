@@ -1,18 +1,17 @@
 {
+    "title": "Upgrade to v1.16.0 (Agent System)",
+    "summary": "This upgrade introduces the Agent system, replacing moderators. It simplifies the subscription model to 3 tiers (Free, Subscriber, Agent) and migrates existing data. Note: Agent tier is now Level 10.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.15.0",
+                "name": "v1.16.0",
                 "height": "T+50",
-                "info": "v1.15.0: Burn-only awards — MsgAward lets users burn MIRAGE to give awards (Quality Post, Original Content, Based AF, Receipts) to posts and comments. Admins (level >= 100) award for free. Award types and costs are governable via award_configs param. Indexer stores award records; backend aggregates for display and magic feed scoring."
+                "info": ""
             }
         }
     ],
-    "metadata": "",
-    "deposit": "auto",
-    "title": "Upgrade: v1.15.0",
-    "summary": "Introduces MsgAward for burn-only awards on posts/comments. Four award types with configurable costs. Free for admins. Unique awarder count feeds into magic scoring algorithm.",
-    "expedited": true
+    "expedited": true,
+    "deposit": "1000000000000umirage"
 }

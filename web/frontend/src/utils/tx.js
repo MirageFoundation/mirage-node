@@ -119,6 +119,42 @@ export async function getPendingDeletes() {
     return h.getPendingDeletes();
 }
 
+// Agent tracking
+export async function addAgentListener(fn) {
+    const h = await getHandler();
+    return h.addAgentListener(fn);
+}
+
+export async function getPendingAgents() {
+    const h = await getHandler();
+    return h.getPendingAgents();
+}
+
+export async function isPendingAgent(agentAddress) {
+    const h = await getHandler();
+    return h.isPendingAgent(agentAddress);
+}
+
+export async function getPendingAgentInfo(agentAddress) {
+    const h = await getHandler();
+    return h.getPendingAgentInfo(agentAddress);
+}
+
+export async function enableAgent(agentAddress) {
+    const h = await getHandler();
+    return h.enableAgent(agentAddress);
+}
+
+export async function disableAgent(agentAddress) {
+    const h = await getHandler();
+    return h.disableAgent(agentAddress);
+}
+
+export async function setAgents(agents, opts) {
+    const h = await getHandler();
+    return h.setAgents(agents, opts);
+}
+
 export function needsChainConfigRefresh() {
     if (_chainConfigFetchClaimed) return false;
     let stale = false;
@@ -157,6 +193,11 @@ export async function createUser(username, inviteCode = "") {
 export async function setUsername(username) {
     const h = await getHandler();
     return h.setUsername(username);
+}
+
+export async function setBiography(biography) {
+    const h = await getHandler();
+    return h.setBiography(biography);
 }
 
 export async function createPost(topic, title, content, tag = "", media = []) {

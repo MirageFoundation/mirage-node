@@ -19,6 +19,9 @@ try {
     }
 } catch (_) { /* ignore */ }
 
+// Hard refresh: clear cached chain config so it's re-fetched fresh
+try { localStorage.removeItem('chainConfig'); } catch (_) { }
+
 const container = document.getElementById('root');
 const root = createRoot(container);
 root.render(<App />);

@@ -67,10 +67,25 @@ const ValueBox = styled.div`
     overflow-x: auto;
 `;
 
+const BioTextarea = styled.textarea`
+    width: 100%;
+    box-sizing: border-box;
+    background-color: ${({ theme }) => theme?.colors?.panelAlt || '#1f2328'};
+    border: 1px solid ${({ theme }) => theme?.colors?.border || '#444'};
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    color: ${({ theme }) => theme?.colors?.text || '#eee'};
+    font-family: inherit;
+    font-size: 0.8rem;
+    resize: vertical;
+    min-height: 80px;
+    &:focus { outline: none; border-color: ${({ theme }) => theme?.colors?.accent || '#7c6dcd'}; }
+`;
+
 const ValueBoxWithButton = styled(ValueBox)`
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: 0.75rem;
     flex-wrap: nowrap;
     overflow: hidden;
@@ -315,6 +330,14 @@ export default function ProfileView({ state }) {
     const [showAllTopicPrefs, setShowAllTopicPrefs] = useState(false);
     const [showAllAuthorPrefs, setShowAllAuthorPrefs] = useState(false);
     const [showAllSimilarUsers, setShowAllSimilarUsers] = useState(false);
+
+    // Biography state
+    const [biography, setBiography] = useState('');
+    const [bioEditing, setBioEditing] = useState(false);
+    const [bioDraft, setBioDraft] = useState('');
+    const [bioSaving, setBioSaving] = useState(false);
+    const [bioError, setBioError] = useState('');
+    const [bioButtonStatus, setBioButtonStatus] = useState('');
     const formatPrefWeight = (w) => {
         const num = Number(w);
         if (!Number.isFinite(num)) return '0';
@@ -486,7 +509,19 @@ export default function ProfileView({ state }) {
                 }
             }
         };
+
+        const fetchBiography = async () => {
+            try {
+                const data = await Api.get('get_profile', { address: profileAddress, _cb: Date.now() });
+                if (!data || cancelled) return;
+                setBiography(data.biography || '');
+            } catch (_) {
+                if (!cancelled) setBiography('');
+            }
+        };
+
         fetchUserStatus();
+        fetchBiography();
         return () => {
             cancelled = true;
         };
@@ -644,13 +679,13 @@ export default function ProfileView({ state }) {
     };
 
     const getTierName = (level) => {
-        const names = ['Free', 'Trusted', 'Established', 'Distinguished'];
+        const names = { 0: 'Free', 1: 'Subscriber', 10: 'Agent' };
         if (level >= 100) return 'Admin';
         return names[level] || 'Free';
     };
 
     const getTierColor = (level) => {
-        const colors = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
+        const colors = { 0: '#6B7280', 1: '#F59E0B', 10: '#EF4444' };
         if (level >= 100) return '#EF4444';
         return colors[level] || colors[0];
     };
@@ -782,6 +817,48 @@ export default function ProfileView({ state }) {
             ? `${profileAddress.slice(0, 10)}...`
             : 'Profile';
 
+    const canHaveBiography = userLevel > 0;
+
+    const BIO_MAX = 512;
+
+    const handleBioSave = async () => {
+        const trimmed = bioDraft.trim();
+        if (trimmed.length > BIO_MAX) {
+            setBioError(`Biography too long (${trimmed.length}/${BIO_MAX})`);
+            return;
+        }
+        setBioSaving(true);
+        setBioError('');
+        setBioButtonStatus('Processing');
+        try {
+            const result = await tx.setBiography(trimmed);
+            if (!result || !result.success) {
+                setBioError(String(result?.error || 'Failed to update biography'));
+                setBioSaving(false);
+                setBioButtonStatus('');
+                return;
+            }
+            const txHash = result.tx_hash ? String(result.tx_hash).toLowerCase() : '';
+            if (txHash) {
+                const pollResult = await tx.pollTxStatus(txHash, { initialDelay: 3000, interval: 2000, maxAttempts: 5 });
+                if (pollResult && !pollResult.success) {
+                    setBioError(pollResult.error_details?.message || 'Transaction rejected');
+                    setBioSaving(false);
+                    setBioButtonStatus('');
+                    return;
+                }
+            }
+            setBiography(trimmed);
+            setBioEditing(false);
+            setBioSaving(false);
+            setBioButtonStatus('');
+        } catch (e) {
+            setBioError(String(e?.message || e));
+            setBioSaving(false);
+            setBioButtonStatus('');
+        }
+    };
+
     // Show loading/error states for username resolution
     if (isResolvingUsername || usernameResolutionError) {
         return (
@@ -850,7 +927,7 @@ export default function ProfileView({ state }) {
                                                                 ? 'subtle'
                                                                 : 'primary'
                                                     }
-                                                    size="pill"
+                                                    size="sm"
                                                     minWidth="follow"
                                                     onMouseEnter={() => setFollowHover(true)}
                                                     onMouseLeave={() => setFollowHover(false)}
@@ -860,7 +937,7 @@ export default function ProfileView({ state }) {
                                                     mobileFullWidth
                                                 >
                                                     {isFollowInProgress
-                                                        ? (formatStatusForPosition(myQueuePosition) || 'Solving PoW...')
+                                                        ? (formatStatusForPosition(myQueuePosition) || 'Processing')
                                                         : (isFollowingProfile
                                                             ? (followHover ? 'Unfollow' : 'Following')
                                                             : 'Follow')}
@@ -924,6 +1001,81 @@ export default function ProfileView({ state }) {
                                             <Mono>{registeredDisplay}</Mono>
                                         </ValueBox>
                                     </RowCentered>
+                                    <Row>
+                                        <Label>Biography:</Label>
+                                        <div style={{ width: '100%' }}>
+                                            {bioEditing ? (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                                    <BioTextarea
+                                                        value={bioDraft}
+                                                        onChange={e => setBioDraft(e.target.value)}
+                                                        maxLength={BIO_MAX}
+                                                        rows={4}
+                                                        disabled={bioSaving}
+                                                        placeholder="Write a short biography..."
+                                                        autoFocus
+                                                    />
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                                        <span style={{ fontSize: '0.7rem', color: bioDraft.length > BIO_MAX ? '#f87171' : '#888' }}>
+                                                            {bioDraft.length}/{BIO_MAX}
+                                                        </span>
+                                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="subtle"
+                                                                disabled={bioSaving}
+                                                                onClick={() => { setBioEditing(false); setBioError(''); setBioDraft(biography); }}
+                                                            >
+                                                                Cancel
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                disabled={bioSaving || bioDraft.length > BIO_MAX}
+                                                                loading={bioSaving}
+                                                                onClick={handleBioSave}
+                                                            >
+                                                                {bioButtonStatus || 'Save'}
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                    {bioError && (
+                                                        <span style={{ fontSize: '0.75rem', color: '#f87171' }}>{bioError}</span>
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <ValueBoxWithButton>
+                                                    <Mono style={{
+                                                        whiteSpace: 'pre-wrap',
+                                                        wordBreak: 'break-word',
+                                                        color: biography ? undefined : '#888',
+                                                        fontSize: '0.8rem',
+                                                    }}>
+                                                        {biography || (isOwnProfile ? 'No biography set.' : 'No biography.')}
+                                                    </Mono>
+                                                    {isOwnProfile && canHaveBiography && (
+                                                        <Button
+                                                            size="sm"
+                                                            minWidth="copy"
+                                                            mobileFullWidth
+                                                            onClick={() => { setBioDraft(biography); setBioEditing(true); setBioError(''); }}
+                                                        >
+                                                            {biography ? 'Edit' : 'Add'}
+                                                        </Button>
+                                                    )}
+                                                    {isOwnProfile && !canHaveBiography && (
+                                                        <Button
+                                                            size="sm"
+                                                            variant="subtle"
+                                                            mobileFullWidth
+                                                            onClick={() => navigate('/subscription')}
+                                                        >
+                                                            Upgrade
+                                                        </Button>
+                                                    )}
+                                                </ValueBoxWithButton>
+                                            )}
+                                        </div>
+                                    </Row>
                                 </>
                             )}
 

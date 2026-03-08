@@ -207,7 +207,7 @@ else
     if [ "$JAILED" = "true" ]; then
         echo "   Validator is jailed. To unjail:"
         if $BIN keys show validator --home "$NODE_HOME" --keyring-backend "$KEYRING_BACKEND" -a >/dev/null 2>&1; then
-            echo "   $BIN tx slashing unjail --from validator --home $NODE_HOME --keyring-backend $KEYRING_BACKEND --chain-id $CHAIN_ID --node tcp://127.0.0.1:26657 --fees 5000umirage -y"
+            echo "   $BIN tx slashing unjail --from validator --home $NODE_HOME --keyring-backend $KEYRING_BACKEND --chain-id $CHAIN_ID --node tcp://127.0.0.1:26657 --fees 1000umirage -y"
         fi
     elif [ "$VAL_STATUS" = "BOND_STATUS_UNBONDING" ]; then
         echo "   Validator is unbonding and cannot join active set until unbonding completes."

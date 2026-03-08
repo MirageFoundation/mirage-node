@@ -1,38 +1,41 @@
 /**
  * Tier color utilities for displaying user subscription status.
- * These colors match the subscription tiers: Free, Trusted, Established, Distinguished.
+ * These colors match the subscription tiers: Free, Subscriber, Agent.
  */
 
 // Tier colors matching SubscriptionView.js
-const TIER_COLORS = ['#6B7280', '#3B82F6', '#8B5CF6', '#F59E0B'];
-const TIER_NAMES = ['Free', 'Trusted Subscriber', 'Established Subscriber', 'Distinguished Subscriber'];
+const TIER_COLORS = {
+    0: '#6B7280', // Free
+    1: '#F59E0B', // Subscriber (gold)
+    10: '#EF4444' // Agent (red)
+};
+
+const TIER_NAMES = {
+    0: 'Free',
+    1: 'Subscriber',
+    10: 'Agent'
+};
 
 /**
  * Get the color for a user's tier level.
- * @param {number} level - The user's tier level (0-3 for regular tiers, >= 100 for admin)
+ * @param {number} level - The user's tier level (0, 1, 10 for regular tiers, >= 100 for admin)
  * @returns {string|null} - The color hex code, or null if Free tier (level 0) or admin (level >= 100)
  */
 export const getTierColor = (level) => {
     if (level === undefined || level === null || level === 0) return null;
     if (level >= 100) return null; // Admins use default colors
-    if (level > 0 && level < TIER_COLORS.length) {
-        return TIER_COLORS[level];
-    }
-    return null;
+    return TIER_COLORS[level] || null;
 };
 
 /**
  * Get the display name for a user's tier level (for tooltips).
- * @param {number} level - The user's tier level (0-3 for regular tiers)
+ * @param {number} level - The user's tier level (0, 1, 10 for regular tiers)
  * @returns {string|null} - The tier name, or null if Free tier or admin
  */
 export const getTierName = (level) => {
     if (level === undefined || level === null || level === 0) return null;
     if (level >= 100) return null; // Admins don't show tier tooltip
-    if (level > 0 && level < TIER_NAMES.length) {
-        return TIER_NAMES[level];
-    }
-    return null;
+    return TIER_NAMES[level] || null;
 };
 
 /**

@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
 import { addStatusListener, getQueueStatus, getNextQueuePosition } from './tx';
-import Storage from './Storage';
 
 export function useTxStatus() {
     const [status, setStatus] = useState({
@@ -45,9 +44,6 @@ export function useTxStatus() {
     const formatStatusForPosition = useCallback((myQueuePosition) => {
         if (!status.isActive || !myQueuePosition) return null;
 
-        const userLevel = Number(Storage.load('user_level', '0')) || 0;
-        const isSubscriber = userLevel > 0;
-
         // status.position = processedTransactions = the transaction currently being processed (1-indexed)
         // If my position is greater than the current one being processed, I'm queued
         const txsAhead = myQueuePosition - status.position;
@@ -57,12 +53,10 @@ export function useTxStatus() {
         }
 
         if (status.status === 'submitting') {
-            // Subscribers have instant tx, no need to show seconds
-            return isSubscriber ? 'Submitting...' : `Submitting (${status.elapsed.toFixed(1)}s)`;
+            return 'Submitting...';
         }
 
-        // Subscribers don't do PoW
-        return isSubscriber ? 'Processing...' : `Solving PoW (${status.elapsed.toFixed(1)}s)`;
+        return 'Processing';
     }, [status]);
 
     return { status, formatStatusForPosition, getMyQueuePosition, isActive: status.isActive };

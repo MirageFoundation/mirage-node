@@ -143,7 +143,7 @@ export function updateCacheTopics(topics, address = null) {
         cached = {
             address: addr.toLowerCase(),
             timestamp: Date.now(),
-            profile: { followed_topics: [], followed_users: [], followed_moderators: [] }
+            profile: { followed_topics: [], followed_users: [], enabled_agents: [] }
         };
     }
     cached.profile.followed_topics = topics;
@@ -165,7 +165,7 @@ export function updateCacheUsers(users, address = null) {
         cached = {
             address: addr.toLowerCase(),
             timestamp: Date.now(),
-            profile: { followed_topics: [], followed_users: [], followed_moderators: [] }
+            profile: { followed_topics: [], followed_users: [], enabled_agents: [] }
         };
     }
     cached.profile.followed_users = users;

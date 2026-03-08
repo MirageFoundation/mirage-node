@@ -265,16 +265,17 @@ func New(
 						}
 					}
 					switch m.(type) {
-					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-						*coretypes.MsgFollowModerator, *coretypes.MsgUnfollowModerator,
-						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-						*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
-						*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-						*coretypes.MsgBridgeBurn, *coretypes.MsgAward:
+				case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+					*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
+					*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+					*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+					*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
+					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+					*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
+					*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
 						containsMeta = true
 					}
 				}

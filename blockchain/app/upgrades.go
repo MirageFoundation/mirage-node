@@ -162,7 +162,7 @@ func (app *App) RegisterUpgradeHandlers() {
 					field  string
 					setter func(sdk.Context, string, []string) error
 				}{
-					{"followed_moderators", app.CoreKeeper.SetProfileFollowedMods},
+					{"followed_moderators", app.CoreKeeper.SetProfileEnabledAgents},
 					{"followed_users", app.CoreKeeper.SetProfileFollowedUsers},
 					{"followed_topics", app.CoreKeeper.SetProfileFollowedTopics},
 					{"blocked_users", app.CoreKeeper.SetProfileBlockedUsers},
@@ -1329,6 +1329,226 @@ func (app *App) RegisterUpgradeHandlers() {
 			}
 
 			sdkCtx.Logger().Info("Upgrade to v1.15.0 complete - MsgAward + award_configs")
+			return toVM, nil
+		},
+	)
+
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.16.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.16.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, err
+			}
+
+			// Migrate KV prefix plist_mods/* -> plist_agents/*
+			store := app.CoreKeeper.StoreService().OpenKVStore(sdkCtx)
+			oldPrefix := []byte("plist_mods/")
+			newPrefix := []byte("plist_agents/")
+			it, err := store.Iterator(oldPrefix, storetypes.PrefixEndBytes(oldPrefix))
+			if err != nil {
+				return nil, fmt.Errorf("failed to iterate plist_mods: %w", err)
+			}
+			var keys [][]byte
+			var vals [][]byte
+			for ; it.Valid(); it.Next() {
+				keys = append(keys, append([]byte(nil), it.Key()...))
+				vals = append(vals, append([]byte(nil), it.Value()...))
+			}
+			it.Close()
+
+			migrated := 0
+			for i, oldKey := range keys {
+				suffix := oldKey[len(oldPrefix):]
+				newKey := make([]byte, len(newPrefix)+len(suffix))
+				copy(newKey, newPrefix)
+				copy(newKey[len(newPrefix):], suffix)
+				if err := store.Set(newKey, vals[i]); err != nil {
+					return nil, fmt.Errorf("failed to set new key: %w", err)
+				}
+				if err := store.Delete(oldKey); err != nil {
+					return nil, fmt.Errorf("failed to delete old key: %w", err)
+				}
+				migrated++
+			}
+			sdkCtx.Logger().Info("v1.16.0: migrated plist_mods -> plist_agents", "count", migrated)
+
+			// Set new tier defaults (Free=0, Subscriber=1, Agent=10) and update reserve
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			params.Tiers = coretypes.DefaultTiers()
+			params.SubscriptionReservePercent = 0.95
+			params.RelayMinGasPrice = 1000
+			if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+				return nil, fmt.Errorf("failed to set new tier params: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.16.0: set tier defaults (Free=0, Subscriber=1, Agent=10), reserve=95%, relay_min_gas_price=1000")
+
+			// Migrate existing profile JSON:
+			// 1. Strip is_moderator field
+			// 2. Remap user levels: old 0->0, 1->1, 2->1, 3->10
+			profiles, pErr := app.CoreKeeper.GetAllProfiles(sdkCtx)
+			if pErr == nil {
+				migrated := 0
+				for _, bz := range profiles {
+					var m map[string]interface{}
+					if err := json.Unmarshal(bz, &m); err != nil {
+						continue
+					}
+					changed := false
+					if _, ok := m["is_moderator"]; ok {
+						delete(m, "is_moderator")
+						changed = true
+					}
+					// Remap level: old tiers 0=Free, 1=Trusted, 2=Established, 3=Distinguished
+					// New tiers: 0=Free, 1=Subscriber, 10=Agent
+					if lvl, ok := m["level"]; ok {
+						var oldLevel int
+						switch v := lvl.(type) {
+						case float64:
+							oldLevel = int(v)
+						case int:
+							oldLevel = v
+						}
+						var newLevel int
+						switch oldLevel {
+						case 0:
+							newLevel = 0
+						case 1, 2, 3:
+							newLevel = 1
+						default:
+							if oldLevel >= 100 {
+								newLevel = oldLevel // preserve admin levels
+							} else {
+								newLevel = 0
+							}
+						}
+						if newLevel != oldLevel {
+							m["level"] = newLevel
+							changed = true
+						}
+					}
+					if changed {
+						owner, _ := m["owner"].(string)
+						newBz, err := json.Marshal(m)
+						if err != nil || owner == "" {
+							continue
+						}
+						_ = app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz)
+						migrated++
+					}
+				}
+				sdkCtx.Logger().Info("v1.16.0: migrated profiles (is_moderator removal + level remap)", "count", migrated)
+			}
+
+			// ── Migrate JSON blob lists → per-entry KV keys ────────────────
+			//
+			// For each legacy prefix we: read the JSON []string blob, write
+			// individual per-entry keys at the new prefix, then delete the old key.
+			//
+			// Unordered sets (followed_users, followed_topics):
+			//   Entry: {newPrefix}{owner}/{entry} → []byte{1}
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//
+			// Ordered set (enabled_agents):
+			//   Entry: {newPrefix}{owner}/{agent} → uint64 BE (position)
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//   Seq:   {newPrefix}{owner}\x00s    → uint64 BE (next position)
+			//
+			// Deque (blocked_users, blocked_posts, blocked_topics):
+			//   Entry: {newPrefix}{owner}/{entry} → uint64 BE (sequence)
+			//   Count: {newPrefix}{owner}\x00c    → uint32 BE
+			//   Seq:   {newPrefix}{owner}\x00s    → uint64 BE (next sequence)
+
+			putU32 := func(v uint32) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, v); return b }
+			putU64 := func(v uint64) []byte { b := make([]byte, 8); binary.BigEndian.PutUint64(b, v); return b }
+			sentinel := []byte{1}
+
+			type listMigration struct {
+				oldPrefix string
+				newPrefix string
+				ordered   bool // true = store uint64 position/sequence, false = store sentinel
+			}
+			migrations := []listMigration{
+				{coretypes.ProfileFollowedUsersPrefix, coretypes.FollowedUsersPrefix, false},
+				{coretypes.ProfileFollowedTopicsPrefix, coretypes.FollowedTopicsPrefix, false},
+				{coretypes.ProfileEnabledAgentsPrefix, coretypes.EnabledAgentsPrefix, true},
+				{coretypes.ProfileBlockedUsersPrefix, coretypes.BlockedUsersPrefix, true},
+				{coretypes.ProfileBlockedPostsPrefix, coretypes.BlockedPostsPrefix, true},
+				{coretypes.ProfileBlockedTopicsPrefix, coretypes.BlockedTopicsPrefix, true},
+			}
+
+			for _, lm := range migrations {
+				oldPfx := []byte(lm.oldPrefix)
+				iter, iterErr := store.Iterator(oldPfx, storetypes.PrefixEndBytes(oldPfx))
+				if iterErr != nil {
+					sdkCtx.Logger().Error("v1.16.0: list migration iterator error", "prefix", lm.oldPrefix, "err", iterErr)
+					return toVM, iterErr
+				}
+				var oldKeys [][]byte
+				var owners []string
+				var lists [][]string
+				for ; iter.Valid(); iter.Next() {
+					key := iter.Key()
+					owner := string(key[len(oldPfx):])
+					var items []string
+					if err := json.Unmarshal(iter.Value(), &items); err != nil {
+						sdkCtx.Logger().Error("v1.16.0: failed to unmarshal list", "prefix", lm.oldPrefix, "owner", owner, "err", err)
+						return toVM, err
+					}
+					oldKeys = append(oldKeys, append([]byte(nil), key...))
+					owners = append(owners, owner)
+					lists = append(lists, items)
+				}
+				iter.Close()
+
+				listMigrated := 0
+				for i, owner := range owners {
+					items := lists[i]
+					for idx, entry := range items {
+						ek := []byte(lm.newPrefix + owner + "/" + entry)
+						if lm.ordered {
+							if err := store.Set(ek, putU64(uint64(idx))); err != nil {
+								return toVM, err
+							}
+						} else {
+							if err := store.Set(ek, sentinel); err != nil {
+								return toVM, err
+							}
+						}
+					}
+					ck := []byte(lm.newPrefix + owner + coretypes.SetCountSuffix)
+					if len(items) > 0 {
+						if err := store.Set(ck, putU32(uint32(len(items)))); err != nil {
+							return toVM, err
+						}
+					} else {
+						if err := store.Delete(ck); err != nil {
+							return toVM, err
+						}
+					}
+					if lm.ordered && len(items) > 0 {
+						sk := []byte(lm.newPrefix + owner + coretypes.DequeSeqSuffix)
+						if err := store.Set(sk, putU64(uint64(len(items)))); err != nil {
+							return toVM, err
+						}
+					} else if lm.ordered {
+						sk := []byte(lm.newPrefix + owner + coretypes.DequeSeqSuffix)
+						if err := store.Delete(sk); err != nil {
+							return toVM, err
+						}
+					}
+					if err := store.Delete(oldKeys[i]); err != nil {
+						return toVM, err
+					}
+					listMigrated++
+				}
+				sdkCtx.Logger().Info("v1.16.0: migrated list", "old_prefix", lm.oldPrefix, "new_prefix", lm.newPrefix, "profiles", listMigrated)
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.16.0 complete")
 			return toVM, nil
 		},
 	)

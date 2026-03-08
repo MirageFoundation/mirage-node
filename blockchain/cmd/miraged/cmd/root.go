@@ -60,6 +60,7 @@ func requiresConfigDir(cmd *cobra.Command) bool {
 	// Commands that require config
 	requiresConfig := []string{
 		"miraged start",
+		"miraged export",
 		"miraged query",
 		"miraged q",
 		"miraged tx",

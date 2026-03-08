@@ -263,7 +263,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
     const errorClearTimeoutRef = React.useRef(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [submitStartTime, setSubmitStartTime] = useState(null);
-    const [elapsedTime, setElapsedTime] = useState(0);
+    const [, setElapsedTime] = useState(0);
     const [submitStatus, setSubmitStatus] = useState('idle'); // idle, solving, submitting, verifying
     const [configUpdateTrigger, setConfigUpdateTrigger] = useState(0);
     const [editorUpload, setEditorUpload] = useState(null);
@@ -408,7 +408,7 @@ function CreatePostView({ state, setPosts, updatePost }) {
             const chain = JSON.parse(chainRaw || '{}');
             const userLevel = parseInt(Storage.load('user_level', '0'));
             const tiers = chain.tiers || [];
-            const tierIndex = Math.min(userLevel, tiers.length - 1);
+            const tierIndex = userLevel === 0 ? 0 : userLevel === 1 ? 1 : (userLevel === 10 || userLevel >= 100) ? 2 : 0;
             const tier = tiers[tierIndex] || {};
 
             // Get limits from chain params tiers, with sensible fallbacks
@@ -1091,12 +1091,9 @@ function CreatePostView({ state, setPosts, updatePost }) {
                                                     mobileFullWidth
                                                 >
                                                     {isSubmitting
-                                                        ? (limits.willPayFee
-                                                            ? (submitStatus === 'verifying' ? 'Verifying...' : 'Submitting...')
-                                                            : (submitStatus === 'solving' ? `Solving PoW... (${elapsedTime.toFixed(1)}s)` :
-                                                                submitStatus === 'submitting' ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                                    submitStatus === 'verifying' ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
-                                                                        `Processing... (${elapsedTime.toFixed(1)}s)`))
+                                                        ? (submitStatus === 'verifying' ? 'Verifying...' :
+                                                            submitStatus === 'submitting' ? 'Submitting...' :
+                                                                'Processing')
                                                         : (isEditMode ? 'Save Edit' : 'Submit')}
                                                 </Button>
                                             </div>

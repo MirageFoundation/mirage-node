@@ -220,6 +220,45 @@ const getVariantStyles = (variant, theme) => {
     }
 };
 
+const getMobileSizeStyles = (size, variant) => {
+    if (variant === 'link') {
+        return css``;
+    }
+    switch (size) {
+        case 'xs':
+            return css`
+        padding: 0.2rem 0.45rem;
+        font-size: 0.6rem;
+        border-radius: 4px;
+            `;
+        case 'sm':
+            return css`
+        padding: 0.35rem 0.6rem;
+        font-size: 0.7rem;
+        border-radius: 6px;
+            `;
+        case 'lg':
+            return css`
+        padding: 0.5rem 1.2rem;
+        font-size: 0.9rem;
+        border-radius: 10px;
+            `;
+        case 'pill':
+            return css`
+        padding: 0.45rem 0.75rem;
+        font-size: 0.8rem;
+        border-radius: 16px;
+            `;
+        case 'md':
+        default:
+            return css`
+                padding: 0.4rem 0.85rem;
+                font-size: 0.8rem;
+                border-radius: 8px;
+            `;
+    }
+};
+
 const StyledButton = styled.button`
     ${baseStyles}
     ${({ $size }) => getSizeStyles($size)}
@@ -231,6 +270,7 @@ const StyledButton = styled.button`
     `}
     
     @media (max-width: 600px) {
+        ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`
             width: 100%;
             text-align: center;
@@ -245,6 +285,7 @@ const StyledLink = styled(Link)`
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
     
     @media (max-width: 600px) {
+        ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`
             width: 100%;
             text-align: center;
@@ -259,6 +300,7 @@ const StyledAnchor = styled.a`
     ${({ $fullWidth }) => $fullWidth && css`width: 100%;`}
     
     @media (max-width: 600px) {
+        ${({ $size, $variant }) => getMobileSizeStyles($size, $variant)}
         ${({ $mobileFullWidth }) => $mobileFullWidth && css`
             width: 100%;
             text-align: center;

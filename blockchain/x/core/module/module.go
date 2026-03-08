@@ -204,6 +204,29 @@ func deriveOwnerFromPubkey(pubkey []byte) (string, error) {
 	return sdk.AccAddress(pub.Address()).String(), nil
 }
 
+// requireUsername loads ProfileCore for owner and fails hard if the profile
+// is missing or has no username set. Returns (ProfileCore, nil) on success.
+// Governance callers must skip this check before calling.
+func (am AppModule) requireUsername(sdkCtx sdk.Context, owner, action string) (types.ProfileCore, error) {
+	bz, found, err := am.k.GetProfileCore(sdkCtx, owner)
+	if err != nil {
+		return types.ProfileCore{}, fmt.Errorf("failed to load profile: %w", err)
+	}
+	if !found {
+		sdkCtx.Logger().Debug("requireUsername: no profile", "owner", owner, "action", action)
+		return types.ProfileCore{}, fmt.Errorf("username required: no profile found for %s", owner)
+	}
+	var core types.ProfileCore
+	if err := json.Unmarshal(bz, &core); err != nil {
+		return types.ProfileCore{}, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	if core.Username == "" {
+		sdkCtx.Logger().Debug("requireUsername: empty username", "owner", owner, "action", action)
+		return types.ProfileCore{}, fmt.Errorf("username required: set a username before calling %s", action)
+	}
+	return core, nil
+}
+
 // validateAndDeductFee checks minimum fee and deducts from owner
 func (am AppModule) validateAndDeductFee(ctx sdk.Context, owner string, feeAmt, minFee uint64) error {
 	if feeAmt == 0 {
@@ -236,11 +259,11 @@ func calculateRelayFee(gasConsumed, minGasPrice, maxGasFee uint64) uint64 {
 }
 
 // deductRelayGasFee deducts gas fee from paid users (level >= 1) using their escrowed reserve.
-// Fee = gasConsumed * relayMinGasPrice, capped at relayMaxGasFee.
+// Fee = gasUsed * relayMinGasPrice, capped at relayMaxGasFee.
 // relayMinGasPrice is in umirage per gas unit (e.g., 5000 = 5000 umirage per gas).
 // Only deducts from users with level >= 1; free users (level 0) use PoW instead.
 // If reserve is insufficient, burns remainder, zeros reserve, and downgrades user to level 0.
-func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int) error {
+func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel int, gasUsed uint64, reason string) error {
 	// Only charge paid users (level >= 1)
 	if userLevel < 1 {
 		return nil
@@ -250,9 +273,8 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	minGasPrice := params.RelayMinGasPrice
 	maxGasFee := params.RelayMaxGasFee
 
-	// Calculate fee based on gas consumed
-	gasConsumed := ctx.GasMeter().GasConsumed()
-	fee := calculateRelayFee(gasConsumed, minGasPrice, maxGasFee)
+	// Calculate fee based on gas used for this message
+	fee := calculateRelayFee(gasUsed, minGasPrice, maxGasFee)
 
 	if fee == 0 {
 		return nil
@@ -266,6 +288,8 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			ctx.Logger().Warn("relay gas fee (admin): insufficient balance, skipping deduction",
 				"owner", owner,
 				"level", userLevel,
+				"reason", reason,
+				"gas_used", gasUsed,
 				"fee", fee,
 				"err", err)
 			return nil
@@ -274,14 +298,19 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 			ctx.Logger().Warn("relay gas fee (admin): failed to burn from module after deduction",
 				"owner", owner,
 				"level", userLevel,
+				"reason", reason,
+				"gas_used", gasUsed,
 				"fee", fee,
 				"err", err)
 		} else {
 			ctx.Logger().Info("relay gas fee deducted from admin balance",
 				"owner", owner,
 				"level", userLevel,
-				"gasConsumed", gasConsumed,
-				"fee", fee)
+				"reason", reason,
+				"gas_used", gasUsed,
+				"fee", fee,
+				"min_gas_price", minGasPrice,
+				"max_gas_fee", maxGasFee)
 		}
 		return nil
 	}
@@ -302,6 +331,7 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	// Deduct from reserve
 	if core.ReserveFunds >= fee {
 		// Sufficient reserve: deduct and burn from module
+		reserveBefore := core.ReserveFunds
 		core.ReserveFunds -= fee
 		if err := am.k.BurnFromModuleAmount(ctx, fee); err != nil {
 			ctx.Logger().Warn("deductRelayGasFee: failed to burn from module", "owner", owner, "fee", fee, "err", err)
@@ -309,11 +339,17 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		ctx.Logger().Info("relay gas fee deducted from reserve",
 			"owner", owner,
 			"level", userLevel,
-			"gasConsumed", gasConsumed,
+			"reason", reason,
+			"gas_used", gasUsed,
 			"fee", fee,
+			"min_gas_price", minGasPrice,
+			"max_gas_fee", maxGasFee,
+			"reserve_before", reserveBefore,
 			"reserve_remaining", core.ReserveFunds)
 	} else {
 		// Insufficient reserve: burn whatever is left, then downgrade
+		previousLevel := core.Level
+		reserveBefore := core.ReserveFunds
 		if core.ReserveFunds > 0 {
 			if err := am.k.BurnFromModuleAmount(ctx, core.ReserveFunds); err != nil {
 				ctx.Logger().Warn("deductRelayGasFee: failed to burn remaining reserve", "owner", owner, "reserve", core.ReserveFunds, "err", err)
@@ -322,8 +358,13 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		ctx.Logger().Info("deductRelayGasFee: reserve exhausted, downgrading to free",
 			"owner", owner,
 			"level", core.Level,
-			"reserve_was", core.ReserveFunds,
-			"fee_needed", fee)
+			"reason", reason,
+			"gas_used", gasUsed,
+			"fee", fee,
+			"min_gas_price", minGasPrice,
+			"max_gas_fee", maxGasFee,
+			"reserve_before", reserveBefore,
+			"reserve_was", core.ReserveFunds)
 
 		// Remove subscription index
 		if core.SubscriptionExpiry > 0 {
@@ -335,6 +376,16 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 		core.Level = 0
 		core.SubscriptionExpiry = 0
 		core.AutoRenew = false
+
+		// Emit event so the indexer updates the user's level
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				"subscription_expired",
+				sdk.NewAttribute("address", owner),
+				sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+				sdk.NewAttribute("reason", "reserve_exhausted"),
+			),
+		)
 	}
 
 	// Save updated profile
@@ -488,24 +539,24 @@ func (am AppModule) InitGenesis(sdkCtx sdk.Context, _ codec.JSONCodec, gs json.R
 			_ = am.k.SetProfileCore(sdkCtx, owner, bz)
 		}
 
-		// Store all list fields separately (only if not empty)
-		if len(ip.FollowedModerators) > 0 {
-			_ = am.k.SetProfileFollowedMods(sdkCtx, owner, ip.FollowedModerators)
+		// Store all list fields as per-entry keys
+		if len(ip.EnabledAgents) > 0 {
+			_ = am.k.ReplaceAllEnabledAgents(sdkCtx, owner, ip.EnabledAgents)
 		}
-		if len(ip.FollowedUsers) > 0 {
-			_ = am.k.SetProfileFollowedUsers(sdkCtx, owner, ip.FollowedUsers)
+		for _, u := range ip.FollowedUsers {
+			_, _ = am.k.AddFollowedUser(sdkCtx, owner, u)
 		}
-		if len(ip.FollowedTopics) > 0 {
-			_ = am.k.SetProfileFollowedTopics(sdkCtx, owner, ip.FollowedTopics)
+		for _, t := range ip.FollowedTopics {
+			_, _ = am.k.AddFollowedTopic(sdkCtx, owner, t)
 		}
-		if len(ip.BlockedUsers) > 0 {
-			_ = am.k.SetProfileBlockedUsers(sdkCtx, owner, ip.BlockedUsers)
+		for _, u := range ip.BlockedUsers {
+			_, _ = am.k.AddBlockedUserDeque(sdkCtx, owner, u, 0) // 0 = no cap during genesis import
 		}
-		if len(ip.BlockedPosts) > 0 {
-			_ = am.k.SetProfileBlockedPosts(sdkCtx, owner, ip.BlockedPosts)
+		for _, p := range ip.BlockedPosts {
+			_, _ = am.k.AddBlockedPostDeque(sdkCtx, owner, p, 0)
 		}
-		if len(ip.BlockedTopics) > 0 {
-			_ = am.k.SetProfileBlockedTopics(sdkCtx, owner, ip.BlockedTopics)
+		for _, t := range ip.BlockedTopics {
+			_, _ = am.k.AddBlockedTopicDeque(sdkCtx, owner, t, 0)
 		}
 	}
 }
@@ -732,7 +783,19 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				),
 			)
 		} else {
-			tierConfig := params.Tiers[int(core.Level)]
+			tierConfig := params.GetTierConfig(int(core.Level))
+			if tierConfig == nil {
+				previousLevel := core.Level
+				sdkCtx.Logger().Error("processSubscriptions: invalid level, downgrading to free",
+					"address", sub.Address, "level", core.Level)
+				core.Level = 0
+				core.SubscriptionExpiry = 0
+				sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+					sdk.NewAttribute("address", sub.Address),
+					sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+					sdk.NewAttribute("reason", "invalid_tier_config")))
+				goto saveProfile
+			}
 			periodFee := tierConfig.PeriodFee
 			balance := am.k.GetBalance(sdkCtx, sub.Address, "umirage")
 
@@ -748,10 +811,15 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				// Burn non-reserve portion
 				if burnAmount > 0 {
 					if err := am.k.BurnFromAccount(sdkCtx, sub.Address, burnAmount); err != nil {
+						previousLevel := core.Level
 						sdkCtx.Logger().Error("processSubscriptions: failed to burn fee portion",
 							"address", sub.Address, "err", err)
 						core.Level = 0
 						core.SubscriptionExpiry = 0
+						sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+							sdk.NewAttribute("address", sub.Address),
+							sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+							sdk.NewAttribute("reason", "renewal_burn_failed")))
 						goto saveProfile
 					}
 				}
@@ -759,10 +827,15 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 				// Escrow reserve portion to module
 				if reserveAmount > 0 {
 					if err := am.k.DeductFeeFromOwner(sdkCtx, sub.Address, reserveAmount); err != nil {
+						previousLevel := core.Level
 						sdkCtx.Logger().Error("processSubscriptions: failed to escrow reserve",
 							"address", sub.Address, "err", err)
 						core.Level = 0
 						core.SubscriptionExpiry = 0
+						sdkCtx.EventManager().EmitEvent(sdk.NewEvent("subscription_expired",
+							sdk.NewAttribute("address", sub.Address),
+							sdk.NewAttribute("previous_level", fmt.Sprintf("%d", previousLevel)),
+							sdk.NewAttribute("reason", "renewal_escrow_failed")))
 						goto saveProfile
 					}
 				}
@@ -894,11 +967,11 @@ func (am AppModule) GetProfile(ctx context.Context, req *types.QueryProfileReque
 		SubscriptionExpiry: profile.SubscriptionExpiry,
 		AutoRenew:          profile.AutoRenew,
 		ReserveFunds:       profile.ReserveFunds,
-		IsModerator:        profile.IsModerator,
 		Biography:          profile.Biography,
 		Avatar:             profile.Avatar,
 		Banner:             profile.Banner,
-		FollowedModerators: profile.FollowedModerators,
+		Flair:              profile.Flair,
+		EnabledAgents:      profile.EnabledAgents,
 		FollowedUsers:      profile.FollowedUsers,
 		FollowedTopics:     profile.FollowedTopics,
 		BlockedUsers:       profile.BlockedUsers,
@@ -933,13 +1006,13 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			continue // Skip invalid profiles
 		}
 
-		// Load all lists for this profile
-		mods, _ := am.k.GetProfileFollowedMods(sdkCtx, core.Owner)
-		users, _ := am.k.GetProfileFollowedUsers(sdkCtx, core.Owner)
-		topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, core.Owner)
-		blockedUsers, _ := am.k.GetProfileBlockedUsers(sdkCtx, core.Owner)
-		blockedPosts, _ := am.k.GetProfileBlockedPosts(sdkCtx, core.Owner)
-		blockedTopics, _ := am.k.GetProfileBlockedTopics(sdkCtx, core.Owner)
+		// Load all lists via per-entry iterators
+		agents, _ := am.k.ListEnabledAgentsOrdered(sdkCtx, core.Owner)
+		users, _ := am.k.ListFollowedUsers(sdkCtx, core.Owner)
+		topics, _ := am.k.ListFollowedTopics(sdkCtx, core.Owner)
+		blockedUsers, _ := am.k.ListBlockedUsers(sdkCtx, core.Owner)
+		blockedPosts, _ := am.k.ListBlockedPosts(sdkCtx, core.Owner)
+		blockedTopics, _ := am.k.ListBlockedTopics(sdkCtx, core.Owner)
 
 		profiles = append(profiles, &types.QueryProfileResponse{
 			Owner:              core.Owner,
@@ -949,11 +1022,11 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 			SubscriptionExpiry: core.SubscriptionExpiry,
 			AutoRenew:          core.AutoRenew,
 			ReserveFunds:       core.ReserveFunds,
-			IsModerator:        core.IsModerator,
 			Biography:          core.Biography,
 			Avatar:             core.Avatar,
 			Banner:             core.Banner,
-			FollowedModerators: mods,
+			Flair:              core.Flair,
+			EnabledAgents:      agents,
 			FollowedUsers:      users,
 			FollowedTopics:     topics,
 			BlockedUsers:       blockedUsers,
@@ -1103,6 +1176,7 @@ func validateMsgPostMedia(media []string) error {
 // Post handler accepts MsgPost and returns empty response.
 func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1122,6 +1196,15 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Post")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
 	}
 
 	params := am.k.GetParams(sdkCtx)
@@ -1175,14 +1258,6 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
 		return nil, err
 	}
-
-	// Get user level for tier-based limits (only need Level from profile)
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)
@@ -1205,7 +1280,8 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 	}
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Post"); err != nil {
 		return nil, err
 	}
 
@@ -1215,6 +1291,7 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 // Vote handler accepts MsgVote and returns empty response.
 func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVoteResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1231,12 +1308,11 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		// Get user level for gas fee deduction
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Vote")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1249,7 +1325,8 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 
 	// Deduct gas fee from paid users
 	if owner != "" {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Vote"); err != nil {
 			return nil, err
 		}
 	}
@@ -1260,6 +1337,7 @@ func (am AppModule) Vote(ctx context.Context, req *types.MsgVote) (*types.MsgVot
 // Edit handler accepts MsgEdit and returns empty response.
 func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEditResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1275,6 +1353,15 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Edit")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
 	}
 
 	params := am.k.GetParams(sdkCtx)
@@ -1302,14 +1389,6 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 		if err := validateTxHash(target); err != nil {
 			return nil, err
 		}
-	}
-
-	// Get user level for tier-based limits (only need Level from profile)
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
 	}
 	tierConfig := params.GetTierConfig(userLevel)
 	if tierConfig == nil {
@@ -1364,15 +1443,159 @@ func (am AppModule) Edit(ctx context.Context, req *types.MsgEdit) (*types.MsgEdi
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Edit"); err != nil {
 		return nil, err
 	}
 
 	return &types.MsgEditResponse{}, nil
 }
 
+// Annotate handler: agent-only overlay on an existing post.
+// Sentinel "." means no change; empty string means clear.
+func (am AppModule) Annotate(ctx context.Context, req *types.MsgAnnotate) (*types.MsgAnnotateResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+
+	var owner string
+	if authority == govAuthority {
+		owner = authority
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("Annotate: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		owner = sdk.AccAddress(pub.Address()).String()
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "Annotate")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
+	// Enforce agent tier
+	if userLevel < types.LevelAgent && authority != govAuthority {
+		return nil, fmt.Errorf("annotate requires agent tier (level >= %d), got %d", types.LevelAgent, userLevel)
+	}
+
+	params := am.k.GetParams(sdkCtx)
+
+	// Validate override txhash (the post being annotated)
+	override := strings.ToLower(strings.TrimSpace(req.GetOverride()))
+	if err := validateTxHash(override); err != nil {
+		return nil, fmt.Errorf("invalid override: %w", err)
+	}
+
+	// Annotate never supports PoW
+	if req.GetEnvelopeDifficulty() != 0 || req.GetEnvelopePow() != 0 {
+		sdkCtx.Logger().Error("Annotate: PoW not allowed", "difficulty", req.GetEnvelopeDifficulty(), "pow", req.GetEnvelopePow())
+		return nil, fmt.Errorf("annotate does not allow pow")
+	}
+
+	tierConfig := params.GetTierConfig(types.LevelAgent)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", types.LevelAgent)
+	}
+
+	// Sentinel "." means no change — skip validation for those fields.
+	const sentinel = "."
+
+	// Validate topic (skip if sentinel)
+	topic := strings.TrimSpace(req.GetTopic())
+	if topic != sentinel && topic != "" {
+		if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate title length (skip if sentinel)
+	title := req.GetTitle()
+	if title != sentinel {
+		titleLen := uint64(utf8.RuneCountInString(title))
+		if titleLen > tierConfig.MaxTitleLength {
+			return nil, fmt.Errorf("title exceeds limit: %d > %d", titleLen, tierConfig.MaxTitleLength)
+		}
+	}
+
+	// Validate content length (skip if sentinel)
+	content := req.GetContent()
+	if content != sentinel {
+		contentLen := uint64(utf8.RuneCountInString(content))
+		if contentLen > tierConfig.MaxContentLength {
+			return nil, fmt.Errorf("content exceeds limit: %d > %d", contentLen, tierConfig.MaxContentLength)
+		}
+	}
+
+	// Validate tag (skip if sentinel)
+	tag := strings.TrimSpace(req.GetTag())
+	if tag != sentinel {
+		if err := validateTag(tag); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate appendix length (skip if sentinel)
+	appendix := req.GetAppendix()
+	if appendix != sentinel {
+		appendixLen := uint64(utf8.RuneCountInString(appendix))
+		if appendixLen > tierConfig.MaxContentLength {
+			return nil, fmt.Errorf("appendix exceeds limit: %d > %d", appendixLen, tierConfig.MaxContentLength)
+		}
+	}
+
+	// Validate media (skip if single-element sentinel ["."])
+	media := req.GetMedia()
+	isSentinelMedia := len(media) == 1 && media[0] == sentinel
+	if !isSentinelMedia && len(media) > 0 {
+		if err := validateMsgPostMedia(media); err != nil {
+			return nil, err
+		}
+	}
+
+	// Validate non-sentinel fields for unsafe text
+	unsafeChecks := []struct{ name, val string }{
+		{"topic", topic}, {"title", title}, {"content", content},
+		{"tag", tag}, {"appendix", appendix},
+	}
+	for _, c := range unsafeChecks {
+		if c.val != sentinel {
+			if err := rejectUnsafeFields(c.name, c.val); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	sdkCtx.Logger().Info("Annotate",
+		"agent", owner,
+		"override", override,
+		"topic_sentinel", topic == sentinel,
+		"title_sentinel", title == sentinel,
+		"content_sentinel", content == sentinel,
+		"tag_sentinel", tag == sentinel,
+		"appendix_sentinel", appendix == sentinel,
+		"media_sentinel", isSentinelMedia,
+		"media_count", len(media),
+	)
+
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Annotate"); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgAnnotateResponse{}, nil
+}
+
 // updateProfileCore is a helper that loads, updates, validates, and persists core profile data only.
-// Lists (FollowedModerators, etc.) are stored separately and should be updated via keeper methods.
+// Lists (EnabledAgents, etc.) are stored separately and should be updated via keeper methods.
 func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn func(*types.ProfileCore) error) error {
 	params := am.k.GetParams(sdkCtx)
 
@@ -1393,18 +1616,18 @@ func (am AppModule) updateProfileCore(sdkCtx sdk.Context, owner string, updateFn
 		return err
 	}
 
-	// Validate core fields (need to get mods count for validation)
-	mods, _ := am.k.GetProfileFollowedMods(sdkCtx, owner)
+	// Validate core fields (need to get agents count for validation)
+	agents, _ := am.k.ListEnabledAgentsOrdered(sdkCtx, owner)
 	tierConfig := params.GetTierConfig(int(core.Level))
-	maxMods := uint64(5)
+	maxAgents := uint64(5)
 	if tierConfig != nil {
-		maxMods = tierConfig.MaxFollowedMods
+		maxAgents = tierConfig.MaxEnabledAgents
 	}
 
 	// Build a temporary Profile for validation
 	tempProf := core.ToProfile()
-	tempProf.FollowedModerators = mods
-	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize, maxMods); err != nil {
+	tempProf.EnabledAgents = agents
+	if err := tempProf.ValidateBasic(params.MinUsernameSize, params.MaxUsernameSize, maxAgents); err != nil {
 		return err
 	}
 
@@ -1435,23 +1658,23 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 	// Convert to full profile
 	prof := core.ToProfile()
 
-	// Load lists
-	if mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner); err == nil {
-		prof.FollowedModerators = mods
+	// Load lists via per-entry iterators
+	if agents, err := am.k.ListEnabledAgentsOrdered(sdkCtx, owner); err == nil {
+		prof.EnabledAgents = agents
 	}
-	if users, err := am.k.GetProfileFollowedUsers(sdkCtx, owner); err == nil {
+	if users, err := am.k.ListFollowedUsers(sdkCtx, owner); err == nil {
 		prof.FollowedUsers = users
 	}
-	if topics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner); err == nil {
+	if topics, err := am.k.ListFollowedTopics(sdkCtx, owner); err == nil {
 		prof.FollowedTopics = topics
 	}
-	if blocked, err := am.k.GetProfileBlockedUsers(sdkCtx, owner); err == nil {
+	if blocked, err := am.k.ListBlockedUsers(sdkCtx, owner); err == nil {
 		prof.BlockedUsers = blocked
 	}
-	if posts, err := am.k.GetProfileBlockedPosts(sdkCtx, owner); err == nil {
+	if posts, err := am.k.ListBlockedPosts(sdkCtx, owner); err == nil {
 		prof.BlockedPosts = posts
 	}
-	if blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner); err == nil {
+	if blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner); err == nil {
 		prof.BlockedTopics = blockedTopics
 	}
 
@@ -1461,6 +1684,7 @@ func (am AppModule) loadFullProfile(sdkCtx sdk.Context, owner string) (types.Pro
 // SetUsername typed handler persists username
 func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) (*types.MsgSetUsernameResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1511,10 +1735,10 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	}
 
 	tierConfig := params.GetTierConfig(userLevel)
-	canChangeName := isGov || (tierConfig != nil && tierConfig.CanChangeName)
+	canRemoveAnon := isGov || (tierConfig != nil && tierConfig.CanRemoveAnon)
 
-	// Username normalization: if user can't change name (free tier), force "Anon-" prefix
-	if !canChangeName {
+	// Username normalization: if user can't remove anon (free tier), force "Anon-" prefix
+	if !canRemoveAnon {
 		for strings.HasPrefix(strings.ToLower(username), "anon-") {
 			username = username[len("anon-"):]
 		}
@@ -1549,28 +1773,29 @@ func (am AppModule) SetUsername(ctx context.Context, req *types.MsgSetUsername) 
 	// Log successful username change
 	sdkCtx.Logger().Info(logDelimiter)
 	if prevUsername != "" && prevUsername != username {
-		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username, "can_change_name", canChangeName)
+		sdkCtx.Logger().Info("SetUsername: username changed", "owner", owner, "old_username", prevUsername, "new_username", username, "can_remove_anon", canRemoveAnon)
 	} else {
-		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username, "can_change_name", canChangeName)
+		sdkCtx.Logger().Info("SetUsername: username set", "owner", owner, "username", username, "can_remove_anon", canRemoveAnon)
 	}
 	sdkCtx.Logger().Info(logDelimiter)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetUsername"); err != nil {
 		return nil, err
 	}
 
 	return &types.MsgSetUsernameResponse{}, nil
 }
 
-// FollowModerator adds a moderator to the user's followed list (capped deque)
-func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowModerator) (*types.MsgFollowModeratorResponse, error) {
+// SetBiography updates a user's biography (subscriber-only feature)
+func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography) (*types.MsgSetBiographyResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	moderator := strings.ToLower(strings.TrimSpace(req.GetModerator()))
 
 	var owner string
 	if authority == govAuthority {
@@ -1581,7 +1806,7 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 	} else {
 		if len(req.GetEnvelopePubkey()) != 33 {
 			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("FollowModerator: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Error("SetBiography: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
 			sdkCtx.Logger().Info(logDelimiter)
 			return nil, fmt.Errorf("invalid envelope_pubkey length")
 		}
@@ -1596,152 +1821,302 @@ func (am AppModule) FollowModerator(ctx context.Context, req *types.MsgFollowMod
 		owner = target
 	}
 
-	// Validate moderator address
-	if _, err := sdk.AccAddressFromBech32(moderator); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("FollowModerator: invalid moderator address", "address", moderator)
-		sdkCtx.Logger().Info(logDelimiter)
-		return nil, fmt.Errorf("invalid moderator address: %s", moderator)
-	}
-
-	// Get user's tier for max mods limit
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "SetBiography")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
+
+	biography := strings.TrimSpace(req.GetBiography())
+	if err := validateSafeText("biography", biography); err != nil {
+		return nil, err
+	}
+
 	tierConfig := params.GetTierConfig(userLevel)
-	maxMods := 5 // fallback
-	if tierConfig != nil {
-		maxMods = int(tierConfig.MaxFollowedMods)
-	}
 
-	// Get current followed mods list
-	mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner)
-	if err != nil {
-		mods = []string{}
-	}
-
-	// Check if already following
-	for _, m := range mods {
-		if m == moderator {
-			// Already following, no-op
-			return &types.MsgFollowModeratorResponse{}, nil
+	// Non-empty biography requires CanHaveBiography (governance can always set)
+	if biography != "" && authority != govAuthority {
+		if tierConfig == nil || !tierConfig.CanHaveBiography {
+			return nil, fmt.Errorf("biography not available for tier level %d", userLevel)
 		}
 	}
 
-	// Add to deque, cap based on tier
-	mods = append(mods, moderator)
-	if len(mods) > maxMods {
-		mods = mods[len(mods)-maxMods:]
-	}
-
-	// Save updated list
-	if err := am.k.SetProfileFollowedMods(sdkCtx, owner, mods); err != nil {
+	// Update profile core
+	if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
+		c.Biography = biography
+		return nil
+	}); err != nil {
 		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("FollowModerator: failed to save followed mods", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Error("SetBiography: update profile failed", "owner", owner, "err", err.Error())
 		sdkCtx.Logger().Info(logDelimiter)
 		return nil, err
 	}
 
-	// Ensure profile core exists (create if needed)
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("SetBiography: biography updated", "owner", owner, "length", len(biography))
+	sdkCtx.Logger().Info(logDelimiter)
+
+	// Deduct gas fee from paid users
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetBiography"); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgSetBiographyResponse{}, nil
+}
+
+// EnableAgent adds an agent to the user's enabled agents list (capped deque)
+func (am AppModule) EnableAgent(ctx context.Context, req *types.MsgEnableAgent) (*types.MsgEnableAgentResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
+
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("EnableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		if derived != target {
+			return nil, fmt.Errorf("envelope_pubkey must derive to target")
+		}
+		owner = target
+	}
+
+	if _, err := sdk.AccAddressFromBech32(agent); err != nil {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("EnableAgent: invalid agent address", "address", agent)
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, fmt.Errorf("invalid agent address: %s", agent)
+	}
+	if agent == owner {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("EnableAgent: self-enable not allowed", "owner", owner)
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, fmt.Errorf("cannot enable yourself as an agent")
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "EnableAgent")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+	tierConfig := params.GetTierConfig(userLevel)
+	maxAgents := 5
+	if tierConfig != nil {
+		maxAgents = int(tierConfig.MaxEnabledAgents)
+	}
+
+	has, err := am.k.HasEnabledAgent(sdkCtx, owner, agent)
+	if err != nil {
+		return nil, err
+	}
+	if has {
+		return &types.MsgEnableAgentResponse{}, nil
+	}
+	if int(am.k.CountEnabledAgents(sdkCtx, owner)) >= maxAgents {
+		return nil, fmt.Errorf("enabled agents limit reached (%d); disable an agent first", maxAgents)
+	}
+	if _, err := am.k.AddEnabledAgent(sdkCtx, owner, agent); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("EnableAgent: agent enabled", "owner", owner, "agent", agent)
+	sdkCtx.Logger().Info(logDelimiter)
+
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "EnableAgent"); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgEnableAgentResponse{}, nil
+}
+
+// DisableAgent removes an agent from the user's enabled agents list
+func (am AppModule) DisableAgent(ctx context.Context, req *types.MsgDisableAgent) (*types.MsgDisableAgentResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+	agent := strings.ToLower(strings.TrimSpace(req.GetAgent()))
+
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("DisableAgent: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		if derived != target {
+			return nil, fmt.Errorf("envelope_pubkey must derive to target")
+		}
+		owner = target
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "DisableAgent")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
+	if err := am.k.RemoveEnabledAgent(sdkCtx, owner, agent); err != nil {
+		return nil, err
+	}
+
+	sdkCtx.Logger().Info(logDelimiter)
+	sdkCtx.Logger().Info("DisableAgent: agent disabled", "owner", owner, "agent", agent)
+	sdkCtx.Logger().Info(logDelimiter)
+
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "DisableAgent"); err != nil {
+		return nil, err
+	}
+
+	return &types.MsgDisableAgentResponse{}, nil
+}
+
+// SetAgents atomically replaces the user's enabled agents list (ordered).
+func (am AppModule) SetAgents(ctx context.Context, req *types.MsgSetAgents) (*types.MsgSetAgentsResponse, error) {
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	params := am.k.GetParams(sdkCtx)
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	authority := req.GetAuthority()
+	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
+
+	var owner string
+	if authority == govAuthority {
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		owner = target
+	} else {
+		if len(req.GetEnvelopePubkey()) != 33 {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("SetAgents: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid envelope_pubkey length")
+		}
+		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
+		derived := sdk.AccAddress(pub.Address()).String()
+		if err := validateAddress(target); err != nil {
+			return nil, fmt.Errorf("invalid target address: %w", err)
+		}
+		if derived != target {
+			return nil, fmt.Errorf("envelope_pubkey must derive to target")
+		}
+		owner = target
+	}
+
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "SetAgents")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+	tierConfig := params.GetTierConfig(userLevel)
+	maxAgents := 5
+	if tierConfig != nil {
+		maxAgents = int(tierConfig.MaxEnabledAgents)
+	}
+
+	agents := req.GetAgents()
+	if len(agents) > maxAgents {
+		return nil, fmt.Errorf("too many agents: %d > %d", len(agents), maxAgents)
+	}
+
+	ownerLower := strings.ToLower(owner)
+	seen := make(map[string]struct{}, len(agents))
+	normalized := make([]string, 0, len(agents))
+	for _, a := range agents {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if _, err := sdk.AccAddressFromBech32(a); err != nil {
+			sdkCtx.Logger().Info(logDelimiter)
+			sdkCtx.Logger().Error("SetAgents: invalid agent address", "address", a)
+			sdkCtx.Logger().Info(logDelimiter)
+			return nil, fmt.Errorf("invalid agent address: %s", a)
+		}
+		if a == ownerLower {
+			return nil, fmt.Errorf("cannot set yourself as an agent")
+		}
+		if _, dup := seen[a]; dup {
+			return nil, fmt.Errorf("duplicate agent: %s", a)
+		}
+		seen[a] = struct{}{}
+		normalized = append(normalized, a)
+	}
+
+	if err := am.k.ReplaceAllEnabledAgents(sdkCtx, owner, normalized); err != nil {
+		sdkCtx.Logger().Info(logDelimiter)
+		sdkCtx.Logger().Error("SetAgents: failed to save enabled agents", "owner", owner, "err", err.Error())
+		sdkCtx.Logger().Info(logDelimiter)
+		return nil, err
+	}
+
 	if _, found, _ := am.k.GetProfileCore(sdkCtx, owner); !found {
 		if err := am.updateProfileCore(sdkCtx, owner, func(c *types.ProfileCore) error {
 			return nil
 		}); err != nil {
-			sdkCtx.Logger().Error("FollowModerator: failed to create profile", "owner", owner, "err", err.Error())
+			sdkCtx.Logger().Error("SetAgents: failed to create profile", "owner", owner, "err", err.Error())
 		}
 	}
 
 	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("FollowModerator: moderator followed", "owner", owner, "moderator", moderator)
+	sdkCtx.Logger().Info("SetAgents: agents set", "owner", owner, "count", len(normalized))
 	sdkCtx.Logger().Info(logDelimiter)
 
-	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "SetAgents"); err != nil {
 		return nil, err
 	}
 
-	return &types.MsgFollowModeratorResponse{}, nil
-}
-
-// UnfollowModerator removes a moderator from the user's followed list
-func (am AppModule) UnfollowModerator(ctx context.Context, req *types.MsgUnfollowModerator) (*types.MsgUnfollowModeratorResponse, error) {
-	sdkCtx := sdk.UnwrapSDKContext(ctx)
-	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
-	authority := req.GetAuthority()
-	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
-	moderator := strings.ToLower(strings.TrimSpace(req.GetModerator()))
-
-	var owner string
-	if authority == govAuthority {
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		owner = target
-	} else {
-		if len(req.GetEnvelopePubkey()) != 33 {
-			sdkCtx.Logger().Info(logDelimiter)
-			sdkCtx.Logger().Error("UnfollowModerator: invalid pubkey length", "len", len(req.GetEnvelopePubkey()))
-			sdkCtx.Logger().Info(logDelimiter)
-			return nil, fmt.Errorf("invalid envelope_pubkey length")
-		}
-		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
-		derived := sdk.AccAddress(pub.Address()).String()
-		if err := validateAddress(target); err != nil {
-			return nil, fmt.Errorf("invalid target address: %w", err)
-		}
-		if derived != target {
-			return nil, fmt.Errorf("envelope_pubkey must derive to target")
-		}
-		owner = target
-	}
-
-	// Get user level for gas fee deduction
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
-
-	// Get current followed mods list and remove the moderator
-	mods, err := am.k.GetProfileFollowedMods(sdkCtx, owner)
-	if err != nil {
-		mods = []string{}
-	}
-
-	newMods := make([]string, 0, len(mods))
-	for _, m := range mods {
-		if m != moderator {
-			newMods = append(newMods, m)
-		}
-	}
-
-	// Save updated list
-	if err := am.k.SetProfileFollowedMods(sdkCtx, owner, newMods); err != nil {
-		sdkCtx.Logger().Info(logDelimiter)
-		sdkCtx.Logger().Error("UnfollowModerator: failed to save followed mods", "owner", owner, "err", err.Error())
-		sdkCtx.Logger().Info(logDelimiter)
-		return nil, err
-	}
-
-	sdkCtx.Logger().Info(logDelimiter)
-	sdkCtx.Logger().Info("UnfollowModerator: moderator unfollowed", "owner", owner, "moderator", moderator)
-	sdkCtx.Logger().Info(logDelimiter)
-
-	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgUnfollowModeratorResponse{}, nil
+	return &types.MsgSetAgentsResponse{}, nil
 }
 
 // BlockPost blocks a post txhash (persisted on-chain)
 func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*types.MsgBlockPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1756,11 +2131,11 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockPost")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1774,24 +2149,16 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 		maxPosts = tierConfig.MaxBlockedPosts
 	}
 
-	posts, _ := am.k.GetProfileBlockedPosts(sdkCtx, owner)
-	for _, p := range posts {
-		if p == target {
-			return &types.MsgBlockPostResponse{}, nil
-		}
-	}
-	posts = append(posts, target)
-	if uint64(len(posts)) > maxPosts {
-		posts = posts[len(posts)-int(maxPosts):]
-	}
-	if err := am.k.SetProfileBlockedPosts(sdkCtx, owner, posts); err != nil {
+	// O(1) add with automatic deque eviction of oldest when over cap
+	if _, err := am.k.AddBlockedPostDeque(sdkCtx, owner, target, uint32(maxPosts)); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("BlockPost", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		am.deductRelayGasFee(sdkCtx, owner, userLevel)
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		_ = am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockPost")
 	}
 
 	return &types.MsgBlockPostResponse{}, nil
@@ -1800,6 +2167,7 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 // UnblockPost unblocks a post txhash (persisted on-chain)
 func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) (*types.MsgUnblockPostResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1813,11 +2181,11 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockPost")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1825,21 +2193,15 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 		return nil, err
 	}
 
-	posts, _ := am.k.GetProfileBlockedPosts(sdkCtx, owner)
-	newPosts := make([]string, 0, len(posts))
-	for _, p := range posts {
-		if p != target {
-			newPosts = append(newPosts, p)
-		}
-	}
-	if err := am.k.SetProfileBlockedPosts(sdkCtx, owner, newPosts); err != nil {
+	if err := am.k.RemoveBlockedPost(sdkCtx, owner, target); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("UnblockPost", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockPost"); err != nil {
 			return nil, err
 		}
 	}
@@ -1850,6 +2212,7 @@ func (am AppModule) UnblockPost(ctx context.Context, req *types.MsgUnblockPost) 
 // BlockUser blocks a user address (persisted on-chain)
 func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*types.MsgBlockUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1864,11 +2227,11 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockUser")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1876,27 +2239,8 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		return nil, err
 	}
 
-	followedUsers, err := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	if err != nil {
-		return nil, err
-	}
-	if len(followedUsers) > 0 {
-		newFollowedUsers := make([]string, 0, len(followedUsers))
-		removed := false
-		for _, u := range followedUsers {
-			if u == target {
-				removed = true
-				continue
-			}
-			newFollowedUsers = append(newFollowedUsers, u)
-		}
-		if removed {
-			if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newFollowedUsers); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("BlockUser removed follow", "owner", owner, "target", target)
-		}
-	}
+	// Mutual exclusion: blocking a user removes them from followed list (O(1))
+	_ = am.k.RemoveFollowedUser(sdkCtx, owner, target)
 
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(10)
@@ -1904,24 +2248,15 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 		maxUsers = tierConfig.MaxBlockedUsers
 	}
 
-	users, _ := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	for _, u := range users {
-		if u == target {
-			return &types.MsgBlockUserResponse{}, nil
-		}
-	}
-	users = append(users, target)
-	if uint64(len(users)) > maxUsers {
-		users = users[len(users)-int(maxUsers):]
-	}
-	if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, users); err != nil {
+	if _, err := am.k.AddBlockedUserDeque(sdkCtx, owner, target, uint32(maxUsers)); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("BlockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -1932,6 +2267,7 @@ func (am AppModule) BlockUser(ctx context.Context, req *types.MsgBlockUser) (*ty
 // UnblockUser unblocks a user address (persisted on-chain)
 func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) (*types.MsgUnblockUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -1945,11 +2281,11 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockUser")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -1957,21 +2293,15 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 		return nil, err
 	}
 
-	users, _ := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	newUsers := make([]string, 0, len(users))
-	for _, u := range users {
-		if u != target {
-			newUsers = append(newUsers, u)
-		}
-	}
-	if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newUsers); err != nil {
+	if err := am.k.RemoveBlockedUser(sdkCtx, owner, target); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("UnblockUser", "owner", owner, "target", target)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -1982,6 +2312,7 @@ func (am AppModule) UnblockUser(ctx context.Context, req *types.MsgUnblockUser) 
 // BlockTopic blocks a topic (persisted on-chain, tier-limited)
 func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*types.MsgBlockTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -1996,11 +2327,11 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "BlockTopic")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
@@ -2011,25 +2342,14 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		sdkCtx.Logger().Debug("BlockTopic wildcard", "owner", owner, "pattern", topic)
 	}
 
-	followedTopics, err := am.k.GetProfileFollowedTopics(sdkCtx, owner)
+	// Mutual exclusion: blocking a topic pattern removes matching followed topics.
+	followedTopics, err := am.k.ListFollowedTopics(sdkCtx, owner)
 	if err != nil {
 		return nil, err
 	}
-	if len(followedTopics) > 0 {
-		newFollowedTopics := make([]string, 0, len(followedTopics))
-		removedCount := 0
-		for _, t := range followedTopics {
-			if topicMatchesPattern(t, topic) {
-				removedCount++
-				continue
-			}
-			newFollowedTopics = append(newFollowedTopics, t)
-		}
-		if removedCount > 0 {
-			if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newFollowedTopics); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("BlockTopic removed follows", "owner", owner, "pattern", topic, "count", removedCount)
+	for _, t := range followedTopics {
+		if topicMatchesPattern(t, topic) {
+			_ = am.k.RemoveFollowedTopic(sdkCtx, owner, t)
 		}
 	}
 
@@ -2039,24 +2359,15 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 		maxTopics = tierConfig.MaxBlockedTopics
 	}
 
-	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
-	for _, t := range topics {
-		if t == topic {
-			return &types.MsgBlockTopicResponse{}, nil
-		}
-	}
-	topics = append(topics, topic)
-	if uint64(len(topics)) > maxTopics {
-		topics = topics[len(topics)-int(maxTopics):]
-	}
-	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, topics); err != nil {
+	if _, err := am.k.AddBlockedTopicDeque(sdkCtx, owner, topic, uint32(maxTopics)); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("BlockTopic", "owner", owner, "topic", topic)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2067,6 +2378,7 @@ func (am AppModule) BlockTopic(ctx context.Context, req *types.MsgBlockTopic) (*
 // UnblockTopic unblocks a topic (persisted on-chain)
 func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic) (*types.MsgUnblockTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2081,11 +2393,11 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 		}
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "UnblockTopic")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	topic := strings.ToLower(strings.TrimSpace(req.GetTopic()))
@@ -2093,21 +2405,15 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
-	topics, _ := am.k.GetProfileBlockedTopics(sdkCtx, owner)
-	newTopics := make([]string, 0, len(topics))
-	for _, t := range topics {
-		if t != topic {
-			newTopics = append(newTopics, t)
-		}
-	}
-	if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newTopics); err != nil {
+	if err := am.k.RemoveBlockedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("UnblockTopic", "owner", owner, "topic", topic)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnblockTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2118,6 +2424,7 @@ func (am AppModule) UnblockTopic(ctx context.Context, req *types.MsgUnblockTopic
 // FollowUser follows a user (adds to followed users list, capped deque)
 func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*types.MsgFollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2149,51 +2456,40 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 		return nil, fmt.Errorf("invalid user address: %s", user)
 	}
 
-	blockedUsers, err := am.k.GetProfileBlockedUsers(sdkCtx, owner)
-	if err != nil {
-		return nil, err
-	}
-	if len(blockedUsers) > 0 {
-		newBlockedUsers := make([]string, 0, len(blockedUsers))
-		removed := false
-		for _, u := range blockedUsers {
-			if u == user {
-				removed = true
-				continue
-			}
-			newBlockedUsers = append(newBlockedUsers, u)
-		}
-		if removed {
-			if err := am.k.SetProfileBlockedUsers(sdkCtx, owner, newBlockedUsers); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("FollowUser removed block", "owner", owner, "user", user)
-		}
-	}
-
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "FollowUser")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
+
+	// Mutual exclusion: following a user removes them from the blocked list (O(1) delete)
+	if err := am.k.RemoveBlockedUser(sdkCtx, owner, user); err != nil {
+		return nil, err
+	}
+
 	tierConfig := params.GetTierConfig(userLevel)
 	maxUsers := uint64(25)
 	if tierConfig != nil {
 		maxUsers = tierConfig.MaxFollowedUsers
 	}
 
-	users, _ := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	for _, u := range users {
-		if u == user {
-			return &types.MsgFollowUserResponse{}, nil
-		}
+	// O(1) duplicate check
+	has, err := am.k.HasFollowedUser(sdkCtx, owner, user)
+	if err != nil {
+		return nil, err
 	}
-	users = append(users, user)
-	if uint64(len(users)) > maxUsers {
-		users = users[len(users)-int(maxUsers):]
+	if has {
+		return &types.MsgFollowUserResponse{}, nil
 	}
-	if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, users); err != nil {
+	// O(1) cap check
+	if uint64(am.k.CountFollowedUsers(sdkCtx, owner)) >= maxUsers {
+		return nil, fmt.Errorf("followed users limit reached (%d); unfollow a user first", maxUsers)
+	}
+	// O(1) write
+	if _, err := am.k.AddFollowedUser(sdkCtx, owner, user); err != nil {
 		return nil, err
 	}
 
@@ -2204,7 +2500,8 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 	sdkCtx.Logger().Info("FollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "FollowUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2215,6 +2512,7 @@ func (am AppModule) FollowUser(ctx context.Context, req *types.MsgFollowUser) (*
 // UnfollowUser unfollows a user (removes from followed users list)
 func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser) (*types.MsgUnfollowUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2242,27 +2540,24 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "UnfollowUser")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 
-	users, _ := am.k.GetProfileFollowedUsers(sdkCtx, owner)
-	newUsers := make([]string, 0, len(users))
-	for _, u := range users {
-		if u != user {
-			newUsers = append(newUsers, u)
-		}
-	}
-	if err := am.k.SetProfileFollowedUsers(sdkCtx, owner, newUsers); err != nil {
+	// O(1) remove — idempotent, no error if not present
+	if err := am.k.RemoveFollowedUser(sdkCtx, owner, user); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("UnfollowUser", "owner", owner, "user", user)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnfollowUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2273,6 +2568,7 @@ func (am AppModule) UnfollowUser(ctx context.Context, req *types.MsgUnfollowUser
 // FollowTopic follows a topic (adds to followed topics list, capped deque)
 func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) (*types.MsgFollowTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	params := am.k.GetParams(sdkCtx)
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
@@ -2300,55 +2596,48 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 		owner = target
 	}
 
+	var userLevel int
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "FollowTopic")
+		if err != nil {
+			return nil, err
+		}
+		userLevel = int(core.Level)
+	}
+
 	if err := validateTopic(topic, uint64(params.MaxTopicSize), uint64(params.MinTopicSize)); err != nil {
 		return nil, fmt.Errorf("invalid topic: %w", err)
 	}
 
-	blockedTopics, err := am.k.GetProfileBlockedTopics(sdkCtx, owner)
+	// Mutual exclusion: following a topic removes matching blocked topic patterns.
+	// Must iterate blocked topics because of wildcard pattern matching.
+	blockedTopics, err := am.k.ListBlockedTopics(sdkCtx, owner)
 	if err != nil {
 		return nil, err
 	}
-	if len(blockedTopics) > 0 {
-		newBlockedTopics := make([]string, 0, len(blockedTopics))
-		removedCount := 0
-		for _, t := range blockedTopics {
-			if topicMatchesPattern(topic, t) {
-				removedCount++
-				continue
-			}
-			newBlockedTopics = append(newBlockedTopics, t)
-		}
-		if removedCount > 0 {
-			if err := am.k.SetProfileBlockedTopics(sdkCtx, owner, newBlockedTopics); err != nil {
-				return nil, err
-			}
-			sdkCtx.Logger().Debug("FollowTopic removed blocks", "owner", owner, "topic", topic, "count", removedCount)
+	for _, t := range blockedTopics {
+		if topicMatchesPattern(topic, t) {
+			_ = am.k.RemoveBlockedTopic(sdkCtx, owner, t)
 		}
 	}
 
-	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
-		userLevel = int(core.Level)
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	maxTopics := uint64(50)
 	if tierConfig != nil {
 		maxTopics = tierConfig.MaxFollowedTopics
 	}
 
-	topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, owner)
-	for _, t := range topics {
-		if t == topic {
-			return &types.MsgFollowTopicResponse{}, nil
-		}
+	has, err := am.k.HasFollowedTopic(sdkCtx, owner, topic)
+	if err != nil {
+		return nil, err
 	}
-	topics = append(topics, topic)
-	if uint64(len(topics)) > maxTopics {
-		topics = topics[len(topics)-int(maxTopics):]
+	if has {
+		return &types.MsgFollowTopicResponse{}, nil
 	}
-	if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, topics); err != nil {
+	if uint64(am.k.CountFollowedTopics(sdkCtx, owner)) >= maxTopics {
+		return nil, fmt.Errorf("followed topics limit reached (%d); unfollow a topic first", maxTopics)
+	}
+	if _, err := am.k.AddFollowedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 
@@ -2359,7 +2648,8 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 	sdkCtx.Logger().Info("FollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "FollowTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2370,6 +2660,7 @@ func (am AppModule) FollowTopic(ctx context.Context, req *types.MsgFollowTopic) 
 // UnfollowTopic unfollows a topic (removes from followed topics list)
 func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTopic) (*types.MsgUnfollowTopicResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2397,27 +2688,23 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 	}
 
 	var userLevel int
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		var core types.ProfileCore
-		_ = json.Unmarshal(bz, &core)
+	if authority != govAuthority {
+		core, err := am.requireUsername(sdkCtx, owner, "UnfollowTopic")
+		if err != nil {
+			return nil, err
+		}
 		userLevel = int(core.Level)
 	}
 
-	topics, _ := am.k.GetProfileFollowedTopics(sdkCtx, owner)
-	newTopics := make([]string, 0, len(topics))
-	for _, t := range topics {
-		if t != topic {
-			newTopics = append(newTopics, t)
-		}
-	}
-	if err := am.k.SetProfileFollowedTopics(sdkCtx, owner, newTopics); err != nil {
+	if err := am.k.RemoveFollowedTopic(sdkCtx, owner, topic); err != nil {
 		return nil, err
 	}
 
 	sdkCtx.Logger().Info("UnfollowTopic", "owner", owner, "topic", topic)
 
 	if authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "UnfollowTopic"); err != nil {
 			return nil, err
 		}
 	}
@@ -2441,6 +2728,7 @@ func (am AppModule) UnfollowTopic(ctx context.Context, req *types.MsgUnfollowTop
 // indexer rejects it - the post remains visible. This is the intended design.
 func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.MsgDeleteResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -2457,15 +2745,11 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		// Get user level for gas fee calculation
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Delete")
+		if err != nil {
+			return nil, err
 		}
-
-		// NOTE: We do NOT validate ownership here. The indexer enforces authorization.
-		// This is intentional - see SECURITY MODEL comment above.
+		userLevel = int(core.Level)
 	}
 
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2479,7 +2763,8 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Delete"); err != nil {
 		return nil, err
 	}
 
@@ -2490,6 +2775,7 @@ func (am AppModule) Delete(ctx context.Context, req *types.MsgDelete) (*types.Ms
 // Authorization: self-signed (envelope_pubkey derives to target) or governance.
 func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*types.MsgDeleteUserResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	target := strings.ToLower(strings.TrimSpace(req.GetTarget()))
@@ -2514,20 +2800,27 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 		actorType = "self"
 	}
 
-	// Verify the profile exists and extract level for gas fee
-	bz, found, _ := am.k.GetProfileCore(sdkCtx, target)
+	// Verify the profile exists and has a username
+	bz, found, err := am.k.GetProfileCore(sdkCtx, target)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load profile: %w", err)
+	}
 	if !found {
 		return nil, fmt.Errorf("profile not found or already deleted for %s", target)
+	}
+	var core types.ProfileCore
+	if err := json.Unmarshal(bz, &core); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
+	}
+	if core.Username == "" {
+		sdkCtx.Logger().Debug("requireUsername: empty username", "owner", target, "action", "DeleteUser")
+		return nil, fmt.Errorf("username required: set a username before calling DeleteUser")
 	}
 
 	// Deduct relay gas fee for self-delete (relay node compensation)
 	if actorType == "self" {
-		var userLevel int
-		var core types.ProfileCore
-		if err := json.Unmarshal(bz, &core); err == nil {
-			userLevel = int(core.Level)
-		}
-		if err := am.deductRelayGasFee(sdkCtx, target, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, target, int(core.Level), gasUsed, "DeleteUser"); err != nil {
 			return nil, err
 		}
 	}
@@ -2553,6 +2846,7 @@ func (am AppModule) DeleteUser(ctx context.Context, req *types.MsgDeleteUser) (*
 // SendTokens sends tokens from signer to target.
 func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*types.MsgSendTokensResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 	sender := strings.ToLower(strings.TrimSpace(req.GetSender()))
@@ -2575,12 +2869,11 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 			return nil, fmt.Errorf("envelope_pubkey must derive to sender")
 		}
 
-		// Get user level for gas fee deduction
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, sender); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, sender, "SendTokens")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	}
 
 	if err := validateAddress(target); err != nil {
@@ -2622,7 +2915,8 @@ func (am AppModule) SendTokens(ctx context.Context, req *types.MsgSendTokens) (*
 	)
 
 	// Deduct gas fee from paid users
-	if err := am.deductRelayGasFee(sdkCtx, sender, userLevel); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, sender, userLevel, gasUsed, "SendTokens"); err != nil {
 		return nil, err
 	}
 
@@ -2789,6 +3083,11 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 		return nil, err
 	}
 
+	core, err := am.requireUsername(sdkCtx, owner, "UpgradeLevel")
+	if err != nil {
+		return nil, err
+	}
+
 	// MsgUpgradeLevel MUST be paid with tokens, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgUpgradeLevel cannot use PoW, must pay with tokens")
@@ -2796,30 +3095,17 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 
 	requestedLevel := int(req.GetLevel())
 
-	// Validate level is 1-3 (admin levels require governance via MsgSetLevel; level 0 uses MsgSetAutoRenewal)
-	if requestedLevel < 1 || requestedLevel > 3 {
-		return nil, fmt.Errorf("invalid level: must be 1-3 (admin levels require governance; use MsgSetAutoRenewal to change auto-renewal)")
-	}
-
-	// Get or create profile core
-	var core types.ProfileCore
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		if err := json.Unmarshal(bz, &core); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
-		}
-	} else {
-		// Create new profile core
-		core = types.ProfileCore{
-			Owner:     owner,
-			CreatedAt: sdkCtx.BlockTime().Unix(),
-		}
+	// Only levels 1 (Subscriber) and 10 (Agent) can be self-upgraded to.
+	// Admin levels require governance via MsgSetLevel; level 0 is free (downgrade via MsgSetAutoRenewal).
+	if !types.ValidSubscriptionLevels[requestedLevel] {
+		return nil, fmt.Errorf("invalid level %d: must be %d (Subscriber) or %d (Agent)", requestedLevel, types.LevelSubscriber, types.LevelAgent)
 	}
 
 	// Get tier config for requested level
-	if requestedLevel >= len(params.Tiers) {
-		return nil, fmt.Errorf("tier %d not configured", requestedLevel)
+	tierConfig := params.GetTierConfig(requestedLevel)
+	if tierConfig == nil {
+		return nil, fmt.Errorf("tier config not found for level %d", requestedLevel)
 	}
-	tierConfig := params.Tiers[requestedLevel]
 
 	// Burn any existing reserve from module account before charging new fee
 	if core.ReserveFunds > 0 {
@@ -2914,6 +3200,7 @@ func (am AppModule) UpgradeLevel(ctx context.Context, req *types.MsgUpgradeLevel
 // SetAutoRenewal sets the auto_renew flag for a user's subscription.
 func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRenewal) (*types.MsgSetAutoRenewalResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 
 	// Derive owner from envelope_pubkey
 	if len(req.GetEnvelopePubkey()) != 33 {
@@ -2924,19 +3211,14 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 		return nil, err
 	}
 
+	core, err := am.requireUsername(sdkCtx, owner, "SetAutoRenewal")
+	if err != nil {
+		return nil, err
+	}
+
 	// MsgSetAutoRenewal MUST be paid with reserve, not PoW
 	if req.GetEnvelopePow() > 0 {
 		return nil, fmt.Errorf("MsgSetAutoRenewal cannot use PoW, must pay with reserve")
-	}
-
-	// Load existing profile core
-	var core types.ProfileCore
-	if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-		if err := json.Unmarshal(bz, &core); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
-		}
-	} else {
-		return nil, fmt.Errorf("profile not found for owner: %s", owner)
 	}
 
 	targetAuto := req.GetAutoRenew()
@@ -2976,7 +3258,8 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 	)
 
 	// Deduct gas fee from paid users using their escrowed reserve
-	if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level)); err != nil {
+	gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+	if err := am.deductRelayGasFee(sdkCtx, owner, int(core.Level), gasUsed, "SetAutoRenewal"); err != nil {
 		return nil, err
 	}
 
@@ -2991,6 +3274,7 @@ func (am AppModule) SetAutoRenewal(ctx context.Context, req *types.MsgSetAutoRen
 // Award handler accepts MsgAward, burns MIRAGE (free for admins level >= 100).
 func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgAwardResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
 	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
 	authority := req.GetAuthority()
 
@@ -3003,11 +3287,11 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 		pub := secp256k1.PubKey{Key: req.GetEnvelopePubkey()}
 		owner = sdk.AccAddress(pub.Address()).String()
 
-		if bz, found, _ := am.k.GetProfileCore(sdkCtx, owner); found {
-			var core types.ProfileCore
-			_ = json.Unmarshal(bz, &core)
-			userLevel = int(core.Level)
+		core, err := am.requireUsername(sdkCtx, owner, "Award")
+		if err != nil {
+			return nil, err
 		}
+		userLevel = int(core.Level)
 	} else {
 		owner = authority
 	}
@@ -3052,7 +3336,8 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 	)
 
 	if owner != "" && authority != govAuthority {
-		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel); err != nil {
+		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "Award"); err != nil {
 			return nil, err
 		}
 	}
@@ -3061,7 +3346,12 @@ func (am AppModule) Award(ctx context.Context, req *types.MsgAward) (*types.MsgA
 }
 
 func (am AppModule) BridgeBurn(ctx context.Context, req *types.MsgBridgeBurn) (*types.MsgBridgeBurnResponse, error) {
-	return bridgeBurn(sdk.UnwrapSDKContext(ctx), am.k, req, am.deductRelayGasFee)
+	sdkCtx := sdk.UnwrapSDKContext(ctx)
+	gasStart := sdkCtx.GasMeter().GasConsumed()
+	return bridgeBurn(sdkCtx, am.k, req, func(c sdk.Context, owner string, userLevel int) error {
+		gasUsed := c.GasMeter().GasConsumed() - gasStart
+		return am.deductRelayGasFee(c, owner, userLevel, gasUsed, "BridgeBurn")
+	})
 }
 
 // BridgeAttest allows validators to attest to a burn on an external chain (inbound).

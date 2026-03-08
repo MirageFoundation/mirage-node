@@ -29,11 +29,14 @@ service Msg {
   // SetUsername persists a username for the signer.
   rpc SetUsername(MsgSetUsername) returns (MsgSetUsernameResponse);
 
-  // FollowModerator adds a moderator to the signer's followed list (capped deque).
-  rpc FollowModerator(MsgFollowModerator) returns (MsgFollowModeratorResponse);
+  // EnableAgent adds an agent to the signer's enabled agents list (capped deque).
+  rpc EnableAgent(MsgEnableAgent) returns (MsgEnableAgentResponse);
 
-  // UnfollowModerator removes a moderator from the signer's followed list.
-  rpc UnfollowModerator(MsgUnfollowModerator) returns (MsgUnfollowModeratorResponse);
+  // DisableAgent removes an agent from the signer's enabled agents list.
+  rpc DisableAgent(MsgDisableAgent) returns (MsgDisableAgentResponse);
+
+  // SetAgents atomically replaces the signer's enabled agents list (ordered).
+  rpc SetAgents(MsgSetAgents) returns (MsgSetAgentsResponse);
 
   // FollowUser adds a user to the signer's followed users list (capped deque).
   rpc FollowUser(MsgFollowUser) returns (MsgFollowUserResponse);
@@ -109,6 +112,12 @@ service Msg {
 
   // Award gives an award to a post/comment, burning MIRAGE (free for admins).
   rpc Award(MsgAward) returns (MsgAwardResponse);
+
+  // SetBiography sets a biography for an address (subscriber-only feature).
+  rpc SetBiography(MsgSetBiography) returns (MsgSetBiographyResponse);
+
+  // Annotate creates an agent overlay on an existing post (agent-tier only).
+  rpc Annotate(MsgAnnotate) returns (MsgAnnotateResponse);
 }
 
 // MsgUpdateParams is the Msg/UpdateParams request type.
@@ -228,8 +237,8 @@ message MsgSetUsername {
 
 message MsgSetUsernameResponse {}
 
-// MsgFollowModerator adds a moderator to the followed list
-message MsgFollowModerator {
+// MsgEnableAgent adds an agent to the enabled agents list
+message MsgEnableAgent {
   option (cosmos.msg.v1.signer) = "authority";
 
   // REQUIRED: address of the signer (node or governance)
@@ -246,13 +255,13 @@ message MsgFollowModerator {
 
   // Payload
   string target = 100;
-  string moderator = 101;
+  string agent = 101;
 }
 
-message MsgFollowModeratorResponse {}
+message MsgEnableAgentResponse {}
 
-// MsgUnfollowModerator removes a moderator from the followed list
-message MsgUnfollowModerator {
+// MsgDisableAgent removes an agent from the enabled agents list
+message MsgDisableAgent {
   option (cosmos.msg.v1.signer) = "authority";
 
   // REQUIRED: address of the signer (node or governance)
@@ -269,10 +278,33 @@ message MsgUnfollowModerator {
 
   // Payload
   string target = 100;
-  string moderator = 101;
+  string agent = 101;
 }
 
-message MsgUnfollowModeratorResponse {}
+message MsgDisableAgentResponse {}
+
+// MsgSetAgents atomically replaces the user's enabled agents list (ordered)
+message MsgSetAgents {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+
+  // Payload
+  string target = 100;
+  repeated string agents = 101;
+}
+
+message MsgSetAgentsResponse {}
 
 // MsgFollowUser adds a user to the followed list
 message MsgFollowUser {
@@ -801,3 +833,55 @@ message MsgAward {
 }
 
 message MsgAwardResponse {}
+
+// MsgSetBiography sets a biography for an address (subscriber-only feature)
+message MsgSetBiography {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+
+  // Payload
+  string target = 100;
+  string biography = 101;
+}
+
+message MsgSetBiographyResponse {}
+
+// MsgAnnotate creates an agent overlay on an existing post (agent-tier only).
+// "." means no change; empty string means clear. No target field (cannot re-parent).
+message MsgAnnotate {
+  option (cosmos.msg.v1.signer) = "authority";
+
+  // REQUIRED: address of the signer (node or governance)
+  string authority = 1 [(cosmos_proto.scalar) = "cosmos.AddressString"];
+
+  // Envelope fields for msg relaying (not required for gov proposals)
+  bytes envelope_pubkey = 2;
+  bytes envelope_block_hash = 3;
+  uint64 envelope_difficulty = 4;
+  uint64 envelope_pow = 5;
+  uint64 envelope_timestamp = 6;
+  // tags 7-9 reserved
+  bytes envelope_signature = 10;
+
+  // Payload (no target — agents cannot re-parent posts)
+  string topic = 101;
+  string title = 102;
+  string content = 103;
+  string tag = 104;
+  string override = 105;
+  repeated string media = 106;
+  string appendix = 107;
+}
+
+message MsgAnnotateResponse {}

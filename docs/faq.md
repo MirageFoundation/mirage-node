@@ -6,17 +6,17 @@
 
 Mirage is what Reddit could have been if it hadn’t sold out. It keeps what people
 actually like: communities, posts, comments, votes, and the ability to discover communities
-through the crowd. The difference is what Mirage removes by design: power mods, opaque
+through the crowd. The difference is what Mirage removes by design: power moderators, opaque
 enforcement, shadow bans, and the endless rulebooks where each community feels like a
 different legal system.
 
-On Mirage, nobody can be banned from the entire network. There is no global moderator layer
+On Mirage, nobody can be banned from the entire network. There is no global agent layer
 that can wipe your account, quarantine a topic, or silently throttle you. A node can choose
 what it shows locally for legal or policy reasons, but it cannot erase you from Mirage as a
 whole, and you can switch nodes seamlessly without having to start over.
 
-Moderation is voluntary and personal. You choose what you want filtered by following
-moderators you trust, blocking users or topics, and shaping your own feed. If you want an
+Moderation is voluntary and personal. You choose what you want filtered by enabling
+agents you trust, blocking users or topics, and shaping your own feed. If you want an
 unfiltered view, you can choose that too. Control sits with the user, not with a small group of gatekeepers.
 
 Mirage is built as a network, not a single site. Multiple independent nodes can host Mirage
@@ -50,7 +50,7 @@ browse feeds, you follow what you care about, and you ignore what you do not.
 
 What changes is everything people hate about modern platforms. There is no central company
 that can quietly rewrite the rules, throttle posts, or flip the site into an ad funnel.
-There are no power mods with global influence, no shadow bans, and no situation where your
+There are no power moderators with global influence, no shadow bans, and no situation where your
 entire identity lives under a single admin.
 
 Mirage is a network made up of nodes. A node is just the website you are using to access the
@@ -61,7 +61,7 @@ Switching nodes is seamless and does not change your content or account. Your fe
 by your actions, what you follow, what you vote on, what you block, and who you choose to
 trust, not by a hidden engagement algorithm.
 
-If you want moderation, you opt into it by following moderators. If you want less filtering,
+If you want moderation, you opt into it by enabling agents. If you want less filtering,
 you choose that too. You are not stuck under one set of rules written by strangers.
 
 ### I just want Reddit, but without the bullshit?
@@ -115,7 +115,7 @@ Paying only buys convenience, not power.
 
 The “catch” is that there is no safety net where a platform can quietly fix things for you.
 You own your account via a seed phrase, so you are responsible for it. There is no central
-moderator to clean up the entire network for everyone, so moderation is opt-in and user
+agent to clean up the entire network for everyone, so moderation is opt-in and user
 driven.
 
 There is no ad revenue to subsidize abuse, so basic usage costs a small amount of compute
@@ -175,11 +175,11 @@ by control.
 
 ### How is moderation handled?
 
-Mirage has no global moderators. There are no power mods with god mode over a topic, and
+Mirage has no global agents. There are no power moderators with god mode over a topic, and
 there is no central authority that can decide what the entire network is allowed to say.
 
 Moderation is voluntary and personal. You control what you see by blocking users, blocking
-topics, and shaping your feed. If you want curated moderation, you can follow moderators you
+topics, and shaping your feed. If you want curated moderation, you can enable agents you
 trust, meaning you can opt into their filters and blocked lists.
 
 If you want an unfiltered view, you can choose that too.
@@ -209,12 +209,12 @@ burger. Different node, same Mirage.
 Mirage does not appoint a global referee for what is “acceptable”. On centralized platforms,
 the definition of acceptable always flows from whoever has power, and it changes constantly.
 
-Mirage is built to avoid that. There is no global moderator class, no universal rulebook,
+Mirage is built to avoid that. There is no global agent class, no universal rulebook,
 and no network wide ban button. If you find a post offensive or inappropriate, you control
 your own experience.
 
 You can block the user, block the topic, and remove it from your feed immediately. If you
-want stronger filtering, you can opt into moderation by following moderators you trust,
+want stronger filtering, you can opt into moderation by enabling agents you trust,
 meaning their blocked lists and filters apply to what you see. If you want less filtering,
 you simply do not opt in.
 
@@ -262,9 +262,9 @@ You do not have to. Mirage supports multiple layers of control.
 
 You can do nothing and just use basic filters and blocks yourself.
 
-You can follow trusted human moderators.
+You can enable trusted human agents.
 
-You can follow automated moderation bots.
+You can enable automated agent bots.
 
 You can use a node with stricter local policies.
 
@@ -562,7 +562,7 @@ communities.
 
 ### Can topics be taken over, censored, or renamed?
 
-No one can “take over” a topic in the Reddit moderator sense, because there is no moderator
+No one can “take over” a topic in the Reddit moderator sense, because there is no agent
 ownership model. A topic is a network wide label and conversation stream.
 
 Nodes can choose to filter what they display locally, but they cannot rename topics for the
@@ -604,7 +604,7 @@ idea as Bitcoin difficulty adjustment, but on a much shorter feedback loop.
 
 Nodes can still apply additional local defenses like rate limits, filtering, and local
 policy choices. But the base layer is designed so spam resistance is structural, not
-dependent on captchas or power mods. If you later choose a subscription, you can skip proof
+dependent on captchas or power moderators. If you later choose a subscription, you can skip proof
 of work for instant posting, and unlock higher limits and extras, but that is all optional.
 
 Normal users can use Mirage without tokens.
@@ -636,8 +636,8 @@ posting patterns, and low effort spam. The difference is that on Reddit they usu
 by posting a comment, “this is a repost”, “this looks automated”, “this account is
 suspicious”, and the user still has to sift through garbage.
 
-On Mirage, you can directly opt into these defenses. If you follow a moderator bot or a
-trusted moderation profile, their filters and block decisions can apply to your feed
+On Mirage, you can directly opt into these defenses. If you enable an agent or a
+trusted agent profile, their filters and block decisions can apply to your feed
 automatically. Your feed becomes clean by default, based on the moderation layer you choose.
 
 If you want stricter filtering, you follow stricter bots. If you want minimal filtering, you
@@ -1249,7 +1249,7 @@ infrastructure.
 Hacker News is centralized, curated, and deliberately exclusionary. HN works because it has
 a narrow focus and a very strong moderation culture. That is also its limitation.
 
-Discussion is shaped heavily by moderators and community norms, topics outside a specific
+Discussion is shaped heavily by agents and community norms, topics outside a specific
 intellectual and cultural lane are discouraged, and rule enforcement is opaque by design. If
 you fall outside that lane, there is no recourse and no exit except leaving entirely. Hacker
 News also relies on a single operator.
@@ -1259,8 +1259,8 @@ users adapt or disappear. Mirage takes the opposite approach.
 
 It does not try to enforce a single global culture or taste. Topics are broad, moderation is
 opt-in, and there is no central authority deciding what discussion should look like
-everywhere. If you want a tightly curated experience similar to HN, you can follow
-moderators, bots, or nodes that enforce that style.
+everywhere. If you want a tightly curated experience similar to HN, you can enable
+agents, bots, or nodes that enforce that style.
 
 If you do not, you do not have to. Hacker News works by filtering people out. Mirage works
 by letting people self-select without being trapped.

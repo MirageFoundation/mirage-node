@@ -6,18 +6,58 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultTiersMaxBlockedTopics(t *testing.T) {
+func TestDefaultTiers(t *testing.T) {
 	tiers := DefaultTiers()
-	require.Len(t, tiers, 4)
+	require.Len(t, tiers, 3, "expected 3 tiers: Free(0), Subscriber(1), Agent(2)")
 
-	got := []uint64{
-		tiers[0].MaxBlockedTopics,
-		tiers[1].MaxBlockedTopics,
-		tiers[2].MaxBlockedTopics,
-		tiers[3].MaxBlockedTopics,
-	}
-	t.Logf("[debug] MaxBlockedTopics tiers=%v", got)
-	require.Equal(t, []uint64{10, 125, 500, 1000}, got)
+	// Free tier: basic limits
+	require.Equal(t, uint64(0), tiers[0].PeriodFee)
+	require.Equal(t, uint64(25), tiers[0].MaxBlockedTopics)
+	require.False(t, tiers[0].CanBeAgent)
+
+	// Subscriber tier
+	require.Equal(t, uint64(100_000_000_000), tiers[1].PeriodFee)
+	require.Equal(t, uint64(500), tiers[1].MaxBlockedTopics)
+	require.False(t, tiers[1].CanBeAgent)
+
+	// Agent tier
+	require.Equal(t, uint64(500_000_000_000), tiers[2].PeriodFee)
+	require.Equal(t, uint64(500), tiers[2].MaxBlockedTopics)
+	require.True(t, tiers[2].CanBeAgent)
+}
+
+func TestLevelToTierIndex(t *testing.T) {
+	require.Equal(t, 0, LevelToTierIndex(0))
+	require.Equal(t, 1, LevelToTierIndex(1))
+	require.Equal(t, 2, LevelToTierIndex(10))
+	require.Equal(t, 2, LevelToTierIndex(100))
+	require.Equal(t, 2, LevelToTierIndex(255))
+
+	// Invalid levels return -1
+	require.Equal(t, -1, LevelToTierIndex(2))
+	require.Equal(t, -1, LevelToTierIndex(5))
+	require.Equal(t, -1, LevelToTierIndex(9))
+	require.Equal(t, -1, LevelToTierIndex(-1))
+}
+
+func TestGetTierConfigMapping(t *testing.T) {
+	p := DefaultParams()
+
+	// Valid levels
+	require.NotNil(t, p.GetTierConfig(0))
+	require.NotNil(t, p.GetTierConfig(1))
+	require.NotNil(t, p.GetTierConfig(10))
+	require.NotNil(t, p.GetTierConfig(100))
+
+	// Invalid levels
+	require.Nil(t, p.GetTierConfig(2))
+	require.Nil(t, p.GetTierConfig(5))
+	require.Nil(t, p.GetTierConfig(9))
+	require.Nil(t, p.GetTierConfig(-1))
+
+	// Level 10 and level 100 should return the same tier config (Agent)
+	require.Equal(t, p.GetTierConfig(10), p.GetTierConfig(100))
+	require.True(t, p.GetTierConfig(10).CanBeAgent)
 }
 
 func TestDefaultAwardConfigs(t *testing.T) {

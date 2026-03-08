@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ type bridgeMockKeeper struct {
 	validatorPowers  map[string]int64
 	totalPower       int64
 	pendingCount     int64
+	profileCores     map[string][]byte
 }
 
 func newBridgeMockKeeper(params types.Params) *bridgeMockKeeper {
@@ -41,6 +43,7 @@ func newBridgeMockKeeper(params types.Params) *bridgeMockKeeper {
 		mintAttestors:    make(map[string]int64),
 		bondedValidators: make(map[string]bool),
 		validatorPowers:  make(map[string]int64),
+		profileCores:     make(map[string][]byte),
 	}
 }
 
@@ -49,7 +52,8 @@ func (mk *bridgeMockKeeper) GetParams(ctx sdk.Context) types.Params {
 }
 
 func (mk *bridgeMockKeeper) GetProfileCore(ctx sdk.Context, addr string) ([]byte, bool, error) {
-	return nil, false, nil
+	bz, found := mk.profileCores[addr]
+	return bz, found, nil
 }
 
 func (mk *bridgeMockKeeper) GetBalance(ctx sdk.Context, owner string, denom string) sdkmath.Int {
@@ -213,6 +217,8 @@ func TestBridgeBurnHandlerHappyPath(t *testing.T) {
 		t.Fatalf("deriveOwnerFromPubkey error: %v", err)
 	}
 	mk.balances[owner] = 1000
+	profileBz, _ := json.Marshal(types.ProfileCore{Owner: owner, Username: "Anon-bridgeuser"})
+	mk.profileCores[owner] = profileBz
 
 	req := &types.MsgBridgeBurn{
 		EnvelopePubkey:     envelopePubkey,
@@ -237,6 +243,56 @@ func TestBridgeBurnHandlerHappyPath(t *testing.T) {
 	}
 	if record.BridgeFee != 10 || record.Amount != 100 {
 		t.Fatalf("burn record mismatch: fee=%d amount=%d", record.BridgeFee, record.Amount)
+	}
+}
+
+func TestBridgeBurnRejectsMissingProfile(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	envelopePubkey := bytes.Repeat([]byte{0x02}, 33)
+	_, err := deriveOwnerFromPubkey(envelopePubkey)
+	if err != nil {
+		t.Fatalf("deriveOwnerFromPubkey error: %v", err)
+	}
+
+	req := &types.MsgBridgeBurn{
+		EnvelopePubkey:     envelopePubkey,
+		DestinationChain:   "solana",
+		DestinationAddress: "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs",
+		Amount:             100,
+	}
+
+	_, err = bridgeBurn(ctx, mk, req, func(_ sdk.Context, _ string, _ int) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "username required") {
+		t.Fatalf("expected username required error, got: %v", err)
+	}
+}
+
+func TestBridgeBurnRejectsEmptyUsername(t *testing.T) {
+	ctx := newMockContext()
+	params := testBridgeParams("solana", 0)
+	mk := newBridgeMockKeeper(params)
+
+	envelopePubkey := bytes.Repeat([]byte{0x02}, 33)
+	owner, err := deriveOwnerFromPubkey(envelopePubkey)
+	if err != nil {
+		t.Fatalf("deriveOwnerFromPubkey error: %v", err)
+	}
+	profileBz, _ := json.Marshal(types.ProfileCore{Owner: owner, Username: ""})
+	mk.profileCores[owner] = profileBz
+
+	req := &types.MsgBridgeBurn{
+		EnvelopePubkey:     envelopePubkey,
+		DestinationChain:   "solana",
+		DestinationAddress: "7EYnhQoR9YM3N7UoaKRoA44Uy8JeaZV3qyouov87awMs",
+		Amount:             100,
+	}
+
+	_, err = bridgeBurn(ctx, mk, req, func(_ sdk.Context, _ string, _ int) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "username required") {
+		t.Fatalf("expected username required error, got: %v", err)
 	}
 }
 

@@ -73,6 +73,24 @@ def _build_pool():
     add_f(msg_edit, "override", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_edit, "media", 106, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
 
+    # MsgAnnotate (agent overlay on existing post)
+    msg_annotate = file_proto.message_type.add()
+    msg_annotate.name = "MsgAnnotate"
+    add_f(msg_annotate, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_annotate, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_annotate, "topic", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "title", 102, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "content", 103, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "tag", 104, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "override", 105, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_annotate, "media", 106, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_annotate, "appendix", 107, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
     # MsgVote
     msg2 = file_proto.message_type.add()
     msg2.name = "MsgVote"
@@ -99,9 +117,22 @@ def _build_pool():
     add_f(msg3, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg3, "username", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgFollowModerator
+    # MsgSetBiography
+    msg_bio = file_proto.message_type.add()
+    msg_bio.name = "MsgSetBiography"
+    add_f(msg_bio, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bio, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_bio, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_bio, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_bio, "biography", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgEnableAgent
     msg_follow = file_proto.message_type.add()
-    msg_follow.name = "MsgFollowModerator"
+    msg_follow.name = "MsgEnableAgent"
     add_f(msg_follow, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_follow, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_follow, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
@@ -110,11 +141,11 @@ def _build_pool():
     add_f(msg_follow, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_follow, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_follow, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_follow, "moderator", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_follow, "agent", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
-    # MsgUnfollowModerator
+    # MsgDisableAgent
     msg_unfollow = file_proto.message_type.add()
-    msg_unfollow.name = "MsgUnfollowModerator"
+    msg_unfollow.name = "MsgDisableAgent"
     add_f(msg_unfollow, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_unfollow, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_unfollow, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
@@ -123,7 +154,20 @@ def _build_pool():
     add_f(msg_unfollow, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg_unfollow, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
     add_f(msg_unfollow, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
-    add_f(msg_unfollow, "moderator", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_unfollow, "agent", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # MsgSetAgents
+    msg_set_agents = file_proto.message_type.add()
+    msg_set_agents.name = "MsgSetAgents"
+    add_f(msg_set_agents, "authority", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_set_agents, "envelope_pubkey", 2, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "envelope_block_hash", 3, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "envelope_difficulty", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_pow", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_timestamp", 6, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_set_agents, "envelope_signature", 10, descriptor_pb2.FieldDescriptorProto.TYPE_BYTES)
+    add_f(msg_set_agents, "target", 100, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_set_agents, "agents", 101, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
 
     # MsgFollowUser
     msg_follow_user = file_proto.message_type.add()
@@ -368,7 +412,7 @@ def _build_pool():
     tier_config = file_proto.message_type.add()
     tier_config.name = "TierConfig"
     add_f(tier_config, "period_fee", 1, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "max_followed_mods", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(tier_config, "max_enabled_agents", 2, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_followed_users", 3, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_followed_topics", 4, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_blocked_users", 5, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -377,13 +421,13 @@ def _build_pool():
     add_f(tier_config, "max_title_length", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "max_content_length", 9, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "editing_time_mins", 10, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(tier_config, "archive_duration_days", 12, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(tier_config, "vote_weight", 13, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
-    add_f(tier_config, "eligible_for_mod", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
-    add_f(tier_config, "can_change_name", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_be_agent", 15, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_remove_anon", 16, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_biography", 17, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "can_have_flair", 20, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
 
     # AwardConfig (used in Params.award_configs)
     award_config = file_proto.message_type.add()
@@ -464,7 +508,7 @@ def _build_pool():
     add_f(msg4, "min_username_size", 36, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "min_topic_size", 37, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "mint_dynamic_credit_cap", 38, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
-    add_f(msg4, "mint_dynamic_fraction", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "mint_dynamic_split", 39, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "subscription_period", 40, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     # tiers is a repeated TierConfig (field 41)
     f_tiers = msg4.field.add()
@@ -473,7 +517,7 @@ def _build_pool():
     f_tiers.label = descriptor_pb2.FieldDescriptorProto.LABEL_REPEATED
     f_tiers.type = descriptor_pb2.FieldDescriptorProto.TYPE_MESSAGE
     f_tiers.type_name = ".mirage.core.v1.TierConfig"
-    add_f(msg4, "subscription_reserve_fraction", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
+    add_f(msg4, "subscription_reserve_percent", 42, descriptor_pb2.FieldDescriptorProto.TYPE_DOUBLE)
     add_f(msg4, "relay_min_gas_price", 43, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "relay_max_gas_fee", 44, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
     add_f(msg4, "max_envelope_age", 45, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
@@ -529,6 +573,32 @@ def _build_pool():
     add_f(msg_diff, "latest_block_hash", 6, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
     add_f(msg_diff, "current_height", 7, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
     add_f(msg_diff, "pow_base_bits", 8, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+
+    # QueryProfileRequest
+    msg_profile_req = file_proto.message_type.add()
+    msg_profile_req.name = "QueryProfileRequest"
+    add_f(msg_profile_req, "address", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+
+    # QueryProfileResponse
+    msg_profile_resp = file_proto.message_type.add()
+    msg_profile_resp.name = "QueryProfileResponse"
+    add_f(msg_profile_resp, "owner", 1, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "username", 2, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "level", 3, descriptor_pb2.FieldDescriptorProto.TYPE_INT32)
+    add_f(msg_profile_resp, "created_at", 4, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_profile_resp, "subscription_expiry", 5, descriptor_pb2.FieldDescriptorProto.TYPE_INT64)
+    add_f(msg_profile_resp, "auto_renew", 6, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(msg_profile_resp, "reserve_funds", 7, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
+    add_f(msg_profile_resp, "biography", 9, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "avatar", 10, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "banner", 11, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
+    add_f(msg_profile_resp, "enabled_agents", 12, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "followed_users", 13, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "followed_topics", 14, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_users", 15, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_posts", 16, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "blocked_topics", 17, descriptor_pb2.FieldDescriptorProto.TYPE_STRING, repeated=True)
+    add_f(msg_profile_resp, "flair", 18, descriptor_pb2.FieldDescriptorProto.TYPE_STRING)
 
     # BridgeChainStatus
     msg_bridge_chain_status = file_proto.message_type.add()
@@ -639,10 +709,13 @@ def _get_message_class(full_name: str):
 # Export classes
 MsgPost = _get_message_class("mirage.core.v1.MsgPost")
 MsgEdit = _get_message_class("mirage.core.v1.MsgEdit")
+MsgAnnotate = _get_message_class("mirage.core.v1.MsgAnnotate")
 MsgVote = _get_message_class("mirage.core.v1.MsgVote")
 MsgSetUsername = _get_message_class("mirage.core.v1.MsgSetUsername")
-MsgFollowModerator = _get_message_class("mirage.core.v1.MsgFollowModerator")
-MsgUnfollowModerator = _get_message_class("mirage.core.v1.MsgUnfollowModerator")
+MsgSetBiography = _get_message_class("mirage.core.v1.MsgSetBiography")
+MsgEnableAgent = _get_message_class("mirage.core.v1.MsgEnableAgent")
+MsgDisableAgent = _get_message_class("mirage.core.v1.MsgDisableAgent")
+MsgSetAgents = _get_message_class("mirage.core.v1.MsgSetAgents")
 MsgFollowUser = _get_message_class("mirage.core.v1.MsgFollowUser")
 MsgUnfollowUser = _get_message_class("mirage.core.v1.MsgUnfollowUser")
 MsgFollowTopic = _get_message_class("mirage.core.v1.MsgFollowTopic")
@@ -679,6 +752,8 @@ QueryParamsRequest = _get_message_class("mirage.core.v1.QueryParamsRequest")
 QueryParamsResponse = _get_message_class("mirage.core.v1.QueryParamsResponse")
 QueryDifficultyRequest = _get_message_class("mirage.core.v1.QueryDifficultyRequest")
 QueryDifficultyResponse = _get_message_class("mirage.core.v1.QueryDifficultyResponse")
+QueryProfileRequest = _get_message_class("mirage.core.v1.QueryProfileRequest")
+QueryProfileResponse = _get_message_class("mirage.core.v1.QueryProfileResponse")
 BridgeChainStatus = _get_message_class("mirage.core.v1.BridgeChainStatus")
 QueryBridgeStatusRequest = _get_message_class("mirage.core.v1.QueryBridgeStatusRequest")
 QueryBridgeStatusResponse = _get_message_class("mirage.core.v1.QueryBridgeStatusResponse")

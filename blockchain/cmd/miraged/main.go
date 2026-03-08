@@ -1,3 +1,5 @@
+//go:build pebbledb
+
 package main
 
 import (

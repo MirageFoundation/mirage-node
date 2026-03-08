@@ -28,15 +28,12 @@
 
 ## Infrastructure / Ops
 
-### Node DB Compaction Strategy (goleveldb problem)
-- **Problem:** goleveldb pruning deletes IAVL versions but disk never shrinks — compaction is lazy and there's no online `CompactRange` hook. The only way to reclaim space is offline `miraged prune` (causes downtime) or a full state-sync rebuild.
-- **Current approach:** Stay on goleveldb. Run offline prune periodically or state-sync rebuild when disk gets too large.
-- **PebbleDB (potential fix):** Already compiled into the binary (pure Go, no build changes needed). Would solve the disk bloat via continuous background compaction. Prior migration attempt (Jan 2026) failed for two reasons:
-  1. CometBFT's `db_backend` does NOT support pebbledb (only `goleveldb`/`memdb`). Only the Cosmos SDK `app-db-backend` can use it.
-  2. With `app-db-backend = "pebbledb"` + `db_backend = "goleveldb"`, state-sync snapshot restore corrupted staking params (`bond_denom` came back empty), causing a panic at the next block. Root cause never identified — could be a cosmos-db bug in the PebbleDB snapshot restore path.
-  - **Untested path:** PebbleDB was never tested without state-sync (e.g., peer-restore with `restore_from_peer.sh` or syncing from genesis). The failure was specifically in snapshot restore, not normal block processing.
-  - **Next step if revisiting:** Test `app-db-backend = "pebbledb"` on a non-critical node using peer-restore (not state-sync) to isolate whether the issue is PebbleDB itself or PebbleDB + snapshot restore.
-- **RocksDB: Not viable without build changes.** Binary is built without CGO / `-tags rocksdb`. Would require Dockerfile changes, librocksdb install, and full rebuild pipeline update.
+### Node DB Compaction Strategy — RESOLVED
+- **PebbleDB migration (Feb 2026) succeeded.** All nodes now run `app-db-backend = "pebbledb"` + `db_backend = "pebbledb"`. Compaction is working: application.db SST files are actively created and deleted (e.g., file numbers up to 13k with only ~1.5k files remaining).
+- **Disk growth was NOT from PebbleDB.** The real culprits were:
+  1. **CometBFT consensus WAL (`cs.wal/`)**: Rotated segments (`wal.NNN`) were never cleaned. ~200MB/day of unbounded growth. Fixed in `entrypoint.sh` — periodic cleanup now deletes rotated WAL segments older than 1 day.
+  2. **Node logs**: 43MB/day with 30-day retention = ~1.3GB steady state. Acceptable.
+  3. **tx_index.db**: `indexer = "kv"` grows forever. Consider switching to `null` on non-query nodes if disk becomes a concern again.
 
 ## Short-term cleanup (remove after March)
 - Remove legacy handling of embedding image/media when the first line is a link. The `media` field already covers this.
@@ -45,7 +42,7 @@
 - Generally optimize website. Find bottlenecks. Use Firefox profiler.
 
 ## Moderation / Anti-botting
-- Add relaying node into blockchain history so we can flag rogue relayers. A separate script can create a moderator that excludes posts from known spam-relayers.
+- Add relaying node into blockchain history so we can flag rogue relayers. A separate script can create an agent that excludes posts from known spam-relayers.
 
 ## Content / UX
 - Add blocking keywords (in topics or posts)?
@@ -58,3 +55,10 @@
 
 ## Identity
 - Should it remain possible to create msgs, participate, etc, without having a set username?
+
+
+# CLEANUP!!!
+- now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
+
+# others:
+- REDUCE GAS from 5k to 1k perhaps? analyze gas usage

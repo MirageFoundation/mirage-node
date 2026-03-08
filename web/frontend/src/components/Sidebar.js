@@ -368,6 +368,9 @@ const Sidebar = ({ currentPath, state }) => {
                 <NavItem to="/topics" className={isActive('/topics') ? 'active' : ''}>
                     Topics
                 </NavItem>
+                <NavItem to="/agents" className={isActive('/agents') ? 'active' : ''}>
+                    Agents
+                </NavItem>
             </NavSection>
 
             <Separator />

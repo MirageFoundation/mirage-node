@@ -241,15 +241,17 @@ def _has_unused_invite_codes(owner: str) -> bool:
 
 
 def _get_completed_quest_count(owner: str) -> int:
-    """Get total number of completed quests for a user."""
+    """Get total number of completed quests/achievements for a user (daily + flash + achievements)."""
     with connect_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT COUNT(*) FROM user_daily_quests
-                WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL
+                SELECT
+                    (SELECT COUNT(*) FROM user_daily_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
+                  + (SELECT COUNT(*) FROM user_flash_quests WHERE LOWER(owner) = LOWER(%s) AND completed_at IS NOT NULL)
+                  + (SELECT COUNT(*) FROM user_achievements WHERE LOWER(owner) = LOWER(%s) AND unlocked_at IS NOT NULL)
                 """,
-                (owner,),
+                (owner, owner, owner),
             )
             row = cur.fetchone()
             return row[0] if row else 0

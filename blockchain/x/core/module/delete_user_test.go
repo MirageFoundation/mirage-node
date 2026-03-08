@@ -337,13 +337,13 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	_ = mk.SetProfileCore(ctx, owner, bz)
 	_ = mk.ClaimUsername(ctx, "listuser", owner)
 
-	// Populate all profile list KV entries
-	_ = mk.SetProfileFollowedMods(ctx, owner, []string{"mod1", "mod2"})
-	_ = mk.SetProfileFollowedUsers(ctx, owner, []string{"user1"})
-	_ = mk.SetProfileFollowedTopics(ctx, owner, []string{"topic1"})
-	_ = mk.SetProfileBlockedUsers(ctx, owner, []string{"blocked1"})
-	_ = mk.SetProfileBlockedPosts(ctx, owner, []string{"txhash1"})
-	_ = mk.SetProfileBlockedTopics(ctx, owner, []string{"btopic1"})
+	// Populate all profile list KV entries using per-entry methods
+	_ = mk.ReplaceAllEnabledAgents(ctx, owner, []string{"agent1", "agent2"})
+	_, _ = mk.AddFollowedUser(ctx, owner, "user1")
+	_, _ = mk.AddFollowedTopic(ctx, owner, "topic1")
+	_, _ = mk.AddBlockedUserDeque(ctx, owner, "blocked1", 0)
+	_, _ = mk.AddBlockedPostDeque(ctx, owner, "txhash1", 0)
+	_, _ = mk.AddBlockedTopicDeque(ctx, owner, "btopic1", 0)
 
 	req := &types.MsgDeleteUser{
 		Authority:      testAccAddressString(),
@@ -357,22 +357,22 @@ func TestDeleteUserCleansUpAllProfileLists(t *testing.T) {
 	}()
 
 	// All lists should be cleaned up
-	mods, _ := mk.GetProfileFollowedMods(ctx, owner)
-	require.Empty(t, mods, "followed mods should be empty")
+	agents, _ := mk.ListEnabledAgentsOrdered(ctx, owner)
+	require.Empty(t, agents, "enabled agents should be empty")
 
-	users, _ := mk.GetProfileFollowedUsers(ctx, owner)
+	users, _ := mk.ListFollowedUsers(ctx, owner)
 	require.Empty(t, users, "followed users should be empty")
 
-	topics, _ := mk.GetProfileFollowedTopics(ctx, owner)
+	topics, _ := mk.ListFollowedTopics(ctx, owner)
 	require.Empty(t, topics, "followed topics should be empty")
 
-	blockedUsers, _ := mk.GetProfileBlockedUsers(ctx, owner)
+	blockedUsers, _ := mk.ListBlockedUsers(ctx, owner)
 	require.Empty(t, blockedUsers, "blocked users should be empty")
 
-	blockedPosts, _ := mk.GetProfileBlockedPosts(ctx, owner)
+	blockedPosts, _ := mk.ListBlockedPosts(ctx, owner)
 	require.Empty(t, blockedPosts, "blocked posts should be empty")
 
-	blockedTopics, _ := mk.GetProfileBlockedTopics(ctx, owner)
+	blockedTopics, _ := mk.ListBlockedTopics(ctx, owner)
 	require.Empty(t, blockedTopics, "blocked topics should be empty")
 }
 
@@ -433,7 +433,7 @@ func TestDeleteUserTargetNormalization(t *testing.T) {
 	require.False(t, found, "profile should be deleted with trimmed target")
 }
 
-func TestDeleteUserWithoutUsername(t *testing.T) {
+func TestDeleteUserWithoutUsernameRejected(t *testing.T) {
 	mk := newMockKeeper()
 	ctx := newMockContext().WithLogger(log.NewNopLogger())
 	am := newTestModule(mk)
@@ -451,12 +451,35 @@ func TestDeleteUserWithoutUsername(t *testing.T) {
 		Target:         owner,
 	}
 
-	// Should not panic on the ReleaseUsername path when username is empty
-	func() {
-		defer func() { recover() }()
-		_, _ = am.DeleteUser(ctx, req)
-	}()
+	_, err := am.DeleteUser(ctx, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
 
+	// Profile should remain since self-delete was rejected
 	_, found, _ := mk.GetProfileCore(ctx, owner)
-	require.False(t, found, "profile without username should still be deletable")
+	require.True(t, found, "profile should still exist when self-delete is rejected for missing username")
+}
+
+func TestDeleteUserGovernanceWithoutUsernameRejected(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext().WithLogger(log.NewNopLogger())
+	am := newTestModule(mk)
+	govAddr := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+
+	targetAddr := testAccAddressString()
+	core := types.ProfileCore{Owner: targetAddr, Username: "", Level: 1}
+	bz, _ := json.Marshal(core)
+	_ = mk.SetProfileCore(ctx, targetAddr, bz)
+
+	req := &types.MsgDeleteUser{
+		Authority: govAddr,
+		Target:    targetAddr,
+	}
+
+	_, err := am.DeleteUser(ctx, req)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "username required")
+
+	_, found, _ := mk.GetProfileCore(ctx, targetAddr)
+	require.True(t, found, "profile should remain when governance delete is rejected for missing username")
 }

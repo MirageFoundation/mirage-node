@@ -152,7 +152,7 @@ function ChangeUsernameView({ state }) {
     const [submitting, setSubmitting] = useState(false);
     const [buttonStatus, setButtonStatus] = useState("idle");
     const [statusStartTime, setStatusStartTime] = useState(null);
-    const [elapsedTime, setElapsedTime] = useState(0);
+    const [, setElapsedTime] = useState(0);
     const [submitError, setSubmitError] = useState("");
     const [cooldownUntil, setCooldownUntil] = useState(0);
     const [userLevel, setUserLevel] = useState(null);
@@ -403,15 +403,11 @@ function ChangeUsernameView({ state }) {
                                                     fullWidth
                                                     loading={submitting}
                                                 >
-                                                    {userLevel >= 1
-                                                        ? (buttonStatus === "verifying" ? 'Verifying...' :
-                                                            buttonStatus === "submitting" || buttonStatus === "preparing" || buttonStatus === "checking" ? 'Submitting...' :
-                                                                'Change Username')
-                                                        : (buttonStatus === "checking" ? `Checking... (${elapsedTime.toFixed(1)}s)` :
-                                                            buttonStatus === "preparing" ? `Preparing... (${elapsedTime.toFixed(1)}s)` :
-                                                                buttonStatus === "submitting" ? `Submitting... (${elapsedTime.toFixed(1)}s)` :
-                                                                    buttonStatus === "verifying" ? `Verifying... (${elapsedTime.toFixed(1)}s)` :
-                                                                        'Change Username')}
+                                                    {buttonStatus === "checking" ? 'Checking...' :
+                                                        buttonStatus === "preparing" ? 'Preparing...' :
+                                                            buttonStatus === "submitting" ? 'Submitting...' :
+                                                                buttonStatus === "verifying" ? 'Verifying...' :
+                                                                    'Change Username'}
                                                 </Button>
                                             </ButtonWrapper>
 

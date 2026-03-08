@@ -15,7 +15,7 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 	msgTypes := []sdk.Msg{
 		&MsgUpdateParams{},
 		&MsgPost{}, &MsgEdit{}, &MsgVote{}, &MsgSetUsername{},
-		&MsgFollowModerator{}, &MsgUnfollowModerator{},
+		&MsgEnableAgent{}, &MsgDisableAgent{}, &MsgSetAgents{},
 		&MsgFollowUser{}, &MsgUnfollowUser{},
 		&MsgFollowTopic{}, &MsgUnfollowTopic{},
 		&MsgBlockPost{}, &MsgUnblockPost{},
@@ -30,13 +30,17 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMinted{},
 		// Award
 		&MsgAward{},
+		// Profile
+		&MsgSetBiography{},
+		// Agent overlays
+		&MsgAnnotate{},
 	}
 	registry.RegisterImplementations((*sdk.Msg)(nil), msgTypes...)
 
 	msgResponseTypes := []proto.Message{
 		&MsgUpdateParamsResponse{},
 		&MsgPostResponse{}, &MsgEditResponse{}, &MsgVoteResponse{}, &MsgSetUsernameResponse{},
-		&MsgFollowModeratorResponse{}, &MsgUnfollowModeratorResponse{},
+		&MsgEnableAgentResponse{}, &MsgDisableAgentResponse{}, &MsgSetAgentsResponse{},
 		&MsgFollowUserResponse{}, &MsgUnfollowUserResponse{},
 		&MsgFollowTopicResponse{}, &MsgUnfollowTopicResponse{},
 		&MsgBlockPostResponse{}, &MsgUnblockPostResponse{},
@@ -51,11 +55,15 @@ func RegisterInterfaces(registry codectypes.InterfaceRegistry) {
 		&MsgBridgeAttestMintedResponse{},
 		// Award
 		&MsgAwardResponse{},
+		// Profile
+		&MsgSetBiographyResponse{},
+		// Agent overlays
+		&MsgAnnotateResponse{},
 	}
 	registry.RegisterImplementations((*tx.MsgResponse)(nil), msgResponseTypes...)
 
-	// Register legacy message types for backwards compatibility (decoding old gov proposals)
-	// MsgMintTo was renamed to MsgMintTokens - we need to decode old proposals that used it
+	// Register legacy message types for backwards compatibility (decoding old transactions)
 	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgMintTo{})
+	registry.RegisterImplementations((*sdk.Msg)(nil), &MsgFollowModerator{}, &MsgUnfollowModerator{})
 	log.Printf("core/types: registered msg interfaces (msgs=%d responses=%d)", len(msgTypes), len(msgResponseTypes))
 }
