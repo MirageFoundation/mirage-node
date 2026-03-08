@@ -463,7 +463,6 @@ const LivePreviewContainer = styled.div`
 	border-radius: 6px;
 	font-size: 0.85rem;
 	color: ${({ theme }) => theme?.colors?.text || "#ccc"};
-	max-height: 200px;
 	overflow-y: auto;
 	opacity: ${({ $visible }) => ($visible ? 1 : 0)};
 	transform: translateY(${({ $visible }) => ($visible ? "0" : "-4px")});
