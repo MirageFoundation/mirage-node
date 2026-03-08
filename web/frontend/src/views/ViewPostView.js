@@ -4153,11 +4153,11 @@ function ViewPostView({ state, updatePost }) {
                                                                     to={`/u/${label}`}
                                                                     style={{
                                                                         textDecoration: 'underline',
-                                                                        fontSize: '0.75rem',
+                                                                        fontSize: '0.6rem',
                                                                         color: theme.colors?.textMuted || theme.colors?.textSecondary || '#888',
                                                                     }}
                                                                 >@{label}</Link>
-                                                                <span style={{ color: theme.colors?.textMuted || '#888', fontSize: '0.75rem' }}>:</span>
+                                                                <span style={{ color: theme.colors?.textMuted || '#888', fontSize: '0.6rem' }}>:</span>
                                                             </div>
                                                             <div style={{
                                                                 padding: '0.4rem 0.65rem',
