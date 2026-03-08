@@ -525,6 +525,12 @@ def main():
         args.remove("--no-confirm")
         no_confirm = True
 
+    # Safety: --no-confirm must never be used with remote mode
+    remaining_mode = next((a for a in args if a.lower() in ("local", "remote")), None)
+    if no_confirm and remaining_mode and remaining_mode.lower() == "remote":
+        print("ERROR: --no-confirm is not allowed for remote mode", file=sys.stderr)
+        return 1
+
     if len(args) < 2:
         print("Usage: python3 submit_proposal.py <local|remote> <proposal_file_or_name> [--dry-run]")
         print("\nAvailable proposals:")
