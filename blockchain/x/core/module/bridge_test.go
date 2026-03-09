@@ -101,8 +101,8 @@ func newSortedMockIterator(data map[string][]byte, start, end []byte, reverse bo
 }
 
 func (it *sortedMockIterator) Domain() ([]byte, []byte) { return it.start, it.end }
-func (it *sortedMockIterator) Valid() bool               { return it.pos < len(it.keys) }
-func (it *sortedMockIterator) Next()                     { it.pos++ }
+func (it *sortedMockIterator) Valid() bool              { return it.pos < len(it.keys) }
+func (it *sortedMockIterator) Next()                    { it.pos++ }
 func (it *sortedMockIterator) Key() []byte {
 	if it.pos < len(it.keys) {
 		return []byte(it.keys[it.pos])
@@ -1066,6 +1066,37 @@ func TestBridgeAttestationStorage(t *testing.T) {
 	}
 	if !hasAttestor {
 		t.Error("Expected validator1 to have attested")
+	}
+
+	attestors, err := mk.GetBridgeAttestorList(ctx, sourceChain, burnID, "mirage1recipient", 1000000)
+	if err != nil {
+		t.Fatalf("GetBridgeAttestorList error: %v", err)
+	}
+	if len(attestors) != 1 || attestors[0] != "validator1" {
+		t.Errorf("Attestors = %v, want [validator1]", attestors)
+	}
+}
+
+// TestBridgeAttestationAmbiguous ensures multiple attestations for same burn_id fail fast.
+func TestBridgeAttestationAmbiguous(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	sourceChain := "solana"
+	burnID := "12345"
+
+	a1 := types.NewBridgeAttestation(sourceChain, burnID, "mirage1alice", 111, 100)
+	if err := mk.SetBridgeAttestation(ctx, a1); err != nil {
+		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+	a2 := types.NewBridgeAttestation(sourceChain, burnID, "mirage1bob", 222, 100)
+	if err := mk.SetBridgeAttestation(ctx, a2); err != nil {
+		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+
+	_, _, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err == nil {
+		t.Fatal("Expected error for ambiguous attestation lookup")
 	}
 }
 

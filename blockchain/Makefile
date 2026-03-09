@@ -77,7 +77,12 @@ build-convert-db:
 	@mkdir -p ./bin
 	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/convert-db ./cmd/convert-db
 
-build-all: test-fast build build-orchestrator build-convert-db
+build-compact-db:
+	@echo "--> building compact-db"
+	@mkdir -p ./bin
+	@go build $(BUILD_FLAGS) -mod=readonly -o ./bin/compact-db ./cmd/compact-db
+
+build-all: test-fast build build-orchestrator build-convert-db build-compact-db
 
 # Build a specific version for upgrades (version embedded via ldflags; binary is always miraged)
 build-version:
@@ -87,7 +92,7 @@ build-version:
 	@VERSION=$(V) go build $(BUILD_FLAGS) -mod=readonly -o ./bin/$(APPNAME)d ./cmd/$(APPNAME)d
 	@echo "--> Binary created: ./bin/$(APPNAME)d"
 
-.PHONY: all install build build-version build-orchestrator build-convert-db build-all
+.PHONY: all install build build-version build-orchestrator build-convert-db build-compact-db build-all
 
 ##################
 ###  Protobuf  ###

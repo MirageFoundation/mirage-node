@@ -1639,11 +1639,9 @@ func (app *App) RegisterUpgradeHandlers() {
 					// Admins: clear any ghost reserve but don't touch level
 					if reserveFunds > 0 && subExpiry <= currentTime {
 						if err := app.CoreKeeper.BurnFromModuleAmount(sdkCtx, reserveFunds); err != nil {
-							sdkCtx.Logger().Warn("v1.17.0: failed to burn admin ghost reserve",
-								"owner", owner, "reserve", reserveFunds, "err", err)
-						} else {
-							ghostReservesBurned += reserveFunds
+							return nil, fmt.Errorf("v1.17.0: failed to burn admin ghost reserve for %s: %w", owner, err)
 						}
+						ghostReservesBurned += reserveFunds
 						m["reserve_funds"] = 0
 						newBz, err := json.Marshal(m)
 						if err != nil {
@@ -1663,11 +1661,9 @@ func (app *App) RegisterUpgradeHandlers() {
 				// Ghost reserve: subscription expired but reserve_funds > 0
 				if reserveFunds > 0 && subExpiry > 0 && subExpiry <= currentTime {
 					if err := app.CoreKeeper.BurnFromModuleAmount(sdkCtx, reserveFunds); err != nil {
-						sdkCtx.Logger().Warn("v1.17.0: failed to burn ghost reserve",
-							"owner", owner, "reserve", reserveFunds, "err", err)
-					} else {
-						ghostReservesBurned += reserveFunds
+						return nil, fmt.Errorf("v1.17.0: failed to burn ghost reserve for %s: %w", owner, err)
 					}
+					ghostReservesBurned += reserveFunds
 					m["reserve_funds"] = 0
 					changed = true
 					sdkCtx.Logger().Info("v1.17.0: burned ghost reserve", "owner", owner, "reserve", reserveFunds)
@@ -1755,6 +1751,14 @@ func (app *App) RegisterUpgradeHandlers() {
 				}
 			}
 			sdkCtx.Logger().Info("v1.17.0: reindexed active subscriptions", "count", reindexed)
+
+			attestationsMoved, attestorsMoved, err := app.CoreKeeper.MigrateBridgeAttestationParams(sdkCtx)
+			if err != nil {
+				return nil, fmt.Errorf("v1.17.0: bridge attestation migration failed: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.17.0: bridge attestation keys migrated",
+				"attestations_moved", attestationsMoved,
+				"attestors_moved", attestorsMoved)
 
 			_ = store // used above
 

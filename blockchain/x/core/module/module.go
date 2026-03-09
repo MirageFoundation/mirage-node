@@ -1047,6 +1047,111 @@ func (am AppModule) GetProfiles(ctx context.Context, req *types.QueryProfilesReq
 	}, nil
 }
 
+func applyParamUpdates(current types.Params, updates types.Params) (types.Params, []string) {
+	var changed []string
+	if updates.MintInterval != 0 {
+		current.MintInterval = updates.MintInterval
+		changed = append(changed, "mint_interval")
+	}
+	if updates.MintQuantity != 0 {
+		current.MintQuantity = updates.MintQuantity
+		changed = append(changed, "mint_quantity")
+	}
+	if updates.MintDynamicCreditCap != 0 {
+		current.MintDynamicCreditCap = updates.MintDynamicCreditCap
+		changed = append(changed, "mint_dynamic_credit_cap")
+	}
+	if updates.MintDynamicSplit != 0 {
+		current.MintDynamicSplit = updates.MintDynamicSplit
+		changed = append(changed, "mint_dynamic_split")
+	}
+	if updates.MinDifficulty != 0 {
+		current.MinDifficulty = updates.MinDifficulty
+		changed = append(changed, "min_difficulty")
+	}
+	if updates.PowMessageWindow != 0 {
+		current.PowMessageWindow = updates.PowMessageWindow
+		changed = append(changed, "pow_message_window")
+	}
+	if updates.PowMessageLimit != 0 {
+		current.PowMessageLimit = updates.PowMessageLimit
+		changed = append(changed, "pow_message_limit")
+	}
+	if updates.PowCalmPeriodDefinition != 0 {
+		current.PowCalmPeriodDefinition = updates.PowCalmPeriodDefinition
+		changed = append(changed, "pow_calm_period_definition")
+	}
+	if updates.PowCalmSequenceThreshold != 0 {
+		current.PowCalmSequenceThreshold = updates.PowCalmSequenceThreshold
+		changed = append(changed, "pow_calm_sequence_threshold")
+	}
+	if updates.PowDifficultyAllowance != 0 {
+		current.PowDifficultyAllowance = updates.PowDifficultyAllowance
+		changed = append(changed, "pow_difficulty_allowance")
+	}
+	if updates.PowDifficultyStep != 0 {
+		current.PowDifficultyStep = updates.PowDifficultyStep
+		changed = append(changed, "pow_difficulty_step")
+	}
+	if updates.BlockHashWindow != 0 {
+		current.BlockHashWindow = updates.BlockHashWindow
+		changed = append(changed, "block_hash_window")
+	}
+	if updates.MinUsernameSize != 0 {
+		current.MinUsernameSize = updates.MinUsernameSize
+		changed = append(changed, "min_username_size")
+	}
+	if updates.MaxUsernameSize != 0 {
+		current.MaxUsernameSize = updates.MaxUsernameSize
+		changed = append(changed, "max_username_size")
+	}
+	if updates.MinTopicSize != 0 {
+		current.MinTopicSize = updates.MinTopicSize
+		changed = append(changed, "min_topic_size")
+	}
+	if updates.MaxTopicSize != 0 {
+		current.MaxTopicSize = updates.MaxTopicSize
+		changed = append(changed, "max_topic_size")
+	}
+	if updates.SubscriptionPeriod != 0 {
+		current.SubscriptionPeriod = updates.SubscriptionPeriod
+		changed = append(changed, "subscription_period")
+	}
+	if updates.SubscriptionReservePercent != 0 {
+		current.SubscriptionReservePercent = updates.SubscriptionReservePercent
+		changed = append(changed, "subscription_reserve_percent")
+	}
+	if len(updates.Tiers) != 0 {
+		current.Tiers = updates.Tiers
+		changed = append(changed, "tiers")
+	}
+	if updates.RelayMinGasPrice != 0 {
+		current.RelayMinGasPrice = updates.RelayMinGasPrice
+		changed = append(changed, "relay_min_gas_price")
+	}
+	if updates.RelayMaxGasFee != 0 {
+		current.RelayMaxGasFee = updates.RelayMaxGasFee
+		changed = append(changed, "relay_max_gas_fee")
+	}
+	if updates.MaxEnvelopeAge != 0 {
+		current.MaxEnvelopeAge = updates.MaxEnvelopeAge
+		changed = append(changed, "max_envelope_age")
+	}
+	if len(updates.BridgeChains) != 0 {
+		current.BridgeChains = updates.BridgeChains
+		changed = append(changed, "bridge_chains")
+	}
+	if updates.BridgeAttestationThreshold != 0 {
+		current.BridgeAttestationThreshold = updates.BridgeAttestationThreshold
+		changed = append(changed, "bridge_attestation_threshold")
+	}
+	if len(updates.AwardConfigs) != 0 {
+		current.AwardConfigs = updates.AwardConfigs
+		changed = append(changed, "award_configs")
+	}
+	return current, changed
+}
+
 // UpdateParams stores new params
 func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams) (*types.MsgUpdateParamsResponse, error) {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
@@ -1055,16 +1160,16 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if strings.TrimSpace(req.GetAuthority()) != govAuthority {
 		return nil, fmt.Errorf("unauthorized: only governance authority can update params")
 	}
-	// Full replace: governance must supply a complete, valid Params object.
-	// This prevents the old partial-update pitfall where zero-valued fields
-	// were silently ignored, making it impossible to explicitly set a param to 0.
-	p := req.Params
-	if err := p.Validate(); err != nil {
+
+	current := am.k.GetParams(sdkCtx)
+	updated, changed := applyParamUpdates(current, req.Params)
+	if err := updated.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if err := am.k.SetParams(sdkCtx, p); err != nil {
+	if err := am.k.SetParams(sdkCtx, updated); err != nil {
 		return nil, err
 	}
+	sdkCtx.Logger().Debug("UpdateParams applied", "fields", strings.Join(changed, ","))
 	return &types.MsgUpdateParamsResponse{}, nil
 }
 
@@ -3337,7 +3442,7 @@ func (am AppModule) GetBridgeAttestation(ctx context.Context, req *types.QueryBr
 	totalPower, _ := am.k.GetTotalBondedValidatorPower(sdkCtx)
 	requiredPower := types.RequiredPower(totalPower, params.BridgeAttestationThreshold)
 
-	attestors, err := am.k.GetBridgeAttestorList(sdkCtx, sourceChain, burnID)
+	attestors, err := am.k.GetBridgeAttestorList(sdkCtx, sourceChain, burnID, attestation.MirageRecipient, attestation.Amount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load attestors: %w", err)
 	}

@@ -35,8 +35,6 @@ import (
 type PowDecorator struct {
 	// Window is how many recent committed block hashes to accept (from params)
 	Window uint32
-	// DefaultDifficulty is the fallback difficulty from params
-	DefaultDifficulty uint64
 	// MinFee, when provided in the tx fee with same denom and amount >=, skips PoW entirely
 	MinFee sdk.Coin
 	// Keeper provides access to dynamic difficulty and params
@@ -211,7 +209,6 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 	window := uint32(params.BlockHashWindow)
 	d.mu.Lock()
 	d.Window = window
-	d.DefaultDifficulty = d.Keeper.GetCurrentDifficulty(ctx)
 	d.mu.Unlock()
 
 	// derive last committed block id hash from header and remember it
