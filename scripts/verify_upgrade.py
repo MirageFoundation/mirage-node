@@ -211,16 +211,16 @@ def check_node_reachable() -> bool:
     return True
 
 
+def _extract_semver(s: str) -> str:
+    """Extract the semver portion, stripping leading 'v' and any suffix after patch."""
+    import re
+    m = re.search(r"v?(\d+\.\d+\.\d+)", s)
+    return m.group(1) if m else s
+
 def _version_matches(actual: str, upgrade_name: str) -> bool:
     if not actual or not upgrade_name:
         return False
-    if upgrade_name in actual:
-        return True
-    if upgrade_name.startswith("v") and upgrade_name[1:] in actual:
-        return True
-    if not upgrade_name.startswith("v") and f"v{upgrade_name}" in actual:
-        return True
-    return False
+    return _extract_semver(actual) == _extract_semver(upgrade_name)
 
 
 def check_software_version(upgrade_name: str) -> None:
