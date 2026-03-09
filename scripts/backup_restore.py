@@ -281,6 +281,7 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
     run(f"ssh {conn} 'echo \"{image}\" > ~/.mirage/docker_image'")
 
     # Step 1: Stop application services (but keep container running for pg_dump)
+    # SIGTERM first so PebbleDB flushes WAL/manifest cleanly, then SIGKILL stragglers.
     status("Stopping application services...")
     run_ssh(
         conn,
@@ -289,7 +290,11 @@ def backup(source_host: str, ssh_user: str = SSH_USER) -> Path:
         docker exec mirage tmux send-keys -t mirage:indexer C-c 2>/dev/null || true
         docker exec mirage tmux send-keys -t mirage:backend C-c 2>/dev/null || true
         docker exec mirage tmux send-keys -t mirage:orchestrator C-c 2>/dev/null || true
-        sleep 3
+        sleep 5
+        docker exec mirage pkill -f miraged 2>/dev/null || true
+        docker exec mirage pkill -f gunicorn 2>/dev/null || true
+        docker exec mirage pkill -f orchestrator 2>/dev/null || true
+        sleep 5
         docker exec mirage pkill -9 -f miraged 2>/dev/null || true
         docker exec mirage pkill -9 -f gunicorn 2>/dev/null || true
         docker exec mirage pkill -9 -f orchestrator 2>/dev/null || true

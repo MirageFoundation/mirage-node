@@ -332,25 +332,17 @@ def extract_backup(backup_tar: Path) -> tuple[Path, str, Path]:
     return extract_dir, image_ref, backup_root
 
 
-def _convert_pebbledb_to_goleveldb(backup_root: Path) -> None:
-    """Convert application.db from PebbleDB to GoLevelDB if needed.
+def _clean_snapshots(backup_root: Path) -> None:
+    """Remove state sync snapshots from backup data before export.
 
-    Older miraged binaries have a bug where the export command doesn't load
-    app.toml, so they default to GoLevelDB regardless of config. This converts
-    the database so the image binary can open it.
+    The export command doesn't need snapshots, and pruned snapshot directories
+    often have stale metadata referencing chunk files that no longer exist,
+    which causes PebbleDB objstorage errors during export.
     """
-    convert_db = ROOT / "blockchain" / "bin" / "convert-db"
-    if not convert_db.exists():
-        status("Building convert-db tool...")
-        run(["make", "build-convert-db"], cwd=str(ROOT / "blockchain"))
-
-    app_db = backup_root / "node" / "data" / "application.db"
-    options_files = list(app_db.glob("OPTIONS-*")) if app_db.exists() else []
-    if not options_files:
-        return  # GoLevelDB doesn't have OPTIONS files, no conversion needed
-
-    status("Converting application.db PebbleDB → GoLevelDB for export compatibility...")
-    run([str(convert_db), "--reverse", str(backup_root / "node" / "data"), "application"])
+    snapshots_dir = backup_root / "node" / "data" / "snapshots"
+    if snapshots_dir.exists():
+        status("Removing snapshots directory (not needed for export)...")
+        shutil.rmtree(snapshots_dir)
 
 
 def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
@@ -359,7 +351,7 @@ def run_export_from_backup(backup_root: Path, image_ref: str) -> Path:
     if export_path.exists():
         export_path.unlink()
 
-    _convert_pebbledb_to_goleveldb(backup_root)
+    _clean_snapshots(backup_root)
 
     status("Running export in isolated container (skip entrypoint)...")
     export_cmd = (
@@ -696,9 +688,6 @@ for row in profiles_data:
     bio = row.get("biography") or ""
     avatar = row.get("avatar") or ""
     owner_key = owner.lower()
-    # Build InitialProfile format with nested core.
-    # Use old field name (followed_moderators) for compatibility with pre-v1.16 binaries.
-    # The upgrade handler will migrate to the new schema.
     profiles.append({
         "core": {
             "owner": owner,
@@ -707,7 +696,7 @@ for row in profiles_data:
             "biography": bio,
             "avatar": avatar,
         },
-        "followed_moderators": agents_map.get(owner_key, []),
+        "enabled_agents": agents_map.get(owner_key, []),
     })
 
 print(json.dumps(profiles))

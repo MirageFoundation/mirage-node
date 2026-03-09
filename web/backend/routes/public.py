@@ -2657,8 +2657,34 @@ def get_agents():
             cur = conn.cursor()
             cur.execute(
                 """
-                SELECT p.owner, p.username, p.biography, p.avatar
+                SELECT p.owner, p.username, p.biography, p.avatar,
+                       GREATEST(
+                           COALESCE(ae.last_edit, 0),
+                           COALESCE(bp.last_block, 0),
+                           COALESCE(bu.last_block, 0),
+                           COALESCE(bt.last_block, 0)
+                       ) AS last_active
                 FROM profiles p
+                LEFT JOIN (
+                    SELECT agent_address, MAX(edited_at) AS last_edit
+                    FROM agent_edits
+                    GROUP BY agent_address
+                ) ae ON LOWER(ae.agent_address) = LOWER(p.owner)
+                LEFT JOIN (
+                    SELECT owner, MAX(blocked_at) AS last_block
+                    FROM blocked_posts
+                    GROUP BY owner
+                ) bp ON LOWER(bp.owner) = LOWER(p.owner)
+                LEFT JOIN (
+                    SELECT owner, MAX(blocked_at) AS last_block
+                    FROM blocked_users
+                    GROUP BY owner
+                ) bu ON LOWER(bu.owner) = LOWER(p.owner)
+                LEFT JOIN (
+                    SELECT owner, MAX(blocked_at) AS last_block
+                    FROM blocked_topics
+                    GROUP BY owner
+                ) bt ON LOWER(bt.owner) = LOWER(p.owner)
                 WHERE p.level = 10
                   AND p.subscription_expiry > %s
                   AND p.deleted_at IS NULL
@@ -2676,6 +2702,7 @@ def get_agents():
                 "username": row[1] or "",
                 "biography": row[2] or "",
                 "avatar": row[3] or "",
+                "last_active": row[4] if row[4] and row[4] > 0 else None,
             }
             for row in rows
         ]
