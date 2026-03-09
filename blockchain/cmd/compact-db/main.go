@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,16 +10,8 @@ import (
 	"github.com/cockroachdb/pebble"
 )
 
-// maxCompactKey is a key guaranteed to be >= any real key in the database.
-var maxCompactKey = bytes16FF()
-
-func bytes16FF() []byte {
-	b := make([]byte, 16)
-	for i := range b {
-		b[i] = 0xff
-	}
-	return b
-}
+// maxCompactKey is a high key used as an upper bound for full compaction.
+var maxCompactKey = bytes.Repeat([]byte{0xff}, 1024)
 
 func main() {
 	if len(os.Args) < 3 {
