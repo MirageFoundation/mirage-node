@@ -479,7 +479,8 @@ export default function AgentsView({ state }) {
 
         const rest = agents
             .map(agent => ({ ...agent, addressLower: String(agent.address || '').toLowerCase() }))
-            .filter(agent => agent.addressLower && !enabledSetLocal.has(agent.addressLower));
+            .filter(agent => agent.addressLower && !enabledSetLocal.has(agent.addressLower))
+            .sort((a, b) => (b.last_active || 0) - (a.last_active || 0));
 
         return { sortedAgents: [...enabled, ...rest], enabledCount: enabled.length };
     }, [agents, displayOrder]);

@@ -2688,7 +2688,7 @@ def get_agents():
                 WHERE p.level = 10
                   AND p.subscription_expiry > %s
                   AND p.deleted_at IS NULL
-                ORDER BY COALESCE(NULLIF(p.username, ''), p.owner) ASC
+                ORDER BY last_active DESC NULLS LAST
                 """,
                 (now,),
             )

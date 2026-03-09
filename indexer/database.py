@@ -2027,10 +2027,15 @@ class DatabaseManager:
                 return int(cur.rowcount or 0)
 
     def delete_post(self, target: str, owner: str | None = None) -> int:
-        """Delete a post. If owner is None, admin delete."""
+        """Delete a post and cascade to all descendants.
+
+        When a comment is deleted, its entire subtree becomes orphaned
+        (unreachable via the recursive parent->child walk used in the
+        comment-tree endpoint).  To keep the flat root_post_id-based
+        counts in the feed consistent, we soft-delete descendants too.
+        """
         with self._connect() as conn:
             with conn.cursor() as cur:
-                # Fetch parent and current subtree size before deleting
                 cur.execute(
                     "SELECT target, comment_count, deleted FROM posts WHERE LOWER(txhash) = LOWER(%s)",
                     (target,),
@@ -2055,10 +2060,29 @@ class DatabaseManager:
                         (target, owner),
                     )
                 deleted_count = cur.rowcount
-                # Decrement comment_count for all ancestors if post was deleted
-                if deleted_count > 0 and parent_id:
-                    # Remove this post + its descendants from ancestor counts
-                    self._update_ancestor_comment_counts(cur, parent_id, delta=-(1 + subtree_count))
+
+                if deleted_count > 0:
+                    # Cascade soft-delete to all descendants so orphaned
+                    # children don't inflate the flat comment count in feeds.
+                    cur.execute(
+                        """
+                        WITH RECURSIVE descendants(tx) AS (
+                            SELECT txhash FROM posts
+                            WHERE LOWER(target) = LOWER(%s) AND deleted = FALSE
+                            UNION ALL
+                            SELECT p.txhash FROM posts p
+                            JOIN descendants d ON LOWER(p.target) = LOWER(d.tx)
+                            WHERE p.deleted = FALSE
+                        )
+                        UPDATE posts SET deleted = TRUE
+                        WHERE txhash IN (SELECT tx FROM descendants)
+                          AND deleted = FALSE
+                        """,
+                        (target,),
+                    )
+
+                    if parent_id:
+                        self._update_ancestor_comment_counts(cur, parent_id, delta=-(1 + subtree_count))
                 return deleted_count
 
     def increment_ancestor_comment_counts(self, target_post_id: str) -> None:
