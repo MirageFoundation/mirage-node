@@ -622,3 +622,79 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestBurnParamsHash(t *testing.T) {
+	h1 := BurnParamsHash("mirage1abc", 1000)
+	h2 := BurnParamsHash("mirage1abc", 1000)
+	h3 := BurnParamsHash("mirage1abc", 2000)
+	h4 := BurnParamsHash("mirage1xyz", 1000)
+
+	if h1 != h2 {
+		t.Error("same params should produce same hash")
+	}
+	if h1 == h3 {
+		t.Error("different amounts should produce different hash")
+	}
+	if h1 == h4 {
+		t.Error("different recipients should produce different hash")
+	}
+	if len(h1) != 16 {
+		t.Errorf("hash should be 16 hex chars (8 bytes), got %d", len(h1))
+	}
+}
+
+func TestBridgeAttestationKeyWithParams(t *testing.T) {
+	key1 := BridgeAttestationKeyWithParams("solana", "42", "mirage1abc", 1000)
+	key2 := BridgeAttestationKeyWithParams("solana", "42", "mirage1abc", 1000)
+	key3 := BridgeAttestationKeyWithParams("solana", "42", "mirage1xyz", 1000)
+
+	if !bytes.Equal(key1, key2) {
+		t.Error("same params should produce same key")
+	}
+	if bytes.Equal(key1, key3) {
+		t.Error("different recipients should produce different keys (anti-poisoning)")
+	}
+
+	legacy := BridgeAttestationKey("solana", "42")
+	if bytes.Equal(key1, legacy) {
+		t.Error("parameterized key must differ from legacy key")
+	}
+}
+
+func TestMeetsThresholdIntegerMath(t *testing.T) {
+	att := &BridgeAttestation{AttestedPower: 6667}
+	if !att.MeetsThreshold(10000, 0.6667) {
+		t.Error("6667/10000 should meet 66.67% threshold")
+	}
+
+	att2 := &BridgeAttestation{AttestedPower: 6666}
+	if att2.MeetsThreshold(10000, 0.6667) {
+		t.Error("6666/10000 should NOT meet 66.67% threshold with ceiling division")
+	}
+
+	// Edge case: very small power, ceiling should round up
+	att3 := &BridgeAttestation{AttestedPower: 1}
+	if att3.MeetsThreshold(3, 0.3334) {
+		t.Error("1/3 at 33.34% should NOT meet threshold (required=ceil(3*3334/10000)=2)")
+	}
+
+	// Zero total power
+	att4 := &BridgeAttestation{AttestedPower: 100}
+	if att4.MeetsThreshold(0, 0.5) {
+		t.Error("zero total power should never meet threshold")
+	}
+}
+
+func TestRequiredPowerCeiling(t *testing.T) {
+	// With ceiling division: (3 * 6667 + 9999) / 10000 = 30000/10000 = 3
+	r := RequiredPower(3, 0.6667)
+	if r != 3 {
+		t.Errorf("RequiredPower(3, 0.6667) = %d, want 3", r)
+	}
+
+	// (1 * 6667 + 9999) / 10000 = 16666/10000 = 1
+	r2 := RequiredPower(1, 0.6667)
+	if r2 != 1 {
+		t.Errorf("RequiredPower(1, 0.6667) = %d, want 1", r2)
+	}
+}

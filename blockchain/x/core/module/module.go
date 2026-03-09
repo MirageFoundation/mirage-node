@@ -391,11 +391,10 @@ func (am AppModule) deductRelayGasFee(ctx sdk.Context, owner string, userLevel i
 	// Save updated profile
 	newBz, err := json.Marshal(core)
 	if err != nil {
-		ctx.Logger().Warn("deductRelayGasFee: failed to marshal profile", "owner", owner, "err", err)
-		return nil
+		return fmt.Errorf("deductRelayGasFee: failed to marshal profile for %s: %w", owner, err)
 	}
 	if err := am.k.SetProfileCore(ctx, owner, newBz); err != nil {
-		ctx.Logger().Warn("deductRelayGasFee: failed to save profile", "owner", owner, "err", err)
+		return fmt.Errorf("deductRelayGasFee: failed to save profile for %s: %w", owner, err)
 	}
 	return nil
 }
@@ -757,9 +756,10 @@ func (am AppModule) processSubscriptions(sdkCtx sdk.Context, params types.Params
 			core.ReserveFunds = 0
 		}
 
-		// Get tier config for current level
-		if core.Level <= 0 || int(core.Level) >= len(params.Tiers) {
-			// Already free tier or invalid, nothing to renew
+		// Get tier config for current level using canonical level→tier mapping
+		tierIdx := types.LevelToTierIndex(int(core.Level))
+		if tierIdx <= 0 {
+			// Free tier (0) or invalid level (-1) — nothing to renew
 			continue
 		}
 
@@ -1055,100 +1055,14 @@ func (am AppModule) UpdateParams(ctx context.Context, req *types.MsgUpdateParams
 	if strings.TrimSpace(req.GetAuthority()) != govAuthority {
 		return nil, fmt.Errorf("unauthorized: only governance authority can update params")
 	}
-	// Support partial updates: overlay non-zero fields onto current params
-	cur := am.k.GetParams(sdkCtx)
+	// Full replace: governance must supply a complete, valid Params object.
+	// This prevents the old partial-update pitfall where zero-valued fields
+	// were silently ignored, making it impossible to explicitly set a param to 0.
 	p := req.Params
-	// Minting
-	if p.MintInterval != 0 {
-		cur.MintInterval = p.MintInterval
+	if err := p.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
 	}
-	if p.MintQuantity != 0 {
-		cur.MintQuantity = p.MintQuantity
-	}
-	if p.MintDynamicCreditCap != 0 {
-		cur.MintDynamicCreditCap = p.MintDynamicCreditCap
-	}
-	if p.MintDynamicSplit != 0 {
-		cur.MintDynamicSplit = p.MintDynamicSplit
-	}
-	// PoW
-	if p.MinDifficulty != 0 {
-		cur.MinDifficulty = p.MinDifficulty
-	}
-	if p.PowMessageWindow != 0 {
-		cur.PowMessageWindow = p.PowMessageWindow
-	}
-	if p.PowMessageLimit != 0 {
-		cur.PowMessageLimit = p.PowMessageLimit
-	}
-	if p.PowCalmPeriodDefinition != 0 {
-		cur.PowCalmPeriodDefinition = p.PowCalmPeriodDefinition
-	}
-	if p.PowCalmSequenceThreshold != 0 {
-		cur.PowCalmSequenceThreshold = p.PowCalmSequenceThreshold
-	}
-	if p.PowDifficultyAllowance != 0 {
-		cur.PowDifficultyAllowance = p.PowDifficultyAllowance
-	}
-	if p.PowDifficultyStep != 0 {
-		cur.PowDifficultyStep = p.PowDifficultyStep
-	}
-	if p.BlockHashWindow != 0 {
-		cur.BlockHashWindow = p.BlockHashWindow
-	}
-	// Username limits
-	if p.MaxUsernameSize != 0 {
-		cur.MaxUsernameSize = p.MaxUsernameSize
-	}
-	if p.MaxTopicSize != 0 {
-		cur.MaxTopicSize = p.MaxTopicSize
-	}
-	if p.MinUsernameSize != 0 {
-		cur.MinUsernameSize = p.MinUsernameSize
-	}
-	// Subscription
-	if p.SubscriptionPeriod != 0 {
-		cur.SubscriptionPeriod = p.SubscriptionPeriod
-	}
-	// Subscription reserve percent [0,1]
-	if p.SubscriptionReservePercent != 0 {
-		cur.SubscriptionReservePercent = p.SubscriptionReservePercent
-	}
-	// Tiers - replace entirely if provided
-	if len(p.Tiers) > 0 {
-		cur.Tiers = p.Tiers
-	}
-	// Topic size limits
-	if p.MinTopicSize != 0 {
-		cur.MinTopicSize = p.MinTopicSize
-	}
-	// Relay fee settings
-	if p.RelayMinGasPrice != 0 {
-		cur.RelayMinGasPrice = p.RelayMinGasPrice
-	}
-	if p.RelayMaxGasFee != 0 {
-		cur.RelayMaxGasFee = p.RelayMaxGasFee
-	}
-	// Envelope age (replay protection)
-	if p.MaxEnvelopeAge != 0 {
-		cur.MaxEnvelopeAge = p.MaxEnvelopeAge
-	}
-	// Bridge parameters - replace entirely if provided (fees are per-chain in BridgeChains)
-	if len(p.BridgeChains) > 0 {
-		cur.BridgeChains = p.BridgeChains
-	}
-	if p.BridgeAttestationThreshold != 0 {
-		cur.BridgeAttestationThreshold = p.BridgeAttestationThreshold
-	}
-	// Award configs - replace entirely if provided
-	if len(p.AwardConfigs) > 0 {
-		cur.AwardConfigs = p.AwardConfigs
-	}
-
-	if err := cur.Validate(); err != nil {
-		return nil, err
-	}
-	if err := am.k.SetParams(sdkCtx, cur); err != nil {
+	if err := am.k.SetParams(sdkCtx, p); err != nil {
 		return nil, err
 	}
 	return &types.MsgUpdateParamsResponse{}, nil
@@ -1254,10 +1168,6 @@ func (am AppModule) Post(ctx context.Context, req *types.MsgPost) (*types.MsgPos
 		return nil, err
 	}
 
-	// Validate media field (v1.12.0)
-	if err := validateMsgPostMedia(req.GetMedia()); err != nil {
-		return nil, err
-	}
 	tierConfig := params.GetTierConfig(userLevel)
 	if tierConfig == nil {
 		return nil, fmt.Errorf("tier config not found for level %d", userLevel)

@@ -1823,9 +1823,31 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 // Bridge Attestation State Management
 // ============================================
 
-// GetBridgeAttestation retrieves a bridge attestation from state
+// GetBridgeAttestation retrieves a bridge attestation from state.
+// Uses the new parameterized key (v1.17.0+) with fallback to legacy key.
 func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string) (*types.BridgeAttestation, bool, error) {
+	return k.GetBridgeAttestationWithParams(ctx, sourceChain, burnID, "", 0)
+}
+
+// GetBridgeAttestationWithParams retrieves a bridge attestation with parameter-scoped key.
+func (k Keeper) GetBridgeAttestationWithParams(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64) (*types.BridgeAttestation, bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
+	// Try new parameterized key first
+	if recipient != "" {
+		key := types.BridgeAttestationKeyWithParams(sourceChain, burnID, recipient, amount)
+		bz, err := store.Get(key)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(bz) > 0 {
+			attestation, err := types.UnmarshalBridgeAttestation(bz)
+			if err != nil {
+				return nil, false, err
+			}
+			return attestation, true, nil
+		}
+	}
+	// Fallback to legacy key for pre-v1.17.0 attestations
 	key := types.BridgeAttestationKey(sourceChain, burnID)
 	bz, err := store.Get(key)
 	if err != nil {
@@ -1841,13 +1863,13 @@ func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string
 	return attestation, true, nil
 }
 
-// SetBridgeAttestation stores a bridge attestation in state
+// SetBridgeAttestation stores a bridge attestation in state using parameterized key.
 func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error {
 	if len(attestation.Attestors) > 0 {
 		return fmt.Errorf("bridge attestors must be stored separately")
 	}
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestationKey(attestation.SourceChain, attestation.BurnID)
+	key := types.BridgeAttestationKeyWithParams(attestation.SourceChain, attestation.BurnID, attestation.MirageRecipient, attestation.Amount)
 	stored := *attestation
 	stored.Attestors = nil
 	bz, err := stored.Marshal()
@@ -1857,9 +1879,10 @@ func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeA
 	return store.Set(key, bz)
 }
 
-// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation
+// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation.
+// Uses parameterized keys so each (chain, burnID, recipient, amount) tuple has its own record.
 func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error) {
-	attestation, found, err := k.GetBridgeAttestation(ctx, sourceChain, burnID)
+	attestation, found, err := k.GetBridgeAttestationWithParams(ctx, sourceChain, burnID, mirageRecipient, amount)
 	if err != nil {
 		return nil, err
 	}
@@ -1879,7 +1902,8 @@ func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnI
 }
 
 // SetBridgeAttestor stores a validator's attestation for an inbound burn.
-func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error {
+// Scoped by burn parameters (recipient, amount) to prevent cross-attestation poisoning.
+func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string, power int64) error {
 	if power <= 0 {
 		return fmt.Errorf("attestor power must be positive")
 	}
@@ -1887,16 +1911,16 @@ func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper 
 		return fmt.Errorf("attestor valoper cannot be empty")
 	}
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKey(sourceChain, burnID, valoper)
+	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
 	bz := make([]byte, 8)
 	binary.BigEndian.PutUint64(bz, uint64(power))
 	return store.Set(key, bz)
 }
 
-// HasBridgeAttestor returns true if the validator already attested to the burn.
-func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error) {
+// HasBridgeAttestor returns true if the validator already attested to the burn with matching params.
+func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string) (bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKey(sourceChain, burnID, valoper)
+	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
 	bz, err := store.Get(key)
 	if err != nil {
 		return false, err
@@ -1995,7 +2019,7 @@ func (k Keeper) MigrateBridgeAttestors(ctx sdk.Context) error {
 			if power <= 0 {
 				continue
 			}
-			if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, valoperAddr, power); err != nil {
+			if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, attestation.MirageRecipient, attestation.Amount, valoperAddr, power); err != nil {
 				migrateErr = err
 				return true
 			}

@@ -605,6 +605,46 @@ def check_profiles() -> None:
         ok("All profile lists are within tier caps")
 
 
+def check_subscription_index_consistency() -> None:
+    """v1.17.0: verify no ghost reserves and subscription index is consistent."""
+    section("Subscription Index Consistency (v1.17.0)")
+
+    profiles, _ = fetch_all_profiles()
+    if not profiles:
+        warn("No profiles — skipping subscription consistency check")
+        return
+
+    import time as _time
+
+    now_unix = int(_time.time())
+    ghost_reserves = []
+    expired_paid = []
+
+    for p in profiles:
+        lvl = p.get("level", 0)
+        if isinstance(lvl, str):
+            lvl = int(lvl)
+        reserve = int(p.get("reserve_funds", 0) or 0)
+        sub_expiry = int(p.get("subscription_expiry", 0) or 0)
+        owner = str(p.get("owner", ""))[:20]
+
+        if reserve > 0 and sub_expiry > 0 and sub_expiry <= now_unix:
+            ghost_reserves.append(f"{owner} reserve={reserve}")
+
+        if lvl > 0 and lvl < 100 and sub_expiry > 0 and sub_expiry <= now_unix:
+            expired_paid.append(f"{owner} lvl={lvl} exp={sub_expiry}")
+
+    if ghost_reserves:
+        fail(f"{len(ghost_reserves)} profiles have ghost reserves: {ghost_reserves[:5]}")
+    else:
+        ok("No ghost reserves found")
+
+    if expired_paid:
+        fail(f"{len(expired_paid)} paid profiles have expired subscriptions: {expired_paid[:5]}")
+    else:
+        ok("No paid profiles with expired subscriptions")
+
+
 # ── Main ───────────────────────────────────────────────────
 
 
@@ -642,6 +682,7 @@ def main() -> int:
     check_upgrade_plan(upgrade_name)
     check_core_params()
     check_profiles()
+    check_subscription_index_consistency()
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")

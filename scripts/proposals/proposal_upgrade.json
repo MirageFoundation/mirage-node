@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.16.0 (Agent System)",
-    "summary": "This upgrade introduces the Agent system, replacing moderators. It simplifies the subscription model to 3 tiers (Free, Subscriber, Agent) and migrates existing data. Note: Agent tier is now Level 10.",
+    "title": "Upgrade to v1.17.0 (Security Hardening)",
+    "summary": "Security upgrade addressing findings from the March 2026 audit: subscription engine fix (C-1), Solana watcher log scoping (C-2/C-3), bridge attestation anti-poisoning (H-3), orchestrator supervision (H-2), deterministic threshold math (M-1), MsgDeleteUser relay routing, and fail-hard upgrade handlers.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.16.0",
+                "name": "v1.17.0-security",
                 "height": "T+50",
                 "info": ""
             }

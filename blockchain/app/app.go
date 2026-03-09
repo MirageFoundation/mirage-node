@@ -272,7 +272,7 @@ func New(
 					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
 					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
 					*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
-					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+					*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
 					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
 					*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
 					*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
@@ -358,8 +358,19 @@ func New(
 				return &abci.ResponsePrepareProposal{Txs: req.Txs}, nil
 			})
 			base.SetProcessProposal(func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-				resp := &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}
-				return resp, nil
+				for _, txBytes := range req.Txs {
+					if len(txBytes) == 0 {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+					tx, err := app.TxConfig().TxDecoder()(txBytes)
+					if err != nil {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+					if len(tx.GetMsgs()) == 0 {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+				}
+				return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
 			})
 		}
 	}

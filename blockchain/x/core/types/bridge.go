@@ -1,10 +1,11 @@
 package types
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-
-
+	"strconv"
 )
 
 const (
@@ -159,14 +160,37 @@ func NewBridgeAttestation(sourceChain, burnID, mirageRecipient string, amount ui
 	}
 }
 
-// BridgeAttestationKey returns the store key for a bridge attestation
+// BurnParamsHash returns a short hex hash of the immutable burn parameters,
+// used to namespace attestation keys so a malicious first-writer cannot poison
+// the record for honest validators who attest different recipient/amount.
+func BurnParamsHash(recipient string, amount uint64) string {
+	h := sha256.Sum256([]byte(recipient + ":" + strconv.FormatUint(amount, 10)))
+	return hex.EncodeToString(h[:8])
+}
+
+// BridgeAttestationKey returns the store key for a bridge attestation.
+// Includes a hash of (recipient, amount) to prevent first-writer poisoning.
 func BridgeAttestationKey(sourceChain, burnID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s", BridgeAttestationsPrefix, sourceChain, burnID))
+}
+
+// BridgeAttestationKeyWithParams returns the store key for a bridge attestation
+// namespaced by burn parameters. Used by v1.17.0+ callers.
+func BridgeAttestationKeyWithParams(sourceChain, burnID, recipient string, amount uint64) []byte {
+	ph := BurnParamsHash(recipient, amount)
+	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeAttestationsPrefix, sourceChain, burnID, ph))
 }
 
 // BridgeAttestorKey returns the store key for a bridge attestor entry.
 func BridgeAttestorKey(sourceChain, burnID, valoper string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%s/%s", BridgeAttestorsPrefix, sourceChain, burnID, valoper))
+}
+
+// BridgeAttestorKeyWithParams returns the store key for a bridge attestor entry
+// namespaced by burn parameters. Used by v1.17.0+ callers.
+func BridgeAttestorKeyWithParams(sourceChain, burnID, recipient string, amount uint64, valoper string) []byte {
+	ph := BurnParamsHash(recipient, amount)
+	return []byte(fmt.Sprintf("%s%s/%s/%s/%s", BridgeAttestorsPrefix, sourceChain, burnID, ph, valoper))
 }
 
 // BridgeBurnKey returns the store key for a bridge burn record.
@@ -203,13 +227,19 @@ func NewBridgeMintAttestation(burnID, destChain, destTx string, createdAt int64)
 	}
 }
 
+// thresholdToBps converts a [0,1] fraction to basis points (0-10000) for deterministic integer math.
+func thresholdToBps(threshold float64) int64 {
+	return int64(threshold*10000 + 0.5)
+}
+
 // MeetsThreshold returns true if the attested power meets or exceeds the threshold.
-// threshold is a fraction in [0,1] (e.g., 0.6667 = 66.67%).
+// Uses integer basis-point arithmetic to avoid float64 non-determinism.
 func (a *BridgeMintAttestation) MeetsThreshold(totalPower int64, threshold float64) bool {
 	if totalPower <= 0 {
 		return false
 	}
-	required := int64(float64(totalPower) * threshold)
+	bps := thresholdToBps(threshold)
+	required := (totalPower*bps + 9999) / 10000
 	return a.AttestedPower >= required
 }
 
@@ -228,22 +258,24 @@ func UnmarshalBridgeMintAttestation(data []byte) (*BridgeMintAttestation, error)
 }
 
 // MeetsThreshold returns true if the attested power meets or exceeds the threshold.
-// threshold is a fraction in [0,1] (e.g., 0.6667 = 66.67%).
+// Uses integer basis-point arithmetic to avoid float64 non-determinism.
 func (a *BridgeAttestation) MeetsThreshold(totalPower int64, threshold float64) bool {
 	if totalPower <= 0 {
 		return false
 	}
-	required := int64(float64(totalPower) * threshold)
+	bps := thresholdToBps(threshold)
+	required := (totalPower*bps + 9999) / 10000
 	return a.AttestedPower >= required
 }
 
 // RequiredPower calculates the voting power required to meet the threshold.
-// threshold is a fraction in [0,1].
+// Uses integer basis-point arithmetic for determinism.
 func RequiredPower(totalPower int64, threshold float64) int64 {
 	if totalPower <= 0 {
 		return 0
 	}
-	return int64(float64(totalPower) * threshold)
+	bps := thresholdToBps(threshold)
+	return (totalPower*bps + 9999) / 10000
 }
 
 // Marshal serializes the attestation to JSON
