@@ -12,7 +12,7 @@ import (
 
 const batchSize = 1000
 
-// NOTE: Deprecated after v1.17.1 once all nodes are on PebbleDB.
+// NOTE: Deprecated after v1.17.0 once all nodes are on PebbleDB.
 // Remove if no rollback to GoLevelDB is required.
 
 func main() {
