@@ -69,12 +69,26 @@ const AgentActions = styled.div`
     }
 `;
 
+const AgentNameRow = styled.div`
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    min-width: 0;
+`;
+
 const AgentName = styled(Link)`
     color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
     text-decoration: none;
     font-weight: 600;
     font-size: 0.85rem;
+    white-space: nowrap;
     &:hover { color: ${({ theme }) => theme?.colors?.link || '#667eea'}; }
+`;
+
+const AgentLastActive = styled.span`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#888'};
+    font-size: 0.65rem;
+    white-space: nowrap;
 `;
 
 const AgentBio = styled.div`
@@ -169,6 +183,18 @@ const ActionRow = styled.div`
     gap: 0.5rem;
     margin-top: 0.75rem;
 `;
+
+function formatTimeAgo(unixSeconds) {
+    if (!unixSeconds) return null;
+    const diff = Math.floor(Date.now() / 1000) - unixSeconds;
+    if (diff < 0) return 'just now';
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
+    if (diff < 31536000) return `${Math.floor(diff / 2592000)}mo ago`;
+    return `${Math.floor(diff / 31536000)}y ago`;
+}
 
 export default function AgentsView({ state }) {
     const viewerAddress = Storage.load('publicKey', '') || '';
@@ -524,9 +550,16 @@ export default function AgentsView({ state }) {
                                                 <AgentCard>
                                                     <AgentRow>
                                                         <AgentInfo>
-                                                            <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
-                                                                @{displayName}
-                                                            </AgentName>
+                                                            <AgentNameRow>
+                                                                <AgentName to={`/u/${encodeURIComponent(agent.username || agent.address)}?tab=posts`}>
+                                                                    @{displayName}
+                                                                </AgentName>
+                                                                <AgentLastActive>
+                                                                    {agent.last_active
+                                                                        ? `(active ${formatTimeAgo(agent.last_active)})`
+                                                                        : '(no activity yet)'}
+                                                                </AgentLastActive>
+                                                            </AgentNameRow>
                                                             {agent.biography && (
                                                                 <AgentBio>{agent.biography}</AgentBio>
                                                             )}

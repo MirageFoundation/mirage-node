@@ -372,6 +372,7 @@ class DatabaseManager:
                     """
                 )
                 cur.execute("ALTER TABLE blocked_posts ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE blocked_posts ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_posts_owner_lower ON blocked_posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_posts_target_lower ON blocked_posts(LOWER(target))")
 
@@ -387,6 +388,7 @@ class DatabaseManager:
                     """
                 )
                 cur.execute("ALTER TABLE blocked_users ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0")
+                cur.execute("ALTER TABLE blocked_users ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_owner_lower ON blocked_users(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_users_target_lower ON blocked_users(LOWER(target))")
 
@@ -401,6 +403,7 @@ class DatabaseManager:
                     )
                     """
                 )
+                cur.execute("ALTER TABLE blocked_topics ADD COLUMN IF NOT EXISTS blocked_at BIGINT NOT NULL DEFAULT 0")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_blocked_topics_owner_lower ON blocked_topics(LOWER(owner))")
                 cur.execute(
                     "CREATE INDEX IF NOT EXISTS idx_blocked_topics_target_lower ON blocked_topics(LOWER(target))"
@@ -1921,7 +1924,7 @@ class DatabaseManager:
                     )
                 return int(cur.rowcount or 0)
 
-    def block_post(self, owner: str, target: str) -> None:
+    def block_post(self, owner: str, target: str, blocked_at: int = 0) -> None:
         """Block a post (add to blocked_posts with next position, evict oldest beyond cap)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1932,11 +1935,11 @@ class DatabaseManager:
                 pos = cur.fetchone()[0]
                 cur.execute(
                     """
-                    INSERT INTO blocked_posts(owner, target, position)
-                    VALUES(%s, %s, %s)
+                    INSERT INTO blocked_posts(owner, target, position, blocked_at)
+                    VALUES(%s, %s, %s, %s)
                     ON CONFLICT(owner, target) DO NOTHING
                     """,
-                    (owner, target, pos),
+                    (owner, target, pos, int(blocked_at)),
                 )
                 self._evict_oldest(cur, "blocked_posts", "target", owner)
 
@@ -1949,7 +1952,7 @@ class DatabaseManager:
                     (owner, target),
                 )
 
-    def block_user(self, owner: str, target: str) -> None:
+    def block_user(self, owner: str, target: str, blocked_at: int = 0) -> None:
         """Block a user (add to blocked_users with next position, evict oldest beyond cap)."""
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1960,11 +1963,11 @@ class DatabaseManager:
                 pos = cur.fetchone()[0]
                 cur.execute(
                     """
-                    INSERT INTO blocked_users(owner, target, position)
-                    VALUES(%s, %s, %s)
+                    INSERT INTO blocked_users(owner, target, position, blocked_at)
+                    VALUES(%s, %s, %s, %s)
                     ON CONFLICT(owner, target) DO NOTHING
                     """,
-                    (owner, target, pos),
+                    (owner, target, pos, int(blocked_at)),
                 )
                 self._evict_oldest(cur, "blocked_users", "target", owner)
 
@@ -1977,7 +1980,7 @@ class DatabaseManager:
                     (owner, target),
                 )
 
-    def block_topic(self, owner: str, target: str) -> None:
+    def block_topic(self, owner: str, target: str, blocked_at: int = 0) -> None:
         """Block a topic (add to blocked_topics with next position, evict oldest beyond cap)."""
         target = self._strip_nul(target) or ""
         with self._connect() as conn:
@@ -1989,11 +1992,11 @@ class DatabaseManager:
                 pos = cur.fetchone()[0]
                 cur.execute(
                     """
-                    INSERT INTO blocked_topics(owner, target, position)
-                    VALUES(%s, %s, %s)
+                    INSERT INTO blocked_topics(owner, target, position, blocked_at)
+                    VALUES(%s, %s, %s, %s)
                     ON CONFLICT(owner, target) DO NOTHING
                     """,
-                    (owner, target, pos),
+                    (owner, target, pos, int(blocked_at)),
                 )
                 self._evict_oldest(cur, "blocked_topics", "target", owner)
 

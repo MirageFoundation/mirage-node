@@ -1396,7 +1396,7 @@ class MessageProcessor:
                 logger.warning("Rejected block_post: missing owner or target")
                 return
 
-            self.db.block_post(owner, target)
+            self.db.block_post(owner, target, blocked_at=int(ts))
             self.log_yaml(
                 "Block post",
                 {"owner": owner, "target": target, "timestamp": int(ts), "time_iso": self.iso_timestamp(ts)},
@@ -1438,7 +1438,7 @@ class MessageProcessor:
                 logger.warning("Rejected block_user: missing owner or target")
                 return
 
-            self.db.block_user(owner, target)
+            self.db.block_user(owner, target, blocked_at=int(ts))
             self.db.unfollow_user(owner, target)
             logger.debug("Block user removed follow: owner=%s target=%s", owner, target)
             self.log_yaml(
@@ -1482,7 +1482,7 @@ class MessageProcessor:
                 logger.warning("Rejected block_topic: missing owner or topic")
                 return
 
-            self.db.block_topic(owner, topic)
+            self.db.block_topic(owner, topic, blocked_at=int(ts))
             removed = self.db.unfollow_topics_matching(owner, topic)
             if removed > 0:
                 logger.debug("Block topic removed follow(s): owner=%s pattern=%s removed=%d", owner, topic, removed)
