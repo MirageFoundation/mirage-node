@@ -4143,10 +4143,10 @@ def test_v1170_security(backend: str) -> None:
 
     fee_payer = _VALIDATOR_ADDR or ""
 
-    # 1. Verify LevelToTierIndex correctness via params endpoint
+    # 1. Verify LevelToTierIndex correctness via chain config endpoint
     #    Agent (level 10) must have a valid tier config (not be skipped)
     try:
-        resp = requests.get(f"{backend}/api/v1/params", timeout=10)
+        resp = requests.get(f"{backend}/api/get_chain_config", timeout=10)
         params = resp.json()
         tiers = params.get("tiers", [])
         if len(tiers) != 3:
@@ -4202,18 +4202,24 @@ def test_v1170_security(backend: str) -> None:
         if ccode == 0 and dcode == 0:
             _pass("v1170.first_post_accepted")
 
-            # Same msg with same timestamp — should fail at check or deliver
-            _, ccode2, clog2, dcode2, dlog2 = _submit_tx(
-                [(msg, "/mirage.core.v1.MsgPost")],
-                DEFAULT_GAS_LIMIT,
-                fee_payer,
-                agent.public_key().public_key_bytes,
-                wait_deliver=True,
-            )
-            if ccode2 != 0 or dcode2 != 0:
-                _pass("v1170.replay_rejected")
-            else:
-                _fail("v1170.replay_rejected", f"ccode={ccode2} dcode={dcode2}")
+            # Same msg with same timestamp — should fail at check, deliver, or mempool level
+            try:
+                _, ccode2, clog2, dcode2, dlog2 = _submit_tx(
+                    [(msg, "/mirage.core.v1.MsgPost")],
+                    DEFAULT_GAS_LIMIT,
+                    fee_payer,
+                    agent.public_key().public_key_bytes,
+                    wait_deliver=True,
+                )
+                if ccode2 != 0 or dcode2 != 0:
+                    _pass("v1170.replay_rejected")
+                else:
+                    _fail("v1170.replay_rejected", f"ccode={ccode2} dcode={dcode2}")
+            except RuntimeError as e:
+                if "already exists in cache" in str(e):
+                    _pass("v1170.replay_rejected")
+                else:
+                    _fail("v1170.replay_rejected", str(e))
         else:
             _fail("v1170.first_post_accepted", f"ccode={ccode} dcode={dcode}")
     else:

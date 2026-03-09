@@ -339,6 +339,7 @@ class MessageProcessor:
                     action_type,
                     ts,
                     topic=root_topic,
+                    target_topic=root_topic,
                     content_length=len(content),
                     root_post_id=root_post_id,
                 )

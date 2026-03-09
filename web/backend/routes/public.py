@@ -3201,6 +3201,7 @@ def get_chain_config():
             "min_topic_size": p["min_topic_size"],
             "subscription_period": p["subscription_period"],
             "subscription_reserve_percent": p["subscription_reserve_percent"],
+            "bridge_attestation_threshold": p["bridge_attestation_threshold"],
             "mint_interval": p["mint_interval"],
             "block_time": _get_block_time_seconds(),
             "tiers": p["tiers"],
