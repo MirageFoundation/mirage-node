@@ -336,6 +336,8 @@ def _get_blocked_users(cur, address: str) -> set[str]:
             cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (agent_address.lower(),))
             blocked_users.update(row[0].lower() for row in cur.fetchall())
 
+    blocked_users.discard(address.lower())
+
     return blocked_users
 
 
@@ -415,7 +417,9 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     agents = _get_enabled_agents(cur, viewer)
     logger.debug(
         "apply_agent_edits: viewer=%s raw_agents=%s post_count=%d",
-        viewer_lower, agents, len(posts),
+        viewer_lower,
+        agents,
+        len(posts),
     )
     if agents:
         agents = [a for a in agents if a.lower() != viewer_lower]
