@@ -918,108 +918,111 @@ class MessageProcessor:
 
     def _handle_annotate(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgAnnotate — store agent overlay edit in agent_edits table."""
-        parsed = MsgAnnotate()
-        parsed.ParseFromString(value)
-        agent = addr_from_pubkey(parsed.envelope_pubkey)
-        if not agent:
-            logger.warning("Rejected annotate %s: invalid envelope_pubkey", tx_hash)
-            return
-        override = str(parsed.override or "").strip().lower()
+        try:
+            parsed = MsgAnnotate()
+            parsed.ParseFromString(value)
+            agent = addr_from_pubkey(parsed.envelope_pubkey)
+            if not agent:
+                logger.warning("Rejected annotate %s: invalid envelope_pubkey", tx_hash)
+                return
+            override = str(parsed.override or "").strip().lower()
 
-        if not override or len(override) != 64:
-            logger.warning("Rejected annotate %s: invalid override", tx_hash)
-            return
-        existing = self.db.get_post(override)
-        if not existing:
-            logger.warning("Rejected annotate %s: override not found", tx_hash)
-            return
+            if not override or len(override) != 64:
+                logger.warning("Rejected annotate %s: invalid override", tx_hash)
+                return
+            existing = self.db.get_post(override)
+            if not existing:
+                logger.warning("Rejected annotate %s: override not found", tx_hash)
+                return
 
-        # Enforce agent tier
-        agent_level = self.db.get_user_level(agent)
-        if agent_level < 10:
-            logger.warning("Rejected annotate %s: not agent tier (level=%d)", tx_hash, agent_level)
-            return
+            # Enforce agent tier
+            agent_level = self.db.get_user_level(agent)
+            if agent_level < 10:
+                logger.warning("Rejected annotate %s: not agent tier (level=%d)", tx_hash, agent_level)
+                return
 
-        # Sentinel "." means no change (store None); empty string means clear
-        SENTINEL = "."
+            # Sentinel "." means no change (store None); empty string means clear
+            SENTINEL = "."
 
-        def resolve_field(val):
-            if val == SENTINEL:
-                return None
-            return val
+            def resolve_field(val):
+                if val == SENTINEL:
+                    return None
+                return val
 
-        topic_raw = str(parsed.topic or "")
-        title_raw = str(parsed.title or "")
-        content_raw = str(parsed.content or "")
-        tag_raw = str(parsed.tag or "")
-        appendix_raw = str(parsed.appendix or "")
+            topic_raw = str(parsed.topic or "")
+            title_raw = str(parsed.title or "")
+            content_raw = str(parsed.content or "")
+            tag_raw = str(parsed.tag or "")
+            appendix_raw = str(parsed.appendix or "")
 
-        topic = resolve_field(topic_raw)
-        title = resolve_field(title_raw)
-        content = resolve_field(content_raw)
-        tag = resolve_field(tag_raw)
-        appendix = resolve_field(appendix_raw)
+            topic = resolve_field(topic_raw)
+            title = resolve_field(title_raw)
+            content = resolve_field(content_raw)
+            tag = resolve_field(tag_raw)
+            appendix = resolve_field(appendix_raw)
 
-        # Media: ["."] means no change; [] means clear; list means replace
-        raw_media = list(parsed.media or [])
-        if len(raw_media) == 1 and raw_media[0] == SENTINEL:
-            media = None
-        else:
-            media = raw_media
+            # Media: ["."] means no change; [] means clear; list means replace
+            raw_media = list(parsed.media or [])
+            if len(raw_media) == 1 and raw_media[0] == SENTINEL:
+                media = None
+            else:
+                media = raw_media
 
-        logger.debug(
-            "MsgAnnotate parsed: tx=%s agent=%s override=%s title_len=%d content_len=%d appendix_len=%d media_count=%d",
-            tx_hash,
-            agent,
-            override,
-            len(title_raw),
-            len(content_raw),
-            len(appendix_raw),
-            len(raw_media),
-        )
+            logger.debug(
+                "MsgAnnotate parsed: tx=%s agent=%s override=%s title_len=%d content_len=%d appendix_len=%d media_count=%d",
+                tx_hash,
+                agent,
+                override,
+                len(title_raw),
+                len(content_raw),
+                len(appendix_raw),
+                len(raw_media),
+            )
 
-        # For comments (target present in DB), ignore topic/title overrides
-        _, _, _, existing_target, _, _, _, _ = existing
-        is_comment = bool(existing_target)
-        if is_comment:
-            topic = None
-            title = None
+            # For comments (target present in DB), ignore topic/title overrides
+            _, _, _, existing_target, _, _, _, _ = existing
+            is_comment = bool(existing_target)
+            if is_comment:
+                topic = None
+                title = None
 
-        logger.info(
-            "MsgAnnotate upsert: agent=%s override=%s topic=%s title=%s appendix=%s media_count=%s",
-            agent,
-            override,
-            topic,
-            title,
-            appendix,
-            len(media) if media is not None else "none",
-        )
+            logger.info(
+                "MsgAnnotate upsert: agent=%s override=%s topic=%s title=%s appendix=%s media_count=%s",
+                agent,
+                override,
+                topic,
+                title,
+                appendix,
+                len(media) if media is not None else "none",
+            )
 
-        self.db.upsert_agent_edit(
-            post_txhash=override,
-            agent_address=agent,
-            edit_txhash=tx_hash,
-            edited_at=int(ts),
-            topic=topic,
-            title=title,
-            content=content,
-            tag=tag,
-            media=media,
-            appendix=appendix,
-        )
+            self.db.upsert_agent_edit(
+                post_txhash=override,
+                agent_address=agent,
+                edit_txhash=tx_hash,
+                edited_at=int(ts),
+                topic=topic,
+                title=title,
+                content=content,
+                tag=tag,
+                media=media,
+                appendix=appendix,
+            )
 
-        self.log_yaml(
-            "Agent annotate",
-            {
-                "height": int(height),
-                "txhash": (tx_hash or "").lower(),
-                "timestamp": int(ts),
-                "time_iso": self.iso_timestamp(ts),
-                "agent": agent,
-                "override": override,
-                "is_comment": is_comment,
-            },
-        )
+            self.log_yaml(
+                "Agent annotate",
+                {
+                    "height": int(height),
+                    "txhash": (tx_hash or "").lower(),
+                    "timestamp": int(ts),
+                    "time_iso": self.iso_timestamp(ts),
+                    "agent": agent,
+                    "override": override,
+                    "is_comment": is_comment,
+                },
+            )
+        except Exception as e:
+            logger.error("Error handling MsgAnnotate %s: %s", tx_hash, e, exc_info=True)
 
     def _handle_award(self, type_url: str, value: bytes, tx_hash: str, ts: int, height: int):
         """Handle MsgAward — store one award per owner+target."""

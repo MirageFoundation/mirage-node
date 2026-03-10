@@ -55,7 +55,10 @@ def _enc_str(tag: int, s: str) -> bytes:
 
 
 def _enc_bytes(tag: int, b: bytes) -> bytes:
-    b = bytes(b or b"")
+    if isinstance(b, str):
+        b = bytes.fromhex(b) if b else b""
+    else:
+        b = bytes(b or b"")
     return _enc_tag(tag) + uvarint(len(b)) + b
 
 
