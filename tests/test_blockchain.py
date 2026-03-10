@@ -4139,7 +4139,7 @@ def test_annotate_chain(backend: str) -> None:
 
 def test_v1170_security(backend: str) -> None:
     """v1.17.0 security upgrade: Agent-tier expiry, relay nonce replay, bridge attestation validation."""
-    print(f"\n{_COLOR_BOLD}[V1.17.0] Security Upgrade Validation{_COLOR_RESET}")
+    print(f"\n{_COLOR_BOLD}[17] Security Upgrade Validation{_COLOR_RESET}")
 
     fee_payer = _VALIDATOR_ADDR or ""
 
