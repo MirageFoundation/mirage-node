@@ -34,10 +34,7 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 		return "", fmt.Errorf("invalid solana destination address: %w", err)
 	}
 
-	orchestratorKey, err := solana.PrivateKeyFromSolanaKeygenFile(w.cfg.Keypair)
-	if err != nil {
-		return "", fmt.Errorf("failed to read solana keypair: %w", err)
-	}
+	orchestratorKey := w.keypair
 	orchestratorPub := orchestratorKey.PublicKey()
 
 	mintPDA, _, err := solana.FindProgramAddress([][]byte{[]byte(mintSeed)}, w.programID)

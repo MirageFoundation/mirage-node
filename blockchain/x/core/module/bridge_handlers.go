@@ -26,8 +26,8 @@ type bridgeAttestBurnedKeeper interface {
 	IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 	GetValidatorPower(ctx sdk.Context, valoper string) (int64, error)
 	GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error)
-	HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error)
-	SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error
+	HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string) (bool, error)
+	SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string, power int64) error
 	GetTotalBondedValidatorPower(ctx sdk.Context) (int64, error)
 	SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error
 	MintToAccount(ctx sdk.Context, recipient string, amount uint64) error
@@ -272,8 +272,8 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 		}, nil
 	}
 
-	// Check if validator already attested
-	alreadyAttested, err := k.HasBridgeAttestor(ctx, sourceChain, burnID, valoper)
+	// Check if validator already attested (scoped by burn parameters)
+	alreadyAttested, err := k.HasBridgeAttestor(ctx, sourceChain, burnID, mirageRecipient, amount, valoper)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check attestor: %w", err)
 	}
@@ -303,8 +303,8 @@ func bridgeAttestBurned(ctx sdk.Context, k bridgeAttestBurnedKeeper, req *types.
 		}, nil
 	}
 
-	// Add attestation (stored separately to avoid variable-size writes)
-	if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, valoper, valPower); err != nil {
+	// Add attestation (stored separately, scoped by burn parameters)
+	if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, mirageRecipient, amount, valoper, valPower); err != nil {
 		return nil, fmt.Errorf("failed to store attestor: %w", err)
 	}
 	attestation.AttestedPower += valPower
@@ -430,6 +430,9 @@ func bridgeAttestMinted(ctx sdk.Context, k bridgeAttestMintedKeeper, req *types.
 	}
 	if len(destChain) > 64 {
 		return nil, fmt.Errorf("destination_chain too long")
+	}
+	if strings.Contains(destChain, "/") {
+		return nil, fmt.Errorf("destination_chain contains invalid character: /")
 	}
 
 	destTx := strings.TrimSpace(req.GetDestinationTx())

@@ -35,8 +35,6 @@ import (
 type PowDecorator struct {
 	// Window is how many recent committed block hashes to accept (from params)
 	Window uint32
-	// DefaultDifficulty is the fallback difficulty from params
-	DefaultDifficulty uint64
 	// MinFee, when provided in the tx fee with same denom and amount >=, skips PoW entirely
 	MinFee sdk.Coin
 	// Keeper provides access to dynamic difficulty and params
@@ -206,11 +204,12 @@ func (d *PowDecorator) checkReserveOrDowngrade(ctx sdk.Context, pubkey []byte, p
 }
 
 func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, next sdk.AnteHandler) (sdk.Context, error) {
-	// Refresh params from the blockchain state
+	// Refresh params from the blockchain state (local copies to avoid data race)
 	params := d.Keeper.GetParams(ctx)
-	d.Window = uint32(params.BlockHashWindow)
-	// Use current dynamic difficulty steps (0 = base)
-	d.DefaultDifficulty = d.Keeper.GetCurrentDifficulty(ctx)
+	window := uint32(params.BlockHashWindow)
+	d.mu.Lock()
+	d.Window = window
+	d.mu.Unlock()
 
 	// derive last committed block id hash from header and remember it
 	chainLastID := strings.ToLower(hex.EncodeToString(ctx.BlockHeader().LastBlockId.Hash))
@@ -409,6 +408,31 @@ func (d *PowDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool, nex
 			canon := buildCanonForDelete(m)
 			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
 				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDelete", "err", err.Error())
+				return ctx, err
+			}
+			if ctx.Priority() <= 0 {
+				ctx = ctx.WithPriority(int64(1 + m.EnvelopeDifficulty))
+			}
+			if !ctx.IsCheckTx() && !ctx.IsReCheckTx() {
+				if err := d.Keeper.RecordPoWMessage(ctx); err != nil {
+					ctx.Logger().Error("PoW: failed to record message", "err", err.Error())
+				}
+			}
+
+		case *coretypes.MsgDeleteUser:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if allowed, _ := d.canUsePoW(ctx, m.EnvelopePubkey); !allowed {
+				if err := d.checkReserveOrDowngrade(ctx, m.EnvelopePubkey, params); err != nil {
+					ctx.Logger().Error("PoW: paid user has insufficient reserve", "msg", "MsgDeleteUser", "err", err.Error())
+					return ctx, err
+				}
+				continue
+			}
+			canon := buildCanonForDeleteUser(m)
+			if err := validatePoWBytesArgon2(canon, m.EnvelopeBlockHash, m.EnvelopeDifficulty, m.EnvelopePow, chainLastID, d, skipHashCheck, currentDifficulty, prevDifficulty, lastChange, gracePeriod, ctx.BlockHeight(), baseBits, powFactor); err != nil {
+				ctx.Logger().Error("PoW: validation failed", "msg", "MsgDeleteUser", "err", err.Error())
 				return ctx, err
 			}
 			if ctx.Priority() <= 0 {
@@ -876,6 +900,16 @@ func buildCanonForDelete(m *coretypes.MsgDelete) []byte {
 	return cw.buf
 }
 
+func buildCanonForDeleteUser(m *coretypes.MsgDeleteUser) []byte {
+	cw := newCanonWriter("MsgDeleteUser")
+	cw.writeBytes(2, m.EnvelopePubkey)
+	cw.writeBytes(3, m.EnvelopeBlockHash)
+	cw.writeUvarint(4, m.EnvelopeDifficulty)
+	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	cw.writeString(100, m.Target)
+	return cw.buf
+}
+
 func buildCanonForSendTokens(m *coretypes.MsgSendTokens) []byte {
 	cw := newCanonWriter("MsgSendTokens")
 	cw.writeBytes(2, m.EnvelopePubkey)
@@ -1168,8 +1202,7 @@ func validatePoWBytesArgon2(canonical []byte, lastBlockHash []byte, difficulty u
 	}
 	hashInt := new(big.Int).SetBytes(sum)
 	if hashInt.Cmp(effTarget) > 0 {
-		return fmt.Errorf("insufficient pow: hash exceeds target (declared=%d, chain_min=%d, prev=%d, grace_period=%d, last_change=%d, current_height=%d, pow=%d, hash_hex=%x, salt_hex=%x)",
-			difficulty, required, prev, gracePeriod, lastChange, currentHeight, pow, sum, salt)
+		return fmt.Errorf("insufficient proof of work")
 	}
 	if skipHashCheck || strings.TrimSpace(currentLastID) == "" {
 		return nil

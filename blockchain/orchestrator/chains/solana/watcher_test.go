@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestParseBridgeStateLastSequence(t *testing.T) {
@@ -129,5 +130,29 @@ func TestInstructionDiscriminator(t *testing.T) {
 	disc3 := instructionDiscriminator("burn")
 	if disc1 == disc3 {
 		t.Errorf("different instructions should have different discriminators")
+	}
+}
+
+func TestPruneSeenSigsTimeBased(t *testing.T) {
+	w := &Watcher{
+		seenSig: make(map[string]time.Time),
+	}
+
+	now := time.Now()
+	w.seenSig["old1"] = now.Add(-60 * time.Minute)
+	w.seenSig["old2"] = now.Add(-45 * time.Minute)
+	w.seenSig["recent1"] = now.Add(-10 * time.Minute)
+	w.seenSig["recent2"] = now.Add(-5 * time.Minute)
+
+	w.pruneSeenSigs()
+
+	if len(w.seenSig) != 2 {
+		t.Errorf("expected 2 entries after pruning, got %d", len(w.seenSig))
+	}
+	if w.seenSig["recent1"].IsZero() || w.seenSig["recent2"].IsZero() {
+		t.Error("recent entries should be retained")
+	}
+	if !w.seenSig["old1"].IsZero() || !w.seenSig["old2"].IsZero() {
+		t.Error("old entries should be pruned")
 	}
 }

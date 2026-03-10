@@ -107,17 +107,17 @@ func (mk *bridgeMockKeeper) SetBridgeAttestation(ctx sdk.Context, attestation *t
 	return nil
 }
 
-func (mk *bridgeMockKeeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error) {
-	key := fmt.Sprintf("%s/%s/%s", sourceChain, burnID, valoper)
+func (mk *bridgeMockKeeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string) (bool, error) {
+	key := fmt.Sprintf("%s/%s/%s/%s/%d", sourceChain, burnID, recipient, valoper, amount)
 	_, ok := mk.burnAttestors[key]
 	return ok, nil
 }
 
-func (mk *bridgeMockKeeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error {
+func (mk *bridgeMockKeeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string, power int64) error {
 	if power <= 0 {
 		return fmt.Errorf("attestor power must be positive")
 	}
-	key := fmt.Sprintf("%s/%s/%s", sourceChain, burnID, valoper)
+	key := fmt.Sprintf("%s/%s/%s/%s/%d", sourceChain, burnID, recipient, valoper, amount)
 	mk.burnAttestors[key] = power
 	return nil
 }

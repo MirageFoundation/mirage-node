@@ -4137,6 +4137,95 @@ def test_annotate_chain(backend: str) -> None:
     _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
+def test_security(backend: str) -> None:
+    """Security checks: tier params, subscription period, bridge threshold, replay rejection."""
+    print(f"\n{_COLOR_BOLD}[17] Security Upgrade Validation{_COLOR_RESET}")
+
+    fee_payer = _VALIDATOR_ADDR or ""
+
+    # 1. Verify LevelToTierIndex correctness via chain config endpoint
+    #    Agent (level 10) must have a valid tier config (not be skipped)
+    try:
+        resp = requests.get(f"{backend}/api/get_chain_config", timeout=10)
+        params = resp.json()
+        tiers = params.get("tiers", [])
+        if len(tiers) != 3:
+            _fail("security.tier_count", f"expected 3 tiers, got {len(tiers)}")
+        else:
+            _pass("security.tier_count")
+
+        # Level 10 (Agent) must map to tier index 2 which has can_be_agent=True
+        agent_tier = tiers[2] if len(tiers) > 2 else {}
+        if agent_tier.get("can_be_agent"):
+            _pass("security.agent_tier_valid")
+        else:
+            _fail("security.agent_tier_valid", f"tier[2].can_be_agent={agent_tier.get('can_be_agent')}")
+    except Exception as e:
+        _fail("security.params_check", str(e))
+
+    # 2. Verify subscription_period is non-zero (M-8 SubscriptionPeriod=0 governance attack)
+    try:
+        sub_period = int(params.get("subscription_period", 0))
+        if sub_period > 0:
+            _pass("security.subscription_period_nonzero")
+        else:
+            _fail("security.subscription_period_nonzero", f"subscription_period={sub_period}")
+    except Exception as e:
+        _fail("security.subscription_period_nonzero", str(e))
+
+    # 3. Bridge attestation threshold should be > 0 and <= 1
+    try:
+        threshold = float(params.get("bridge_attestation_threshold", 0))
+        if 0 < threshold <= 1:
+            _pass("security.bridge_threshold_valid")
+        else:
+            _fail("security.bridge_threshold_valid", f"threshold={threshold}")
+    except Exception as e:
+        _fail("security.bridge_threshold_valid", str(e))
+
+    # 4. Relay nonce: submit same tx twice — second should be rejected
+    #    (Note: basic timestamp replay check already exists via envelope_timestamp;
+    #    we verify the timestamp + PoW dedup here)
+    agent = WALLETS.get("agent1")
+    if agent:
+        lb, diff, _, _ = _get_pow_params(backend, str(agent.address()))
+        ts = _now_ms()
+
+        msg = _build_msg_post(agent, lb, 0, ts, f"sec{_rand_str(4)}", "Security Test", "v1.17.0 test", pow_val=0)
+        _, ccode, clog, dcode, dlog = _submit_tx(
+            [(msg, "/mirage.core.v1.MsgPost")],
+            DEFAULT_GAS_LIMIT,
+            fee_payer,
+            agent.public_key().public_key_bytes,
+            wait_deliver=True,
+        )
+        if ccode == 0 and dcode == 0:
+            _pass("security.first_post_accepted")
+
+            # Same msg with same timestamp — should fail at check, deliver, or mempool level
+            try:
+                _, ccode2, clog2, dcode2, dlog2 = _submit_tx(
+                    [(msg, "/mirage.core.v1.MsgPost")],
+                    DEFAULT_GAS_LIMIT,
+                    fee_payer,
+                    agent.public_key().public_key_bytes,
+                    wait_deliver=True,
+                )
+                if ccode2 != 0 or dcode2 != 0:
+                    _pass("security.replay_rejected")
+                else:
+                    _fail("security.replay_rejected", f"ccode={ccode2} dcode={dcode2}")
+            except RuntimeError as e:
+                if "already exists in cache" in str(e):
+                    _pass("security.replay_rejected")
+                else:
+                    _fail("security.replay_rejected", str(e))
+        else:
+            _fail("security.first_post_accepted", f"ccode={ccode} dcode={dcode}")
+    else:
+        _fail("security.relay_test", "agent1 wallet not available")
+
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -4159,6 +4248,7 @@ ALL_CATEGORIES = {
     "tier_features": test_tier_features,
     "biography": test_biography,
     "annotate_chain": test_annotate_chain,
+    "security": test_security,
 }
 
 

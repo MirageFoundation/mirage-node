@@ -59,6 +59,7 @@ RUN REACT_APP_VERSION="${GIT_BRANCH:-?} (${GIT_HASH:-?})" REACT_APP_API_BASE=/ap
 WORKDIR /opt/mirage
 COPY blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
 COPY blockchain/bin/orchestrator /opt/mirage/blockchain/bin/orchestrator
+COPY blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
 COPY scripts/ /opt/mirage/scripts/
 COPY web/backend/ /opt/mirage/web/backend/
 COPY indexer/ /opt/mirage/indexer/
@@ -121,7 +122,8 @@ WORKDIR /opt/mirage
 # Copy compiled binaries (not Go source)
 COPY --from=builder /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/miraged
 COPY --from=builder /opt/mirage/blockchain/bin/orchestrator /opt/mirage/blockchain/bin/orchestrator
-RUN chmod +x /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/orchestrator
+COPY --from=builder /opt/mirage/blockchain/bin/compact-db /opt/mirage/blockchain/bin/compact-db
+RUN chmod +x /opt/mirage/blockchain/bin/miraged /opt/mirage/blockchain/bin/orchestrator /opt/mirage/blockchain/bin/compact-db
 
 # Copy built frontend (not source)
 COPY --from=builder /opt/mirage/web/frontend/build /opt/mirage/web/frontend/build

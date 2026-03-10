@@ -223,10 +223,9 @@ func New(
 
 			// Initialize PowDecorator (params will be refreshed at runtime)
 			powDec := &PowDecorator{
-				Window:            60,         // Initial value, will be updated from params
-				DefaultDifficulty: 10,         // Initial value, will be updated to current difficulty
-				MinFee:            sdk.Coin{}, // do not skip PoW based on SDK fee; node pays gas separately
-				Keeper:            app.CoreKeeper,
+				Window: 60,         // Initial value, will be updated from params
+				MinFee: sdk.Coin{}, // do not skip PoW based on SDK fee; node pays gas separately
+				Keeper: app.CoreKeeper,
 			}
 			meta := RelaySigDecorator{Keeper: app.CoreKeeper}
 			metaFees := RelayGasFeeDecorator{BankKeeper: app.BankKeeper}
@@ -265,17 +264,17 @@ func New(
 						}
 					}
 					switch m.(type) {
-				case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
-					*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
-					*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
-					*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
-					*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
-					*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
-					*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
-					*coretypes.MsgDelete, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
-					*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
-					*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
-					*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
+					case *coretypes.MsgPost, *coretypes.MsgVote, *coretypes.MsgSetUsername,
+						*coretypes.MsgEnableAgent, *coretypes.MsgDisableAgent, *coretypes.MsgSetAgents,
+						*coretypes.MsgFollowUser, *coretypes.MsgUnfollowUser,
+						*coretypes.MsgFollowTopic, *coretypes.MsgUnfollowTopic,
+						*coretypes.MsgBlockPost, *coretypes.MsgUnblockPost,
+						*coretypes.MsgBlockUser, *coretypes.MsgUnblockUser,
+						*coretypes.MsgBlockTopic, *coretypes.MsgUnblockTopic,
+						*coretypes.MsgDelete, *coretypes.MsgDeleteUser, *coretypes.MsgSendTokens, *coretypes.MsgEdit,
+						*coretypes.MsgUpgradeLevel, *coretypes.MsgSetAutoRenewal,
+						*coretypes.MsgBridgeBurn, *coretypes.MsgAward,
+						*coretypes.MsgSetBiography, *coretypes.MsgAnnotate:
 						containsMeta = true
 					}
 				}
@@ -358,8 +357,19 @@ func New(
 				return &abci.ResponsePrepareProposal{Txs: req.Txs}, nil
 			})
 			base.SetProcessProposal(func(ctx sdk.Context, req *abci.RequestProcessProposal) (*abci.ResponseProcessProposal, error) {
-				resp := &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}
-				return resp, nil
+				for _, txBytes := range req.Txs {
+					if len(txBytes) == 0 {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+					tx, err := app.TxConfig().TxDecoder()(txBytes)
+					if err != nil {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+					if len(tx.GetMsgs()) == 0 {
+						return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_REJECT}, nil
+					}
+				}
+				return &abci.ResponseProcessProposal{Status: abci.ResponseProcessProposal_ACCEPT}, nil
 			})
 		}
 	}

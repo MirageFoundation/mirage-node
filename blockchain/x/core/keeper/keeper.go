@@ -1,6 +1,7 @@
 package keeper
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -1823,10 +1824,41 @@ func (k Keeper) DeleteUserState(ctx sdk.Context, addr string) (usernameReleased 
 // Bridge Attestation State Management
 // ============================================
 
-// GetBridgeAttestation retrieves a bridge attestation from state
+// GetBridgeAttestation retrieves a bridge attestation by source_chain and burn_id.
+// Returns an error if multiple attestations exist for the same burn.
 func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string) (*types.BridgeAttestation, bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestationKey(sourceChain, burnID)
+	prefix := []byte(fmt.Sprintf("%s%s/%s/", types.BridgeAttestationsPrefix, sourceChain, burnID))
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return nil, false, err
+	}
+	defer it.Close()
+
+	var attestation *types.BridgeAttestation
+	for ; it.Valid(); it.Next() {
+		if attestation != nil {
+			return nil, false, fmt.Errorf("multiple attestations found for %s/%s", sourceChain, burnID)
+		}
+		parsed, err := types.UnmarshalBridgeAttestation(it.Value())
+		if err != nil {
+			return nil, false, err
+		}
+		attestation = parsed
+	}
+	if attestation == nil {
+		return nil, false, nil
+	}
+	return attestation, true, nil
+}
+
+// GetBridgeAttestationWithParams retrieves a bridge attestation with parameter-scoped key.
+func (k Keeper) GetBridgeAttestationWithParams(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64) (*types.BridgeAttestation, bool, error) {
+	if strings.TrimSpace(recipient) == "" {
+		return nil, false, fmt.Errorf("recipient cannot be empty")
+	}
+	store := k.storeService.OpenKVStore(ctx)
+	key := types.BridgeAttestationKeyWithParams(sourceChain, burnID, recipient, amount)
 	bz, err := store.Get(key)
 	if err != nil {
 		return nil, false, err
@@ -1841,13 +1873,13 @@ func (k Keeper) GetBridgeAttestation(ctx sdk.Context, sourceChain, burnID string
 	return attestation, true, nil
 }
 
-// SetBridgeAttestation stores a bridge attestation in state
+// SetBridgeAttestation stores a bridge attestation in state using parameterized key.
 func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeAttestation) error {
 	if len(attestation.Attestors) > 0 {
 		return fmt.Errorf("bridge attestors must be stored separately")
 	}
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestationKey(attestation.SourceChain, attestation.BurnID)
+	key := types.BridgeAttestationKeyWithParams(attestation.SourceChain, attestation.BurnID, attestation.MirageRecipient, attestation.Amount)
 	stored := *attestation
 	stored.Attestors = nil
 	bz, err := stored.Marshal()
@@ -1857,9 +1889,10 @@ func (k Keeper) SetBridgeAttestation(ctx sdk.Context, attestation *types.BridgeA
 	return store.Set(key, bz)
 }
 
-// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation
+// GetOrCreateBridgeAttestation retrieves or creates a new bridge attestation.
+// Uses parameterized keys so each (chain, burnID, recipient, amount) tuple has its own record.
 func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnID, mirageRecipient string, amount uint64) (*types.BridgeAttestation, error) {
-	attestation, found, err := k.GetBridgeAttestation(ctx, sourceChain, burnID)
+	attestation, found, err := k.GetBridgeAttestationWithParams(ctx, sourceChain, burnID, mirageRecipient, amount)
 	if err != nil {
 		return nil, err
 	}
@@ -1879,7 +1912,8 @@ func (k Keeper) GetOrCreateBridgeAttestation(ctx sdk.Context, sourceChain, burnI
 }
 
 // SetBridgeAttestor stores a validator's attestation for an inbound burn.
-func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string, power int64) error {
+// Scoped by burn parameters (recipient, amount) to prevent cross-attestation poisoning.
+func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string, power int64) error {
 	if power <= 0 {
 		return fmt.Errorf("attestor power must be positive")
 	}
@@ -1887,16 +1921,16 @@ func (k Keeper) SetBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper 
 		return fmt.Errorf("attestor valoper cannot be empty")
 	}
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKey(sourceChain, burnID, valoper)
+	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
 	bz := make([]byte, 8)
 	binary.BigEndian.PutUint64(bz, uint64(power))
 	return store.Set(key, bz)
 }
 
-// HasBridgeAttestor returns true if the validator already attested to the burn.
-func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper string) (bool, error) {
+// HasBridgeAttestor returns true if the validator already attested to the burn with matching params.
+func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, valoper string) (bool, error) {
 	store := k.storeService.OpenKVStore(ctx)
-	key := types.BridgeAttestorKey(sourceChain, burnID, valoper)
+	key := types.BridgeAttestorKeyWithParams(sourceChain, burnID, recipient, amount, valoper)
 	bz, err := store.Get(key)
 	if err != nil {
 		return false, err
@@ -1904,10 +1938,14 @@ func (k Keeper) HasBridgeAttestor(ctx sdk.Context, sourceChain, burnID, valoper 
 	return len(bz) > 0, nil
 }
 
-// IterateBridgeAttestors iterates over attestors for a specific burn.
-func (k Keeper) IterateBridgeAttestors(ctx sdk.Context, sourceChain, burnID string, fn func(valoper string, power int64) bool) error {
+// IterateBridgeAttestors iterates over attestors for a specific burn + params.
+func (k Keeper) IterateBridgeAttestors(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64, fn func(valoper string, power int64) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
-	prefix := []byte(fmt.Sprintf("%s%s/%s/", types.BridgeAttestorsPrefix, sourceChain, burnID))
+	if strings.TrimSpace(recipient) == "" {
+		return fmt.Errorf("recipient cannot be empty")
+	}
+	paramsHash := types.BurnParamsHash(recipient, amount)
+	prefix := []byte(fmt.Sprintf("%s%s/%s/%s/", types.BridgeAttestorsPrefix, sourceChain, burnID, paramsHash))
 	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
 	if err != nil {
 		return err
@@ -1932,9 +1970,9 @@ func (k Keeper) IterateBridgeAttestors(ctx sdk.Context, sourceChain, burnID stri
 }
 
 // GetBridgeAttestorList returns a sorted list of attestors for a burn.
-func (k Keeper) GetBridgeAttestorList(ctx sdk.Context, sourceChain, burnID string) ([]string, error) {
+func (k Keeper) GetBridgeAttestorList(ctx sdk.Context, sourceChain, burnID, recipient string, amount uint64) ([]string, error) {
 	var attestors []string
-	if err := k.IterateBridgeAttestors(ctx, sourceChain, burnID, func(valoper string, _ int64) bool {
+	if err := k.IterateBridgeAttestors(ctx, sourceChain, burnID, recipient, amount, func(valoper string, _ int64) bool {
 		attestors = append(attestors, valoper)
 		return false
 	}); err != nil {
@@ -1944,8 +1982,141 @@ func (k Keeper) GetBridgeAttestorList(ctx sdk.Context, sourceChain, burnID strin
 	return attestors, nil
 }
 
-// IterateBridgeAttestations iterates over all inbound attestations.
-func (k Keeper) IterateBridgeAttestations(ctx sdk.Context, fn func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool) error {
+type bridgeAttestationParams struct {
+	recipient string
+	amount    uint64
+}
+
+// MigrateBridgeAttestationParams moves legacy bridge attestation and attestor keys to param-scoped keys.
+func (k Keeper) MigrateBridgeAttestationParams(ctx sdk.Context) (int, int, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	prefix := []byte(types.BridgeAttestationsPrefix)
+	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
+	if err != nil {
+		return 0, 0, err
+	}
+	defer it.Close()
+
+	attestationParams := make(map[string]bridgeAttestationParams)
+	var attestationsToDelete [][]byte
+	attestationsMoved := 0
+
+	for ; it.Valid(); it.Next() {
+		key := string(it.Key())
+		suffix := strings.TrimPrefix(key, types.BridgeAttestationsPrefix)
+		parts := strings.Split(suffix, "/")
+		if len(parts) != 2 && len(parts) != 3 {
+			return 0, 0, fmt.Errorf("invalid bridge attestation key: %s", key)
+		}
+		attestation, err := types.UnmarshalBridgeAttestation(it.Value())
+		if err != nil {
+			return 0, 0, err
+		}
+		if strings.TrimSpace(attestation.MirageRecipient) == "" {
+			return 0, 0, fmt.Errorf("attestation missing recipient for %s", key)
+		}
+
+		attKey := parts[0] + "/" + parts[1]
+		if existing, ok := attestationParams[attKey]; ok {
+			if existing.recipient != attestation.MirageRecipient || existing.amount != attestation.Amount {
+				return 0, 0, fmt.Errorf("conflicting attestation params for %s", attKey)
+			}
+		} else {
+			attestationParams[attKey] = bridgeAttestationParams{
+				recipient: attestation.MirageRecipient,
+				amount:    attestation.Amount,
+			}
+		}
+
+		if len(parts) == 3 {
+			expected := types.BurnParamsHash(attestation.MirageRecipient, attestation.Amount)
+			if parts[2] != expected {
+				return 0, 0, fmt.Errorf("attestation params hash mismatch for %s", attKey)
+			}
+		}
+
+		if len(parts) == 2 {
+			newKey := types.BridgeAttestationKeyWithParams(parts[0], parts[1], attestation.MirageRecipient, attestation.Amount)
+			existing, err := store.Get(newKey)
+			if err != nil {
+				return 0, 0, err
+			}
+			if len(existing) == 0 {
+				if err := store.Set(newKey, it.Value()); err != nil {
+					return 0, 0, err
+				}
+			} else if !bytes.Equal(existing, it.Value()) {
+				return 0, 0, fmt.Errorf("conflicting attestation for %s", key)
+			}
+			attestationsToDelete = append(attestationsToDelete, append([]byte{}, it.Key()...))
+			attestationsMoved++
+		}
+	}
+
+	for _, k := range attestationsToDelete {
+		if err := store.Delete(k); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	attPrefix := []byte(types.BridgeAttestorsPrefix)
+	attIt, err := store.Iterator(attPrefix, storetypes.PrefixEndBytes(attPrefix))
+	if err != nil {
+		return 0, 0, err
+	}
+	defer attIt.Close()
+
+	var attestorsToDelete [][]byte
+	attestorsMoved := 0
+
+	for ; attIt.Valid(); attIt.Next() {
+		key := string(attIt.Key())
+		suffix := strings.TrimPrefix(key, types.BridgeAttestorsPrefix)
+		parts := strings.Split(suffix, "/")
+		if len(parts) == 4 {
+			continue
+		}
+		if len(parts) != 3 {
+			return 0, 0, fmt.Errorf("invalid bridge attestor key: %s", key)
+		}
+
+		sourceChain := parts[0]
+		burnID := parts[1]
+		valoper := parts[2]
+		info, ok := attestationParams[sourceChain+"/"+burnID]
+		if !ok {
+			return 0, 0, fmt.Errorf("missing attestation for %s/%s", sourceChain, burnID)
+		}
+		newKey := types.BridgeAttestorKeyWithParams(sourceChain, burnID, info.recipient, info.amount, valoper)
+		existing, err := store.Get(newKey)
+		if err != nil {
+			return 0, 0, err
+		}
+		if len(existing) == 0 {
+			if err := store.Set(newKey, attIt.Value()); err != nil {
+				return 0, 0, err
+			}
+		} else if !bytes.Equal(existing, attIt.Value()) {
+			return 0, 0, fmt.Errorf("conflicting attestor entry for %s", key)
+		}
+		attestorsToDelete = append(attestorsToDelete, append([]byte{}, attIt.Key()...))
+		attestorsMoved++
+	}
+
+	for _, k := range attestorsToDelete {
+		if err := store.Delete(k); err != nil {
+			return 0, 0, err
+		}
+	}
+
+	ctx.Logger().Debug("bridge attestation key migration complete",
+		"attestations_moved", attestationsMoved,
+		"attestors_moved", attestorsMoved)
+
+	return attestationsMoved, attestorsMoved, nil
+}
+
+func (k Keeper) iterateBridgeAttestationsLegacy(ctx sdk.Context, fn func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool) error {
 	store := k.storeService.OpenKVStore(ctx)
 	prefix := []byte(types.BridgeAttestationsPrefix)
 	it, err := store.Iterator(prefix, storetypes.PrefixEndBytes(prefix))
@@ -1956,7 +2127,7 @@ func (k Keeper) IterateBridgeAttestations(ctx sdk.Context, fn func(sourceChain, 
 	for ; it.Valid(); it.Next() {
 		key := string(it.Key())
 		suffix := strings.TrimPrefix(key, types.BridgeAttestationsPrefix)
-		parts := strings.SplitN(suffix, "/", 2)
+		parts := strings.Split(suffix, "/")
 		if len(parts) != 2 {
 			continue
 		}
@@ -1974,7 +2145,7 @@ func (k Keeper) IterateBridgeAttestations(ctx sdk.Context, fn func(sourceChain, 
 // MigrateBridgeAttestors moves stored attestor maps to per-attestor keys.
 func (k Keeper) MigrateBridgeAttestors(ctx sdk.Context) error {
 	var migrateErr error
-	err := k.IterateBridgeAttestations(ctx, func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool {
+	err := k.iterateBridgeAttestationsLegacy(ctx, func(sourceChain, burnID string, attestation *types.BridgeAttestation) bool {
 		if len(attestation.Attestors) == 0 {
 			return false
 		}
@@ -1995,7 +2166,7 @@ func (k Keeper) MigrateBridgeAttestors(ctx sdk.Context) error {
 			if power <= 0 {
 				continue
 			}
-			if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, valoperAddr, power); err != nil {
+			if err := k.SetBridgeAttestor(ctx, sourceChain, burnID, attestation.MirageRecipient, attestation.Amount, valoperAddr, power); err != nil {
 				migrateErr = err
 				return true
 			}

@@ -109,6 +109,20 @@ echo "Moniker:   $MONIKER"
 echo "==> Running initialization..."
 bash "$ROOT_DIR/deploy/init.sh"
 
+COMPACT_DB_BIN="$ROOT_DIR/blockchain/bin/compact-db"
+if [ ! -x "$COMPACT_DB_BIN" ]; then
+  echo "ERROR: compact-db binary missing at $COMPACT_DB_BIN" >&2
+  exit 1
+fi
+if [ "${APP_DB_BACKEND:-}" != "pebbledb" ] || [ "${COMET_DB_BACKEND:-}" != "pebbledb" ]; then
+  echo "ERROR: PebbleDB required for automatic compaction (APP_DB_BACKEND=${APP_DB_BACKEND:-}, COMET_DB_BACKEND=${COMET_DB_BACKEND:-})" >&2
+  exit 1
+fi
+
+echo "==> Compacting PebbleDB databases (startup)..."
+"$COMPACT_DB_BIN" "$NODE_HOME/data" application blockstore state tx_index evidence
+echo "✓ Compaction complete"
+
 # Ensure Caddyfile exists and is correct
 # If DOMAIN is set and Caddyfile already has HTTPS config for that domain, don't overwrite
 mkdir -p /etc/caddy

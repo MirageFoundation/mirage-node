@@ -47,8 +47,9 @@ type Watcher struct {
 	rpcClient  *rpc.Client
 	wsClient   *ws.Client
 	programID  solana.PublicKey
+	keypair    solana.PrivateKey
 	lastSig    string
-	seenSig    map[string]bool
+	seenSig    map[string]time.Time
 	discBurn   [8]byte
 	discMint   [8]byte
 	ready      bool
@@ -71,13 +72,19 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 		return nil, fmt.Errorf("failed to connect solana websocket: %w", err)
 	}
 
+	keypair, err := solana.PrivateKeyFromSolanaKeygenFile(cfg.Keypair)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read solana keypair: %w", err)
+	}
+
 	watcher := &Watcher{
 		cfg:       cfg,
 		logger:    logger,
 		rpcClient: rpc.New(cfg.RPC),
 		wsClient:  wsClient,
 		programID: programID,
-		seenSig:   make(map[string]bool),
+		keypair:   keypair,
+		seenSig:   make(map[string]time.Time),
 		discBurn:  eventDiscriminator("BurnInitiated"),
 		discMint:  instructionDiscriminator("mint"),
 		ready:     true,
@@ -238,7 +245,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		stopIndex := -1
 		for i, sig := range sigs {
 			sigStr := sig.Signature.String()
-			if sigStr == w.lastSig || w.seenSig[sigStr] {
+			if sigStr == w.lastSig || !w.seenSig[sigStr].IsZero() {
 				stopIndex = i
 				break
 			}
@@ -277,15 +284,14 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		if sigStr == "" || sig.Signature.IsZero() {
 			continue
 		}
-		if w.seenSig[sigStr] {
+		if !w.seenSig[sigStr].IsZero() {
 			continue
 		}
 
 		burns, err := w.parseBurnsFromSignature(ctx, sigStr)
 		if err != nil {
 			w.logger.Printf("ERROR parsing burns from signature %s: %v", sigStr, err)
-			// Mark as seen to avoid retrying bad transactions forever
-			w.seenSig[sigStr] = true
+			w.seenSig[sigStr] = time.Now()
 			continue
 		}
 		for _, burn := range burns {
@@ -296,7 +302,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 				return ctx.Err()
 			}
 		}
-		w.seenSig[sigStr] = true
+		w.seenSig[sigStr] = time.Now()
 	}
 
 	// Update lastSig to the most recent signature and persist
@@ -323,9 +329,12 @@ func ptr[T any](v T) *T {
 }
 
 func (w *Watcher) pruneSeenSigs() {
-	// Simple strategy: clear the map and rely on lastSig for deduplication
-	// This is safe because lastSig ensures we don't re-process old signatures
-	w.seenSig = make(map[string]bool)
+	cutoff := time.Now().Add(-30 * time.Minute)
+	for k, t := range w.seenSig {
+		if t.Before(cutoff) {
+			delete(w.seenSig, k)
+		}
+	}
 }
 
 // stateFilePath returns the path to the state file
@@ -381,13 +390,35 @@ func (w *Watcher) parseBurnsFromSignature(ctx context.Context, signature string)
 		return nil, fmt.Errorf("transaction %s missing metadata", signature)
 	}
 
+	// C-3: Skip failed transactions — their logs are not authoritative
+	if tx.Meta.Err != nil {
+		return nil, nil
+	}
+
+	// C-2: Track program invocation depth so we only process "Program data:"
+	// lines emitted while our bridge program is the active invocation.
+	bridgePID := w.programID.String()
+	bridgeActive := 0
 	burns := []chains.ExternalBurnEvent{}
 	for _, line := range tx.Meta.LogMessages {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "Program data: ") {
+		trimmed := strings.TrimSpace(line)
+
+		if strings.HasPrefix(trimmed, "Program "+bridgePID+" invoke") {
+			bridgeActive++
 			continue
 		}
-		payload := strings.TrimPrefix(line, "Program data: ")
+		if bridgeActive > 0 && (strings.HasPrefix(trimmed, "Program "+bridgePID+" success") ||
+			strings.HasPrefix(trimmed, "Program "+bridgePID+" failed")) {
+			bridgeActive--
+			continue
+		}
+		if bridgeActive <= 0 {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "Program data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(trimmed, "Program data: ")
 		raw, err := base64.StdEncoding.DecodeString(payload)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode program data: %w", err)

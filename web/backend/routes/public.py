@@ -336,6 +336,8 @@ def _get_blocked_users(cur, address: str) -> set[str]:
             cur.execute("SELECT target FROM blocked_users WHERE owner = %s", (agent_address.lower(),))
             blocked_users.update(row[0].lower() for row in cur.fetchall())
 
+    blocked_users.discard(address.lower())
+
     return blocked_users
 
 
@@ -413,6 +415,12 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     eligible_posts = posts
 
     agents = _get_enabled_agents(cur, viewer)
+    logger.debug(
+        "apply_agent_edits: viewer=%s raw_agents=%s post_count=%d",
+        viewer_lower,
+        agents,
+        len(posts),
+    )
     if agents:
         agents = [a for a in agents if a.lower() != viewer_lower]
 
@@ -431,6 +439,7 @@ def _apply_agent_edits(cur, posts: list[dict], viewer: str) -> list[dict]:
     if cur.fetchone():
         agents.insert(0, viewer_lower)
     if not agents:
+        logger.debug("apply_agent_edits: no agents for viewer=%s, skipping overlay", viewer_lower)
         return posts
 
     import json as _json
@@ -3201,6 +3210,7 @@ def get_chain_config():
             "min_topic_size": p["min_topic_size"],
             "subscription_period": p["subscription_period"],
             "subscription_reserve_percent": p["subscription_reserve_percent"],
+            "bridge_attestation_threshold": p["bridge_attestation_threshold"],
             "mint_interval": p["mint_interval"],
             "block_time": _get_block_time_seconds(),
             "tiers": p["tiers"],

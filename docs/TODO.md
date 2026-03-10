@@ -50,15 +50,9 @@
 ## Security
 - Full security audit for every module.
 
-## Privacy
-- Add all privacy-related quotes from Obsidian somewhere?
-
-## Identity
-- Should it remain possible to create msgs, participate, etc, without having a set username?
-
 
 # CLEANUP!!!
 - now that we're fully moved from GoLevelDB to PebbleDB, remove everything related to the pebbledb converter (the go project, etc)
 
-# others:
-- REDUCE GAS from 5k to 1k perhaps? analyze gas usage
+# Other Ideas:
+- Allow only 3 new profiles (set_username) per minute

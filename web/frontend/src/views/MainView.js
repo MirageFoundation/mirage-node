@@ -693,6 +693,117 @@ const NsfwHeroNote = styled.div`
     }
 `;
 
+// Android app banner - shown once to Android mobile users until dismissed
+const AndroidAppHero = styled.div`
+    background: linear-gradient(135deg, rgba(52, 168, 83, 0.08) 0%, rgba(66, 133, 244, 0.08) 100%);
+    border: 1px solid rgba(66, 133, 244, 0.3);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+
+    @media (max-width: 1000px) {
+        border-radius: 10px;
+        padding: 1rem 1.25rem;
+    }
+
+    @media (max-width: 768px) {
+        border-radius: 8px;
+        padding: 0.85rem 1rem;
+    }
+`;
+
+const AndroidHeroTitle = styled.div`
+    font-size: 1rem;
+    font-weight: 700;
+    color: ${({ theme }) => theme?.colors?.text || '#FFFFFF'};
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    line-height: 1.2;
+
+    @media (max-width: 768px) {
+        font-size: 0.9rem;
+    }
+`;
+
+const AndroidHeroEmoji = styled.span`
+    font-size: 1.1rem;
+    line-height: 1;
+`;
+
+const AndroidHeroDescription = styled.div`
+    color: ${({ theme }) => theme?.colors?.subtleText || '#bcb1a2'};
+    font-size: 0.8rem;
+    line-height: 1.6;
+
+    @media (max-width: 768px) {
+        font-size: 0.75rem;
+    }
+`;
+
+const AndroidHeroButtons = styled.div`
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+    flex-wrap: wrap;
+
+    @media (max-width: 768px) {
+        gap: 0.5rem;
+    }
+`;
+
+const AndroidHeroButton = styled.a`
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+    text-decoration: none;
+    text-align: center;
+    background: linear-gradient(135deg, #34a853 0%, #2d9249 100%);
+    color: #fff;
+
+    &:hover {
+        background: linear-gradient(135deg, #2d9249 0%, #267a3d 100%);
+        transform: translateY(-1px);
+    }
+
+    @media (max-width: 768px) {
+        padding: 0.45rem 1rem;
+        font-size: 0.8rem;
+        flex: 1;
+        min-width: 80px;
+    }
+`;
+
+const AndroidHeroDismiss = styled.button`
+    padding: 0.5rem 1.25rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: rgba(100, 116, 139, 0.2);
+    color: #94a3b8;
+    border: 1px solid rgba(100, 116, 139, 0.3);
+
+    &:hover {
+        background: rgba(100, 116, 139, 0.3);
+        color: #cbd5e1;
+    }
+
+    @media (max-width: 768px) {
+        padding: 0.45rem 1rem;
+        font-size: 0.8rem;
+        flex: 1;
+        min-width: 80px;
+    }
+`;
+
 const HomeFeedInfoTitle = styled.div`
     font-size: 0.7rem;
     font-weight: 600;
@@ -1357,6 +1468,17 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
     const dismissWelcomeCard = () => {
         try { Storage.save('welcome_card_dismissed_v1', true); } catch (_) { }
         setShowWelcomeCard(false);
+    };
+
+    // Android app banner: show once for Android users until dismissed
+    const isAndroid = (() => { try { return /android/i.test(navigator.userAgent); } catch (_) { return false; } })();
+    const [showAndroidBanner, setShowAndroidBanner] = useState(() => {
+        if (!isAndroid) return false;
+        try { return !Storage.load('android_app_banner_dismissed', false); } catch (_) { return true; }
+    });
+    const dismissAndroidBanner = () => {
+        try { Storage.save('android_app_banner_dismissed', true); } catch (_) { }
+        setShowAndroidBanner(false);
     };
 
     // NSFW welcome hero: show once for logged-in users until they choose yes/no
@@ -2773,6 +2895,26 @@ const MainView = ({ state, setPosts, updatePost, setTopic, routeTopic }) => {
                                 onToggleCollapse={toggleQuestCard}
                                 size={cardSize}
                             />
+                        )}
+
+                        {/* Android app banner - shown once for Android users until dismissed */}
+                        {showAndroidBanner && (
+                            <AndroidAppHero role="region" aria-label="Android app available">
+                                <AndroidHeroTitle>
+                                    <AndroidHeroEmoji>📱</AndroidHeroEmoji> Mirage is available on Android
+                                </AndroidHeroTitle>
+                                <AndroidHeroDescription>
+                                    Get the native Android app for a faster, smoother experience with push notifications and offline support.
+                                </AndroidHeroDescription>
+                                <AndroidHeroButtons>
+                                    <AndroidHeroButton href="https://play.google.com/store/apps/details?id=talk.mirage.mobile" target="_blank" rel="noopener noreferrer">
+                                        Get the app
+                                    </AndroidHeroButton>
+                                    <AndroidHeroDismiss onClick={dismissAndroidBanner}>
+                                        No thanks
+                                    </AndroidHeroDismiss>
+                                </AndroidHeroButtons>
+                            </AndroidAppHero>
                         )}
 
                         {/* NSFW welcome hero - shown once for logged-in users until dismissed */}

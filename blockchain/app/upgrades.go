@@ -1552,6 +1552,220 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.17.0: Security upgrade ──────────────────────────────────────
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.17.0-security",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.17.0-security...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.17.0: RunMigrations failed: %w", err)
+			}
+
+			// ── C-1 remediation: fix Agent-tier subscription bypass ──────
+			// Profiles at level 10 (Agent) with expired subscriptions may have
+			// bypassed renewal/downgrade due to the old `int(level) >= len(tiers)`
+			// check. Re-evaluate every non-free profile using LevelToTierIndex.
+			store := sdkCtx.KVStore(app.GetKey(coretypes.StoreKey))
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			currentTime := sdkCtx.BlockTime().Unix()
+
+			profiles, pErr := app.CoreKeeper.GetAllProfiles(sdkCtx)
+			if pErr != nil {
+				return nil, fmt.Errorf("v1.17.0: failed to read profiles: %w", pErr)
+			}
+
+			remediated := 0
+			ghostReservesBurned := uint64(0)
+
+			for _, bz := range profiles {
+				var m map[string]interface{}
+				if err := json.Unmarshal(bz, &m); err != nil {
+					return nil, fmt.Errorf("v1.17.0: profile unmarshal failed: %w", err)
+				}
+
+				owner, _ := m["owner"].(string)
+				if owner == "" {
+					continue
+				}
+
+				var level int
+				switch v := m["level"].(type) {
+				case float64:
+					level = int(v)
+				case int:
+					level = v
+				default:
+					continue
+				}
+
+				if level <= 0 {
+					continue // free tier, skip
+				}
+
+				tierIdx := coretypes.LevelToTierIndex(level)
+				if tierIdx <= 0 {
+					// Invalid level → downgrade to free
+					m["level"] = 0
+					m["subscription_expiry"] = 0
+					m["reserve_funds"] = 0
+					m["auto_renew"] = false
+					newBz, err := json.Marshal(m)
+					if err != nil {
+						return nil, fmt.Errorf("v1.17.0: marshal failed for %s: %w", owner, err)
+					}
+					if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
+						return nil, fmt.Errorf("v1.17.0: save failed for %s: %w", owner, err)
+					}
+					sdkCtx.Logger().Info("v1.17.0: downgraded invalid level", "owner", owner, "old_level", level)
+					remediated++
+					continue
+				}
+
+				// Check for ghost reserves (reserve_funds > 0 but no active subscription)
+				reserveFunds := uint64(0)
+				if rf, ok := m["reserve_funds"].(float64); ok {
+					reserveFunds = uint64(rf)
+				}
+				subExpiry := int64(0)
+				if se, ok := m["subscription_expiry"].(float64); ok {
+					subExpiry = int64(se)
+				}
+
+				if level >= coretypes.LevelAdminMin {
+					// Admins: clear any ghost reserve but don't touch level
+					if reserveFunds > 0 && subExpiry <= currentTime {
+						if err := app.CoreKeeper.BurnFromModuleAmount(sdkCtx, reserveFunds); err != nil {
+							return nil, fmt.Errorf("v1.17.0: failed to burn admin ghost reserve for %s: %w", owner, err)
+						}
+						ghostReservesBurned += reserveFunds
+						m["reserve_funds"] = 0
+						newBz, err := json.Marshal(m)
+						if err != nil {
+							return nil, fmt.Errorf("v1.17.0: marshal failed for %s: %w", owner, err)
+						}
+						if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
+							return nil, fmt.Errorf("v1.17.0: save failed for %s: %w", owner, err)
+						}
+						sdkCtx.Logger().Info("v1.17.0: cleared admin ghost reserve", "owner", owner, "burned", reserveFunds)
+						remediated++
+					}
+					continue
+				}
+
+				changed := false
+
+				// Ghost reserve: subscription expired but reserve_funds > 0
+				if reserveFunds > 0 && subExpiry > 0 && subExpiry <= currentTime {
+					if err := app.CoreKeeper.BurnFromModuleAmount(sdkCtx, reserveFunds); err != nil {
+						return nil, fmt.Errorf("v1.17.0: failed to burn ghost reserve for %s: %w", owner, err)
+					}
+					ghostReservesBurned += reserveFunds
+					m["reserve_funds"] = 0
+					changed = true
+					sdkCtx.Logger().Info("v1.17.0: burned ghost reserve", "owner", owner, "reserve", reserveFunds)
+				}
+
+				// Expired subscription → re-evaluate
+				if subExpiry > 0 && subExpiry <= currentTime {
+					tierConfig := params.GetTierConfig(level)
+					if tierConfig == nil || tierConfig.PeriodFee == 0 {
+						// Invalid/free tier config → downgrade
+						m["level"] = 0
+						m["subscription_expiry"] = 0
+						m["auto_renew"] = false
+						changed = true
+						sdkCtx.Logger().Info("v1.17.0: downgraded (invalid tier config)", "owner", owner, "old_level", level)
+					} else {
+						// Subscription has expired; downgrade to free
+						m["level"] = 0
+						m["subscription_expiry"] = 0
+						m["reserve_funds"] = 0
+						m["auto_renew"] = false
+						changed = true
+						sdkCtx.Logger().Info("v1.17.0: downgraded (expired subscription)", "owner", owner, "old_level", level)
+					}
+				}
+
+				if changed {
+					newBz, err := json.Marshal(m)
+					if err != nil {
+						return nil, fmt.Errorf("v1.17.0: marshal failed for %s: %w", owner, err)
+					}
+					if err := app.CoreKeeper.SetProfileCore(sdkCtx, owner, newBz); err != nil {
+						return nil, fmt.Errorf("v1.17.0: save failed for %s: %w", owner, err)
+					}
+					remediated++
+				}
+			}
+
+			sdkCtx.Logger().Info("v1.17.0: C-1 remediation complete",
+				"profiles_remediated", remediated,
+				"ghost_reserves_burned", ghostReservesBurned)
+
+			// ── Rebuild subscription index for consistency ──────────────
+			// Clear all existing subscription index entries and re-index from profile data
+			subPrefix := []byte(coretypes.SubscriptionsPrefix)
+			iter := store.Iterator(subPrefix, storetypes.PrefixEndBytes(subPrefix))
+			keysToDelete := [][]byte{}
+			for ; iter.Valid(); iter.Next() {
+				keysToDelete = append(keysToDelete, append([]byte{}, iter.Key()...))
+			}
+			iter.Close()
+			for _, k := range keysToDelete {
+				store.Delete(k)
+			}
+			sdkCtx.Logger().Info("v1.17.0: cleared stale subscription index entries", "count", len(keysToDelete))
+
+			// Re-index active subscriptions from fresh profile data
+			reindexed := 0
+			freshProfiles, err := app.CoreKeeper.GetAllProfiles(sdkCtx)
+			if err != nil {
+				return nil, fmt.Errorf("v1.17.0: failed to re-read profiles for reindex: %w", err)
+			}
+			for _, bz := range freshProfiles {
+				var m map[string]interface{}
+				if err := json.Unmarshal(bz, &m); err != nil {
+					continue
+				}
+				owner, _ := m["owner"].(string)
+				if owner == "" {
+					continue
+				}
+				var level int
+				if v, ok := m["level"].(float64); ok {
+					level = int(v)
+				}
+				var subExpiry int64
+				if v, ok := m["subscription_expiry"].(float64); ok {
+					subExpiry = int64(v)
+				}
+				if level > 0 && subExpiry > currentTime {
+					if err := app.CoreKeeper.SetSubscription(sdkCtx, owner, level, subExpiry); err != nil {
+						return nil, fmt.Errorf("v1.17.0: failed to reindex subscription for %s: %w", owner, err)
+					}
+					reindexed++
+				}
+			}
+			sdkCtx.Logger().Info("v1.17.0: reindexed active subscriptions", "count", reindexed)
+
+			attestationsMoved, attestorsMoved, err := app.CoreKeeper.MigrateBridgeAttestationParams(sdkCtx)
+			if err != nil {
+				return nil, fmt.Errorf("v1.17.0: bridge attestation migration failed: %w", err)
+			}
+			sdkCtx.Logger().Info("v1.17.0: bridge attestation keys migrated",
+				"attestations_moved", attestationsMoved,
+				"attestors_moved", attestorsMoved)
+
+			_ = store // used above
+
+			sdkCtx.Logger().Info("Upgrade to v1.17.0-security complete")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

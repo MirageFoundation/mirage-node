@@ -108,3 +108,27 @@ func TestGetAwardConfig(t *testing.T) {
 
 	require.Nil(t, p.GetAwardConfig("not_a_real_award"))
 }
+
+func TestC1BugCondition(t *testing.T) {
+	// Reproduce the C-1 bug condition: the old code used
+	//   if core.Level <= 0 || int(core.Level) >= len(params.Tiers)
+	// With 3 tiers (indices 0,1,2), level 10 evaluates to int(10) >= 3 = true,
+	// causing Agent users to skip renewal/downgrade entirely.
+	p := DefaultParams()
+	require.Len(t, p.Tiers, 3)
+
+	// Old buggy condition would skip Agent (level 10)
+	level10 := 10
+	buggySkip := level10 <= 0 || level10 >= len(p.Tiers)
+	require.True(t, buggySkip, "demonstrates the old bug: level 10 was incorrectly skipped")
+
+	// New code uses LevelToTierIndex which correctly maps level 10 → index 2
+	tierIdx := LevelToTierIndex(level10)
+	require.Equal(t, 2, tierIdx, "LevelToTierIndex(10) must return 2")
+	require.True(t, tierIdx > 0, "Agent tier index must be > 0 (not skipped)")
+
+	// Admin (level 100) also must not be skipped
+	adminIdx := LevelToTierIndex(100)
+	require.Equal(t, 2, adminIdx)
+	require.True(t, adminIdx > 0)
+}

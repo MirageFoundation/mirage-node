@@ -157,20 +157,6 @@ EXPECTED_TIERS = [
     },
 ]
 
-# Fields removed in v1.16.0 tier overhaul — must not appear in params response
-REMOVED_TIER_FIELDS = [
-    "max_followed_mods",
-    "archive_duration_days",
-    "eligible_for_mod",
-    "can_change_name",
-]
-
-# Fields removed in v1.16.0 profile migration — must not appear in profile response
-REMOVED_PROFILE_FIELDS = [
-    "is_moderator",
-    "followed_moderators",
-]
-
 EXPECTED_AWARD_CONFIGS = [
     {"name": "quality_post", "cost": 10_000_000_000},
     {"name": "original_content", "cost": 5_000_000_000},
@@ -200,10 +186,6 @@ EXPECTED_PARAMS = {
 }
 
 
-def is_valid_level(level: int) -> bool:
-    return level in (0, 1, 10) or level >= 100
-
-
 # ── Checks ─────────────────────────────────────────────────
 
 
@@ -229,16 +211,16 @@ def check_node_reachable() -> bool:
     return True
 
 
+def _extract_semver(s: str) -> str:
+    """Extract the semver portion, stripping leading 'v' and any suffix after patch."""
+    import re
+    m = re.search(r"v?(\d+\.\d+\.\d+)", s)
+    return m.group(1) if m else s
+
 def _version_matches(actual: str, upgrade_name: str) -> bool:
     if not actual or not upgrade_name:
         return False
-    if upgrade_name in actual:
-        return True
-    if upgrade_name.startswith("v") and upgrade_name[1:] in actual:
-        return True
-    if not upgrade_name.startswith("v") and f"v{upgrade_name}" in actual:
-        return True
-    return False
+    return _extract_semver(actual) == _extract_semver(upgrade_name)
 
 
 def check_software_version(upgrade_name: str) -> None:
@@ -423,16 +405,6 @@ def check_core_params() -> None:
         else:
             ok(f"{label}: all fields match")
 
-    # ── Removed tier fields (pre-v1.16.0 leftovers) ──
-    stale_found = False
-    for i, tier in enumerate(tiers):
-        for removed in REMOVED_TIER_FIELDS:
-            if removed in tier:
-                fail(f"Tier[{i}]: stale field '{removed}' still present")
-                stale_found = True
-    if not stale_found:
-        ok("No stale pre-v1.16.0 tier fields present")
-
 
 def fetch_all_profiles() -> tuple[list[dict], int | None]:
     """Fetch all profiles with pagination."""
@@ -468,141 +440,44 @@ def fetch_all_profiles() -> tuple[list[dict], int | None]:
     return profiles, total
 
 
-def check_profiles() -> None:
-    section("Profile Migration")
-    profiles, total = fetch_all_profiles()
+def check_subscription_index_consistency() -> None:
+    """v1.17.0: verify no ghost reserves and subscription index is consistent."""
+    section("Subscription Index Consistency (v1.17.0)")
+
+    profiles, _ = fetch_all_profiles()
     if not profiles:
-        fail("No profiles found (cannot validate migration)")
+        warn("No profiles — skipping subscription consistency check")
         return
 
-    ok(f"Total profiles fetched: {len(profiles)}")
-    if total and total > 0 and total != len(profiles):
-        fail(f"Profile count mismatch: fetched {len(profiles)} vs pagination total {total}")
+    import time as _time
 
-    bad_levels = []
-    level_counts: dict[int, int] = {}
-    missing_lists = {
-        "enabled_agents": 0,
-        "followed_users": 0,
-        "followed_topics": 0,
-        "blocked_users": 0,
-        "blocked_posts": 0,
-        "blocked_topics": 0,
-    }
-    missing_scalars = {
-        "biography": 0,
-        "avatar": 0,
-        "banner": 0,
-        "flair": 0,
-    }
-    stale_field_hits: dict[str, int] = {f: 0 for f in REMOVED_PROFILE_FIELDS}
-    self_agent_violations: list[str] = []
-    list_type_errors: list[str] = []
-    list_cap_violations: list[str] = []
-    list_dupe_violations: list[str] = []
-
-    tier_caps = {t["level"]: t for t in EXPECTED_TIERS}
+    now_unix = int(_time.time())
+    ghost_reserves = []
+    expired_paid = []
 
     for p in profiles:
         lvl = p.get("level", 0)
         if isinstance(lvl, str):
             lvl = int(lvl)
-        level_counts[lvl] = level_counts.get(lvl, 0) + 1
-        if not is_valid_level(lvl):
-            bad_levels.append((p.get("owner", "?")[:20], lvl))
-        for key in missing_lists:
-            if key not in p:
-                missing_lists[key] += 1
-        for key in missing_scalars:
-            if key not in p:
-                missing_scalars[key] += 1
-        for removed_field in REMOVED_PROFILE_FIELDS:
-            if removed_field in p:
-                stale_field_hits[removed_field] += 1
-        owner = str(p.get("owner", "")).lower()
-        agents = p.get("enabled_agents")
-        if isinstance(agents, list):
-            agents_lc = [str(a).lower() for a in agents]
-            if owner and owner in agents_lc:
-                self_agent_violations.append(owner[:20])
+        reserve = int(p.get("reserve_funds", 0) or 0)
+        sub_expiry = int(p.get("subscription_expiry", 0) or 0)
+        owner = str(p.get("owner", ""))[:20]
 
-        # ── List field validation (type, duplicates, cap per tier) ──
-        if lvl in tier_caps:
-            caps = tier_caps[lvl]
-        else:
-            caps = None
+        if reserve > 0 and sub_expiry > 0 and sub_expiry <= now_unix:
+            ghost_reserves.append(f"{owner} reserve={reserve}")
 
-        list_fields = {
-            "enabled_agents": ("max_enabled_agents", p.get("enabled_agents")),
-            "followed_users": ("max_followed_users", p.get("followed_users")),
-            "followed_topics": ("max_followed_topics", p.get("followed_topics")),
-            "blocked_users": ("max_blocked_users", p.get("blocked_users")),
-            "blocked_posts": ("max_blocked_posts", p.get("blocked_posts")),
-            "blocked_topics": ("max_blocked_topics", p.get("blocked_topics")),
-        }
+        if lvl > 0 and lvl < 100 and sub_expiry > 0 and sub_expiry <= now_unix:
+            expired_paid.append(f"{owner} lvl={lvl} exp={sub_expiry}")
 
-        for list_name, (cap_key, raw_list) in list_fields.items():
-            if list_name not in p:
-                continue
-            if not isinstance(raw_list, list):
-                list_type_errors.append(f"{owner[:20]}:{list_name}={type(raw_list).__name__}")
-                continue
-            if len(raw_list) != len(set(map(str, raw_list))):
-                list_dupe_violations.append(f"{owner[:20]}:{list_name}")
-            if caps is not None:
-                max_allowed = int(caps.get(cap_key, 0))
-                if len(raw_list) > max_allowed:
-                    list_cap_violations.append(f"{owner[:20]}:{list_name}={len(raw_list)} (cap {max_allowed})")
-            debug(f"Profile {owner[:12]} {list_name} count={len(raw_list)}")
-
-    dist = ", ".join(f"lvl {k}: {v}" for k, v in sorted(level_counts.items()))
-    ok(f"Level distribution: {dist}")
-
-    if bad_levels:
-        fail(f"{len(bad_levels)} profiles have invalid levels: {bad_levels[:5]}")
+    if ghost_reserves:
+        fail(f"{len(ghost_reserves)} profiles have ghost reserves: {ghost_reserves[:5]}")
     else:
-        ok("All profiles have valid levels (0, 1, 10, or 100+)")
+        ok("No ghost reserves found")
 
-    for key, count in missing_lists.items():
-        if count:
-            fail(f"{count} profiles missing '{key}' field")
-        else:
-            ok(f"All profiles include '{key}' field")
-
-    # proto3 omits zero-value scalars (empty string) in JSON, so missing is expected
-    for key, count in missing_scalars.items():
-        if count:
-            warn(f"{count} profiles missing '{key}' scalar field (empty values omitted by proto)")
-        else:
-            ok(f"All profiles include '{key}' scalar field")
-
-    stale_any = False
-    for removed_field, count in stale_field_hits.items():
-        if count:
-            fail(f"{count} profiles still have stale '{removed_field}' field")
-            stale_any = True
-    if not stale_any:
-        ok("No stale pre-v1.16.0 profile fields present")
-
-    if self_agent_violations:
-        fail(f"{len(self_agent_violations)} profiles have themselves as enabled agent: {self_agent_violations[:5]}")
+    if expired_paid:
+        fail(f"{len(expired_paid)} paid profiles have expired subscriptions: {expired_paid[:5]}")
     else:
-        ok("No profiles have themselves as enabled agent")
-
-    if list_type_errors:
-        fail(f"{len(list_type_errors)} list fields have invalid types: {list_type_errors[:5]}")
-    else:
-        ok("All list fields are JSON arrays")
-
-    if list_dupe_violations:
-        fail(f"{len(list_dupe_violations)} profiles have duplicate list entries: {list_dupe_violations[:5]}")
-    else:
-        ok("No duplicate entries in profile lists")
-
-    if list_cap_violations:
-        warn(f"{len(list_cap_violations)} profiles exceed tier caps (legacy/migrated data): {list_cap_violations[:5]}")
-    else:
-        ok("All profile lists are within tier caps")
+        ok("No paid profiles with expired subscriptions")
 
 
 # ── Main ───────────────────────────────────────────────────
@@ -641,7 +516,7 @@ def main() -> int:
     check_software_version(upgrade_name)
     check_upgrade_plan(upgrade_name)
     check_core_params()
-    check_profiles()
+    check_subscription_index_consistency()
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")

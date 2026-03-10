@@ -66,12 +66,14 @@ func (a *Attestor) Run(ctx context.Context) error {
 
 	externalBurns := make(chan chains.ExternalBurnEvent, a.cfg.Attestor.BatchSize)
 	mirageBurns := make(chan chains.MirageBurnEvent, a.cfg.Attestor.BatchSize)
+	errCh := make(chan error, len(a.watchers)+1)
 
 	for _, watcher := range a.watchers {
 		w := watcher
 		go func() {
 			if err := w.WatchBurns(ctx, externalBurns); err != nil {
 				a.logger.Printf("ERROR chain watcher %s stopped: %v", w.ChainID(), err)
+				errCh <- fmt.Errorf("chain watcher %s: %w", w.ChainID(), err)
 			}
 		}()
 	}
@@ -79,6 +81,7 @@ func (a *Attestor) Run(ctx context.Context) error {
 	go func() {
 		if err := a.mirage.WatchBridgeBurns(ctx, mirageBurns); err != nil {
 			a.logger.Printf("ERROR mirage burn watcher stopped: %v", err)
+			errCh <- fmt.Errorf("mirage burn watcher: %w", err)
 		}
 	}()
 
@@ -86,6 +89,8 @@ func (a *Attestor) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-errCh:
+			return err
 		case burn := <-externalBurns:
 			if err := a.handleExternalBurns(ctx, burn, externalBurns); err != nil {
 				return err

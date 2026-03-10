@@ -406,6 +406,25 @@ func (d RelaySigDecorator) AnteHandle(ctx sdk.Context, tx sdk.Tx, simulate bool,
 				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDelete", "err", err.Error())
 				return ctx, err
 			}
+		case *coretypes.MsgDeleteUser:
+			if m.Authority == govAuthority {
+				continue
+			}
+			if err := validateEnvelopeTimestamp(ctx, m.EnvelopeTimestamp, maxAge); err != nil {
+				ctx.Logger().Error("RelaySig: timestamp validation failed", "msg", "MsgDeleteUser", "err", err.Error())
+				return ctx, err
+			}
+			if err := verifyRelaySignature("MsgDeleteUser", m.EnvelopePubkey, m.EnvelopeSignature, func(w *canonWriter) {
+				w.writeBytes(2, m.EnvelopePubkey)
+				w.writeBytes(3, m.EnvelopeBlockHash)
+				w.writeUvarint(4, m.EnvelopeDifficulty)
+				w.writeUvarint(5, m.EnvelopePow)
+				w.writeUvarint(6, m.EnvelopeTimestamp)
+				w.writeString(100, m.Target)
+			}); err != nil {
+				ctx.Logger().Error("RelaySig: verification failed", "msg", "MsgDeleteUser", "err", err.Error())
+				return ctx, err
+			}
 		case *coretypes.MsgSendTokens:
 			if m.Authority == govAuthority {
 				continue // Skip validation for governance

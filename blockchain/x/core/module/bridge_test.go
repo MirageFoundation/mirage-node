@@ -101,8 +101,8 @@ func newSortedMockIterator(data map[string][]byte, start, end []byte, reverse bo
 }
 
 func (it *sortedMockIterator) Domain() ([]byte, []byte) { return it.start, it.end }
-func (it *sortedMockIterator) Valid() bool               { return it.pos < len(it.keys) }
-func (it *sortedMockIterator) Next()                     { it.pos++ }
+func (it *sortedMockIterator) Valid() bool              { return it.pos < len(it.keys) }
+func (it *sortedMockIterator) Next()                    { it.pos++ }
 func (it *sortedMockIterator) Key() []byte {
 	if it.pos < len(it.keys) {
 		return []byte(it.keys[it.pos])
@@ -1039,13 +1039,13 @@ func TestBridgeAttestationStorage(t *testing.T) {
 		t.Fatalf("SetBridgeAttestation error: %v", err)
 	}
 
-	// Store attestor separately
-	if err := mk.SetBridgeAttestor(ctx, sourceChain, burnID, "validator1", 100); err != nil {
+	// Store attestor separately (with burn params for v1.17.0 anti-poisoning)
+	if err := mk.SetBridgeAttestor(ctx, sourceChain, burnID, "mirage1recipient", 1000000, "validator1", 100); err != nil {
 		t.Fatalf("SetBridgeAttestor error: %v", err)
 	}
 
-	// Retrieve and verify
-	restored, found, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	// Retrieve and verify using parameterized key (v1.17.0+)
+	restored, found, err := mk.GetBridgeAttestationWithParams(ctx, sourceChain, burnID, "mirage1recipient", 1000000)
 	if err != nil {
 		t.Fatalf("GetBridgeAttestation error: %v", err)
 	}
@@ -1059,13 +1059,44 @@ func TestBridgeAttestationStorage(t *testing.T) {
 		t.Errorf("AttestedPower = %d, want 100", restored.AttestedPower)
 	}
 
-	// Verify attestor stored separately
-	hasAttestor, err := mk.HasBridgeAttestor(ctx, sourceChain, burnID, "validator1")
+	// Verify attestor stored separately (with burn params for v1.17.0 anti-poisoning)
+	hasAttestor, err := mk.HasBridgeAttestor(ctx, sourceChain, burnID, "mirage1recipient", 1000000, "validator1")
 	if err != nil {
 		t.Fatalf("HasBridgeAttestor error: %v", err)
 	}
 	if !hasAttestor {
 		t.Error("Expected validator1 to have attested")
+	}
+
+	attestors, err := mk.GetBridgeAttestorList(ctx, sourceChain, burnID, "mirage1recipient", 1000000)
+	if err != nil {
+		t.Fatalf("GetBridgeAttestorList error: %v", err)
+	}
+	if len(attestors) != 1 || attestors[0] != "validator1" {
+		t.Errorf("Attestors = %v, want [validator1]", attestors)
+	}
+}
+
+// TestBridgeAttestationAmbiguous ensures multiple attestations for same burn_id fail fast.
+func TestBridgeAttestationAmbiguous(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	sourceChain := "solana"
+	burnID := "12345"
+
+	a1 := types.NewBridgeAttestation(sourceChain, burnID, "mirage1alice", 111, 100)
+	if err := mk.SetBridgeAttestation(ctx, a1); err != nil {
+		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+	a2 := types.NewBridgeAttestation(sourceChain, burnID, "mirage1bob", 222, 100)
+	if err := mk.SetBridgeAttestation(ctx, a2); err != nil {
+		t.Fatalf("SetBridgeAttestation error: %v", err)
+	}
+
+	_, _, err := mk.GetBridgeAttestation(ctx, sourceChain, burnID)
+	if err == nil {
+		t.Fatal("Expected error for ambiguous attestation lookup")
 	}
 }
 
@@ -1127,50 +1158,50 @@ func TestBridgeAttestationDuplicateRejectionInbound(t *testing.T) {
 // =============================================================================
 
 // TestThresholdExactlyAtBoundary tests attestation exactly at 2/3 threshold
+// Uses v1.17.0 integer basis-point math with ceiling division.
 func TestThresholdExactlyAtBoundary(t *testing.T) {
 	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
 
 	totalPower := int64(100)
 	threshold := 0.6667 // 66.67%
 
-	// required = int(100 * 0.6667) = 66
-	// So 66 power SHOULD meet threshold (66 >= 66)
-	attestation.AttestedPower = 66
-	if !attestation.MeetsThreshold(totalPower, threshold) {
-		t.Error("66% should meet threshold (required=66 due to truncation)")
-	}
-
-	// 65 power should NOT meet threshold
-	attestation.AttestedPower = 65
-	if attestation.MeetsThreshold(totalPower, threshold) {
-		t.Error("65% should not meet 66.67% threshold")
-	}
-
-	// 67 power should definitely meet threshold
+	// required = ceil(100 * 6667 / 10000) = ceil(66.67) = 67
 	attestation.AttestedPower = 67
 	if !attestation.MeetsThreshold(totalPower, threshold) {
-		t.Error("67% should meet 66.67% threshold")
+		t.Error("67/100 should meet threshold (required=67 with ceiling)")
+	}
+
+	// 66 power should NOT meet threshold (ceiling rounds up)
+	attestation.AttestedPower = 66
+	if attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("66/100 should not meet 66.67% threshold with ceiling division")
+	}
+
+	// 68 power should definitely meet threshold
+	attestation.AttestedPower = 68
+	if !attestation.MeetsThreshold(totalPower, threshold) {
+		t.Error("68/100 should meet 66.67% threshold")
 	}
 }
 
 // TestThresholdWithOddTotalPower tests threshold with non-round numbers
+// Uses v1.17.0 integer basis-point math with ceiling division.
 func TestThresholdWithOddTotalPower(t *testing.T) {
 	attestation := types.NewBridgeAttestation("solana", "123", "mirage1recipient", 1000000, 100)
 
 	totalPower := int64(150)
 	threshold := 0.6667 // 66.67%
 
-	// Required: int(150 * 0.6667) = int(100.005) = 100
-	// So 100 SHOULD meet threshold
-	attestation.AttestedPower = 100
+	// Required: ceil(150 * 6667 / 10000) = ceil(100.005) = 101
+	attestation.AttestedPower = 101
 	if !attestation.MeetsThreshold(totalPower, threshold) {
-		t.Error("100/150 should meet threshold (required=100 due to truncation)")
+		t.Error("101/150 should meet threshold (required=101 with ceiling)")
 	}
 
-	// 99 should NOT meet
-	attestation.AttestedPower = 99
+	// 100 should NOT meet (ceiling rounds up)
+	attestation.AttestedPower = 100
 	if attestation.MeetsThreshold(totalPower, threshold) {
-		t.Error("99/150 should not meet threshold")
+		t.Error("100/150 should not meet threshold with ceiling division")
 	}
 }
 
