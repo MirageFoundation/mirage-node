@@ -4137,8 +4137,8 @@ def test_annotate_chain(backend: str) -> None:
     _check_reject("annotate_chain.setagents_no_username", code, log, "username", tx_hash)
 
 
-def test_v1170_security(backend: str) -> None:
-    """v1.17.0 security upgrade: Agent-tier expiry, relay nonce replay, bridge attestation validation."""
+def test_security(backend: str) -> None:
+    """Security checks: tier params, subscription period, bridge threshold, replay rejection."""
     print(f"\n{_COLOR_BOLD}[17] Security Upgrade Validation{_COLOR_RESET}")
 
     fee_payer = _VALIDATOR_ADDR or ""
@@ -4150,38 +4150,38 @@ def test_v1170_security(backend: str) -> None:
         params = resp.json()
         tiers = params.get("tiers", [])
         if len(tiers) != 3:
-            _fail("v1170.tier_count", f"expected 3 tiers, got {len(tiers)}")
+            _fail("security.tier_count", f"expected 3 tiers, got {len(tiers)}")
         else:
-            _pass("v1170.tier_count")
+            _pass("security.tier_count")
 
         # Level 10 (Agent) must map to tier index 2 which has can_be_agent=True
         agent_tier = tiers[2] if len(tiers) > 2 else {}
         if agent_tier.get("can_be_agent"):
-            _pass("v1170.agent_tier_valid")
+            _pass("security.agent_tier_valid")
         else:
-            _fail("v1170.agent_tier_valid", f"tier[2].can_be_agent={agent_tier.get('can_be_agent')}")
+            _fail("security.agent_tier_valid", f"tier[2].can_be_agent={agent_tier.get('can_be_agent')}")
     except Exception as e:
-        _fail("v1170.params_check", str(e))
+        _fail("security.params_check", str(e))
 
     # 2. Verify subscription_period is non-zero (M-8 SubscriptionPeriod=0 governance attack)
     try:
         sub_period = int(params.get("subscription_period", 0))
         if sub_period > 0:
-            _pass("v1170.subscription_period_nonzero")
+            _pass("security.subscription_period_nonzero")
         else:
-            _fail("v1170.subscription_period_nonzero", f"subscription_period={sub_period}")
+            _fail("security.subscription_period_nonzero", f"subscription_period={sub_period}")
     except Exception as e:
-        _fail("v1170.subscription_period_nonzero", str(e))
+        _fail("security.subscription_period_nonzero", str(e))
 
     # 3. Bridge attestation threshold should be > 0 and <= 1
     try:
         threshold = float(params.get("bridge_attestation_threshold", 0))
         if 0 < threshold <= 1:
-            _pass("v1170.bridge_threshold_valid")
+            _pass("security.bridge_threshold_valid")
         else:
-            _fail("v1170.bridge_threshold_valid", f"threshold={threshold}")
+            _fail("security.bridge_threshold_valid", f"threshold={threshold}")
     except Exception as e:
-        _fail("v1170.bridge_threshold_valid", str(e))
+        _fail("security.bridge_threshold_valid", str(e))
 
     # 4. Relay nonce: submit same tx twice — second should be rejected
     #    (Note: basic timestamp replay check already exists via envelope_timestamp;
@@ -4200,7 +4200,7 @@ def test_v1170_security(backend: str) -> None:
             wait_deliver=True,
         )
         if ccode == 0 and dcode == 0:
-            _pass("v1170.first_post_accepted")
+            _pass("security.first_post_accepted")
 
             # Same msg with same timestamp — should fail at check, deliver, or mempool level
             try:
@@ -4212,18 +4212,18 @@ def test_v1170_security(backend: str) -> None:
                     wait_deliver=True,
                 )
                 if ccode2 != 0 or dcode2 != 0:
-                    _pass("v1170.replay_rejected")
+                    _pass("security.replay_rejected")
                 else:
-                    _fail("v1170.replay_rejected", f"ccode={ccode2} dcode={dcode2}")
+                    _fail("security.replay_rejected", f"ccode={ccode2} dcode={dcode2}")
             except RuntimeError as e:
                 if "already exists in cache" in str(e):
-                    _pass("v1170.replay_rejected")
+                    _pass("security.replay_rejected")
                 else:
-                    _fail("v1170.replay_rejected", str(e))
+                    _fail("security.replay_rejected", str(e))
         else:
-            _fail("v1170.first_post_accepted", f"ccode={ccode} dcode={dcode}")
+            _fail("security.first_post_accepted", f"ccode={ccode} dcode={dcode}")
     else:
-        _fail("v1170.relay_test", "agent1 wallet not available")
+        _fail("security.relay_test", "agent1 wallet not available")
 
 
 # =========================================================================
@@ -4248,7 +4248,7 @@ ALL_CATEGORIES = {
     "tier_features": test_tier_features,
     "biography": test_biography,
     "annotate_chain": test_annotate_chain,
-    "v1170_security": test_v1170_security,
+    "security": test_security,
 }
 
 
