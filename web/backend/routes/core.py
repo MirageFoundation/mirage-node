@@ -3225,6 +3225,10 @@ def core_post():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            log_event(rid, "post.invalid_nonce", envelope_nonce=data.get("envelope_nonce"))
+            return err[0], err[1]
         target = str(data.get("target", ""))
         topic = str(data.get("topic", "")).strip()
         title = str(data.get("title", ""))
