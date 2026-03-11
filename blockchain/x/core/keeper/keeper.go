@@ -2634,7 +2634,11 @@ func (k Keeper) SetEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint6
 	}
 	// Also set expiry index for pruning
 	expiryKey := []byte(fmt.Sprintf("%s%020d/%x/%d", types.EnvelopeNonceExpiryPrefix, expiryUnix, pubkeyHash, nonce))
-	return store.Set(expiryKey, []byte{})
+	if err := store.Set(expiryKey, []byte{}); err != nil {
+		return err
+	}
+	ctx.Logger().Debug("RelaySig: stored envelope nonce", "nonce", nonce, "expiry_unix", expiryUnix)
+	return nil
 }
 
 // PruneExpiredNonces removes all nonce entries that have expired.
@@ -2662,12 +2666,17 @@ func (k Keeper) PruneExpiredNonces(ctx sdk.Context, nowUnix int64) (int, error) 
 		// We need to reconstruct: envelope_nonce/{pubkey_hash}/{nonce}
 		suffix := string(expiryKey[len(types.EnvelopeNonceExpiryPrefix):])
 		// Skip past the expiry timestamp (20 digits + "/")
-		if len(suffix) > 21 {
-			nonceKeySuffix := suffix[21:] // {pubkey_hash}/{nonce}
-			nonceKey := []byte(types.EnvelopeNoncePrefix + nonceKeySuffix)
-			_ = store.Delete(nonceKey)
+		if len(suffix) <= 21 {
+			return pruned, fmt.Errorf("invalid envelope nonce expiry key: %q", string(expiryKey))
 		}
-		_ = store.Delete(expiryKey)
+		nonceKeySuffix := suffix[21:] // {pubkey_hash}/{nonce}
+		nonceKey := []byte(types.EnvelopeNoncePrefix + nonceKeySuffix)
+		if err := store.Delete(nonceKey); err != nil {
+			return pruned, err
+		}
+		if err := store.Delete(expiryKey); err != nil {
+			return pruned, err
+		}
 		pruned++
 	}
 	return pruned, nil

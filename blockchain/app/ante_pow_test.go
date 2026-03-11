@@ -261,7 +261,6 @@ func TestBuildCanonForBlockTopic(t *testing.T) {
 	expected.writeBytes(3, blockHash)
 	expected.writeUvarint(4, difficulty)
 	expected.writeUvarint(6, timestamp)
-	expected.writeUvarint(7, msg.EnvelopeNonce)
 	expected.writeString(100, target)
 	expected.writeString(101, topic)
 
@@ -292,7 +291,6 @@ func TestBuildCanonForAward(t *testing.T) {
 	expected.writeBytes(3, blockHash)
 	expected.writeUvarint(4, difficulty)
 	expected.writeUvarint(6, timestamp)
-	expected.writeUvarint(7, msg.EnvelopeNonce)
 	expected.writeString(100, target)
 	expected.writeString(101, awardType)
 
@@ -323,7 +321,6 @@ func TestBuildCanonForUnblockTopic(t *testing.T) {
 	expected.writeBytes(3, blockHash)
 	expected.writeUvarint(4, difficulty)
 	expected.writeUvarint(6, timestamp)
-	expected.writeUvarint(7, msg.EnvelopeNonce)
 	expected.writeString(100, target)
 	expected.writeString(101, topic)
 

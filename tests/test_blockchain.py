@@ -1529,6 +1529,7 @@ def test_pow(backend: str) -> None:
     if diff > 0:
         diff_low = diff - 1
         topic_low = f"pow{_rand_str(4)}"
+        nonce = _gen_nonce()
         base = _canon_base_post_raw(
             free_wallet.public_key().public_key_bytes,
             _lb_bytes(lb),
@@ -1541,9 +1542,10 @@ def test_pow(backend: str) -> None:
             "",
             0,
             [],
+            nonce=nonce,
         )
         proof = compute_pow(base, diff_low, base_bits, pow_factor, lb)
-        msg = _build_msg_post(free_wallet, lb, diff_low, ts, topic_low, "Title", "content", pow_val=int(proof), nonce=_gen_nonce())
+        msg = _build_msg_post(free_wallet, lb, diff_low, ts, topic_low, "Title", "content", pow_val=int(proof), nonce=nonce)
         txh, code, log, _, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
         )
@@ -1569,6 +1571,7 @@ def test_pow(backend: str) -> None:
     # 2.3 Invalid block hash — chain may not validate hash against actual blocks
     bad_lb = _rand_hex(64)
     topic_bad = f"pow{_rand_str(4)}"
+    nonce = _gen_nonce()
     base = _canon_base_post_raw(
         free_wallet.public_key().public_key_bytes,
         _lb_bytes(bad_lb),
@@ -1581,6 +1584,7 @@ def test_pow(backend: str) -> None:
         "",
         0,
         [],
+        nonce=nonce,
     )
     proof = compute_pow(base, diff, base_bits, pow_factor, bad_lb)
     msg = _build_msg_post(
@@ -1593,7 +1597,7 @@ def test_pow(backend: str) -> None:
         "content",
         pow_val=int(proof),
         lb_override=bad_lb,
-        nonce=_gen_nonce(),
+        nonce=nonce,
     )
     txh, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")], DEFAULT_GAS_LIMIT, fee_payer, free_wallet.public_key().public_key_bytes
@@ -1988,9 +1992,10 @@ def test_msg_validation(backend: str) -> None:
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
     ts = _now_ms()
     bw_uname = f"bw{_rand_str(6)}"
-    base = _canon_base_set_username_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, bw_uname)
+    nonce = _gen_nonce()
+    base = _canon_base_set_username_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, bw_uname, nonce=nonce)
     proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=proof, nonce=_gen_nonce())
+    msg = _build_msg_set_username(bw, lb, diff, ts, bw_addr, bw_uname, pow_val=proof, nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetUsername")],
         DEFAULT_GAS_LIMIT,
@@ -2012,9 +2017,10 @@ def test_msg_validation(backend: str) -> None:
             print(f"    [{i}/{max_blocked_posts}] blocked posts…")
         target = _rand_hex(64)
         blocked_post_targets.append(target)
-        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
+        nonce = _gen_nonce()
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_post(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockPost")],
             FILL_GAS_LIMIT,
@@ -2033,9 +2039,10 @@ def test_msg_validation(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
         over_target = _rand_hex(64)
-        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target)
+        nonce = _gen_nonce()
+        base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_post(bw, lb, diff, ts, over_target, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_post(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockPost")],
             FILL_GAS_LIMIT,
@@ -2058,9 +2065,10 @@ def test_msg_validation(backend: str) -> None:
         ts = _now_ms()
         target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
         blocked_user_targets.append(target.lower())
-        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target)
+        nonce = _gen_nonce()
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_user(bw, lb, diff, ts, target, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockUser")],
             FILL_GAS_LIMIT,
@@ -2079,9 +2087,10 @@ def test_msg_validation(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
         over_target = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target)
+        nonce = _gen_nonce()
+        base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, over_target, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_user(bw, lb, diff, ts, over_target, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_user(bw, lb, diff, ts, over_target, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockUser")],
             FILL_GAS_LIMIT,
@@ -2104,9 +2113,10 @@ def test_msg_validation(backend: str) -> None:
         ts = _now_ms()
         topic = f"t{_rand_str(6)}{i}"
         blocked_topic_targets.append(topic)
-        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+        nonce = _gen_nonce()
+        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, _ = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockTopic")],
             FILL_GAS_LIMIT,
@@ -2125,9 +2135,10 @@ def test_msg_validation(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, bw_addr)
         ts = _now_ms()
         over_topic = f"t{_rand_str(6)}over"
-        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic)
+        nonce = _gen_nonce()
+        base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, over_topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, over_topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgBlockTopic")],
             FILL_GAS_LIMIT,
@@ -2497,9 +2508,10 @@ def test_follow_limits(backend: str) -> None:
             target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
             followed_user_targets.append(target_addr.lower())
             ts = ts_base + i
-            base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr)
+            nonce = _gen_nonce()
+            base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, target_addr, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, target_addr, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgFollowUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
@@ -2518,9 +2530,10 @@ def test_follow_limits(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_addr)
+        nonce = _gen_nonce()
+        base = _canon_base_follow_user_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_addr, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, over_addr, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_follow_user(fw, lb, diff, ts, fw_addr, over_addr, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgFollowUser")],
             FILL_GAS_LIMIT,
@@ -2547,9 +2560,10 @@ def test_follow_limits(backend: str) -> None:
             topic = f"ft{_rand_str(4)}{start + i}"
             followed_topic_targets.append(topic)
             ts = ts_base + i
-            base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic)
+            nonce = _gen_nonce()
+            base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, topic, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, topic, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgFollowTopic"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
@@ -2568,9 +2582,10 @@ def test_follow_limits(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_topic = f"ft{_rand_str(4)}over"
-        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_topic)
+        nonce = _gen_nonce()
+        base = _canon_base_follow_topic_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_topic, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, over_topic, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_follow_topic(fw, lb, diff, ts, fw_addr, over_topic, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgFollowTopic")],
             FILL_GAS_LIMIT,
@@ -2597,9 +2612,10 @@ def test_follow_limits(backend: str) -> None:
             agent_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
             enabled_agent_targets.append(agent_addr.lower())
             ts = ts_base + i
-            base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr)
+            nonce = _gen_nonce()
+            base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, agent_addr, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, agent_addr, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgEnableAgent"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, fw_pub) * FILL_GAS_BUFFER)
@@ -2618,9 +2634,10 @@ def test_follow_limits(backend: str) -> None:
         lb, diff, base_bits, pow_factor = _get_pow_params(backend, fw_addr)
         ts = _now_ms()
         over_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
-        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_agent)
+        nonce = _gen_nonce()
+        base = _canon_base_enable_agent_raw(fw_pub, _lb_bytes(lb), diff, ts, fw_addr, over_agent, nonce=nonce)
         proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, over_agent, pow_val=proof, nonce=_gen_nonce())
+        msg = _build_msg_enable_agent(fw, lb, diff, ts, fw_addr, over_agent, pow_val=proof, nonce=nonce)
         _, ccode, _, dcode, dlog = _submit_tx(
             [(msg, "/mirage.core.v1.MsgEnableAgent")],
             FILL_GAS_LIMIT,
@@ -3118,9 +3135,10 @@ def test_tier_enforcement(backend: str) -> None:
             topic = f"tier{_rand_str(4)}"
             over_content = "x" * (max_content + 25)
             pub = w.public_key().public_key_bytes
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [])
+            nonce = _gen_nonce()
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [], nonce=nonce)
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_post(w, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=_gen_nonce())
+            msg = _build_msg_post(w, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=nonce)
         else:
             topic = f"tier{_rand_str(4)}"
             over_content = "x" * (max_content + 25)
@@ -3139,9 +3157,10 @@ def test_tier_enforcement(backend: str) -> None:
         if level == 0:
             topic2 = f"tier{_rand_str(4)}"
             over_title = "T" * (max_title + 25)
-            base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic2, over_title, "body", "", 0, [])
+            nonce2 = _gen_nonce()
+            base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic2, over_title, "body", "", 0, [], nonce=nonce2)
             proof2 = compute_pow(base2, diff, base_bits, pow_factor, lb)
-            msg2 = _build_msg_post(w, lb, diff, ts, topic2, over_title, "body", pow_val=int(proof2), nonce=_gen_nonce())
+            msg2 = _build_msg_post(w, lb, diff, ts, topic2, over_title, "body", pow_val=int(proof2), nonce=nonce2)
         else:
             topic2 = f"tier{_rand_str(4)}"
             over_title = "T" * (max_title + 25)
@@ -3471,9 +3490,10 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             target_addr = str(LocalWallet(PrivateKey(), prefix="mirage").address())
             blocked_targets.append(target_addr.lower())
             ts = ts_base + i
-            base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr)
+            nonce = _gen_nonce()
+            base = _canon_base_block_user_raw(bw_pub, _lb_bytes(lb), diff, ts, target_addr, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_block_user(bw, lb, diff, ts, target_addr, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockUser"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
@@ -3506,9 +3526,10 @@ def test_hard_cap_vs_deque(backend: str) -> None:
             fake_hash = _rand_hex(64)
             blocked_post_targets.append(fake_hash.lower())
             ts = ts_base + i
-            base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash)
+            nonce = _gen_nonce()
+            base = _canon_base_block_post_raw(bw_pub, _lb_bytes(lb), diff, ts, fake_hash, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_block_post(bw, lb, diff, ts, fake_hash, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockPost"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
@@ -3532,9 +3553,10 @@ def test_hard_cap_vs_deque(backend: str) -> None:
         for i in range(batch_count):
             topic = f"bt{_rand_str(4)}{start + i}"
             ts = ts_base + i
-            base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic)
+            nonce = _gen_nonce()
+            base = _canon_base_block_topic_raw(bw_pub, _lb_bytes(lb), diff, ts, bw_addr, topic, nonce=nonce)
             proof = _compute_pow_quiet(base, diff, base_bits, pow_factor, lb)
-            msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=_gen_nonce())
+            msg = _build_msg_block_topic(bw, lb, diff, ts, bw_addr, topic, pow_val=proof, nonce=nonce)
             msgs.append((msg, "/mirage.core.v1.MsgBlockTopic"))
         sim_limit = max(FILL_GAS_LIMIT, int(DEFAULT_GAS_LIMIT * len(msgs) * 3))
         sim_gas = int(_simulate_tx_gas(msgs, sim_limit, fee_payer, bw_pub) * FILL_GAS_BUFFER)
@@ -3858,9 +3880,10 @@ def test_tier_features(backend: str) -> None:
     topic = f"tf{_rand_str(4)}"
     over_content = "x" * 1050
     pub = fw.public_key().public_key_bytes
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [])
+    nonce = _gen_nonce()
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", over_content, "", 0, [], nonce=nonce)
     proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    msg = _build_msg_post(fw, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=_gen_nonce())
+    msg = _build_msg_post(fw, lb, diff, ts, topic, "Title", over_content, pow_val=int(proof), nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT,
@@ -3970,9 +3993,10 @@ def test_biography(backend: str) -> None:
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(fw.address()))
     ts = _now_ms()
     pub = fw.public_key().public_key_bytes
-    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), diff, ts, str(fw.address()), "free bio")
+    nonce = _gen_nonce()
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), diff, ts, str(fw.address()), "free bio", nonce=nonce)
     proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    msg3 = _build_msg_set_biography(fw, lb, diff, ts, str(fw.address()), "free bio", pow_val=int(proof), nonce=_gen_nonce())
+    msg3 = _build_msg_set_biography(fw, lb, diff, ts, str(fw.address()), "free bio", pow_val=int(proof), nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgSetBiography")],
         DEFAULT_GAS_LIMIT,
@@ -4195,11 +4219,12 @@ def test_annotate_chain(backend: str) -> None:
     random_agent = str(LocalWallet(PrivateKey(), prefix="mirage").address())
     lb2, diff2, base_bits2, pow_factor2 = _get_pow_params(backend, noname_addr)
     ts2 = _now_ms()
+    nonce2 = _gen_nonce()
     base2 = _canon_base_enable_agent_raw(
-        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb2), diff2, ts2, noname_addr, random_agent
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb2), diff2, ts2, noname_addr, random_agent, nonce=nonce2
     )
     proof2 = _compute_pow_quiet(base2, diff2, base_bits2, pow_factor2, lb2)
-    msg = _build_msg_enable_agent(noname_wallet2, lb2, diff2, ts2, noname_addr, random_agent, pow_val=proof2, nonce=_gen_nonce())
+    msg = _build_msg_enable_agent(noname_wallet2, lb2, diff2, ts2, noname_addr, random_agent, pow_val=proof2, nonce=nonce2)
     tx_hash, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgEnableAgent")],
         DEFAULT_GAS_LIMIT,
@@ -4211,11 +4236,12 @@ def test_annotate_chain(backend: str) -> None:
     # 15. SetAgents without username should fail
     lb3, diff3, base_bits3, pow_factor3 = _get_pow_params(backend, noname_addr)
     ts3 = _now_ms()
+    nonce3 = _gen_nonce()
     base3 = _canon_base_set_agents_raw(
-        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb3), diff3, ts3, noname_addr, [random_agent]
+        noname_wallet2.public_key().public_key_bytes, _lb_bytes(lb3), diff3, ts3, noname_addr, [random_agent], nonce=nonce3
     )
     proof3 = _compute_pow_quiet(base3, diff3, base_bits3, pow_factor3, lb3)
-    msg = _build_msg_set_agents(noname_wallet2, lb3, diff3, ts3, noname_addr, [random_agent], pow_val=proof3, nonce=_gen_nonce())
+    msg = _build_msg_set_agents(noname_wallet2, lb3, diff3, ts3, noname_addr, [random_agent], pow_val=proof3, nonce=nonce3)
     tx_hash, code, log, _, _ = _submit_tx(
         [(msg, "/mirage.core.v1.MsgSetAgents")],
         DEFAULT_GAS_LIMIT,

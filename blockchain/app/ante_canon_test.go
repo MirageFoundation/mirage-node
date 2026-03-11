@@ -151,6 +151,11 @@ func TestCanonicalSerializationCompleteness(t *testing.T) {
 			fn:   func(v interface{}) []byte { return buildCanonForDelete(v.(*coretypes.MsgDelete)) },
 		},
 		{
+			name: "MsgDeleteUser",
+			obj:  &coretypes.MsgDeleteUser{},
+			fn:   func(v interface{}) []byte { return buildCanonForDeleteUser(v.(*coretypes.MsgDeleteUser)) },
+		},
+		{
 			name: "MsgSendTokens",
 			obj:  &coretypes.MsgSendTokens{},
 			fn:   func(v interface{}) []byte { return buildCanonForSendTokens(v.(*coretypes.MsgSendTokens)) },
