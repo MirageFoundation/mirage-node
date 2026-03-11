@@ -4345,35 +4345,36 @@ def test_security(backend: str) -> None:
 def test_envelope_replay(backend: str) -> None:
     """Test that replaying a relay message with the same nonce is rejected."""
     print(f"\n{_COLOR_BOLD}[REPLAY] Envelope Replay Protection{_COLOR_RESET}")
-    sub = WALLETS["subscriber"]
-    fee_payer = WALLETS["fee_payer"]
+    sub = WALLETS["sub1"]
+    fee_payer = _VALIDATOR_ADDR or ""
     pub = sub.public_key().public_key_bytes
     lb, diff, base_bits, pow_factor = _get_pow_params(backend, str(sub.address()))
     ts = _now_ms()
     nonce = _gen_nonce()
+    topic = f"replay{_rand_str(4)}"
 
-    msg1 = _build_msg_post(sub, lb, diff, ts, "main", "Replay Test", "content", target=str(sub.address()), nonce=nonce)
+    msg1 = _build_msg_post(sub, lb, 0, ts, topic, "Replay Test", "content", nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg1, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
     )
-    _check_deliver_accept("replay.first_submit", ccode, dcode, dlog)
+    _check_deliver_accept("envelope_replay.first_submit", ccode, dcode, dlog)
 
-    msg2 = _build_msg_post(sub, lb, diff, ts, "main", "Replay Test", "content", target=str(sub.address()), nonce=nonce)
+    msg2 = _build_msg_post(sub, lb, 0, ts, topic, "Replay Test", "content", nonce=nonce)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg2, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
     )
-    _check_deliver_reject("replay.duplicate_nonce_rejected", ccode, dcode, dlog)
+    _check_deliver_reject("envelope_replay.duplicate_nonce_rejected", ccode, dcode, dlog)
 
     nonce2 = _gen_nonce()
     ts2 = _now_ms()
-    msg3 = _build_msg_post(sub, lb, diff, ts2, "main", "Replay Test 2", "content2", target=str(sub.address()), nonce=nonce2)
+    msg3 = _build_msg_post(sub, lb, 0, ts2, topic, "Replay Test 2", "content2", nonce=nonce2)
     _, ccode, _, dcode, dlog = _submit_tx(
         [(msg3, "/mirage.core.v1.MsgPost")],
         DEFAULT_GAS_LIMIT, fee_payer, pub, wait_deliver=True,
     )
-    _check_deliver_accept("replay.different_nonce_ok", ccode, dcode, dlog)
+    _check_deliver_accept("envelope_replay.different_nonce_ok", ccode, dcode, dlog)
 
 # =========================================================================
 # Main
