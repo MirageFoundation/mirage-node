@@ -874,7 +874,7 @@ def _load_candidate_posts(
         root_topic_raw = (root_topic or topic or "").strip()
         root_topic_lower = root_topic_raw.lower()
 
-        if pid in blocked_posts or author in blocked_users or relayer_lower in blocked_users:
+        if pid in blocked_posts or author in blocked_users:
             continue
         if _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
             continue
@@ -935,7 +935,6 @@ def _load_vote_and_comment_stats(
             f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
                 FROM votes WHERE LOWER(target) IN ({id_ph})
                   AND LOWER(owner) NOT IN ({blocked_ph})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_ph})
                 GROUP BY LOWER(target)""",
             post_ids + list(blocked_users),
         )
@@ -959,7 +958,6 @@ def _load_vote_and_comment_stats(
                   AND COALESCE(target, '') != ''
                   AND LOWER(txhash) NOT IN ({ab_ph})
                   AND LOWER(owner) NOT IN ({ab_ph})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({ab_ph})
                   {deleted_bare}
                 GROUP BY LOWER(root_post_id)""",
             post_ids + list(all_blocked) + list(all_blocked),
@@ -1807,7 +1805,6 @@ def _load_unique_commenter_counts(
               AND LOWER(c.owner) != LOWER(root.owner)
               AND LOWER(c.txhash) NOT IN ({ab_ph})
               AND LOWER(c.owner) NOT IN ({ab_ph})
-              AND COALESCE(LOWER(c.relayer), '') NOT IN ({ab_ph})
               AND c.deleted = false
             GROUP BY LOWER(c.root_post_id)
             """,
@@ -1859,7 +1856,6 @@ def _load_award_aggregates(
             f"""SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards
                 WHERE LOWER(target) IN ({id_ph})
                   AND LOWER(owner) NOT IN ({blocked_ph})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_ph})
                 GROUP BY LOWER(target)""",
             post_ids + list(blocked_users),
         )
@@ -1878,7 +1874,6 @@ def _load_award_aggregates(
             f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
                 FROM awards WHERE LOWER(target) IN ({id_ph})
                   AND LOWER(owner) NOT IN ({blocked_ph})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_ph})
                 GROUP BY LOWER(target), award_type""",
             post_ids + list(blocked_users),
         )
@@ -2121,7 +2116,7 @@ def _row_to_post(
     author = (owner or "").lower()
 
     relayer_lower = (relayer or "").strip().lower()
-    if pid in seen or pid in blocked_posts or author in blocked_users or relayer_lower in blocked_users:
+    if pid in seen or pid in blocked_posts or author in blocked_users:
         return None
     topic_lower = (topic or "").strip().lower()
     if _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple()):
@@ -4226,9 +4221,8 @@ def _format_search_posts(
     for r in rows:
         txhash = (r[0] or "").lower()
         owner = (r[1] or "").lower()
-        relayer = (r[13] or "").strip().lower() if len(r) > 13 else ""
         topic = (r[3] or "").strip().lower() if len(r) > 3 else ""
-        if txhash in blocked_posts or owner in blocked_users or relayer in blocked_users:
+        if txhash in blocked_posts or owner in blocked_users:
             continue
         if _topic_is_blocked(topic, blocked_topics or set(), blocked_topic_prefixes or tuple()):
             continue
@@ -4249,7 +4243,6 @@ def _format_search_posts(
                 f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0) FROM votes 
                 WHERE LOWER(target) IN ({placeholders})
                   AND LOWER(owner) NOT IN ({blocked_placeholders})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
                 GROUP BY LOWER(target)""",
                 post_ids + list(blocked_users),
             )
@@ -4278,7 +4271,6 @@ def _format_search_posts(
                   AND COALESCE(target, '') != ''
                   AND LOWER(txhash) NOT IN ({blocked_placeholders})
                   AND LOWER(owner) NOT IN ({blocked_placeholders})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
                   {deleted_bare}
                 GROUP BY LOWER(root_post_id)
                 """,
@@ -4375,8 +4367,6 @@ def _format_search_posts(
             media_val = []
         pid = (txhash or "").lower()
         relayer_lower = (relayer or "").strip().lower()
-        if relayer_lower in blocked_users:
-            continue
         posts.append(
             {
                 "post_id": pid,
@@ -4591,7 +4581,6 @@ def get_posts():
             for r in rows
             if (r[0] or "").lower() not in blocked_posts
             and (r[1] or "").lower() not in blocked_users
-            and (r[15] or "").lower() not in blocked_users
             and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
             and _tag_allowed(r[6] if len(r) > 6 else "")
         ]
@@ -4607,7 +4596,6 @@ def get_posts():
                     f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0) FROM votes 
                     WHERE LOWER(target) IN ({placeholders})
                       AND LOWER(owner) NOT IN ({blocked_placeholders})
-                      AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
                     GROUP BY LOWER(target)""",
                     post_ids + list(blocked_users),
                 )
@@ -4634,7 +4622,6 @@ def get_posts():
                       AND COALESCE(target, '') != ''
                       AND LOWER(txhash) NOT IN ({blocked_placeholders})
                       AND LOWER(owner) NOT IN ({blocked_placeholders})
-                      AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
                       {deleted_bare}
                     GROUP BY LOWER(root_post_id)
                     """,
@@ -4861,7 +4848,6 @@ def get_user_posts():
             for r in rows
             if (r[0] or "").lower() not in blocked_posts
             and (r[1] or "").lower() not in blocked_users
-            and (r[14] or "").lower() not in blocked_users
             and not _topic_is_blocked((r[3] or "").strip().lower(), blocked_topics_exact, blocked_topic_prefixes)
         ]
         post_ids = [r[0].lower() for r in rows]
@@ -4901,7 +4887,6 @@ def get_user_posts():
                       AND COALESCE(target, '') != ''
                       AND LOWER(txhash) NOT IN ({blocked_placeholders})
                       AND LOWER(owner) NOT IN ({blocked_placeholders})
-                      AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
                       {deleted_bare}
                     GROUP BY LOWER(root_post_id)
                     """,
@@ -5245,7 +5230,7 @@ def _fetch_post(
         return None
 
     # Filter if post owner is blocked
-    if owner in blocked_users or relayer_val in blocked_users:
+    if owner in blocked_users:
         return None
 
     # Filter if post topic is blocked
@@ -5258,8 +5243,7 @@ def _fetch_post(
         cur.execute(
             f"""SELECT COALESCE(SUM(user_weight), 0) FROM votes 
             WHERE LOWER(target) = %s
-              AND LOWER(owner) NOT IN ({blocked_placeholders})
-              AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})""",
+              AND LOWER(owner) NOT IN ({blocked_placeholders})""",
             [pid] + list(blocked_users),
         )
     else:
@@ -5279,15 +5263,14 @@ def _fetch_post(
         blocked_placeholders = ",".join(["%s"] * len(all_blocked))
         cur.execute(
             f"""
-            WITH RECURSIVE subtree(tx, owner, relayer) AS (
-                SELECT p.txhash, p.owner, p.relayer FROM posts p WHERE COALESCE(p.target,'') = %s {deleted_clause}
+            WITH RECURSIVE subtree(tx, owner) AS (
+                SELECT p.txhash, p.owner FROM posts p WHERE COALESCE(p.target,'') = %s {deleted_clause}
                 UNION ALL
-                SELECT p.txhash, p.owner, p.relayer FROM posts p JOIN subtree s ON p.target = s.tx {deleted_clause}
+                SELECT p.txhash, p.owner FROM posts p JOIN subtree s ON p.target = s.tx {deleted_clause}
             )
             SELECT COUNT(1) FROM subtree 
             WHERE LOWER(tx) NOT IN ({blocked_placeholders})
               AND LOWER(owner) NOT IN ({blocked_placeholders})
-              AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_placeholders})
             """,
             [pid] + list(all_blocked) + list(all_blocked),
         )
@@ -5428,7 +5411,6 @@ def _fetch_comment_tree_batch(
         if (
             pid in blocked_posts
             or owner in blocked_users
-            or relayer_val in blocked_users
             or _topic_is_blocked(topic_lower, blocked_topics or set(), blocked_topic_prefixes or tuple())
         ):
             blocked_ids.add(pid)
@@ -5483,7 +5465,6 @@ def _fetch_comment_tree_batch(
                 FROM votes
                 WHERE LOWER(target) IN ({ph})
                   AND LOWER(owner) NOT IN ({blocked_ph})
-                  AND COALESCE(LOWER(relayer), '') NOT IN ({blocked_ph})
                 GROUP BY LOWER(target)
                 """,
                 post_ids + list(blocked_users),

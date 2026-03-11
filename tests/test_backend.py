@@ -1542,6 +1542,29 @@ def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX
     return False
 
 
+def _wait_tx_status(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            if data.get("indexed") and data.get("details"):
+                return data
+        time.sleep(0.5)
+    return None
+
+
 def _wait_blocked_topic_state(
     backend: str,
     address: str,
@@ -1923,6 +1946,13 @@ def test_post_lifecycle(backend: str):
     topic = f"annot{_rand_str(6)}"
     title = f"Test Post {_rand_str(6)}"
     content = f"Content body {_rand_str(20)}"
+    try:
+        validator_addr = _resolve_validator_key_addr()
+    except Exception as e:
+        _fail("post.relayer.validator_addr", str(e))
+        return
+    validator_lower = validator_addr.lower()
+    _debug(f"expected relayer={validator_lower}")
 
     # 3.1 Create post
     txh = _do_post(backend, wallet, topic, title, content)
@@ -1937,6 +1967,20 @@ def test_post_lifecycle(backend: str):
         _pass("post.appears in get_user_posts")
     else:
         _fail("post.appears in get_user_posts", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
+
+    # 3.2a Relayer present in get_user_posts
+    code, user_posts = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
+    if code == 200:
+        posts = (user_posts or {}).get("posts") or []
+        p_user = next((p for p in posts if str(p.get("post_id", "")).lower() == txh), None)
+        relayer_val = str(p_user.get("relayer", "")).strip().lower() if p_user else ""
+        _debug(f"user_posts relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_user_posts")
+        else:
+            _fail("post.relayer in get_user_posts", f"relayer={relayer_val}")
+    else:
+        _fail("post.relayer in get_user_posts", f"code={code}")
 
     # 3.3 Verify in get_posts feed (poll up to INDEX_TIMEOUT_SEC, use newest sort)
     found = []
@@ -1953,6 +1997,16 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.appears in get_posts feed")
 
+    # 3.3a Relayer present in get_posts feed
+    if found:
+        p = found[0]
+        relayer_val = str(p.get("relayer", "")).strip().lower()
+        _debug(f"get_posts relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_posts feed")
+        else:
+            _fail("post.relayer in get_posts feed", f"relayer={relayer_val}")
+
     # 3.4 Post has correct fields
     if found:
         p = found[0]
@@ -1966,7 +2020,38 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
-    # 3.4a Award post (non-self)
+    # 3.4a get_tx_status includes relayer
+    post_status = _wait_tx_status(backend, txh, expect_type="post")
+    if post_status and post_status.get("details"):
+        relayer_val = str((post_status.get("details") or {}).get("relayer", "")).strip().lower()
+        _debug(f"tx_status post relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_tx_status")
+        else:
+            _fail("post.relayer in get_tx_status", f"relayer={relayer_val}")
+    else:
+        _fail("post.relayer in get_tx_status", "missing tx status details")
+
+    # 3.4b Search results include relayer
+    search_found = False
+    search_relayer = ""
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
+        code, sr = _get(f"{backend}/api/search", {"q": title[:8], "limit": 10})
+        if code == 200:
+            posts = (sr or {}).get("posts") or []
+            match = next((p for p in posts if str(p.get("post_id", "")).lower() == txh), None)
+            if match:
+                search_found = True
+                search_relayer = str(match.get("relayer", "")).strip().lower()
+                break
+        time.sleep(1)
+    _debug(f"search relayer={search_relayer}")
+    if search_found and search_relayer == validator_lower:
+        _pass("post.relayer in search results")
+    else:
+        _fail("post.relayer in search results", f"found={search_found} relayer={search_relayer}")
+
+    # 3.4c Award post (non-self)
     awarder = WALLETS["sub1"]
     award_type = "quality_post"
     _debug(f"award post target={txh} type={award_type}")
@@ -1977,7 +2062,7 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.award submitted", f"code={award_code} resp={award_resp}")
 
-    # 3.4b Award appears in post feed data
+    # 3.4d Award appears in post feed data
     award_seen = False
     if award_txh:
         for _ in range(int(INDEX_TIMEOUT_SEC)):
@@ -2014,6 +2099,22 @@ def test_post_lifecycle(backend: str):
             _pass("post.vote_up reflected", votes=votes_after_up)
         else:
             _fail("post.vote_up reflected", f"votes={votes_after_up}")
+
+    # 3.5a Vote tx_status includes relayer
+    vote_txh = str((vote_resp or {}).get("tx_hash", "") or "").lower()
+    if vote_txh:
+        vote_status = _wait_tx_status(backend, vote_txh, expect_type="vote")
+        if vote_status and vote_status.get("details"):
+            relayer_val = str((vote_status.get("details") or {}).get("relayer", "")).strip().lower()
+            _debug(f"tx_status vote relayer={relayer_val}")
+            if relayer_val == validator_lower:
+                _pass("vote.relayer in get_tx_status")
+            else:
+                _fail("vote.relayer in get_tx_status", f"relayer={relayer_val}")
+        else:
+            _fail("vote.relayer in get_tx_status", "missing tx status details")
+    else:
+        _fail("vote.relayer in get_tx_status", "missing tx hash")
 
     # 3.6 Vote down (poll up to INDEX_TIMEOUT_SEC)
     _do_vote(backend, wallet, txh, -1)
@@ -2090,6 +2191,22 @@ def test_comments(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
+    try:
+        validator_addr = _resolve_validator_key_addr()
+    except Exception as e:
+        _fail("comments.relayer.validator_addr", str(e))
+        return
+    validator_lower = validator_addr.lower()
+    _debug(f"expected relayer={validator_lower}")
+
+    def _find_comment(nodes, target_id: str):
+        for n in nodes:
+            if str(n.get("post_id", "")).lower() == target_id:
+                return n
+            child = _find_comment(n.get("children") or [], target_id)
+            if child:
+                return child
+        return None
 
     # Create a parent post
     parent_txh = _do_post(backend, wallet, "test", f"Parent {_rand_str(4)}", "Parent body")
@@ -2113,7 +2230,23 @@ def test_comments(backend: str):
     else:
         _fail("comments.appears in get_comments", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
-    # 4.2a Award comment (non-self)
+    # 4.2a Relayer present in get_comments
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": parent_txh, "address": addr})
+    if code == 200:
+        root = (data or {}).get("root") or {}
+        children = (data or {}).get("children") or []
+        comment_node = _find_comment(children, c1_txh)
+        root_relayer = str(root.get("relayer", "")).strip().lower()
+        child_relayer = str((comment_node or {}).get("relayer", "")).strip().lower()
+        _debug(f"comments relayer root={root_relayer} child={child_relayer}")
+        if root_relayer == validator_lower and child_relayer == validator_lower:
+            _pass("comments.relayer in get_comments")
+        else:
+            _fail("comments.relayer in get_comments", f"root={root_relayer} child={child_relayer}")
+    else:
+        _fail("comments.relayer in get_comments", f"code={code}")
+
+    # 4.2b Award comment (non-self)
     awarder = WALLETS["sub1"]
     award_type = "receipts"
     _debug(f"award comment target={c1_txh} type={award_type}")
@@ -2124,7 +2257,7 @@ def test_comments(backend: str):
     else:
         _fail("comments.award submitted", f"code={award_code} resp={award_resp}")
 
-    # 4.2b Award appears in get_comments
+    # 4.2c Award appears in get_comments
     award_seen = False
     if award_txh:
         for _ in range(int(INDEX_TIMEOUT_SEC)):
