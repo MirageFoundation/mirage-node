@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
@@ -162,6 +163,7 @@ func newMockContext() sdk.Context {
 	return sdk.Context{}.
 		WithContext(context.Background()).
 		WithBlockHeight(100).
+		WithBlockTime(time.Unix(1700000000, 0)).
 		WithEventManager(sdk.NewEventManager()).
 		WithGasMeter(storetypes.NewInfiniteGasMeter()).
 		WithLogger(log.NewNopLogger())
