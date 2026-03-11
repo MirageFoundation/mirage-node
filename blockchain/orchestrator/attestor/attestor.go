@@ -11,18 +11,13 @@ import (
 
 	"mirage/orchestrator/chains"
 	"mirage/orchestrator/config"
-	"mirage/orchestrator/mirage"
 	"mirage/orchestrator/chains/solana"
-)
-
-var (
-	ErrTransactionTooOld = errors.New("transaction too old")
-	ErrBridgeMintAlreadyRecorded = errors.New("bridge mint already recorded")
+	coretypes "mirage/x/core/types"
 )
 
 type Attestor struct {
 	cfg      *config.Config
-	mirage   *mirage.Client
+	mirage   MirageClient
 	watchers []chains.ChainWatcher
 	logger   *log.Logger
 
@@ -31,7 +26,18 @@ type Attestor struct {
 	lastSeq   map[string]uint64
 }
 
-func New(cfg *config.Config, mirageClient *mirage.Client, logger *log.Logger) (*Attestor, error) {
+type MirageClient interface {
+	WatchBridgeBurns(ctx context.Context, ch chan<- chains.MirageBurnEvent) error
+	RequireTxIndex(ctx context.Context) error
+	QueryBridgeStatus(ctx context.Context) (*coretypes.QueryBridgeStatusResponse, error)
+	QueryBridgeMint(ctx context.Context, destinationChain, burnID string) (*coretypes.QueryBridgeMintResponse, error)
+	QueryBridgeBurn(ctx context.Context, destinationChain, burnID string) (*coretypes.QueryBridgeBurnResponse, error)
+	SearchBurnTxHash(ctx context.Context, destinationChain string, seq uint64) (string, error)
+	SubmitBridgeMinted(ctx context.Context, burnID, destChain, destTx, mirageTxHash string) error
+	SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBurnEvent) error
+}
+
+func New(cfg *config.Config, mirageClient MirageClient, logger *log.Logger) (*Attestor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
@@ -427,19 +433,5 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 // Checks both sentinel errors (via errors.Is) and string patterns as fallback
 // for errors originating from external RPC responses.
 func isPermanentError(err error) bool {
-	if errors.Is(err, ErrTransactionTooOld) || errors.Is(err, ErrBridgeMintAlreadyRecorded) {
-		return true
-	}
-	errStr := err.Error()
-	permanentPatterns := []string{
-		"TransactionTooOld",
-		"error: 6020",
-		"bridge mint already recorded",
-	}
-	for _, pattern := range permanentPatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-	return false
+	return errors.Is(err, chains.ErrTransactionTooOld) || errors.Is(err, chains.ErrBridgeMintAlreadyRecorded)
 }

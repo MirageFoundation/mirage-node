@@ -42,6 +42,16 @@ func isOutOfGasError(err error) bool {
 	return strings.Contains(errStr, "out of gas") || strings.Contains(errStr, "code=11")
 }
 
+func wrapBridgeMintAlreadyRecorded(err error) error {
+	if err == nil {
+		return nil
+	}
+	if strings.Contains(err.Error(), "bridge mint already recorded") {
+		return fmt.Errorf("%w: %v", chains.ErrBridgeMintAlreadyRecorded, err)
+	}
+	return err
+}
+
 func (c *Client) SubmitBridgeAttest(ctx context.Context, burn chains.ExternalBurnEvent) error {
 	burnID := strings.ToLower(strings.TrimSpace(burn.BurnID))
 	msg := &coretypes.MsgBridgeAttestBurned{
@@ -92,6 +102,9 @@ func (c *Client) submitWithGasRetry(ctx context.Context, msg sdk.Msg, action, bu
 		}
 		if resp.TxResponse.Code != 0 {
 			lastErr = fmt.Errorf("broadcast tx rejected (CheckTx): code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+			if strings.Contains(resp.TxResponse.RawLog, "bridge mint already recorded") {
+				return wrapBridgeMintAlreadyRecorded(lastErr)
+			}
 			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
 				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
 				continue
@@ -106,6 +119,7 @@ func (c *Client) submitWithGasRetry(ctx context.Context, msg sdk.Msg, action, bu
 		if err := c.waitForTx(ctx, txHash, 30*time.Second); err != nil {
 			c.logger.Printf("ERROR %s tx FAILED burn_id=%s txhash=%s error=%v", action, burnID, txHash, err)
 			lastErr = fmt.Errorf("%s tx failed: %w", action, err)
+			lastErr = wrapBridgeMintAlreadyRecorded(lastErr)
 			if isOutOfGasError(lastErr) && attempt < len(multipliers)-1 {
 				c.logger.Printf("DEBUG %s out of gas at %.1fx, retrying with %.1fx", action, multiplier, multipliers[attempt+1])
 				continue
@@ -332,7 +346,8 @@ func (c *Client) waitForTx(ctx context.Context, txHash string, maxWait time.Dura
 
 		// Tx found - check result
 		if resp.TxResponse.Code != 0 {
-			return fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		err := fmt.Errorf("tx execution failed: code=%d raw_log=%s", resp.TxResponse.Code, resp.TxResponse.RawLog)
+		return wrapBridgeMintAlreadyRecorded(err)
 		}
 
 		// Success

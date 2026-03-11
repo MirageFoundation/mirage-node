@@ -33,6 +33,8 @@ message TierConfig {
   bool can_have_avatar = 18;
   bool can_have_banner = 19;
   bool can_have_flair = 20;
+  // max_biography_length is the max biography length for this tier (0 = disabled)
+  uint64 max_biography_length = 21;
 }
 
 // Params defines the parameters for the module.

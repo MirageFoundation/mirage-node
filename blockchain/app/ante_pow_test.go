@@ -6,7 +6,12 @@ import (
 	"math/big"
 	"testing"
 
+	sdkmath "cosmossdk.io/math"
 	"github.com/stretchr/testify/require"
+
+	sdk "github.com/cosmos/cosmos-sdk/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	protov2 "google.golang.org/protobuf/proto"
 
 	coretypes "mirage/x/core/types"
 	// "golang.org/x/crypto/argon2"
@@ -188,6 +193,50 @@ func TestValidatePoW(t *testing.T) {
 	canonical2 := []byte("test_canonical_bytes_2")
 	err = validatePoWBytesArgon2(canonical2, lastBlockHash, 0, nonce0, "", ring, true, 0, 0, 0, 0, 0, minDiff, step)
 	require.Error(t, err, "Should reject PoW if canonical bytes change")
+}
+
+type mockTx struct {
+	msgs []sdk.Msg
+}
+
+func (m mockTx) GetMsgs() []sdk.Msg { return m.msgs }
+func (m mockTx) GetMsgsV2() ([]protov2.Message, error) { return nil, nil }
+func (m mockTx) ValidateBasic() error { return nil }
+
+func TestDisableDelegatorStakingDecorator(t *testing.T) {
+	decorator := DisableDelegatorStakingDecorator{}
+	next := func(ctx sdk.Context, tx sdk.Tx, simulate bool) (sdk.Context, error) {
+		return ctx, nil
+	}
+
+	addr := sdk.AccAddress(bytes.Repeat([]byte{0x1}, 20))
+	valAddr := sdk.ValAddress(addr)
+
+	selfDelegate := &stakingtypes.MsgDelegate{
+		DelegatorAddress: addr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+	}
+	_, err := decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{selfDelegate}}, false, next)
+	require.NoError(t, err)
+
+	otherAddr := sdk.AccAddress(bytes.Repeat([]byte{0x2}, 20))
+	thirdParty := &stakingtypes.MsgDelegate{
+		DelegatorAddress: otherAddr.String(),
+		ValidatorAddress: valAddr.String(),
+		Amount:           sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+	}
+	_, err = decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{thirdParty}}, false, next)
+	require.ErrorIs(t, err, ErrDelegationDisabled)
+
+	redelegate := &stakingtypes.MsgBeginRedelegate{
+		DelegatorAddress:    addr.String(),
+		ValidatorSrcAddress: valAddr.String(),
+		ValidatorDstAddress: valAddr.String(),
+		Amount:              sdk.NewCoin("umirage", sdkmath.NewInt(1)),
+	}
+	_, err = decorator.AnteHandle(sdk.Context{}, mockTx{msgs: []sdk.Msg{redelegate}}, false, next)
+	require.ErrorIs(t, err, ErrDelegationDisabled)
 }
 
 func TestBuildCanonForBlockTopic(t *testing.T) {

@@ -286,6 +286,8 @@ def _parse_envelope_nonce(data: dict):
         return 0, (jsonify({"error": "envelope_nonce required"}), 400)
     try:
         nonce = int(data.get("envelope_nonce"))
+        if nonce <= 0:
+            return 0, (jsonify({"error": "envelope_nonce must be > 0"}), 400)
         return nonce, None
     except (TypeError, ValueError):
         return 0, (jsonify({"error": "invalid envelope_nonce"}), 400)

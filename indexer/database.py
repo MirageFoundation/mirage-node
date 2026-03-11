@@ -72,6 +72,8 @@ class DatabaseManager:
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS comment_count INTEGER NOT NULL DEFAULT 0")
                 # v1.12.0: dedicated media field (JSON array of URLs)
                 cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS media TEXT NOT NULL DEFAULT '[]'")
+                # v1.18.0: relayer (validator/node address)
+                cur.execute("ALTER TABLE posts ADD COLUMN IF NOT EXISTS relayer TEXT")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_owner_lower ON posts(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_target_lower ON posts(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_txhash_lower ON posts(LOWER(txhash))")
@@ -79,6 +81,7 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root ON posts((COALESCE(target,'') = ''))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_root_post_id ON posts(LOWER(root_post_id))")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_posts_relayer_lower ON posts(LOWER(relayer))")
                 # Root posts always have their own topic as root_topic and their
                 # own txhash as root_post_id; this backfill is idempotent.
                 cur.execute(
@@ -107,6 +110,7 @@ class DatabaseManager:
                     )
                     """
                 )
+                cur.execute("ALTER TABLE votes ADD COLUMN IF NOT EXISTS relayer TEXT")
                 # Migration: rename old column names to unified naming
                 cur.execute(
                     """
@@ -169,6 +173,7 @@ class DatabaseManager:
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_owner_lower ON votes(LOWER(owner))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_target_lower ON votes(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_created_at ON votes(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_votes_relayer_lower ON votes(LOWER(relayer))")
 
                 # Awards (burn-only signals on posts/comments)
                 cur.execute(
@@ -183,11 +188,13 @@ class DatabaseManager:
                     )
                     """
                 )
+                cur.execute("ALTER TABLE awards ADD COLUMN IF NOT EXISTS relayer TEXT")
                 cur.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uniq_awards_owner_target ON awards(LOWER(owner), LOWER(target))"
                 )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_target_lower ON awards(LOWER(target))")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_created_at ON awards(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_awards_relayer_lower ON awards(LOWER(relayer))")
 
                 # Per-user preferences for topics and authors (for home feed recommendations)
                 cur.execute(
@@ -976,6 +983,7 @@ class DatabaseManager:
         content: str,
         target: str,
         paid: bool,
+        relayer: Optional[str] = None,
         edited_at: Optional[int] = None,
         deleted: bool = False,
         thumbnail_url: Optional[str] = None,
@@ -995,6 +1003,7 @@ class DatabaseManager:
         thumbnail_url = self._strip_nul(thumbnail_url)
         root_topic = self._strip_nul(root_topic)
         root_post_id = self._strip_nul(root_post_id)
+        relayer = self._strip_nul(relayer)
         media_json = _json.dumps(media or [])
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1015,9 +1024,10 @@ class DatabaseManager:
                         tag,
                         root_topic,
                         root_post_id,
-                        media
+                        media,
+                        relayer
                     )
-                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(txhash) DO UPDATE SET
                       owner=EXCLUDED.owner,
                       topic=EXCLUDED.topic,
@@ -1032,7 +1042,8 @@ class DatabaseManager:
                       tag=EXCLUDED.tag,
                       root_topic=COALESCE(EXCLUDED.root_topic, posts.root_topic),
                       root_post_id=COALESCE(EXCLUDED.root_post_id, posts.root_post_id),
-                      media=EXCLUDED.media
+                      media=EXCLUDED.media,
+                      relayer=EXCLUDED.relayer
                     """,
                     (
                         txhash,
@@ -1050,6 +1061,7 @@ class DatabaseManager:
                         (root_topic or None),
                         (root_post_id or None),
                         media_json,
+                        relayer,
                     ),
                 )
 
@@ -1449,6 +1461,7 @@ class DatabaseManager:
         user_vote: float,
         user_weight: float,
         paid: bool,
+        relayer: Optional[str] = None,
     ) -> None:
         """Insert or update a vote.
 
@@ -1459,16 +1472,17 @@ class DatabaseManager:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO votes(txhash, owner, target, user_vote, user_weight, created_at, paid)
-                    VALUES(%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO votes(txhash, owner, target, user_vote, user_weight, created_at, paid, relayer)
+                    VALUES(%s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(LOWER(owner), LOWER(target)) DO UPDATE SET
                       txhash=EXCLUDED.txhash,
                       user_vote=EXCLUDED.user_vote,
                       user_weight=EXCLUDED.user_weight,
                       created_at=EXCLUDED.created_at,
-                      paid=EXCLUDED.paid
+                      paid=EXCLUDED.paid,
+                      relayer=EXCLUDED.relayer
                     """,
-                    (txhash, owner, target, float(user_vote), float(user_weight), int(created_at), bool(paid)),
+                    (txhash, owner, target, float(user_vote), float(user_weight), int(created_at), bool(paid), relayer),
                 )
 
     def is_topic_followed(self, owner: str, topic: str) -> bool:

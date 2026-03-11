@@ -674,7 +674,7 @@ def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
 
     Envelope layout in *base* (no pow) is always:
       prefix, tag2(pubkey bytes), tag3(last_block_hash bytes),
-      tag4(difficulty uvarint), tag6(timestamp uvarint), payload tags (100+)
+      tag4(difficulty uvarint), tag6(timestamp uvarint), tag7(nonce uvarint, optional), payload tags (100+)
     """
     base_arr = bytearray(base)
 
@@ -699,47 +699,29 @@ def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
     if i < len(base_arr) and base_arr[i] == 0:
         i += 1
 
-    try:
-        # tag 2: pubkey bytes
-        if i >= len(base_arr) or base_arr[i] != 2:
-            raise ValueError("expected tag2")
-        i += 1
-        length_2, i = _read_uvarint(base_arr, i)
-        i += length_2
+    # tag 2: pubkey bytes
+    if i >= len(base_arr) or base_arr[i] != 2:
+        raise ValueError("expected tag2")
+    i += 1
+    length_2, i = _read_uvarint(base_arr, i)
+    i += length_2
 
-        # tag 3: last_block_hash bytes
-        if i >= len(base_arr) or base_arr[i] != 3:
-            raise ValueError("expected tag3")
-        i += 1
-        length_3, i = _read_uvarint(base_arr, i)
-        i += length_3
+    # tag 3: last_block_hash bytes
+    if i >= len(base_arr) or base_arr[i] != 3:
+        raise ValueError("expected tag3")
+    i += 1
+    length_3, i = _read_uvarint(base_arr, i)
+    i += length_3
 
-        # tag 4: difficulty uvarint
-        if i >= len(base_arr) or base_arr[i] != 4:
-            raise ValueError("expected tag4")
-        i += 1
-        # skip difficulty value
-        _, i = _read_uvarint(base_arr, i)
-        tag_4_end = i
+    # tag 4: difficulty uvarint
+    if i >= len(base_arr) or base_arr[i] != 4:
+        raise ValueError("expected tag4")
+    i += 1
+    _, i = _read_uvarint(base_arr, i)
 
-        # tag 6: timestamp uvarint (should immediately follow, but
-        # fall back to searching from tag_4_end to be robust)
-        tag_6_pos = -1
-        if tag_4_end < len(base_arr) and base_arr[tag_4_end] == 6:
-            tag_6_pos = tag_4_end
-        else:
-            for j in range(tag_4_end, len(base_arr)):
-                if base_arr[j] == 6:
-                    tag_6_pos = j
-                    break
+    # tag 6 must immediately follow tag 4
+    if i >= len(base_arr) or base_arr[i] != 6:
+        raise ValueError("expected tag6 after tag4")
 
-        if tag_6_pos >= 0:
-            pow_bytes = _enc_u64(5, int(pow_val))
-            return bytes(base_arr[:tag_6_pos] + pow_bytes + base_arr[tag_6_pos:])
-
-    except Exception:
-        # On any unexpected layout, fall through to append-at-end.
-        pass
-
-    # Fallback: append pow if we could not safely locate tag4/tag6
-    return bytes(base_arr + _enc_u64(5, int(pow_val)))
+    pow_bytes = _enc_u64(5, int(pow_val))
+    return bytes(base_arr[:i] + pow_bytes + base_arr[i:])

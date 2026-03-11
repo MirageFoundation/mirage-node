@@ -6709,6 +6709,11 @@ func (m *MsgPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -6863,6 +6868,11 @@ func (m *MsgEdit) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -6967,6 +6977,11 @@ func (m *MsgVote) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -7075,6 +7090,11 @@ func (m *MsgSetUsername) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -7182,6 +7202,11 @@ func (m *MsgEnableAgent) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -7288,6 +7313,11 @@ func (m *MsgDisableAgent) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -7398,6 +7428,11 @@ func (m *MsgSetAgents) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -7504,6 +7539,11 @@ func (m *MsgFollowUser) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -7612,6 +7652,11 @@ func (m *MsgUnfollowUser) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -7718,6 +7763,11 @@ func (m *MsgFollowTopic) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -7826,6 +7876,11 @@ func (m *MsgUnfollowTopic) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -7923,6 +7978,11 @@ func (m *MsgBlockPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -8022,6 +8082,11 @@ func (m *MsgUnblockPost) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8120,6 +8185,11 @@ func (m *MsgBlockUser) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8217,6 +8287,11 @@ func (m *MsgUnblockUser) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -8325,6 +8400,11 @@ func (m *MsgBlockTopic) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8432,6 +8512,11 @@ func (m *MsgUnblockTopic) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8530,6 +8615,11 @@ func (m *MsgDelete) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8627,6 +8717,11 @@ func (m *MsgDeleteUser) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -8742,6 +8837,11 @@ func (m *MsgSendTokens) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -8846,6 +8946,11 @@ func (m *MsgSetLevel) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -9181,6 +9286,11 @@ func (m *MsgUpgradeLevel) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -9281,6 +9391,11 @@ func (m *MsgSetAutoRenewal) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -9395,6 +9510,11 @@ func (m *MsgBridgeBurn) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -9708,6 +9828,11 @@ func (m *MsgAward) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -9814,6 +9939,11 @@ func (m *MsgSetBiography) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintTx(dAtA, i, uint64(len(m.EnvelopeSignature)))
 		i--
 		dAtA[i] = 0x52
+	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
 	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
@@ -9969,6 +10099,11 @@ func (m *MsgAnnotate) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x52
 	}
+	if m.EnvelopeNonce != 0 {
+		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeNonce))
+		i--
+		dAtA[i] = 0x38
+	}
 	if m.EnvelopeTimestamp != 0 {
 		i = encodeVarintTx(dAtA, i, uint64(m.EnvelopeTimestamp))
 		i--
@@ -10093,6 +10228,9 @@ func (m *MsgPost) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10161,6 +10299,9 @@ func (m *MsgEdit) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10235,6 +10376,9 @@ func (m *MsgVote) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10284,6 +10428,9 @@ func (m *MsgSetUsername) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10336,6 +10483,9 @@ func (m *MsgEnableAgent) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10387,6 +10537,9 @@ func (m *MsgDisableAgent) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10437,6 +10590,9 @@ func (m *MsgSetAgents) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10491,6 +10647,9 @@ func (m *MsgFollowUser) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10541,6 +10700,9 @@ func (m *MsgUnfollowUser) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10593,6 +10755,9 @@ func (m *MsgFollowTopic) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10643,6 +10808,9 @@ func (m *MsgUnfollowTopic) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10695,6 +10863,9 @@ func (m *MsgBlockPost) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10741,6 +10912,9 @@ func (m *MsgUnblockPost) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10789,6 +10963,9 @@ func (m *MsgBlockUser) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10836,6 +11013,9 @@ func (m *MsgUnblockUser) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10882,6 +11062,9 @@ func (m *MsgBlockTopic) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -10934,6 +11117,9 @@ func (m *MsgUnblockTopic) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -10985,6 +11171,9 @@ func (m *MsgDelete) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11032,6 +11221,9 @@ func (m *MsgDeleteUser) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11078,6 +11270,9 @@ func (m *MsgSendTokens) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -11132,6 +11327,9 @@ func (m *MsgSetLevel) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -11289,6 +11487,9 @@ func (m *MsgUpgradeLevel) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11335,6 +11536,9 @@ func (m *MsgSetAutoRenewal) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11380,6 +11584,9 @@ func (m *MsgBridgeBurn) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -11531,6 +11738,9 @@ func (m *MsgAward) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11582,6 +11792,9 @@ func (m *MsgSetBiography) Size() (n int) {
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
 	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
+	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
 		n += 1 + l + sovTx(uint64(l))
@@ -11632,6 +11845,9 @@ func (m *MsgAnnotate) Size() (n int) {
 	}
 	if m.EnvelopeTimestamp != 0 {
 		n += 1 + sovTx(uint64(m.EnvelopeTimestamp))
+	}
+	if m.EnvelopeNonce != 0 {
+		n += 1 + sovTx(uint64(m.EnvelopeNonce))
 	}
 	l = len(m.EnvelopeSignature)
 	if l > 0 {
@@ -12032,6 +12248,25 @@ func (m *MsgPost) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -12515,6 +12750,25 @@ func (m *MsgEdit) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -13034,6 +13288,25 @@ func (m *MsgVote) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -13372,6 +13645,25 @@ func (m *MsgSetUsername) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -13731,6 +14023,25 @@ func (m *MsgEnableAgent) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -14082,6 +14393,25 @@ func (m *MsgDisableAgent) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -14441,6 +14771,25 @@ func (m *MsgSetAgents) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -14792,6 +15141,25 @@ func (m *MsgFollowUser) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -15151,6 +15519,25 @@ func (m *MsgUnfollowUser) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -15502,6 +15889,25 @@ func (m *MsgFollowTopic) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -15861,6 +16267,25 @@ func (m *MsgUnfollowTopic) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -16216,6 +16641,25 @@ func (m *MsgBlockPost) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -16535,6 +16979,25 @@ func (m *MsgUnblockPost) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -16862,6 +17325,25 @@ func (m *MsgBlockUser) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -17185,6 +17667,25 @@ func (m *MsgUnblockUser) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -17504,6 +18005,25 @@ func (m *MsgBlockTopic) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -17863,6 +18383,25 @@ func (m *MsgUnblockTopic) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -18218,6 +18757,25 @@ func (m *MsgDelete) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -18541,6 +19099,25 @@ func (m *MsgDeleteUser) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -18860,6 +19437,25 @@ func (m *MsgSendTokens) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -19234,6 +19830,25 @@ func (m *MsgSetLevel) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -20278,6 +20893,25 @@ func (m *MsgUpgradeLevel) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -20584,6 +21218,25 @@ func (m *MsgSetAutoRenewal) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -20895,6 +21548,25 @@ func (m *MsgBridgeBurn) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -21915,6 +22587,25 @@ func (m *MsgAward) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -22270,6 +22961,25 @@ func (m *MsgSetBiography) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		case 10:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeSignature", wireType)
@@ -22621,6 +23331,25 @@ func (m *MsgAnnotate) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.EnvelopeTimestamp |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EnvelopeNonce", wireType)
+			}
+			m.EnvelopeNonce = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowTx
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.EnvelopeNonce |= uint64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}

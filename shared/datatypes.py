@@ -454,6 +454,7 @@ def _build_pool():
     add_f(tier_config, "can_have_avatar", 18, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_banner", 19, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
     add_f(tier_config, "can_have_flair", 20, descriptor_pb2.FieldDescriptorProto.TYPE_BOOL)
+    add_f(tier_config, "max_biography_length", 21, descriptor_pb2.FieldDescriptorProto.TYPE_UINT64)
 
     # AwardConfig (used in Params.award_configs)
     award_config = file_proto.message_type.add()

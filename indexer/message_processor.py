@@ -190,6 +190,7 @@ class MessageProcessor:
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
+        relayer = str(msg_dict.get("authority", "") or "").strip().lower()
 
         topic = str(msg_dict.get("topic", "") or "")
         title = str(msg_dict.get("title", "") or "")
@@ -255,6 +256,7 @@ class MessageProcessor:
             content,
             target,
             paid,
+            relayer=relayer,
             tag=tag,
             root_topic=root_topic,
             root_post_id=root_post_id,
@@ -321,6 +323,7 @@ class MessageProcessor:
                     "timestamp": int(ts),
                     "time_iso": self.iso_timestamp(ts),
                     "owner": owner,
+                    "relayer": relayer,
                     "topic": topic,
                     "title": title,
                     "content": content,
@@ -406,6 +409,7 @@ class MessageProcessor:
         parsed.ParseFromString(value)
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         owner = derive_owner_from_msg(msg_dict)
+        relayer = str(msg_dict.get("authority", "") or "").strip().lower()
         payload = {
             "target": msg_dict.get("target", ""),
             "direction": int(msg_dict.get("direction", 0) or 0),
@@ -477,7 +481,7 @@ class MessageProcessor:
                             "Error reversing author preference for cleared vote %s: %s", txhash, e, exc_info=True
                         )
 
-            self.db.upsert_vote(txhash, owner, ts, target, 0.0, 0.0, paid)
+            self.db.upsert_vote(txhash, owner, ts, target, 0.0, 0.0, paid, relayer=relayer)
             self.log_yaml(
                 "Stored vote",
                 {
@@ -486,6 +490,7 @@ class MessageProcessor:
                     "timestamp": int(ts),
                     "time_iso": self.iso_timestamp(ts),
                     "owner": owner,
+                    "relayer": relayer,
                     "target": target,
                     "user_vote": 0.0,
                     "user_weight": 0.0,
@@ -667,7 +672,7 @@ class MessageProcessor:
                 )
 
         # Persist both the user vote and the weighted contribution.
-        self.db.upsert_vote(txhash, owner, ts, target, user_vote, user_weight, paid)
+        self.db.upsert_vote(txhash, owner, ts, target, user_vote, user_weight, paid, relayer=relayer)
 
         # Track quest progress for votes
         if owner and raw_direction != 0:
@@ -757,6 +762,9 @@ class MessageProcessor:
 
         # Build detailed vote log
         vote_log = {
+            "owner": owner,
+            "relayer": relayer,
+            "txhash": txhash,
             "vote": {
                 "direction": int(raw_direction),
                 "topic": root_topic,
@@ -804,6 +812,7 @@ class MessageProcessor:
         msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
         logger.info("MsgEdit msg_dict: %s", msg_dict)
         owner = derive_owner_from_msg(msg_dict)
+        relayer = str(msg_dict.get("authority", "") or "").strip().lower()
         override = str(msg_dict.get("override", "") or "").strip().lower()
         target = str(msg_dict.get("target", "") or "").strip().lower()
         topic = str(msg_dict.get("topic", "") or "")
@@ -869,6 +878,7 @@ class MessageProcessor:
             new_content,
             target,
             paid_flag,
+            relayer=relayer,
             tag=tag,
             root_topic=root_topic,
             root_post_id=root_post_id,
@@ -911,6 +921,7 @@ class MessageProcessor:
                 "timestamp": int(ts),
                 "time_iso": self.iso_timestamp(ts),
                 "owner": owner,
+                "relayer": relayer,
                 "override": override,
                 "is_root": bool(is_root),
             },
@@ -1031,6 +1042,7 @@ class MessageProcessor:
             parsed.ParseFromString(value)
             msg_dict = MessageToDict(parsed, preserving_proto_field_name=True)
             owner = derive_owner_from_msg(msg_dict)
+            relayer = str(msg_dict.get("authority", "") or "").strip().lower()
             target = str(msg_dict.get("target", "")).strip().lower()
             award_type = str(msg_dict.get("award_type", "")).strip()
 
@@ -1056,11 +1068,11 @@ class MessageProcessor:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
-                            INSERT INTO awards (owner, target, award_type, burned_amount, created_at)
-                            VALUES (%s, %s, %s, %s, %s)
+                            INSERT INTO awards (owner, target, award_type, burned_amount, created_at, relayer)
+                            VALUES (%s, %s, %s, %s, %s, %s)
                             ON CONFLICT (LOWER(owner), LOWER(target)) DO NOTHING
                             """,
-                            (owner.lower(), target, award_type, burned_amount, ts),
+                            (owner.lower(), target, award_type, burned_amount, ts, relayer),
                         )
                         if cur.rowcount == 0:
                             logger.info("Award %s: duplicate owner=%s target=%s, skipped", tx_hash, owner, target)
@@ -1074,6 +1086,7 @@ class MessageProcessor:
                 {
                     "txhash": tx_hash,
                     "owner": owner,
+                    "relayer": relayer,
                     "target": target,
                     "award_type": award_type,
                     "burned": burned_amount,

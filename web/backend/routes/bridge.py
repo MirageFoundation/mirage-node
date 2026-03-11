@@ -368,6 +368,8 @@ def bridge_burn():
             return jsonify({"error": "envelope_nonce required"}), 400
         try:
             nonce = int(data.get("envelope_nonce"))
+            if nonce <= 0:
+                return jsonify({"error": "envelope_nonce must be > 0"}), 400
         except (TypeError, ValueError):
             return jsonify({"error": "invalid envelope_nonce"}), 400
 
