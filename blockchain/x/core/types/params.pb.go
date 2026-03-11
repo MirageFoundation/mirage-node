@@ -45,8 +45,9 @@ type TierConfig struct {
 	CanRemoveAnon    bool `protobuf:"varint,16,opt,name=can_remove_anon,json=canRemoveAnon,proto3" json:"can_remove_anon,omitempty"`
 	CanHaveBiography bool `protobuf:"varint,17,opt,name=can_have_biography,json=canHaveBiography,proto3" json:"can_have_biography,omitempty"`
 	CanHaveAvatar    bool `protobuf:"varint,18,opt,name=can_have_avatar,json=canHaveAvatar,proto3" json:"can_have_avatar,omitempty"`
-	CanHaveBanner    bool `protobuf:"varint,19,opt,name=can_have_banner,json=canHaveBanner,proto3" json:"can_have_banner,omitempty"`
-	CanHaveFlair     bool `protobuf:"varint,20,opt,name=can_have_flair,json=canHaveFlair,proto3" json:"can_have_flair,omitempty"`
+	CanHaveBanner      bool   `protobuf:"varint,19,opt,name=can_have_banner,json=canHaveBanner,proto3" json:"can_have_banner,omitempty"`
+	CanHaveFlair       bool   `protobuf:"varint,20,opt,name=can_have_flair,json=canHaveFlair,proto3" json:"can_have_flair,omitempty"`
+	MaxBiographyLength uint64 `protobuf:"varint,21,opt,name=max_biography_length,json=maxBiographyLength,proto3" json:"max_biography_length,omitempty"`
 }
 
 func (m *TierConfig) Reset()         { *m = TierConfig{} }
@@ -199,6 +200,13 @@ func (m *TierConfig) GetCanHaveFlair() bool {
 		return m.CanHaveFlair
 	}
 	return false
+}
+
+func (m *TierConfig) GetMaxBiographyLength() uint64 {
+	if m != nil {
+		return m.MaxBiographyLength
+	}
+	return 0
 }
 
 // Params defines the parameters for the module.
@@ -941,6 +949,13 @@ func (m *TierConfig) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.MaxBiographyLength != 0 {
+		i = encodeVarintParams(dAtA, i, uint64(m.MaxBiographyLength))
+		i--
+		dAtA[i] = 0x1
+		i--
+		dAtA[i] = 0xa8
+	}
 	if m.CanHaveFlair {
 		i--
 		if m.CanHaveFlair {
@@ -1429,6 +1444,9 @@ func (m *TierConfig) Size() (n int) {
 	if m.CanHaveFlair {
 		n += 3
 	}
+	if m.MaxBiographyLength != 0 {
+		n += 2 + sovParams(uint64(m.MaxBiographyLength))
+	}
 	return n
 }
 
@@ -1916,6 +1934,25 @@ func (m *TierConfig) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.CanHaveFlair = bool(v != 0)
+		case 21:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MaxBiographyLength", wireType)
+			}
+			m.MaxBiographyLength = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowParams
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MaxBiographyLength |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipParams(dAtA[iNdEx:])

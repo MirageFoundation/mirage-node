@@ -2,6 +2,7 @@ package attestor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,6 +13,11 @@ import (
 	"mirage/orchestrator/config"
 	"mirage/orchestrator/mirage"
 	"mirage/orchestrator/chains/solana"
+)
+
+var (
+	ErrTransactionTooOld = errors.New("transaction too old")
+	ErrBridgeMintAlreadyRecorded = errors.New("bridge mint already recorded")
 )
 
 type Attestor struct {
@@ -417,15 +423,18 @@ func (a *Attestor) retry(ctx context.Context, fn func() error) error {
 	return fmt.Errorf("max retries exceeded: %w", lastErr)
 }
 
-// isPermanentError returns true for errors that should not be retried
+// isPermanentError returns true for errors that should not be retried.
+// Checks both sentinel errors (via errors.Is) and string patterns as fallback
+// for errors originating from external RPC responses.
 func isPermanentError(err error) bool {
+	if errors.Is(err, ErrTransactionTooOld) || errors.Is(err, ErrBridgeMintAlreadyRecorded) {
+		return true
+	}
 	errStr := err.Error()
-	// Solana program errors that indicate already processed or invalid data
-	// Note: AlreadyMinted (6021) is now handled gracefully in the minter and returns success
 	permanentPatterns := []string{
-		"TransactionTooOld",            // Sequence too old
-		"error: 6020",                  // TransactionTooOld error code
-		"bridge mint already recorded", // Duplicate mint confirmation on Mirage
+		"TransactionTooOld",
+		"error: 6020",
+		"bridge mint already recorded",
 	}
 	for _, pattern := range permanentPatterns {
 		if strings.Contains(errStr, pattern) {

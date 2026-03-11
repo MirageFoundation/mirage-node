@@ -134,7 +134,7 @@ type MsgPost struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target  string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -216,6 +216,13 @@ func (m *MsgPost) GetEnvelopePow() uint64 {
 func (m *MsgPost) GetEnvelopeTimestamp() uint64 {
 	if m != nil {
 		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgPost) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
 	}
 	return 0
 }
@@ -315,7 +322,7 @@ type MsgEdit struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target   string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -398,6 +405,13 @@ func (m *MsgEdit) GetEnvelopePow() uint64 {
 func (m *MsgEdit) GetEnvelopeTimestamp() uint64 {
 	if m != nil {
 		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgEdit) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
 	}
 	return 0
 }
@@ -504,7 +518,7 @@ type MsgVote struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target    string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -586,6 +600,13 @@ func (m *MsgVote) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgVote) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgVote) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -653,7 +674,7 @@ type MsgSetUsername struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target   string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -735,6 +756,13 @@ func (m *MsgSetUsername) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgSetUsername) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgSetUsername) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -802,7 +830,7 @@ type MsgEnableAgent struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -884,6 +912,13 @@ func (m *MsgEnableAgent) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgEnableAgent) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgEnableAgent) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -951,7 +986,7 @@ type MsgDisableAgent struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1033,6 +1068,13 @@ func (m *MsgDisableAgent) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgDisableAgent) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgDisableAgent) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1100,7 +1142,7 @@ type MsgSetAgents struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string   `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1182,6 +1224,13 @@ func (m *MsgSetAgents) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgSetAgents) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgSetAgents) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1249,7 +1298,7 @@ type MsgFollowUser struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1331,6 +1380,13 @@ func (m *MsgFollowUser) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgFollowUser) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgFollowUser) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1398,7 +1454,7 @@ type MsgUnfollowUser struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1480,6 +1536,13 @@ func (m *MsgUnfollowUser) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUnfollowUser) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUnfollowUser) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1547,7 +1610,7 @@ type MsgFollowTopic struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1629,6 +1692,13 @@ func (m *MsgFollowTopic) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgFollowTopic) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgFollowTopic) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1696,7 +1766,7 @@ type MsgUnfollowTopic struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1778,6 +1848,13 @@ func (m *MsgUnfollowTopic) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUnfollowTopic) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUnfollowTopic) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1845,7 +1922,7 @@ type MsgBlockPost struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -1926,6 +2003,13 @@ func (m *MsgBlockPost) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgBlockPost) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgBlockPost) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -1986,7 +2070,7 @@ type MsgUnblockPost struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2067,6 +2151,13 @@ func (m *MsgUnblockPost) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUnblockPost) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUnblockPost) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2127,7 +2218,7 @@ type MsgBlockUser struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2208,6 +2299,13 @@ func (m *MsgBlockUser) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgBlockUser) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgBlockUser) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2268,7 +2366,7 @@ type MsgUnblockUser struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2349,6 +2447,13 @@ func (m *MsgUnblockUser) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUnblockUser) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUnblockUser) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2409,7 +2514,7 @@ type MsgBlockTopic struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2491,6 +2596,13 @@ func (m *MsgBlockTopic) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgBlockTopic) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgBlockTopic) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2558,7 +2670,7 @@ type MsgUnblockTopic struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2640,6 +2752,13 @@ func (m *MsgUnblockTopic) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUnblockTopic) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUnblockTopic) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2707,7 +2826,7 @@ type MsgDelete struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2788,6 +2907,13 @@ func (m *MsgDelete) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgDelete) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgDelete) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2848,7 +2974,7 @@ type MsgDeleteUser struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -2929,6 +3055,13 @@ func (m *MsgDeleteUser) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgDeleteUser) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgDeleteUser) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -2989,7 +3122,7 @@ type MsgSendTokens struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Sender string `protobuf:"bytes,100,opt,name=sender,proto3" json:"sender,omitempty"`
@@ -3072,6 +3205,13 @@ func (m *MsgSendTokens) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgSendTokens) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgSendTokens) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -3146,7 +3286,7 @@ type MsgSetLevel struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -3224,6 +3364,13 @@ func (m *MsgSetLevel) GetEnvelopePow() uint64 {
 func (m *MsgSetLevel) GetEnvelopeTimestamp() uint64 {
 	if m != nil {
 		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgSetLevel) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
 	}
 	return 0
 }
@@ -3640,7 +3787,7 @@ type MsgUpgradeLevel struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Level uint32 `protobuf:"varint,100,opt,name=level,proto3" json:"level,omitempty"`
@@ -3721,6 +3868,13 @@ func (m *MsgUpgradeLevel) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgUpgradeLevel) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgUpgradeLevel) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -3781,7 +3935,7 @@ type MsgSetAutoRenewal struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	AutoRenew bool `protobuf:"varint,100,opt,name=auto_renew,json=autoRenew,proto3" json:"auto_renew,omitempty"`
@@ -3862,6 +4016,13 @@ func (m *MsgSetAutoRenewal) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgSetAutoRenewal) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgSetAutoRenewal) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -3922,7 +4083,7 @@ type MsgBridgeBurn struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	DestinationChain   string `protobuf:"bytes,100,opt,name=destination_chain,json=destinationChain,proto3" json:"destination_chain,omitempty"`
@@ -4001,6 +4162,13 @@ func (m *MsgBridgeBurn) GetEnvelopePow() uint64 {
 func (m *MsgBridgeBurn) GetEnvelopeTimestamp() uint64 {
 	if m != nil {
 		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgBridgeBurn) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
 	}
 	return 0
 }
@@ -4374,7 +4542,7 @@ type MsgAward struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target    string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -4456,6 +4624,13 @@ func (m *MsgAward) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgAward) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgAward) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -4523,7 +4698,7 @@ type MsgSetBiography struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload
 	Target    string `protobuf:"bytes,100,opt,name=target,proto3" json:"target,omitempty"`
@@ -4605,6 +4780,13 @@ func (m *MsgSetBiography) GetEnvelopeTimestamp() uint64 {
 	return 0
 }
 
+func (m *MsgSetBiography) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
+	}
+	return 0
+}
+
 func (m *MsgSetBiography) GetEnvelopeSignature() []byte {
 	if m != nil {
 		return m.EnvelopeSignature
@@ -4673,7 +4855,7 @@ type MsgAnnotate struct {
 	EnvelopeDifficulty uint64 `protobuf:"varint,4,opt,name=envelope_difficulty,json=envelopeDifficulty,proto3" json:"envelope_difficulty,omitempty"`
 	EnvelopePow        uint64 `protobuf:"varint,5,opt,name=envelope_pow,json=envelopePow,proto3" json:"envelope_pow,omitempty"`
 	EnvelopeTimestamp  uint64 `protobuf:"varint,6,opt,name=envelope_timestamp,json=envelopeTimestamp,proto3" json:"envelope_timestamp,omitempty"`
-	// tags 7-9 reserved
+	EnvelopeNonce      uint64 `protobuf:"varint,7,opt,name=envelope_nonce,json=envelopeNonce,proto3" json:"envelope_nonce,omitempty"`
 	EnvelopeSignature []byte `protobuf:"bytes,10,opt,name=envelope_signature,json=envelopeSignature,proto3" json:"envelope_signature,omitempty"`
 	// Payload (no target — agents cannot re-parent posts)
 	Topic    string   `protobuf:"bytes,101,opt,name=topic,proto3" json:"topic,omitempty"`
@@ -4756,6 +4938,13 @@ func (m *MsgAnnotate) GetEnvelopePow() uint64 {
 func (m *MsgAnnotate) GetEnvelopeTimestamp() uint64 {
 	if m != nil {
 		return m.EnvelopeTimestamp
+	}
+	return 0
+}
+
+func (m *MsgAnnotate) GetEnvelopeNonce() uint64 {
+	if m != nil {
+		return m.EnvelopeNonce
 	}
 	return 0
 }

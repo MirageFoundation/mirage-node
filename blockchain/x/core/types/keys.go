@@ -71,6 +71,10 @@ const (
 	// MintDenom is the base denom used for minting and burning
 	MintDenom = "umirage"
 
+	// Envelope nonce dedup (replay protection): seen nonces with TTL for pruning
+	EnvelopeNoncePrefix       = "envelope_nonce/"       // envelope_nonce/{pubkey_hash}/{nonce} -> empty value (existence check)
+	EnvelopeNonceExpiryPrefix = "envelope_nonce_expiry/" // envelope_nonce_expiry/{expiry_unix}/{pubkey_hash}/{nonce} -> empty value (for pruning)
+
 	// Bridge-related prefixes (defined in bridge.go for detailed comments)
 	// BridgeAttestationsPrefix = "bridge_attestations/"
 	// BridgePendingCountKey = "bridge_pending_count"

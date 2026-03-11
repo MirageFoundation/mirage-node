@@ -3,6 +3,7 @@ package solana
 import (
 	"bytes"
 	"context"
+	crypto_rand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -53,6 +54,7 @@ type Watcher struct {
 	discBurn   [8]byte
 	discMint   [8]byte
 	ready      bool
+	rng        *rand.Rand
 
 	// Rate limiting
 	rpcMu       sync.Mutex
@@ -77,6 +79,14 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 		return nil, fmt.Errorf("failed to read solana keypair: %w", err)
 	}
 
+	var rngSeed int64
+	var seedBuf [8]byte
+	if _, err := crypto_rand.Read(seedBuf[:]); err != nil {
+		rngSeed = time.Now().UnixNano()
+	} else {
+		rngSeed = int64(binary.LittleEndian.Uint64(seedBuf[:]))
+	}
+
 	watcher := &Watcher{
 		cfg:       cfg,
 		logger:    logger,
@@ -88,6 +98,7 @@ func NewWatcher(cfg config.SolanaConfig, logger *log.Logger) (*Watcher, error) {
 		discBurn:  eventDiscriminator("BurnInitiated"),
 		discMint:  instructionDiscriminator("mint"),
 		ready:     true,
+		rng:       rand.New(rand.NewSource(rngSeed)),
 	}
 
 	logger.Printf("DEBUG solana watcher commitment=finalized confirmations=%d", cfg.Confirmations)
@@ -151,7 +162,7 @@ func (w *Watcher) getTransactionWithRetry(ctx context.Context, sig solana.Signat
 		if isRateLimitError(err) {
 			if attempt < rpcMaxRetries {
 				// Exponential backoff with jitter
-				delay := time.Duration(rpcRetryBaseMs*(1<<attempt)+rand.Intn(rpcRetryJitter)) * time.Millisecond
+				delay := time.Duration(rpcRetryBaseMs*(1<<attempt)+w.rng.Intn(rpcRetryJitter)) * time.Millisecond
 				w.logger.Printf("DEBUG rate limited on GetTransaction, retry %d/%d after %v", attempt+1, rpcMaxRetries, delay)
 				select {
 				case <-ctx.Done():
@@ -223,7 +234,7 @@ func (w *Watcher) pollBurns(ctx context.Context, events chan<- chains.ExternalBu
 		if err != nil {
 			// Check for rate limiting and retry once after delay
 			if isRateLimitError(err) {
-				delay := time.Duration(rpcRetryBaseMs+rand.Intn(rpcRetryJitter)) * time.Millisecond
+				delay := time.Duration(rpcRetryBaseMs+w.rng.Intn(rpcRetryJitter)) * time.Millisecond
 				w.logger.Printf("DEBUG rate limited on GetSignatures, retrying after %v", delay)
 				select {
 				case <-ctx.Done():
@@ -570,7 +581,7 @@ func (w *Watcher) GetLastSequence(ctx context.Context) (uint64, error) {
 	info, err := w.rpcClient.GetAccountInfo(ctx, bridgeStatePDA)
 	if err != nil {
 		if isRateLimitError(err) {
-			delay := time.Duration(rpcRetryBaseMs+rand.Intn(rpcRetryJitter)) * time.Millisecond
+			delay := time.Duration(rpcRetryBaseMs+w.rng.Intn(rpcRetryJitter)) * time.Millisecond
 			w.logger.Printf("DEBUG rate limited on GetAccountInfo, retrying after %v", delay)
 			select {
 			case <-ctx.Done():

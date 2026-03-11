@@ -2614,6 +2614,65 @@ func (k Keeper) IsValidatorBonded(ctx sdk.Context, valoper string) (bool, error)
 	return validator.IsBonded(), nil
 }
 
+// HasEnvelopeNonce checks if a nonce has been seen for the given pubkey hash.
+func (k Keeper) HasEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint64) bool {
+	store := k.storeService.OpenKVStore(ctx)
+	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
+	val, err := store.Get(key)
+	if err != nil {
+		return false
+	}
+	return val != nil
+}
+
+// SetEnvelopeNonce records a nonce for the given pubkey hash with an expiry time.
+func (k Keeper) SetEnvelopeNonce(ctx sdk.Context, pubkeyHash []byte, nonce uint64, expiryUnix int64) error {
+	store := k.storeService.OpenKVStore(ctx)
+	key := []byte(fmt.Sprintf("%s%x/%d", types.EnvelopeNoncePrefix, pubkeyHash, nonce))
+	if err := store.Set(key, []byte{}); err != nil {
+		return err
+	}
+	// Also set expiry index for pruning
+	expiryKey := []byte(fmt.Sprintf("%s%020d/%x/%d", types.EnvelopeNonceExpiryPrefix, expiryUnix, pubkeyHash, nonce))
+	return store.Set(expiryKey, []byte{})
+}
+
+// PruneExpiredNonces removes all nonce entries that have expired.
+func (k Keeper) PruneExpiredNonces(ctx sdk.Context, nowUnix int64) (int, error) {
+	store := k.storeService.OpenKVStore(ctx)
+	prefix := []byte(types.EnvelopeNonceExpiryPrefix)
+	// End key is exclusive; use nowUnix+1 so we include entries expiring exactly at nowUnix
+	cutoff := []byte(fmt.Sprintf("%s%020d/", types.EnvelopeNonceExpiryPrefix, nowUnix+1))
+
+	iter, err := store.Iterator(prefix, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	defer iter.Close()
+
+	var toDelete [][]byte
+	for ; iter.Valid(); iter.Next() {
+		toDelete = append(toDelete, append([]byte{}, iter.Key()...))
+	}
+
+	pruned := 0
+	for _, expiryKey := range toDelete {
+		// Parse the nonce key from the expiry key
+		// Format: envelope_nonce_expiry/{expiry_unix}/{pubkey_hash}/{nonce}
+		// We need to reconstruct: envelope_nonce/{pubkey_hash}/{nonce}
+		suffix := string(expiryKey[len(types.EnvelopeNonceExpiryPrefix):])
+		// Skip past the expiry timestamp (20 digits + "/")
+		if len(suffix) > 21 {
+			nonceKeySuffix := suffix[21:] // {pubkey_hash}/{nonce}
+			nonceKey := []byte(types.EnvelopeNoncePrefix + nonceKeySuffix)
+			_ = store.Delete(nonceKey)
+		}
+		_ = store.Delete(expiryKey)
+		pruned++
+	}
+	return pruned, nil
+}
+
 // GetEnabledBridgeChains returns all enabled bridge chains from params
 func (k Keeper) GetEnabledBridgeChains(ctx sdk.Context) []*types.BridgeChainConfig {
 	params := k.GetParams(ctx)

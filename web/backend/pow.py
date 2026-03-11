@@ -57,9 +57,10 @@ def canon_base_set_username(
     timestamp: int,
     target: str,
     username: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_set_username(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, username
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, username, nonce=int(nonce)
     )
 
 
@@ -70,9 +71,10 @@ def canon_base_set_biography(
     timestamp: int,
     target: str,
     biography: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_set_biography(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, biography
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, biography, nonce=int(nonce)
     )
 
 
@@ -87,6 +89,7 @@ def canon_base_post(
     content: str,
     tag: str = "",
     media: list[str] | None = None,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_post(
         pub_dec,
@@ -99,6 +102,7 @@ def canon_base_post(
         content,
         tag,
         media=media,
+        nonce=int(nonce),
     )
 
 
@@ -114,6 +118,7 @@ def canon_base_edit(
     tag: str,
     override: str,
     media: list[str] | None = None,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_edit(
         pub_dec,
@@ -127,6 +132,7 @@ def canon_base_edit(
         tag,
         override,
         media=media,
+        nonce=int(nonce),
     )
 
 
@@ -142,6 +148,7 @@ def canon_base_annotate(
     override: str,
     media: list[str] | None = None,
     appendix: str = "",
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_annotate(
         pub_dec,
@@ -155,6 +162,7 @@ def canon_base_annotate(
         override,
         media=media,
         appendix=appendix,
+        nonce=int(nonce),
     )
 
 
@@ -165,9 +173,10 @@ def canon_base_vote(
     timestamp: int,
     target: str,
     direction: int,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_vote(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, int(direction)
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, int(direction), nonce=int(nonce)
     )
 
 
@@ -178,9 +187,10 @@ def canon_base_enable_agent(
     timestamp: int,
     target: str,
     agent: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_enable_agent(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent, nonce=int(nonce)
     )
 
 
@@ -191,9 +201,10 @@ def canon_base_disable_agent(
     timestamp: int,
     target: str,
     agent: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_disable_agent(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agent, nonce=int(nonce)
     )
 
 
@@ -204,9 +215,10 @@ def canon_base_set_agents(
     timestamp: int,
     target: str,
     agents: list[str],
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_set_agents(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agents
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, agents, nonce=int(nonce)
     )
 
 
@@ -217,9 +229,10 @@ def canon_base_follow_user(
     timestamp: int,
     target: str,
     user: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_follow_user(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, user
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, user, nonce=int(nonce)
     )
 
 
@@ -230,9 +243,10 @@ def canon_base_unfollow_user(
     timestamp: int,
     target: str,
     user: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_unfollow_user(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, user
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, user, nonce=int(nonce)
     )
 
 
@@ -243,9 +257,10 @@ def canon_base_follow_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_follow_topic(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic, nonce=int(nonce)
     )
 
 
@@ -256,9 +271,10 @@ def canon_base_unfollow_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_unfollow_topic(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic, nonce=int(nonce)
     )
 
 
@@ -268,9 +284,10 @@ def canon_base_block_post(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_block_post(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -280,9 +297,10 @@ def canon_base_unblock_post(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_unblock_post(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -292,9 +310,10 @@ def canon_base_block_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_block_user(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -304,9 +323,10 @@ def canon_base_unblock_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_unblock_user(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -317,9 +337,10 @@ def canon_base_block_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_block_topic(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic, nonce=int(nonce)
     )
 
 
@@ -330,9 +351,10 @@ def canon_base_unblock_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_unblock_topic(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, topic, nonce=int(nonce)
     )
 
 
@@ -342,9 +364,10 @@ def canon_base_delete(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_delete(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -354,9 +377,10 @@ def canon_base_delete_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_delete_user(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, nonce=int(nonce)
     )
 
 
@@ -368,9 +392,10 @@ def canon_base_send_tokens(
     sender: str,
     target: str,
     amount: int,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_send_tokens(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), sender, target, int(amount)
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), sender, target, int(amount), nonce=int(nonce)
     )
 
 
@@ -381,9 +406,10 @@ def canon_base_report(
     timestamp: int,
     target: str,
     reason: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_report(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, reason
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, reason, nonce=int(nonce)
     )
 
 
@@ -393,9 +419,10 @@ def canon_base_upgrade_level(
     difficulty: int,
     timestamp: int,
     level: int,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_upgrade_level(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), int(level)
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), int(level), nonce=int(nonce)
     )
 
 
@@ -405,9 +432,10 @@ def canon_base_set_auto_renewal(
     difficulty: int,
     timestamp: int,
     auto_renew: bool,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_set_auto_renewal(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), bool(auto_renew)
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), bool(auto_renew), nonce=int(nonce)
     )
 
 
@@ -418,9 +446,10 @@ def canon_base_award(
     timestamp: int,
     target: str,
     award_type: str,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_award(
-        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, award_type
+        pub_dec, _hex_to_bytes(last_block_hash), int(difficulty), int(timestamp), target, award_type, nonce=int(nonce)
     )
 
 
@@ -432,6 +461,7 @@ def canon_base_bridge_burn(
     destination_chain: str,
     destination_address: str,
     amount: int,
+    nonce: int = 0,
 ) -> bytes:
     return canon_shared.canon_base_bridge_burn(
         pub_dec,
@@ -441,6 +471,7 @@ def canon_base_bridge_burn(
         destination_chain,
         destination_address,
         int(amount),
+        nonce=int(nonce),
     )
 
 

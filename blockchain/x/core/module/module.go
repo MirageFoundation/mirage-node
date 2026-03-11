@@ -637,7 +637,11 @@ func (am AppModule) EndBlock(ctx context.Context) error {
 	sdkCtx := sdk.UnwrapSDKContext(ctx)
 	params := am.k.GetParams(sdkCtx)
 
-	// Bridge fees are burned inline when threshold is reached.
+	if pruned, err := am.k.PruneExpiredNonces(sdkCtx, sdkCtx.BlockTime().Unix()); err != nil {
+		sdkCtx.Logger().Error("EndBlock: failed to prune expired nonces", "err", err)
+	} else if pruned > 0 {
+		sdkCtx.Logger().Debug("EndBlock: pruned expired nonces", "count", pruned)
+	}
 
 	// Process subscription renewals/expirations
 	if err := am.processSubscriptions(sdkCtx, params); err != nil {
@@ -1857,6 +1861,10 @@ func (am AppModule) SetBiography(ctx context.Context, req *types.MsgSetBiography
 		if tierConfig == nil || !tierConfig.CanHaveBiography {
 			return nil, fmt.Errorf("biography not available for tier level %d", userLevel)
 		}
+		maxLen := tierConfig.MaxBiographyLength
+		if maxLen > 0 && uint64(utf8.RuneCountInString(biography)) > maxLen {
+			return nil, fmt.Errorf("biography exceeds limit: %d > %d characters", utf8.RuneCountInString(biography), maxLen)
+		}
 	}
 
 	// Update profile core
@@ -2173,7 +2181,9 @@ func (am AppModule) BlockPost(ctx context.Context, req *types.MsgBlockPost) (*ty
 
 	if owner != "" && authority != govAuthority {
 		gasUsed := sdkCtx.GasMeter().GasConsumed() - gasStart
-		_ = am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockPost")
+		if err := am.deductRelayGasFee(sdkCtx, owner, userLevel, gasUsed, "BlockPost"); err != nil {
+			return nil, err
+		}
 	}
 
 	return &types.MsgBlockPostResponse{}, nil
@@ -2969,8 +2979,13 @@ func (am AppModule) SetLevel(ctx context.Context, req *types.MsgSetLevel) (*type
 		return nil, fmt.Errorf("failed to unmarshal profile: %w", err)
 	}
 
-	// Update level
-	core.Level = req.GetLevel()
+	// Validate level is a known tier
+	newLevel := req.GetLevel()
+	if types.LevelToTierIndex(int(newLevel)) < 0 {
+		return nil, fmt.Errorf("invalid level %d: must be 0, 1, 10, or >= 100", newLevel)
+	}
+
+	core.Level = newLevel
 
 	// Save profile core
 	bz, err = json.Marshal(core)

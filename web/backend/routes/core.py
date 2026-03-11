@@ -13,9 +13,10 @@ Endpoints:
 import base64
 import ipaddress
 import os
+import random
 import re
-from typing import Any, Dict
 import time
+from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 from settings import REGISTRATION_ENABLED, REGISTRATION_INVITE_CODE_REQUIRED
@@ -279,6 +280,17 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
             log_event(rid, "invite_quest.completed", referrer=referrer_addr, new_user=new_user_addr)
 
 
+def _parse_envelope_nonce(data: dict):
+    """Parse envelope_nonce from request. Returns (nonce, None) or (0, error_response)."""
+    if "envelope_nonce" not in data:
+        return 0, (jsonify({"error": "envelope_nonce required"}), 400)
+    try:
+        nonce = int(data.get("envelope_nonce"))
+        return nonce, None
+    except (TypeError, ValueError):
+        return 0, (jsonify({"error": "invalid envelope_nonce"}), 400)
+
+
 def _hex_to_bytes(s: str) -> bytes:
     """Convert hex string to bytes for envelope_block_hash."""
     try:
@@ -522,6 +534,9 @@ def core_set_username():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         # Log what we got
         log_event(
@@ -592,6 +607,7 @@ def core_set_username():
                     timestamp,
                     user_addr,
                     username,
+                    nonce=nonce,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -612,6 +628,7 @@ def core_set_username():
                 timestamp,
                 user_addr,
                 username,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -695,6 +712,7 @@ def core_set_username():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = user_addr
         msg.username = username
@@ -803,6 +821,9 @@ def core_set_biography():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         log_event(
             rid,
@@ -849,6 +870,7 @@ def core_set_biography():
                     timestamp,
                     user_addr,
                     biography,
+                    nonce=nonce,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -870,6 +892,7 @@ def core_set_biography():
                 timestamp,
                 user_addr,
                 biography,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -884,6 +907,7 @@ def core_set_biography():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = user_addr
         msg.biography = biography
@@ -943,6 +967,9 @@ def core_enable_agent():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and agent):
             return jsonify({"error": "missing required fields"}), 400
@@ -985,7 +1012,7 @@ def core_enable_agent():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_enable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent)
+                base = canon_base_enable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1004,6 +1031,7 @@ def core_enable_agent():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = user_addr
         msg.agent = agent
@@ -1056,6 +1084,9 @@ def core_disable_agent():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and agent):
             return jsonify({"error": "missing required fields"}), 400
@@ -1082,7 +1113,7 @@ def core_disable_agent():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_disable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent)
+                base = canon_base_disable_agent(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agent, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1101,6 +1132,7 @@ def core_disable_agent():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = user_addr
         msg.agent = agent
@@ -1157,6 +1189,9 @@ def core_set_agents():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64):
             return jsonify({"error": "missing required fields"}), 400
@@ -1218,7 +1253,7 @@ def core_set_agents():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_set_agents(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents)
+                base = canon_base_set_agents(pub_dec, last_block_hash, int(difficulty), timestamp, user_addr, agents, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -1237,6 +1272,7 @@ def core_set_agents():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = user_addr
         for a in agents:
@@ -1294,6 +1330,9 @@ def core_block_post():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         log_event(
             rid,
@@ -1343,7 +1382,7 @@ def core_block_post():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_block_post(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_block_post(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1362,6 +1401,7 @@ def core_block_post():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -1414,6 +1454,9 @@ def core_block_user():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         log_event(
             rid,
@@ -1463,7 +1506,7 @@ def core_block_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_block_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_block_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1482,6 +1525,7 @@ def core_block_user():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -1532,6 +1576,9 @@ def core_unblock_post():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target):
             return jsonify({"error": "missing required fields"}), 400
@@ -1551,7 +1598,7 @@ def core_unblock_post():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_post(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_unblock_post(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1570,6 +1617,7 @@ def core_unblock_post():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -1620,6 +1668,9 @@ def core_unblock_user():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target):
             return jsonify({"error": "missing required fields"}), 400
@@ -1639,7 +1690,7 @@ def core_unblock_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_unblock_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1658,6 +1709,7 @@ def core_unblock_user():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -1710,6 +1762,9 @@ def core_block_topic():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         import re
 
@@ -1760,7 +1815,7 @@ def core_block_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_block_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic)
+                base = canon_base_block_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1779,6 +1834,7 @@ def core_block_topic():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = ""
         msg.topic = topic
@@ -1830,6 +1886,9 @@ def core_unblock_topic():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and topic):
             return jsonify({"error": "missing required fields"}), 400
@@ -1849,7 +1908,7 @@ def core_unblock_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unblock_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic)
+                base = canon_base_unblock_topic(pub_dec, last_block_hash, int(difficulty), timestamp, "", topic, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1868,6 +1927,7 @@ def core_unblock_topic():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = ""
         msg.topic = topic
@@ -1920,6 +1980,9 @@ def core_follow_user():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target and user):
             return jsonify({"error": "missing required fields"}), 400
@@ -1950,7 +2013,7 @@ def core_follow_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_follow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user)
+                base = canon_base_follow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -1966,6 +2029,7 @@ def core_follow_user():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.user = user
@@ -2018,6 +2082,9 @@ def core_unfollow_user():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target and user):
             return jsonify({"error": "missing required fields"}), 400
@@ -2037,7 +2104,7 @@ def core_unfollow_user():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unfollow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user)
+                base = canon_base_unfollow_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, user, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2053,6 +2120,7 @@ def core_unfollow_user():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.user = user
@@ -2100,6 +2168,9 @@ def core_follow_topic():
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
         timestamp = int(data.get("timestamp", 0)) or int(time.time() * 1000)
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target and topic):
             return jsonify({"error": "missing required fields"}), 400
@@ -2130,7 +2201,7 @@ def core_follow_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_follow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic)
+                base = canon_base_follow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2146,6 +2217,7 @@ def core_follow_topic():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.topic = topic
@@ -2195,6 +2267,9 @@ def core_unfollow_topic():
         difficulty = int(data.get("pow_difficulty", 0))
         proof = int(data.get("pow", 0))
         timestamp = int(data.get("timestamp", 0)) or int(time.time() * 1000)
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if not (pub_b64 and sig_b64 and target and topic):
             return jsonify({"error": "missing required fields"}), 400
@@ -2214,7 +2289,7 @@ def core_unfollow_topic():
 
         if not is_subscriber(user_addr):
             try:
-                base = canon_base_unfollow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic)
+                base = canon_base_unfollow_topic(pub_dec, last_block_hash, int(difficulty), timestamp, target, topic, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -2230,6 +2305,7 @@ def core_unfollow_topic():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.topic = topic
@@ -2287,6 +2363,9 @@ def core_delete_post():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         target = str(data.get("target", "")).strip()
         # no client-provided fees
 
@@ -2334,7 +2413,7 @@ def core_delete_post():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_delete(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_delete(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -2363,6 +2442,7 @@ def core_delete_post():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -2428,6 +2508,9 @@ def core_delete_user():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         target = str(data.get("target", "")).strip().lower()
 
         log_event(
@@ -2480,7 +2563,7 @@ def core_delete_user():
             if not is_valid_recent_block_hash(last_block_hash):
                 return jsonify({"error": "invalid last_block_hash"}), 400
             try:
-                base = canon_base_delete_user(pub_dec, last_block_hash, int(difficulty), timestamp, target)
+                base = canon_base_delete_user(pub_dec, last_block_hash, int(difficulty), timestamp, target, nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None and not check_pow_target(
                     digest, _effective_difficulty(int(difficulty)), get_pow_base_bits(), _pow_factor()
@@ -2497,6 +2580,7 @@ def core_delete_user():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
 
@@ -2555,6 +2639,9 @@ def core_report():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         reason = "".join(c for c in reason_raw if ord(c) >= 32 and ord(c) < 127 or ord(c) >= 160)
         reason = reason.strip()
@@ -2576,7 +2663,7 @@ def core_report():
 
         try:
             pub_dec = decode_b64(pub_b64)
-            base = canon_base_report(pub_dec, last_block_hash, int(difficulty), timestamp, target, reason)
+            base = canon_base_report(pub_dec, last_block_hash, int(difficulty), timestamp, target, reason, nonce=nonce)
             digest = argon2_digest(base, last_block_hash, proof)
             if digest is not None:
                 effective_required = _effective_difficulty(int(difficulty))
@@ -2603,7 +2690,7 @@ def core_report():
             from cryptography.hazmat.primitives import hashes
             from cryptography.hazmat.primitives.asymmetric import utils as _utils
 
-            base = canon_base_report(pub_dec, last_block_hash, int(difficulty), timestamp, target, reason)
+            base = canon_base_report(pub_dec, last_block_hash, int(difficulty), timestamp, target, reason, nonce=nonce)
             signed = canon_signed_with_pow(base, int(proof))
             digest = _hl.sha256(signed).digest()
 
@@ -2704,6 +2791,9 @@ def core_edit():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         target = str(data.get("target", "")).strip()
         topic = str(data.get("topic", "")).strip()
         title = str(data.get("title", "")).strip()
@@ -2814,6 +2904,7 @@ def core_edit():
                     tag,
                     override,
                     media=media,
+                    nonce=nonce,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -2840,6 +2931,7 @@ def core_edit():
                 tag,
                 override,
                 media=media,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -2855,6 +2947,7 @@ def core_edit():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         log_event(rid, "edit.debug", is_comment=is_comment, topic=topic, target=target, media_count=len(media))
@@ -2938,6 +3031,9 @@ def core_annotate():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         topic = str(data.get("topic", "")).strip()
         title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
@@ -3022,6 +3118,7 @@ def core_annotate():
                 override,
                 media=media,
                 appendix=appendix,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3046,6 +3143,7 @@ def core_annotate():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.topic = topic
         msg.title = title
@@ -3256,6 +3354,7 @@ def core_post():
                     content,
                     tag,
                     media=media,
+                    nonce=nonce,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -3282,6 +3381,7 @@ def core_post():
                 content,
                 tag,
                 media=media,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3297,6 +3397,7 @@ def core_post():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.topic = topic
@@ -3372,6 +3473,9 @@ def core_vote():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         # no client-provided fees
         # Minimal fields; last_block_hash/difficulty/proof only needed for PoW path
         if not (pub_b64 and sig_b64 and target):
@@ -3433,7 +3537,7 @@ def core_vote():
                 return jsonify({"error": "invalid last_block_hash"}), 400
                 # PoW precheck: mirror chain's validatePoWBytesArgon2 threshold
             try:
-                base = canon_base_vote(pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction))
+                base = canon_base_vote(pub_dec, last_block_hash, int(difficulty), timestamp, target, int(direction), nonce=nonce)
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
                     effective_required = _effective_difficulty(int(difficulty))
@@ -3452,6 +3556,7 @@ def core_vote():
                     timestamp,
                     target,
                     int(direction),
+                    nonce=nonce,
                 )
                 signed = canon_signed_with_pow(base, int(proof))
                 if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3500,6 +3605,7 @@ def core_vote():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.direction = int(direction)
@@ -3572,6 +3678,9 @@ def core_send_tokens():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         # no client-provided fees
 
         log_event(rid, "send_tokens.parsed", target=target, amount=amount)
@@ -3620,6 +3729,7 @@ def core_send_tokens():
                     user_addr,
                     target,
                     int(amount),
+                    nonce=nonce,
                 )
                 digest = argon2_digest(base, last_block_hash, proof)
                 if digest is not None:
@@ -3642,6 +3752,7 @@ def core_send_tokens():
                 user_addr,
                 target,
                 int(amount),
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, int(proof))
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3657,6 +3768,7 @@ def core_send_tokens():
         msg.envelope_difficulty = int(difficulty)
         msg.envelope_pow = int(proof)
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.sender = user_addr
         msg.target = target
@@ -3727,6 +3839,9 @@ def core_upgrade_level():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
         level = int(data.get("level", 0))
         # no client-provided fees
 
@@ -3787,6 +3902,7 @@ def core_upgrade_level():
                 0,  # difficulty always 0 for upgrade_level
                 timestamp,
                 level,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3802,6 +3918,7 @@ def core_upgrade_level():
         msg.envelope_difficulty = 0  # No PoW for upgrade
         msg.envelope_pow = 0  # No PoW for upgrade
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.level = level
 
@@ -3866,6 +3983,9 @@ def core_set_auto_renewal():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if "auto_renew" not in data:
             return jsonify({"error": "auto_renew required"}), 400
@@ -3905,6 +4025,7 @@ def core_set_auto_renewal():
                 0,
                 timestamp,
                 auto_renew,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -3919,6 +4040,7 @@ def core_set_auto_renewal():
         msg.envelope_difficulty = 0
         msg.envelope_pow = 0
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.auto_renew = auto_renew
 
@@ -3973,6 +4095,9 @@ def core_award():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         if difficulty != 0 or proof != 0:
             return jsonify({"error": "pow not allowed for award"}), 400
@@ -4029,6 +4154,7 @@ def core_award():
                 timestamp,
                 target,
                 award_type,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, 0)
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -4043,6 +4169,7 @@ def core_award():
         msg.envelope_difficulty = 0
         msg.envelope_pow = 0
         msg.envelope_timestamp = int(timestamp)
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.target = target
         msg.award_type = award_type
