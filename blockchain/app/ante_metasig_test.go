@@ -9,8 +9,19 @@ import (
 	sdkmath "cosmossdk.io/math"
 	secp "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	authtypes "github.com/cosmos/cosmos-sdk/x/auth/types"
+	banktypes "github.com/cosmos/cosmos-sdk/x/bank/types"
+	distrtypes "github.com/cosmos/cosmos-sdk/x/distribution/types"
+	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
+	govv1 "github.com/cosmos/cosmos-sdk/x/gov/types/v1"
+	slashingtypes "github.com/cosmos/cosmos-sdk/x/slashing/types"
+	stakingtypes "github.com/cosmos/cosmos-sdk/x/staking/types"
+	"github.com/cosmos/cosmos-sdk/x/authz"
+	minttypes "github.com/cosmos/cosmos-sdk/x/mint/types"
 	"github.com/stretchr/testify/require"
 	protov2 "google.golang.org/protobuf/proto"
+
+	coretypes "mirage/x/core/types"
 )
 
 func TestVerifyRelaySignatureBlockTopic(t *testing.T) {
@@ -223,3 +234,143 @@ func (t testFeeTx) GetMsgs() []sdk.Msg { return nil }
 func (t testFeeTx) GetMsgsV2() ([]protov2.Message, error) { return nil, nil }
 
 func (t testFeeTx) ValidateBasic() error { return nil }
+
+// --- C-1 exhaustive tests: mixed relay + SDK message rejection ---
+
+func TestIsRelayMessage(t *testing.T) {
+	relayMsgs := []sdk.Msg{
+		&coretypes.MsgPost{},
+		&coretypes.MsgVote{},
+		&coretypes.MsgSetUsername{},
+		&coretypes.MsgEnableAgent{},
+		&coretypes.MsgDisableAgent{},
+		&coretypes.MsgSetAgents{},
+		&coretypes.MsgFollowUser{},
+		&coretypes.MsgUnfollowUser{},
+		&coretypes.MsgFollowTopic{},
+		&coretypes.MsgUnfollowTopic{},
+		&coretypes.MsgBlockPost{},
+		&coretypes.MsgUnblockPost{},
+		&coretypes.MsgBlockUser{},
+		&coretypes.MsgUnblockUser{},
+		&coretypes.MsgBlockTopic{},
+		&coretypes.MsgUnblockTopic{},
+		&coretypes.MsgDelete{},
+		&coretypes.MsgDeleteUser{},
+		&coretypes.MsgSendTokens{},
+		&coretypes.MsgEdit{},
+		&coretypes.MsgUpgradeLevel{},
+		&coretypes.MsgSetAutoRenewal{},
+		&coretypes.MsgBridgeBurn{},
+		&coretypes.MsgAward{},
+		&coretypes.MsgSetBiography{},
+		&coretypes.MsgAnnotate{},
+	}
+	for _, m := range relayMsgs {
+		require.True(t, isRelayMessage(m), "expected relay: %T", m)
+	}
+
+	nonRelayMsgs := []sdk.Msg{
+		&banktypes.MsgSend{},
+		&banktypes.MsgMultiSend{},
+		&stakingtypes.MsgDelegate{},
+		&stakingtypes.MsgUndelegate{},
+		&govv1.MsgSubmitProposal{},
+		&slashingtypes.MsgUnjail{},
+		&distrtypes.MsgSetWithdrawAddress{},
+		&authz.MsgGrant{},
+	}
+	for _, m := range nonRelayMsgs {
+		require.False(t, isRelayMessage(m), "expected non-relay: %T", m)
+	}
+}
+
+func TestMixedRelaySDKMessageRejection(t *testing.T) {
+	govAuthority := authtypes.NewModuleAddress(govtypes.ModuleName).String()
+	_ = govAuthority
+
+	sdkMsgs := []struct {
+		name string
+		msg  sdk.Msg
+	}{
+		// bank
+		{"bank.MsgSend", &banktypes.MsgSend{}},
+		{"bank.MsgMultiSend", &banktypes.MsgMultiSend{}},
+		{"bank.MsgUpdateParams", &banktypes.MsgUpdateParams{}},
+		// staking
+		{"staking.MsgDelegate", &stakingtypes.MsgDelegate{}},
+		{"staking.MsgUndelegate", &stakingtypes.MsgUndelegate{}},
+		{"staking.MsgBeginRedelegate", &stakingtypes.MsgBeginRedelegate{}},
+		{"staking.MsgCancelUnbondingDelegation", &stakingtypes.MsgCancelUnbondingDelegation{}},
+		{"staking.MsgCreateValidator", &stakingtypes.MsgCreateValidator{}},
+		{"staking.MsgEditValidator", &stakingtypes.MsgEditValidator{}},
+		{"staking.MsgUpdateParams", &stakingtypes.MsgUpdateParams{}},
+		// gov
+		{"gov.MsgSubmitProposal", &govv1.MsgSubmitProposal{}},
+		{"gov.MsgVote", &govv1.MsgVote{}},
+		{"gov.MsgVoteWeighted", &govv1.MsgVoteWeighted{}},
+		{"gov.MsgDeposit", &govv1.MsgDeposit{}},
+		// authz
+		{"authz.MsgGrant", &authz.MsgGrant{}},
+		{"authz.MsgRevoke", &authz.MsgRevoke{}},
+		{"authz.MsgExec", &authz.MsgExec{}},
+		// distribution
+		{"distribution.MsgSetWithdrawAddress", &distrtypes.MsgSetWithdrawAddress{}},
+		{"distribution.MsgWithdrawDelegatorReward", &distrtypes.MsgWithdrawDelegatorReward{}},
+		{"distribution.MsgWithdrawValidatorCommission", &distrtypes.MsgWithdrawValidatorCommission{}},
+		{"distribution.MsgFundCommunityPool", &distrtypes.MsgFundCommunityPool{}},
+		{"distribution.MsgUpdateParams", &distrtypes.MsgUpdateParams{}},
+		// slashing
+		{"slashing.MsgUnjail", &slashingtypes.MsgUnjail{}},
+		{"slashing.MsgUpdateParams", &slashingtypes.MsgUpdateParams{}},
+		// mint
+		{"mint.MsgUpdateParams", &minttypes.MsgUpdateParams{}},
+	}
+
+	relayMsg := &coretypes.MsgPost{}
+
+	for _, tc := range sdkMsgs {
+		t.Run("relay+"+tc.name, func(t *testing.T) {
+			msgs := []sdk.Msg{relayMsg, tc.msg}
+			isRelay, hasNon := classifyMsgs(msgs)
+			require.True(t, isRelay, "should detect relay message")
+			require.True(t, hasNon, "should detect non-relay message %s", tc.name)
+		})
+	}
+
+	// Pure relay tx must be accepted (both flags consistent).
+	t.Run("pure_relay", func(t *testing.T) {
+		msgs := []sdk.Msg{
+			&coretypes.MsgPost{},
+			&coretypes.MsgVote{},
+			&coretypes.MsgFollowUser{},
+		}
+		isRelay, hasNon := classifyMsgs(msgs)
+		require.True(t, isRelay)
+		require.False(t, hasNon)
+	})
+
+	// Pure SDK tx must route to standard ante.
+	t.Run("pure_sdk", func(t *testing.T) {
+		msgs := []sdk.Msg{
+			&banktypes.MsgSend{},
+			&stakingtypes.MsgDelegate{},
+		}
+		isRelay, hasNon := classifyMsgs(msgs)
+		require.False(t, isRelay)
+		require.True(t, hasNon)
+	})
+}
+
+// classifyMsgs replicates the ante handler's message classification logic
+// for testability.
+func classifyMsgs(msgs []sdk.Msg) (isRelayTx, hasNonRelay bool) {
+	for _, m := range msgs {
+		if isRelayMessage(m) {
+			isRelayTx = true
+		} else {
+			hasNonRelay = true
+		}
+	}
+	return
+}
