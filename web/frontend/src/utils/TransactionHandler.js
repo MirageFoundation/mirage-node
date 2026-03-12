@@ -9,6 +9,13 @@ import { notifyTopicsUpdated, invalidateCache as invalidateSubCache } from './Su
 
 const ALLOWED_TAGS = new Set(["", "sensitive", "porn", "gore", "violence", "death"]);
 
+// Nonce: (Date.now() * 1_000_000) + rand32. Must be >0, <=2^53-1 (JS safe int). Included in signed canonical bytes.
+function generateEnvelopeNonce() {
+    let nonce = Math.floor(Date.now() * 1_000_000) + ((Math.random() * 0xFFFFFFFF) >>> 0);
+    if (nonce <= 0 || !Number.isSafeInteger(nonce)) nonce = Date.now() * 1000 + ((Math.random() * 999) >>> 0) + 1;
+    return nonce;
+}
+
 let __CosmSecp256k1 = null;
 let __CosmSha256 = null;
 async function ensureCosmCrypto() {
@@ -2393,7 +2400,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgPost
-    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, media }) {
+    canonicalPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, media, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2446,6 +2453,7 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
             tag102, encStr(title || ""),
@@ -2461,7 +2469,7 @@ class TransactionHandler {
     }
 
     // Build canonical bytes for MsgEdit (must match chain ante)
-    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override, media }) {
+    canonicalEdit({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, title, content, tag, override, media, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2520,6 +2528,7 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
             tag102, encStr(title || ""),
@@ -2530,7 +2539,7 @@ class TransactionHandler {
         );
     }
 
-    canonicalAnnotate({ pub_bytes, last_block_hash, difficulty, proof, timestamp, topic, title, content, tag, override, media, appendix }) {
+    canonicalAnnotate({ pub_bytes, last_block_hash, difficulty, proof, timestamp, topic, title, content, tag, override, media, appendix, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2589,6 +2598,7 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag101, encStr(topic || ""),
             tag102, encStr(title || ""),
             tag103, encStr(content || ""),
@@ -2601,7 +2611,7 @@ class TransactionHandler {
 
     // Build canonical bytes for MsgSetUsername (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
-    canonicalSetUsername({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, username }) {
+    canonicalSetUsername({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, username, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2649,12 +2659,13 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(username || ""),
         );
     }
 
-    canonicalSetBiography({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, biography }) {
+    canonicalSetBiography({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, biography, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2702,13 +2713,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(biography ?? ""),
         );
     }
 
     // Build canonical bytes for MsgEnableAgent
-    canonicalEnableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent }) {
+    canonicalEnableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2756,13 +2768,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(agent || ""),
         );
     }
 
     // Build canonical bytes for MsgDisableAgent
-    canonicalDisableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent }) {
+    canonicalDisableAgent({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agent, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2810,13 +2823,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(agent || ""),
         );
     }
 
     // Build canonical bytes for MsgSetAgents
-    canonicalSetAgents({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agents }) {
+    canonicalSetAgents({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, agents, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2868,13 +2882,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             ...agentParts,
         );
     }
 
     // Build canonical bytes for MsgFollowUser
-    canonicalFollowUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, user }) {
+    canonicalFollowUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, user, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2922,13 +2937,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(user || ""),
         );
     }
 
     // Build canonical bytes for MsgUnfollowUser
-    canonicalUnfollowUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, user }) {
+    canonicalUnfollowUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, user, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -2976,13 +2992,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(user || ""),
         );
     }
 
     // Build canonical bytes for MsgFollowTopic
-    canonicalFollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+    canonicalFollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3030,13 +3047,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
         );
     }
 
     // Build canonical bytes for MsgUnfollowTopic
-    canonicalUnfollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+    canonicalUnfollowTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3084,13 +3102,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
         );
     }
 
     // Build canonical bytes for MsgUnblockPost
-    canonicalUnblockPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalUnblockPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3137,12 +3156,13 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgUnblockUser
-    canonicalUnblockUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalUnblockUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3189,12 +3209,13 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgBlockPost (v1.5: no block bool)
-    canonicalBlockPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalBlockPost({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3241,12 +3262,13 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgBlockUser (v1.5: no block bool)
-    canonicalBlockUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalBlockUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3293,12 +3315,13 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgBlockTopic
-    canonicalBlockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+    canonicalBlockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3346,13 +3369,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
         );
     }
 
     // Build canonical bytes for MsgUnblockTopic
-    canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic }) {
+    canonicalUnblockTopic({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, topic, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3400,6 +3424,7 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
             tag101, encStr(topic || ""),
         );
@@ -3407,7 +3432,7 @@ class TransactionHandler {
 
     // Build canonical bytes for MsgDelete (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
-    canonicalDelete({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalDelete({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3455,13 +3480,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgDeleteUser (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
-    canonicalDeleteUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target }) {
+    canonicalDeleteUser({ pub_bytes, last_block_hash, difficulty, proof, timestamp, target, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3509,13 +3535,14 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(target || ""),
         );
     }
 
     // Build canonical bytes for MsgSendTokens (must match chain ante)
     // IMPORTANT: Authority (tag 1) is NOT included - it's set by backend to validator/node address
-    canonicalSendTokens({ pub_bytes, last_block_hash, difficulty, proof, timestamp, sender, target, amount }) {
+    canonicalSendTokens({ pub_bytes, last_block_hash, difficulty, proof, timestamp, sender, target, amount, nonce }) {
         const uvarint = (n) => {
             const out = [];
             let v = (n >>> 0);
@@ -3565,6 +3592,7 @@ class TransactionHandler {
             tag4, uvarint(difficulty >>> 0),
             tag5, uvarint(proof >>> 0),
             tag6, uvarint64(timestamp || 0),
+            Uint8Array.from([7]), uvarint64(nonce),
             tag100, encStr(sender || ""),
             tag101, encStr(target || ""),
             tag102, uvarint64(amount || 0),  // Use 64-bit for large amounts (>4B umirage)
@@ -3589,7 +3617,8 @@ class TransactionHandler {
         // Use proper binary-to-base64 encoding
         const pubB64 = btoa(Array.from(pubBytes).map(b => String.fromCharCode(b)).join(''));
 
-        let toRelay = { ...transaction, pubkey: pubB64, pow: proof, signature: "" };
+        const envelopeNonce = Number(transaction.envelope_nonce) || generateEnvelopeNonce();
+        let toRelay = { ...transaction, pubkey: pubB64, pow: proof, signature: "", envelope_nonce: String(envelopeNonce) };
 
         try {
             // Compute canonical bytes per Tx type and sign
@@ -3636,6 +3665,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: signerAddress,
                     username: transaction.username || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3650,6 +3680,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 // Include invite_code if present (for recruit quest completion)
                 if (transaction.invite_code) {
@@ -3676,6 +3707,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: signerAddress,
                     biography: transaction.biography ?? "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3689,6 +3721,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/set_biography';
             } else if (msgName === 'MsgEnableAgent') {
@@ -3703,6 +3736,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     agent: agentLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3716,6 +3750,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/enable_agent';
             } else if (msgName === 'MsgDisableAgent') {
@@ -3730,6 +3765,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     agent: agentLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3743,6 +3779,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/disable_agent';
             } else if (msgName === 'MsgSetAgents') {
@@ -3757,6 +3794,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     agents: agentsLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3770,6 +3808,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/set_agents';
             } else if (msgName === 'MsgFollowUser') {
@@ -3784,6 +3823,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     user: userLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3798,6 +3838,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/follow_user';
             } else if (msgName === 'MsgUnfollowUser') {
@@ -3812,6 +3853,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     user: userLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3826,6 +3868,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/unfollow_user';
             } else if (msgName === 'MsgFollowTopic') {
@@ -3840,6 +3883,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     topic: topicLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3854,6 +3898,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/follow_topic';
             } else if (msgName === 'MsgUnfollowTopic') {
@@ -3868,6 +3913,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: targetLower,
                     topic: topicLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3882,6 +3928,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/unfollow_topic';
             } else if (msgName === 'MsgBlockPost') {
@@ -3893,6 +3940,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3906,6 +3954,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/block_post';
             } else if (msgName === 'MsgUnblockPost') {
@@ -3917,6 +3966,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3930,6 +3980,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/unblock_post';
             } else if (msgName === 'MsgBlockUser') {
@@ -3941,6 +3992,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3954,6 +4006,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/block_user';
             } else if (msgName === 'MsgUnblockUser') {
@@ -3965,6 +4018,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -3978,6 +4032,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/unblock_user';
             } else if (msgName === 'MsgBlockTopic') {
@@ -3990,6 +4045,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
                     topic: transaction.topic || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4003,6 +4059,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/block_topic';
             } else if (msgName === 'MsgUnblockTopic') {
@@ -4015,6 +4072,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
                     topic: transaction.topic || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4028,6 +4086,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/unblock_topic';
             } else if (msgName === 'MsgDelete') {
@@ -4040,6 +4099,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: transaction.target || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4053,6 +4113,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/delete_post';
             } else if (msgName === 'MsgDeleteUser') {
@@ -4066,6 +4127,7 @@ class TransactionHandler {
                     proof: Number(proof),
                     timestamp: transaction.timestamp,
                     target: targetLower,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4079,6 +4141,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/delete_user';
             } else if (msgName === 'MsgSendTokens') {
@@ -4096,6 +4159,7 @@ class TransactionHandler {
                     sender: senderLower,
                     target: targetLower,
                     amount: Number(transaction.amount || 0),
+                    nonce: envelopeNonce,
                 };
                 const canon = this.canonicalSendTokens(canonParams);
                 const digest = __CosmSha256(canon);
@@ -4111,6 +4175,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/send_tokens';
             } else if (msgName === 'MsgReport') {
@@ -4162,6 +4227,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag5, uvarint(Number(proof)),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(transaction.reason || ""),
                 );
@@ -4178,6 +4244,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/report';
             } else if (msgName === 'MsgPost') {
@@ -4196,6 +4263,7 @@ class TransactionHandler {
                     content: transaction.content || "",
                     tag: transaction.tag || "",
                     media: mediaArr,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4226,6 +4294,7 @@ class TransactionHandler {
                     tag: transaction.tag || "",
                     override: String(transaction.override || '').toLowerCase(),
                     media: mediaArr,
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4255,6 +4324,7 @@ class TransactionHandler {
                     override: String(transaction.override || '').toLowerCase(),
                     media: mediaArr,
                     appendix: transaction.appendix || "",
+                    nonce: envelopeNonce,
                 });
                 const digest = __CosmSha256(canon);
                 const sigCompact = await __CosmSecp256k1.createSignature(digest, privBytes);
@@ -4332,6 +4402,7 @@ class TransactionHandler {
                     tag4, uvarint(voteSignData.pow_difficulty),
                     tag5, uvarint(voteSignData.proof),
                     tag6, uvarint64(voteSignData.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(voteSignData.target),
                     tag101, uvarint(voteSignData.direction),
                 );
@@ -4352,6 +4423,7 @@ class TransactionHandler {
                     target: transaction.target || "",
                     direction: Number(transaction.direction),
                     timestamp: transaction.timestamp,
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/vote';
             } else if (msgName === 'MsgUpgradeLevel') {
@@ -4400,6 +4472,7 @@ class TransactionHandler {
                     tag4, uvarint(0), // difficulty always 0 for upgrade
                     tag5, uvarint(0), // pow always 0 for upgrade
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, uvarint(targetLevel),
                 );
                 const digest = __CosmSha256(canon);
@@ -4412,6 +4485,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp || 0,
                     last_block_hash: transaction.last_block_hash,
                     level: targetLevel,
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/upgrade_level';
             } else if (msgName === 'MsgSetAutoRenewal') {
@@ -4460,6 +4534,7 @@ class TransactionHandler {
                     tag4, uvarint(0),
                     tag5, uvarint(0),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, uvarint(flag ? 1 : 0),
                 );
                 const digest = __CosmSha256(canon);
@@ -4472,6 +4547,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp || 0,
                     last_block_hash: transaction.last_block_hash,
                     auto_renew: flag,
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/set_auto_renewal';
             } else if (msgName === 'MsgBridgeBurn') {
@@ -4522,6 +4598,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag5, uvarint(Number(proof)),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.destination_chain || ""),
                     tag101, encStr(transaction.destination_address || ""),
                     tag102, uvarint64(transaction.amount || 0),
@@ -4540,6 +4617,7 @@ class TransactionHandler {
                     destination_chain: transaction.destination_chain || "",
                     destination_address: transaction.destination_address || "",
                     amount: transaction.amount || 0,
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'bridge/burn';
             } else if (msgName === 'MsgAward') {
@@ -4588,6 +4666,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag5, uvarint(Number(proof)),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(transaction.award_type || ""),
                 );
@@ -4604,6 +4683,7 @@ class TransactionHandler {
                     pow: Number(proof),
                     target: transaction.target || "",
                     award_type: transaction.award_type || "",
+                    envelope_nonce: String(envelopeNonce),
                 };
                 endpoint = 'core/award';
             }
@@ -4888,6 +4968,10 @@ class TransactionHandler {
                 transaction.timestamp = Date.now();
             }
 
+            // Generate envelope nonce once — used in both PoW baseBytes and signing canonical bytes
+            const envelopeNonce = generateEnvelopeNonce();
+            transaction.envelope_nonce = String(envelopeNonce);
+
             // Subscribers (level >= 1) skip PoW — chain trusts them.
             // Fee-only actions (upgrade_level, set_auto_renewal) never use PoW regardless of level.
             // NOTE: pow_difficulty=0 for a free user means "base difficulty" (0 extra steps),
@@ -5003,6 +5087,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(powData.last_block_hash)),
                     tag4, uvarint(powData.difficulty),
                     tag6, uvarint64(powData.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(powData.target),
                     tag101, uvarint(powData.direction),
                 );
@@ -5029,6 +5114,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(topic),
                     tag102, encStr(transaction.title || ""),
@@ -5053,6 +5139,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.agent || "").toLowerCase()),
                 );
@@ -5073,6 +5160,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     ...agentParts,
                 );
@@ -5089,6 +5177,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress),
                     tag101, encStr(transaction.username || ""),
                 );
@@ -5105,6 +5194,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.user || "").toLowerCase()),
                 );
@@ -5121,6 +5211,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.user || "").toLowerCase()),
                 );
@@ -5137,6 +5228,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.topic || "").toLowerCase()),
                 );
@@ -5153,6 +5245,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(signerAddress.toLowerCase()),
                     tag101, encStr((transaction.topic || "").toLowerCase()),
                 );
@@ -5168,6 +5261,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'unblock_post') {
@@ -5182,6 +5276,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'block_user') {
@@ -5196,6 +5291,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'unblock_user') {
@@ -5210,6 +5306,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'block_topic') {
@@ -5225,6 +5322,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(transaction.topic || ""),
                 );
@@ -5241,6 +5339,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(transaction.topic || ""),
                 );
@@ -5256,6 +5355,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'delete_user') {
@@ -5270,6 +5370,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                 );
             } else if (action === 'send_tokens') {
@@ -5286,6 +5387,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.sender || signerAddress),
                     tag101, encStr(transaction.target || ""),
                     tag102, uvarint64(transaction.amount || 0),  // Use 64-bit for large amounts
@@ -5305,6 +5407,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(transaction.reason || ""),
                 );
@@ -5333,6 +5436,7 @@ class TransactionHandler {
                     tag3, encBytes(hexToBytes(transaction.last_block_hash)),
                     tag4, uvarint(difficulty),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag100, encStr(transaction.target || ""),
                     tag101, encStr(topic),
                     tag102, encStr(transaction.title || ""),
@@ -5367,6 +5471,7 @@ class TransactionHandler {
                     tag4, uvarint(difficulty),
                     tag5, uvarint(0),
                     tag6, uvarint64(transaction.timestamp || 0),
+                    Uint8Array.from([7]), uvarint64(envelopeNonce),
                     tag101, encStr(transaction.topic || ""),
                     tag102, encStr(transaction.title || ""),
                     tag103, encStr(transaction.content || ""),
