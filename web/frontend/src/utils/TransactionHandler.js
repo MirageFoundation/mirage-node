@@ -3618,7 +3618,7 @@ class TransactionHandler {
         const pubB64 = btoa(Array.from(pubBytes).map(b => String.fromCharCode(b)).join(''));
 
         const envelopeNonce = Number(transaction.envelope_nonce) || generateEnvelopeNonce();
-        let toRelay = { ...transaction, pubkey: pubB64, pow: proof, signature: "", envelope_nonce: String(envelopeNonce) };
+        let toRelay = { ...transaction, pubkey: pubB64, pow: proof, signature: "", envelope_nonce: envelopeNonce };
 
         try {
             // Compute canonical bytes per Tx type and sign
@@ -3680,7 +3680,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 // Include invite_code if present (for recruit quest completion)
                 if (transaction.invite_code) {
@@ -3721,7 +3721,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/set_biography';
             } else if (msgName === 'MsgEnableAgent') {
@@ -3750,7 +3750,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/enable_agent';
             } else if (msgName === 'MsgDisableAgent') {
@@ -3779,7 +3779,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/disable_agent';
             } else if (msgName === 'MsgSetAgents') {
@@ -3808,7 +3808,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/set_agents';
             } else if (msgName === 'MsgFollowUser') {
@@ -3838,7 +3838,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/follow_user';
             } else if (msgName === 'MsgUnfollowUser') {
@@ -3868,7 +3868,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unfollow_user';
             } else if (msgName === 'MsgFollowTopic') {
@@ -3898,7 +3898,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/follow_topic';
             } else if (msgName === 'MsgUnfollowTopic') {
@@ -3928,7 +3928,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unfollow_topic';
             } else if (msgName === 'MsgBlockPost') {
@@ -3954,7 +3954,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/block_post';
             } else if (msgName === 'MsgUnblockPost') {
@@ -3980,7 +3980,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unblock_post';
             } else if (msgName === 'MsgBlockUser') {
@@ -4006,7 +4006,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/block_user';
             } else if (msgName === 'MsgUnblockUser') {
@@ -4032,7 +4032,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unblock_user';
             } else if (msgName === 'MsgBlockTopic') {
@@ -4059,7 +4059,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/block_topic';
             } else if (msgName === 'MsgUnblockTopic') {
@@ -4086,7 +4086,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/unblock_topic';
             } else if (msgName === 'MsgDelete') {
@@ -4113,7 +4113,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/delete_post';
             } else if (msgName === 'MsgDeleteUser') {
@@ -4141,7 +4141,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/delete_user';
             } else if (msgName === 'MsgSendTokens') {
@@ -4175,7 +4175,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/send_tokens';
             } else if (msgName === 'MsgReport') {
@@ -4244,7 +4244,7 @@ class TransactionHandler {
                     last_block_hash: transaction.last_block_hash,
                     pow_difficulty: difficulty,
                     pow: Number(proof),
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/report';
             } else if (msgName === 'MsgPost') {
@@ -4423,7 +4423,7 @@ class TransactionHandler {
                     target: transaction.target || "",
                     direction: Number(transaction.direction),
                     timestamp: transaction.timestamp,
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/vote';
             } else if (msgName === 'MsgUpgradeLevel') {
@@ -4485,7 +4485,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp || 0,
                     last_block_hash: transaction.last_block_hash,
                     level: targetLevel,
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/upgrade_level';
             } else if (msgName === 'MsgSetAutoRenewal') {
@@ -4547,7 +4547,7 @@ class TransactionHandler {
                     timestamp: transaction.timestamp || 0,
                     last_block_hash: transaction.last_block_hash,
                     auto_renew: flag,
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/set_auto_renewal';
             } else if (msgName === 'MsgBridgeBurn') {
@@ -4617,7 +4617,7 @@ class TransactionHandler {
                     destination_chain: transaction.destination_chain || "",
                     destination_address: transaction.destination_address || "",
                     amount: transaction.amount || 0,
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'bridge/burn';
             } else if (msgName === 'MsgAward') {
@@ -4683,7 +4683,7 @@ class TransactionHandler {
                     pow: Number(proof),
                     target: transaction.target || "",
                     award_type: transaction.award_type || "",
-                    envelope_nonce: String(envelopeNonce),
+                    envelope_nonce: envelopeNonce,
                 };
                 endpoint = 'core/award';
             }
@@ -4970,7 +4970,7 @@ class TransactionHandler {
 
             // Generate envelope nonce once — used in both PoW baseBytes and signing canonical bytes
             const envelopeNonce = generateEnvelopeNonce();
-            transaction.envelope_nonce = String(envelopeNonce);
+            transaction.envelope_nonce = envelopeNonce;
 
             // Subscribers (level >= 1) skip PoW — chain trusts them.
             // Fee-only actions (upgrade_level, set_auto_renewal) never use PoW regardless of level.
