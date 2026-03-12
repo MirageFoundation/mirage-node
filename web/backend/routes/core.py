@@ -12,6 +12,7 @@ Endpoints:
 
 import base64
 import ipaddress
+import logging
 import os
 import random
 import re
@@ -281,9 +282,20 @@ def _process_invite_quest_completion(rid: str, new_user_addr: str) -> None:
 
 
 def _parse_envelope_nonce(data: dict):
-    """Parse envelope_nonce from request. Returns (nonce, None) or (0, error_response)."""
+    """Parse envelope_nonce from request. Returns (nonce, None) or (0, error_response).
+
+    Nonce generation (for clients):
+        nonce = (Date.now() * 1_000_000) ^ (rand32)
+        Must be >0; for JS keep <=2^53-1. Include in signature.
+
+    LEGACY_NONCE_COMPAT: When envelope_nonce is missing, return 0 so the
+    chain falls back to pre-1.18 canonical verification (no replay protection).
+    Remove this legacy path after all clients send envelope_nonce.
+    """
     if "envelope_nonce" not in data:
-        return 0, (jsonify({"error": "envelope_nonce required"}), 400)
+        # LEGACY_NONCE_COMPAT: accept missing nonce (pre-1.18 clients)
+        logging.debug("LEGACY_NONCE_COMPAT: request missing envelope_nonce")
+        return 0, None
     try:
         nonce = int(data.get("envelope_nonce"))
         if nonce <= 0:

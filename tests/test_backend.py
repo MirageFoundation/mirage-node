@@ -3267,32 +3267,33 @@ def test_edge_cases(backend: str):
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
-    # 9.11b Missing envelope_nonce rejected
-    ts = _now_ms()
-    nonce = _fresh_nonce()
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", "test", "no nonce", "body", "", 0, None, nonce)
-    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
-    signed = canon_signed_with_pow(base, int(proof))
-    sig = sign_canonical(wallet, signed)
+    # 9.11b LEGACY_NONCE_COMPAT: missing envelope_nonce accepted (pre-1.18 clients).
+    # Sign with nonce=0 canonical bytes (no tag 7) to match the chain's legacy path.
+    # Remove this legacy test after all clients send envelope_nonce.
+    ts_legacy = _now_ms()
+    base_legacy = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_legacy, "", "test", "legacy no nonce", "body", "", 0, None, 0)
+    proof_legacy = compute_pow(base_legacy, diff, base_bits, pow_factor, lb)
+    signed_legacy = canon_signed_with_pow(base_legacy, int(proof_legacy))
+    sig_legacy = sign_canonical(wallet, signed_legacy)
     payload_no_nonce = {
         "pubkey": _b64(pub),
-        "signature": _b64(sig),
+        "signature": _b64(sig_legacy),
         "last_block_hash": lb,
-        "timestamp": ts,
+        "timestamp": ts_legacy,
         "pow_difficulty": diff,
-        "pow": int(proof),
+        "pow": int(proof_legacy),
         "target": "",
         "topic": "test",
-        "title": "no nonce",
+        "title": "legacy no nonce",
         "content": "body",
     }
     code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
-    if code_no_nonce == 400:
-        _pass("edge.missing_envelope_nonce_rejected")
+    if code_no_nonce == 200:
+        _pass("edge.missing_envelope_nonce_legacy_accepted")
     else:
-        _fail("edge.missing_envelope_nonce_rejected", f"code={code_no_nonce} expected 400")
+        _fail("edge.missing_envelope_nonce_legacy_accepted", f"code={code_no_nonce} resp={resp_no_nonce}")
 
-    # 9.11c Zero envelope_nonce rejected (sign with nonce=0 so canonical bytes match)
+    # 9.11c Zero envelope_nonce explicitly sent is still rejected
     ts_z = _now_ms()
     base_z = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_z, "", "test", "zero nonce", "body", "", 0, None, 0)
     proof_z = compute_pow(base_z, diff, base_bits, pow_factor, lb)
@@ -3316,6 +3317,33 @@ def test_edge_cases(backend: str):
         _pass("edge.zero_envelope_nonce_rejected")
     else:
         _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
+
+    # 9.11d 1.18+ path: nonce present → replay protection active
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+    ts_new = _now_ms()
+    nonce_new = _fresh_nonce()
+    base_new = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_new, "", "test", "nonce present", "body", "", 0, None, nonce_new)
+    proof_new = compute_pow(base_new, diff, base_bits, pow_factor, lb)
+    signed_new = canon_signed_with_pow(base_new, int(proof_new))
+    sig_new = sign_canonical(wallet, signed_new)
+    payload_with_nonce = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig_new),
+        "last_block_hash": lb,
+        "timestamp": ts_new,
+        "envelope_nonce": str(nonce_new),
+        "pow_difficulty": diff,
+        "pow": int(proof_new),
+        "target": "",
+        "topic": "test",
+        "title": "nonce present",
+        "content": "body",
+    }
+    code_with_nonce, resp_with_nonce = _post(f"{backend}/api/core/post", payload_with_nonce)
+    if code_with_nonce == 200:
+        _pass("edge.envelope_nonce_present_accepted")
+    else:
+        _fail("edge.envelope_nonce_present_accepted", f"code={code_with_nonce} resp={resp_with_nonce}")
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
