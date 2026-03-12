@@ -1105,27 +1105,22 @@ func verifyRelaySignature(msgName string, pubkey []byte, sig []byte, fill func(*
 	return nil
 }
 
-// validateEnvelopeTimestamp checks that envelope_timestamp is not too old or in the future.
-// timestampMs is the envelope timestamp in milliseconds.
-// maxAgeSec is the maximum allowed age in seconds.
-func envelopeMaxFutureSkew(maxAgeSec uint64) time.Duration {
-	maxAge := time.Duration(maxAgeSec) * time.Second
-	return maxAge + (5 * time.Minute)
-}
-
 func envelopeNonceExpiryUnix(ctx sdk.Context, timestampMs uint64, maxAgeSec uint64) int64 {
 	maxAge := time.Duration(maxAgeSec) * time.Second
 	blockTime := ctx.BlockTime()
-	expiry := blockTime.Add(maxAge)
+	expiry := blockTime.Add(maxAge + 5*time.Minute)
 	if timestampMs > 0 {
 		txTime := time.UnixMilli(int64(timestampMs))
-		if txTime.After(blockTime) {
-			expiry = txTime.Add(maxAge)
+		if candidate := txTime.Add(maxAge + 5*time.Minute); candidate.After(expiry) {
+			expiry = candidate
 		}
 	}
 	return expiry.Unix()
 }
 
+// validateEnvelopeTimestamp checks that envelope_timestamp is not too old or in the future.
+// timestampMs is the envelope timestamp in milliseconds.
+// maxAgeSec is the maximum allowed age in seconds.
 func validateEnvelopeTimestamp(ctx sdk.Context, timestampMs uint64, maxAgeSec uint64) error {
 	if timestampMs == 0 {
 		return fmt.Errorf("envelope_timestamp is required")
@@ -1137,10 +1132,13 @@ func validateEnvelopeTimestamp(ctx sdk.Context, timestampMs uint64, maxAgeSec ui
 	if age > maxAge {
 		return fmt.Errorf("envelope_timestamp too old: age=%s, max=%s (tx_time=%s, block_time=%s)", age, maxAge, txTime, blockTime)
 	}
-	// Allow a small window for envelope_timestamp to be slightly ahead of block_time.
-	// Derive this from max_envelope_age so it is tunable via Params (governance).
-	// We cap it to keep replay protection meaningful.
-	maxFutureSkew := envelopeMaxFutureSkew(maxAgeSec)
+	maxFutureSkew := maxAge / 2
+	if maxFutureSkew < 5*time.Second {
+		maxFutureSkew = 5 * time.Second
+	}
+	if maxFutureSkew > 30*time.Second {
+		maxFutureSkew = 30 * time.Second
+	}
 	if age < -maxFutureSkew {
 		return fmt.Errorf("envelope_timestamp in future: age=%s (tx_time=%s, block_time=%s)", age, txTime, blockTime)
 	}
