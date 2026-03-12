@@ -147,6 +147,9 @@ func (w *Watcher) ExecuteMint(ctx context.Context, burn chains.MirageBurnEvent) 
 	if err != nil {
 		// Check if this is an "AlreadyMinted" error - means Solana mint succeeded previously
 		errStr := err.Error()
+		if strings.Contains(errStr, "TransactionTooOld") || strings.Contains(errStr, "6020") {
+			return "", fmt.Errorf("%w: %s", chains.ErrTransactionTooOld, errStr)
+		}
 		if strings.Contains(errStr, "AlreadyMinted") || strings.Contains(errStr, "6021") {
 			w.logger.Printf("WARN  [ALREADY_MINTED] burn_id=%s was already minted on Solana; recovering signature", burn.BurnID)
 			recoveredSig, sigErr := w.findMintRecordSignature(ctx, mintRecordPDA)
@@ -268,6 +271,10 @@ func (w *Watcher) waitForConfirmation(ctx context.Context, sig solana.Signature)
 		return ctx.Err()
 	case resp := <-sub.Response():
 		if resp.Value.Err != nil {
+			errStr := fmt.Sprintf("%v", resp.Value.Err)
+			if strings.Contains(errStr, "TransactionTooOld") || strings.Contains(errStr, "6020") {
+				return fmt.Errorf("%w: %s", chains.ErrTransactionTooOld, errStr)
+			}
 			return fmt.Errorf("transaction failed: %v", resp.Value.Err)
 		}
 	case <-time.After(60 * time.Second):

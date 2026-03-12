@@ -89,6 +89,13 @@ def _build_cache_from_params(p: Dict) -> Dict[str, Any]:
     tiers = p.get("tiers")
     if not tiers or not isinstance(tiers, list) or len(tiers) == 0:
         raise RuntimeError("missing or empty tiers in chain params")
+    for idx, tier in enumerate(tiers):
+        if "max_biography_length" not in tier:
+            raise RuntimeError(f"missing max_biography_length in tier {idx}")
+        try:
+            tier["max_biography_length"] = int(tier["max_biography_length"])
+        except (TypeError, ValueError):
+            raise RuntimeError(f"invalid max_biography_length in tier {idx}: {tier.get('max_biography_length')}")
     result["tiers"] = tiers
 
     # Bridge chains - optional, defaults to empty list

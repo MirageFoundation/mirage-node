@@ -1,4 +1,5 @@
 import time
+import random
 import base64
 import hashlib
 import requests
@@ -526,23 +527,25 @@ def set_username(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
+    nonce = int(time.time_ns()) ^ random.getrandbits(32)
 
     if skip_pow:
         # Subscriber mode: no PoW, difficulty=0, pow=0
-        base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), 0, ts_ms, addr, username)
+        base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), 0, ts_ms, addr, username, nonce=nonce)
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(wallet, signed)
         req = {
             "username": username,
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "pubkey": base64.b64encode(pub_bytes).decode(),
             "signature": base64.b64encode(sig).decode(),
         }
     else:
         # Free user mode: compute PoW
-        base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), diff, ts_ms, addr, username)
+        base = _canon_base_set_username(pub_bytes, bytes.fromhex(lb), diff, ts_ms, addr, username, nonce=nonce)
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
@@ -550,6 +553,7 @@ def set_username(
             "username": username,
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "pubkey": base64.b64encode(pub_bytes).decode(),
@@ -604,6 +608,7 @@ def post(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
+    nonce = int(time.time_ns()) ^ random.getrandbits(32)
 
     if skip_pow:
         # Subscriber mode: no PoW
@@ -619,6 +624,7 @@ def post(
             tag or "",
             0,
             media=media,
+            nonce=nonce,
         )
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(wallet, signed)
@@ -627,6 +633,7 @@ def post(
             "signature": base64.b64encode(sig).decode(),
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "target": target,
             "topic": topic or "",
@@ -649,6 +656,7 @@ def post(
             tag or "",
             0,
             media=media,
+            nonce=nonce,
         )
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
@@ -658,6 +666,7 @@ def post(
             "signature": base64.b64encode(sig).decode(),
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": target,
@@ -708,10 +717,11 @@ def vote(
         skip_pow = is_subscriber(backend, addr)
 
     ts_ms = int(time.time() * 1000)
+    nonce = int(time.time_ns()) ^ random.getrandbits(32)
 
     if skip_pow:
         # Subscriber mode: no PoW
-        base = _canon_base_vote(pub, bytes.fromhex(lb), 0, ts_ms, target, int(direction))
+        base = _canon_base_vote(pub, bytes.fromhex(lb), 0, ts_ms, target, int(direction), nonce=nonce)
         signed = canon_signed_with_pow(base, 0)
         sig = sign_canonical(wallet, signed)
         req = {
@@ -719,13 +729,14 @@ def vote(
             "signature": base64.b64encode(sig).decode(),
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": 0,
             "target": target,
             "direction": direction,
         }
     else:
         # Free user mode: compute PoW
-        base = _canon_base_vote(pub, bytes.fromhex(lb), diff, ts_ms, target, int(direction))
+        base = _canon_base_vote(pub, bytes.fromhex(lb), diff, ts_ms, target, int(direction), nonce=nonce)
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
@@ -734,6 +745,7 @@ def vote(
             "signature": base64.b64encode(sig).decode(),
             "last_block_hash": lb,
             "timestamp": ts_ms,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": target,

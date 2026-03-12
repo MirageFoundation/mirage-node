@@ -1766,6 +1766,41 @@ func (app *App) RegisterUpgradeHandlers() {
 			return toVM, nil
 		},
 	)
+
+	// ── v1.18.0: Replay protection + biography limits + security fixes ──
+	app.UpgradeKeeper.SetUpgradeHandler(
+		"v1.18.0",
+		func(ctx context.Context, plan upgradetypes.Plan, fromVM module.VersionMap) (module.VersionMap, error) {
+			sdkCtx := sdk.UnwrapSDKContext(ctx)
+			sdkCtx.Logger().Info("Starting upgrade to v1.18.0...")
+
+			toVM, err := app.ModuleManager.RunMigrations(ctx, app.Configurator(), fromVM)
+			if err != nil {
+				return nil, fmt.Errorf("v1.18.0: RunMigrations failed: %w", err)
+			}
+
+			params := app.CoreKeeper.GetParams(sdkCtx)
+			tiers := params.GetTiers()
+			bioLimits := []uint64{0, 512, 512}
+			updated := false
+			for i, tier := range tiers {
+				if i < len(bioLimits) && tier.MaxBiographyLength != bioLimits[i] {
+					tier.MaxBiographyLength = bioLimits[i]
+					updated = true
+				}
+			}
+			if updated {
+				if err := app.CoreKeeper.SetParams(sdkCtx, params); err != nil {
+					return nil, fmt.Errorf("v1.18.0: failed to set params: %w", err)
+				}
+				sdkCtx.Logger().Info("v1.18.0: set MaxBiographyLength on tier configs",
+					"free", bioLimits[0], "subscriber", bioLimits[1], "agent", bioLimits[2])
+			}
+
+			sdkCtx.Logger().Info("Upgrade to v1.18.0 complete")
+			return toVM, nil
+		},
+	)
 }
 
 // extractProtoVarint scans raw protobuf bytes for a field with the given tag number (varint wire type = 0)

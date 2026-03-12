@@ -112,6 +112,7 @@ EXPECTED_TIERS = [
         "can_have_avatar": False,
         "can_have_banner": False,
         "can_have_flair": False,
+        "max_biography_length": 0,
     },
     {
         "level": 1,
@@ -133,6 +134,7 @@ EXPECTED_TIERS = [
         "can_have_avatar": True,
         "can_have_banner": True,
         "can_have_flair": True,
+        "max_biography_length": 512,
     },
     {
         "level": 10,
@@ -154,6 +156,7 @@ EXPECTED_TIERS = [
         "can_have_avatar": True,
         "can_have_banner": True,
         "can_have_flair": True,
+        "max_biography_length": 512,
     },
 ]
 
@@ -480,6 +483,27 @@ def check_subscription_index_consistency() -> None:
         ok("No paid profiles with expired subscriptions")
 
 
+def check_biography_limits() -> None:
+    """v1.18.0: verify max_biography_length is set correctly on tier configs."""
+    section("Biography Length Limits (v1.18.0)")
+    data = http_get(f"{REST}/mirage/core/v1/params")
+    if not data:
+        fail("Could not fetch params for biography check")
+        return
+    params = data.get("params", {})
+    tiers = params.get("tiers", [])
+    expected = {0: 0, 1: 512, 2: 512}
+    for idx, exp_val in expected.items():
+        if idx >= len(tiers):
+            fail(f"Tier {idx} missing from params")
+            continue
+        got = int(tiers[idx].get("max_biography_length", -1))
+        if got == exp_val:
+            ok(f"Tier {idx} max_biography_length = {got}")
+        else:
+            fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
+
+
 # ── Main ───────────────────────────────────────────────────
 
 
@@ -517,6 +541,7 @@ def main() -> int:
     check_upgrade_plan(upgrade_name)
     check_core_params()
     check_subscription_index_consistency()
+    check_biography_limits()
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")

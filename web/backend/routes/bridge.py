@@ -10,6 +10,8 @@ Endpoints:
 
 import base64
 import os
+import random
+import time
 from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
@@ -362,6 +364,14 @@ def bridge_burn():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        if "envelope_nonce" not in data:
+            return jsonify({"error": "envelope_nonce required"}), 400
+        try:
+            nonce = int(data.get("envelope_nonce"))
+            if nonce <= 0:
+                return jsonify({"error": "envelope_nonce must be > 0"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid envelope_nonce"}), 400
 
         destination_chain = str(data.get("destination_chain", "")).strip()
         if not destination_chain:
@@ -434,6 +444,7 @@ def bridge_burn():
                 destination_chain,
                 destination_address,
                 amount,
+                nonce=nonce,
             )
             signed = canon_signed_with_pow(base, proof)
             if not _verify_signature(pub_dec, sig_dec, signed):
@@ -451,6 +462,7 @@ def bridge_burn():
         msg.envelope_difficulty = difficulty
         msg.envelope_pow = proof
         msg.envelope_timestamp = timestamp
+        msg.envelope_nonce = nonce
         msg.envelope_signature = sig_dec
         msg.destination_chain = destination_chain
         msg.destination_address = destination_address

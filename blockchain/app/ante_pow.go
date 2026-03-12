@@ -843,6 +843,9 @@ func buildCanonForPost(m *coretypes.MsgPost) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	cw.writeString(102, m.Title)
@@ -861,6 +864,9 @@ func buildCanonForVote(m *coretypes.MsgVote) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeUvarint(101, uint64(uint32(m.Direction)))
 	return cw.buf
@@ -873,6 +879,9 @@ func buildCanonForSetUsername(m *coretypes.MsgSetUsername) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Username)
 	return cw.buf
@@ -884,6 +893,9 @@ func buildCanonForSetBiography(m *coretypes.MsgSetBiography) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Biography)
 	return cw.buf
@@ -896,6 +908,9 @@ func buildCanonForDelete(m *coretypes.MsgDelete) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -906,6 +921,9 @@ func buildCanonForDeleteUser(m *coretypes.MsgDeleteUser) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -917,6 +935,9 @@ func buildCanonForSendTokens(m *coretypes.MsgSendTokens) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Sender)
 	cw.writeString(101, m.Target)
 	cw.writeUvarint(102, m.Amount)
@@ -929,6 +950,9 @@ func buildCanonForAward(m *coretypes.MsgAward) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.AwardType)
 	return cw.buf
@@ -941,6 +965,9 @@ func buildCanonForBridgeBurn(m *coretypes.MsgBridgeBurn) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.DestinationChain)
 	cw.writeString(101, m.DestinationAddress)
 	cw.writeUvarint(102, m.Amount)
@@ -953,6 +980,9 @@ func buildCanonForEnableAgent(m *coretypes.MsgEnableAgent) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Agent)
 	return cw.buf
@@ -964,6 +994,9 @@ func buildCanonForDisableAgent(m *coretypes.MsgDisableAgent) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Agent)
 	return cw.buf
@@ -975,6 +1008,9 @@ func buildCanonForSetAgents(m *coretypes.MsgSetAgents) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	for _, agent := range m.Agents {
 		cw.writeString(101, agent)
@@ -988,6 +1024,9 @@ func buildCanonForFollowUser(m *coretypes.MsgFollowUser) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.User)
 	return cw.buf
@@ -999,6 +1038,9 @@ func buildCanonForUnfollowUser(m *coretypes.MsgUnfollowUser) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.User)
 	return cw.buf
@@ -1010,6 +1052,9 @@ func buildCanonForFollowTopic(m *coretypes.MsgFollowTopic) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	return cw.buf
@@ -1021,6 +1066,9 @@ func buildCanonForUnfollowTopic(m *coretypes.MsgUnfollowTopic) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	return cw.buf
@@ -1032,6 +1080,9 @@ func buildCanonForBlockPost(m *coretypes.MsgBlockPost) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -1042,6 +1093,9 @@ func buildCanonForUnblockPost(m *coretypes.MsgUnblockPost) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -1052,6 +1106,9 @@ func buildCanonForBlockUser(m *coretypes.MsgBlockUser) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -1062,6 +1119,9 @@ func buildCanonForUnblockUser(m *coretypes.MsgUnblockUser) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	return cw.buf
 }
@@ -1072,6 +1132,9 @@ func buildCanonForBlockTopic(m *coretypes.MsgBlockTopic) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	return cw.buf
@@ -1083,6 +1146,9 @@ func buildCanonForUnblockTopic(m *coretypes.MsgUnblockTopic) []byte {
 	cw.writeBytes(3, m.EnvelopeBlockHash)
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	return cw.buf
@@ -1095,6 +1161,9 @@ func buildCanonForEdit(m *coretypes.MsgEdit) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT included - it's appended separately during PoW validation
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeString(100, m.Target)
 	cw.writeString(101, m.Topic)
 	cw.writeString(102, m.Title)
@@ -1114,6 +1183,9 @@ func buildCanonForUpgradeLevel(m *coretypes.MsgUpgradeLevel) []byte {
 	cw.writeUvarint(4, m.EnvelopeDifficulty)
 	// envelope_pow (field 5) is NOT used for upgrade level (no PoW allowed)
 	cw.writeUvarint(6, m.EnvelopeTimestamp)
+	if m.EnvelopeNonce != 0 {
+		cw.writeUvarint(7, m.EnvelopeNonce)
+	}
 	cw.writeUvarint(100, uint64(m.Level))
 	return cw.buf
 }

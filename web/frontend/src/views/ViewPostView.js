@@ -2148,24 +2148,18 @@ function ViewPostView({ state, updatePost }) {
         setReplySubmitStartTime(prev => ({ ...prev, [commentId]: Date.now() }));
         setReplySubmitStatus(prev => ({ ...prev, [commentId]: 'solving' }));
 
-        // Clear reply text but keep box open (disabled) during PoW
-        try {
-            updatePost(commentId, {
-                replyText: "",
-            });
-        } catch (_) { }
-
         // Submit the comment and wait for completion
         try {
             const res = await tx.createCommentAsync(commentId, replyString);
-            // Clear attached state for this reply
-            try {
-                setReplyAttachedType(prev => { const n = { ...prev }; delete n[commentId]; return n; });
-                setReplyAttachedUrl(prev => { const n = { ...prev }; delete n[commentId]; return n; });
-                setReplyThumbLoading(prev => { const n = { ...prev }; delete n[commentId]; return n; });
-            } catch (_) { }
 
             if (res && res.success) {
+                // Clear reply text and attached state only on success
+                try { updatePost(commentId, { replyText: "" }); } catch (_) { }
+                try {
+                    setReplyAttachedType(prev => { const n = { ...prev }; delete n[commentId]; return n; });
+                    setReplyAttachedUrl(prev => { const n = { ...prev }; delete n[commentId]; return n; });
+                    setReplyThumbLoading(prev => { const n = { ...prev }; delete n[commentId]; return n; });
+                } catch (_) { }
                 try {
                     const txHash = (res && res.tx_hash) ? String(res.tx_hash).toLowerCase() : "";
                     if (!txHash) throw new Error("missing tx hash");

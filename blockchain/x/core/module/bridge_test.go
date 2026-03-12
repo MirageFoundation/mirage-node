@@ -3,10 +3,12 @@ package core
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"cosmossdk.io/core/store"
 	"cosmossdk.io/log"
@@ -161,6 +163,7 @@ func newMockContext() sdk.Context {
 	return sdk.Context{}.
 		WithContext(context.Background()).
 		WithBlockHeight(100).
+		WithBlockTime(time.Unix(1700000000, 0)).
 		WithEventManager(sdk.NewEventManager()).
 		WithGasMeter(storetypes.NewInfiniteGasMeter()).
 		WithLogger(log.NewNopLogger())
@@ -220,6 +223,44 @@ func TestBridgeBurnRecordStorage(t *testing.T) {
 	_, found, _ = mk.GetBridgeBurnRecord(ctx, "ethereum", burnID)
 	if found {
 		t.Error("Expected burn record to not exist for different chain")
+	}
+}
+
+func TestEnvelopeNoncePrune(t *testing.T) {
+	mk := newMockKeeper()
+	ctx := newMockContext()
+
+	pubHash := sha256.Sum256([]byte("pubkey-1"))
+	nonce := uint64(42)
+	expiry := ctx.BlockTime().Unix() + 60
+
+	if err := mk.SetEnvelopeNonce(ctx, pubHash[:16], nonce, expiry); err != nil {
+		t.Fatalf("SetEnvelopeNonce error: %v", err)
+	}
+	if !mk.HasEnvelopeNonce(ctx, pubHash[:16], nonce) {
+		t.Fatalf("expected nonce to exist before pruning")
+	}
+
+	pruned, err := mk.PruneExpiredNonces(ctx, expiry-1)
+	if err != nil {
+		t.Fatalf("PruneExpiredNonces error: %v", err)
+	}
+	if pruned != 0 {
+		t.Fatalf("pruned=%d, want 0", pruned)
+	}
+	if !mk.HasEnvelopeNonce(ctx, pubHash[:16], nonce) {
+		t.Fatalf("expected nonce to remain before expiry")
+	}
+
+	pruned, err = mk.PruneExpiredNonces(ctx, expiry)
+	if err != nil {
+		t.Fatalf("PruneExpiredNonces error: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("pruned=%d, want 1", pruned)
+	}
+	if mk.HasEnvelopeNonce(ctx, pubHash[:16], nonce) {
+		t.Fatalf("expected nonce to be pruned")
 	}
 }
 

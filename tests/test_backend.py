@@ -163,6 +163,10 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _fresh_nonce() -> int:
+    return int(time.time_ns()) ^ random.getrandbits(32)
+
+
 def _lb_bytes(lb_hex: str) -> bytes:
     try:
         return bytes.fromhex(lb_hex.strip())
@@ -555,9 +559,10 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
     lb = str(st.get("last_block_hash", ""))
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
 
     # upgrade_level: difficulty=0, proof=0 (no PoW)
-    base = _canon_base_upgrade_level_raw(pub, _lb_bytes(lb), 0, ts, level)
+    base = _canon_base_upgrade_level_raw(pub, _lb_bytes(lb), 0, ts, level, nonce)
     signed = canon_signed_with_pow(base, 0)
     sig = sign_canonical(wallet, signed)
     payload = {
@@ -565,6 +570,7 @@ def _do_upgrade_level(backend: str, wallet: LocalWallet, level: int) -> dict:
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "level": level,
     }
     code, resp = _post(f"{backend}/api/core/upgrade_level", payload)
@@ -577,9 +583,10 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_send_tokens_raw(pub, _lb_bytes(lb), d, ts, addr, target, amount)
+    base = _canon_base_send_tokens_raw(pub, _lb_bytes(lb), d, ts, addr, target, amount, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -591,6 +598,7 @@ def _do_send_tokens(backend: str, wallet: LocalWallet, target: str, amount: int,
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "amount": amount,
@@ -619,7 +627,8 @@ def _do_award(
     lb = last_block_hash or str(st.get("last_block_hash", ""))
     pub = pub_override or wallet.public_key().public_key_bytes
     ts = int(timestamp or _now_ms())
-    base = _canon_base_award_raw(pub, _lb_bytes(lb), int(pow_difficulty), ts, target, award_type)
+    nonce = _fresh_nonce()
+    base = _canon_base_award_raw(pub, _lb_bytes(lb), int(pow_difficulty), ts, target, award_type, nonce)
     signed = canon_signed_with_pow(base, int(pow))
     sig = sig_override or sign_canonical(wallet, signed)
     payload = {
@@ -627,6 +636,7 @@ def _do_award(
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": int(pow_difficulty),
         "pow": int(pow),
         "target": target,
@@ -866,9 +876,10 @@ def _do_post(
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, None, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -880,6 +891,7 @@ def _do_post(
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "topic": topic,
@@ -907,9 +919,10 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction))
+    base = _canon_base_vote_raw(pub, _lb_bytes(lb), d, ts, target, int(direction), nonce)
     if skip_pow:
         proof = 0
     else:
@@ -921,6 +934,7 @@ def _do_vote(backend: str, wallet, target: str, direction: int, skip_pow: bool =
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "direction": direction,
@@ -957,9 +971,10 @@ def _do_edit(
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_edit_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash)
+    base = _canon_base_edit_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, override_hash, None, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -971,6 +986,7 @@ def _do_edit(
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "topic": topic,
@@ -1003,6 +1019,7 @@ def _do_annotate(
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     media_list = media if media is not None else ["."]
 
     base = _canon_base_annotate_raw(
@@ -1017,6 +1034,7 @@ def _do_annotate(
         override_hash,
         media=media_list,
         appendix=appendix,
+        nonce=nonce,
     )
     signed = canon_signed_with_pow(base, int(pow_val))
     sig = sign_canonical(wallet, signed)
@@ -1025,6 +1043,7 @@ def _do_annotate(
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": int(pow_difficulty),
         "pow": int(pow_val),
         "topic": topic,
@@ -1052,9 +1071,10 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_delete_raw(pub, _lb_bytes(lb), d, ts, target)
+    base = _canon_base_delete_raw(pub, _lb_bytes(lb), d, ts, target, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1066,6 +1086,7 @@ def _do_delete(backend: str, wallet, target: str, skip_pow: bool = False) -> dic
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
     }
@@ -1081,9 +1102,10 @@ def _do_delete_user(backend: str, wallet, target_addr: str, skip_pow: bool = Fal
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_delete_user_raw(pub, _lb_bytes(lb), d, ts, target_addr)
+    base = _canon_base_delete_user_raw(pub, _lb_bytes(lb), d, ts, target_addr, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1095,6 +1117,7 @@ def _do_delete_user(backend: str, wallet, target_addr: str, skip_pow: bool = Fal
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target_addr,
     }
@@ -1109,11 +1132,12 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
     canon_fn = _canon_base_follow_user_raw if follow else _canon_base_unfollow_user_raw
     endpoint = "follow_user" if follow else "unfollow_user"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, user_addr)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, user_addr, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1125,6 +1149,7 @@ def _do_follow_user(backend: str, wallet, user_addr: str, follow: bool = True, s
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": addr,
         "user": user_addr,
@@ -1141,11 +1166,12 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
     canon_fn = _canon_base_follow_topic_raw if follow else _canon_base_unfollow_topic_raw
     endpoint = "follow_topic" if follow else "unfollow_topic"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, topic)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, topic, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1157,6 +1183,7 @@ def _do_follow_topic(backend: str, wallet, topic: str, follow: bool = True, skip
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": addr,
         "topic": topic,
@@ -1173,6 +1200,7 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
     if block_type == "post":
@@ -1182,7 +1210,7 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
         canon_fn = _canon_base_block_user_raw if block else _canon_base_unblock_user_raw
         endpoint = "block_user" if block else "unblock_user"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, target)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, target, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1194,6 +1222,7 @@ def _do_block(backend: str, wallet, target: str, block_type: str, block: bool = 
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
     }
@@ -1209,11 +1238,12 @@ def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_p
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
     canon_fn = _canon_base_block_topic_raw if block else _canon_base_unblock_topic_raw
     endpoint = "block_topic" if block else "unblock_topic"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, "", topic, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1225,6 +1255,7 @@ def _do_block_topic(backend: str, wallet, topic: str, block: bool = True, skip_p
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "topic": topic,
     }
@@ -1241,9 +1272,10 @@ def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = F
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_set_username_raw(pub, _lb_bytes(lb), d, ts, addr, username)
+    base = _canon_base_set_username_raw(pub, _lb_bytes(lb), d, ts, addr, username, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1255,6 +1287,7 @@ def _do_set_username_raw(backend: str, wallet, username: str, skip_pow: bool = F
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": addr,
         "username": username,
@@ -1271,9 +1304,10 @@ def _do_set_biography(backend: str, wallet, biography: str, skip_pow: bool = Fal
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), d, ts, addr, biography)
+    base = _canon_base_set_biography_raw(pub, _lb_bytes(lb), d, ts, addr, biography, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1285,6 +1319,7 @@ def _do_set_biography(backend: str, wallet, biography: str, skip_pow: bool = Fal
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": addr,
         "biography": biography,
@@ -1301,9 +1336,10 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_report_raw(pub, _lb_bytes(lb), d, ts, target, reason)
+    base = _canon_base_report_raw(pub, _lb_bytes(lb), d, ts, target, reason, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1315,6 +1351,7 @@ def _do_report(backend: str, wallet, target: str, reason: str, skip_pow: bool = 
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "reason": reason,
@@ -1331,11 +1368,12 @@ def _do_enable_agent(backend: str, wallet, agent_addr: str, enable: bool = True,
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
     canon_fn = _canon_base_enable_agent_raw if enable else _canon_base_disable_agent_raw
     endpoint = "enable_agent" if enable else "disable_agent"
 
-    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, agent_addr)
+    base = canon_fn(pub, _lb_bytes(lb), d, ts, addr, agent_addr, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1347,6 +1385,7 @@ def _do_enable_agent(backend: str, wallet, agent_addr: str, enable: bool = True,
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": addr,
         "agent": agent_addr,
@@ -1363,9 +1402,10 @@ def _do_set_agents(backend: str, wallet, agents: list[str], skip_pow: bool = Fal
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_set_agents_raw(pub, _lb_bytes(lb), d, ts, addr, agents)
+    base = _canon_base_set_agents_raw(pub, _lb_bytes(lb), d, ts, addr, agents, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1377,6 +1417,7 @@ def _do_set_agents(backend: str, wallet, agents: list[str], skip_pow: bool = Fal
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "agents": agents,
     }
@@ -1393,8 +1434,9 @@ def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
     lb = str(st.get("last_block_hash", ""))
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
 
-    base = _canon_base_set_auto_renewal_raw(pub, _lb_bytes(lb), 0, ts, auto_renew)
+    base = _canon_base_set_auto_renewal_raw(pub, _lb_bytes(lb), 0, ts, auto_renew, nonce)
     signed = canon_signed_with_pow(base, 0)
     sig = sign_canonical(wallet, signed)
     payload = {
@@ -1402,6 +1444,7 @@ def _do_set_auto_renewal(backend: str, wallet, auto_renew: bool) -> dict:
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "auto_renew": auto_renew,
     }
     code, resp = _post(f"{backend}/api/core/set_auto_renewal", payload)
@@ -1424,9 +1467,10 @@ def _do_post_with_media(
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
     pub = wallet.public_key().public_key_bytes
     ts = _now_ms()
+    nonce = _fresh_nonce()
     d = 0 if skip_pow else diff
 
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media)
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), d, ts, target, topic, title, content, tag, 0, media, nonce)
     if skip_pow:
         proof = 0
     else:
@@ -1438,6 +1482,7 @@ def _do_post_with_media(
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": d,
         "target": target,
         "topic": topic,
@@ -1495,6 +1540,29 @@ def _wait_indexed(backend: str, owner: str, tx_hash: str, timeout: float = INDEX
             pass
         time.sleep(0.5)
     return False
+
+
+def _wait_tx_status(
+    backend: str,
+    tx_hash: str,
+    expect_type: str | None = None,
+    timeout: float = INDEX_TIMEOUT_SEC,
+) -> dict | None:
+    deadline = time.perf_counter() + timeout
+    h = (tx_hash or "").lower()
+    while time.perf_counter() < deadline:
+        code, data = _get(f"{backend}/api/get_tx_status", {"hash": h})
+        if code == 200 and data:
+            if not data.get("found"):
+                time.sleep(0.5)
+                continue
+            if expect_type and data.get("tx_type") != expect_type:
+                time.sleep(0.5)
+                continue
+            if data.get("indexed") and data.get("details"):
+                return data
+        time.sleep(0.5)
+    return None
 
 
 def _wait_blocked_topic_state(
@@ -1655,6 +1723,17 @@ def test_params(backend: str):
             _fail("params.max_blocked_topics tier limits", f"got {got_blocked}")
     else:
         _pass("params.max_blocked_topics tier limits (skipped, pre-v1.13.0)", tiers_len=len(tiers))
+
+    # 1.4c tier limits for max_biography_length (requires v1.18.0 upgrade)
+    expected_bio = [0, 512, 512]
+    if len(tiers) >= 3:
+        got_bio = [int((tiers[i] or {}).get("max_biography_length", -1)) for i in range(3)]
+        if got_bio == expected_bio:
+            _pass("params.max_biography_length tier limits", values=got_bio)
+        else:
+            _fail("params.max_biography_length tier limits", f"got {got_bio}")
+    else:
+        _pass("params.max_biography_length tier limits (skipped, pre-v1.18.0)", tiers_len=len(tiers))
 
     # 1.5 get_network_stats returns consistent data
     code2, stats = _get(f"{backend}/api/get_network_stats")
@@ -1867,6 +1946,13 @@ def test_post_lifecycle(backend: str):
     topic = f"annot{_rand_str(6)}"
     title = f"Test Post {_rand_str(6)}"
     content = f"Content body {_rand_str(20)}"
+    try:
+        validator_addr = _resolve_validator_key_addr()
+    except Exception as e:
+        _fail("post.relayer.validator_addr", str(e))
+        return
+    validator_lower = validator_addr.lower()
+    _debug(f"expected relayer={validator_lower}")
 
     # 3.1 Create post
     txh = _do_post(backend, wallet, topic, title, content)
@@ -1881,6 +1967,20 @@ def test_post_lifecycle(backend: str):
         _pass("post.appears in get_user_posts")
     else:
         _fail("post.appears in get_user_posts", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
+
+    # 3.2a Relayer present in get_user_posts
+    code, user_posts = _get(f"{backend}/api/get_user_posts", {"owner": addr, "address": addr, "limit": 50})
+    if code == 200:
+        posts = (user_posts or {}).get("posts") or []
+        p_user = next((p for p in posts if str(p.get("post_id", "")).lower() == txh), None)
+        relayer_val = str(p_user.get("relayer", "")).strip().lower() if p_user else ""
+        _debug(f"user_posts relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_user_posts")
+        else:
+            _fail("post.relayer in get_user_posts", f"relayer={relayer_val}")
+    else:
+        _fail("post.relayer in get_user_posts", f"code={code}")
 
     # 3.3 Verify in get_posts feed (poll up to INDEX_TIMEOUT_SEC, use newest sort)
     found = []
@@ -1897,6 +1997,16 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.appears in get_posts feed")
 
+    # 3.3a Relayer present in get_posts feed
+    if found:
+        p = found[0]
+        relayer_val = str(p.get("relayer", "")).strip().lower()
+        _debug(f"get_posts relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_posts feed")
+        else:
+            _fail("post.relayer in get_posts feed", f"relayer={relayer_val}")
+
     # 3.4 Post has correct fields
     if found:
         p = found[0]
@@ -1910,7 +2020,38 @@ def test_post_lifecycle(backend: str):
         else:
             _fail("post.fields correct", f"title={p.get('title')}, topic={p.get('topic')}")
 
-    # 3.4a Award post (non-self)
+    # 3.4a get_tx_status includes relayer
+    post_status = _wait_tx_status(backend, txh, expect_type="post")
+    if post_status and post_status.get("details"):
+        relayer_val = str((post_status.get("details") or {}).get("relayer", "")).strip().lower()
+        _debug(f"tx_status post relayer={relayer_val}")
+        if relayer_val == validator_lower:
+            _pass("post.relayer in get_tx_status")
+        else:
+            _fail("post.relayer in get_tx_status", f"relayer={relayer_val}")
+    else:
+        _fail("post.relayer in get_tx_status", "missing tx status details")
+
+    # 3.4b Search results include relayer
+    search_found = False
+    search_relayer = ""
+    for _ in range(int(INDEX_TIMEOUT_SEC)):
+        code, sr = _get(f"{backend}/api/search", {"q": title[:8], "limit": 10})
+        if code == 200:
+            posts = (sr or {}).get("posts") or []
+            match = next((p for p in posts if str(p.get("post_id", "")).lower() == txh), None)
+            if match:
+                search_found = True
+                search_relayer = str(match.get("relayer", "")).strip().lower()
+                break
+        time.sleep(1)
+    _debug(f"search relayer={search_relayer}")
+    if search_found and search_relayer == validator_lower:
+        _pass("post.relayer in search results")
+    else:
+        _fail("post.relayer in search results", f"found={search_found} relayer={search_relayer}")
+
+    # 3.4c Award post (non-self)
     awarder = WALLETS["sub1"]
     award_type = "quality_post"
     _debug(f"award post target={txh} type={award_type}")
@@ -1921,7 +2062,7 @@ def test_post_lifecycle(backend: str):
     else:
         _fail("post.award submitted", f"code={award_code} resp={award_resp}")
 
-    # 3.4b Award appears in post feed data
+    # 3.4d Award appears in post feed data
     award_seen = False
     if award_txh:
         for _ in range(int(INDEX_TIMEOUT_SEC)):
@@ -1958,6 +2099,22 @@ def test_post_lifecycle(backend: str):
             _pass("post.vote_up reflected", votes=votes_after_up)
         else:
             _fail("post.vote_up reflected", f"votes={votes_after_up}")
+
+    # 3.5a Vote tx_status includes relayer
+    vote_txh = str((vote_resp or {}).get("tx_hash", "") or "").lower()
+    if vote_txh:
+        vote_status = _wait_tx_status(backend, vote_txh, expect_type="vote")
+        if vote_status and vote_status.get("details"):
+            relayer_val = str((vote_status.get("details") or {}).get("relayer", "")).strip().lower()
+            _debug(f"tx_status vote relayer={relayer_val}")
+            if relayer_val == validator_lower:
+                _pass("vote.relayer in get_tx_status")
+            else:
+                _fail("vote.relayer in get_tx_status", f"relayer={relayer_val}")
+        else:
+            _fail("vote.relayer in get_tx_status", "missing tx status details")
+    else:
+        _fail("vote.relayer in get_tx_status", "missing tx hash")
 
     # 3.6 Vote down (poll up to INDEX_TIMEOUT_SEC)
     _do_vote(backend, wallet, txh, -1)
@@ -2034,6 +2191,22 @@ def test_comments(backend: str):
 
     wallet = WALLETS["free"]
     addr = str(wallet.address())
+    try:
+        validator_addr = _resolve_validator_key_addr()
+    except Exception as e:
+        _fail("comments.relayer.validator_addr", str(e))
+        return
+    validator_lower = validator_addr.lower()
+    _debug(f"expected relayer={validator_lower}")
+
+    def _find_comment(nodes, target_id: str):
+        for n in nodes:
+            if str(n.get("post_id", "")).lower() == target_id:
+                return n
+            child = _find_comment(n.get("children") or [], target_id)
+            if child:
+                return child
+        return None
 
     # Create a parent post
     parent_txh = _do_post(backend, wallet, "test", f"Parent {_rand_str(4)}", "Parent body")
@@ -2057,7 +2230,23 @@ def test_comments(backend: str):
     else:
         _fail("comments.appears in get_comments", f"not found after {int(INDEX_TIMEOUT_SEC)}s")
 
-    # 4.2a Award comment (non-self)
+    # 4.2a Relayer present in get_comments
+    code, data = _get(f"{backend}/api/get_comments", {"post_id": parent_txh, "address": addr})
+    if code == 200:
+        root = (data or {}).get("root") or {}
+        children = (data or {}).get("children") or []
+        comment_node = _find_comment(children, c1_txh)
+        root_relayer = str(root.get("relayer", "")).strip().lower()
+        child_relayer = str((comment_node or {}).get("relayer", "")).strip().lower()
+        _debug(f"comments relayer root={root_relayer} child={child_relayer}")
+        if root_relayer == validator_lower and child_relayer == validator_lower:
+            _pass("comments.relayer in get_comments")
+        else:
+            _fail("comments.relayer in get_comments", f"root={root_relayer} child={child_relayer}")
+    else:
+        _fail("comments.relayer in get_comments", f"code={code}")
+
+    # 4.2b Award comment (non-self)
     awarder = WALLETS["sub1"]
     award_type = "receipts"
     _debug(f"award comment target={c1_txh} type={award_type}")
@@ -2068,7 +2257,7 @@ def test_comments(backend: str):
     else:
         _fail("comments.award submitted", f"code={award_code} resp={award_resp}")
 
-    # 4.2b Award appears in get_comments
+    # 4.2c Award appears in get_comments
     award_seen = False
     if award_txh:
         for _ in range(int(INDEX_TIMEOUT_SEC)):
@@ -2704,7 +2893,8 @@ def test_subscriber(backend: str):
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, a)
             pub_s = w.public_key().public_key_bytes
             ts = _now_ms()
-            base = _canon_base_post_raw(pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0)
+            nonce = _fresh_nonce()
+            base = _canon_base_post_raw(pub_s, _lb_bytes(lb), 1, ts, "", "test", f"{name} pow", "body", "", 0, None, nonce)
             proof = compute_pow(base, 1, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(w, signed)
@@ -2713,6 +2903,7 @@ def test_subscriber(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": 1,
                 "pow": int(proof),
                 "target": "",
@@ -2733,7 +2924,8 @@ def test_subscriber(backend: str):
         lb2, _, base_bits2, pow_factor2, _ = _fetch_params(backend, free_addr)
         pub_free = free_wallet.public_key().public_key_bytes
         ts2 = _now_ms()
-        base2 = _canon_base_post_raw(pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0)
+        nonce2 = _fresh_nonce()
+        base2 = _canon_base_post_raw(pub_free, _lb_bytes(lb2), 0, ts2, "", "test", "no pow", "body", "", 0, None, nonce2)
         signed2 = canon_signed_with_pow(base2, 0)
         sig2 = sign_canonical(free_wallet, signed2)
         payload2 = {
@@ -2741,6 +2933,7 @@ def test_subscriber(backend: str):
             "signature": _b64(sig2),
             "last_block_hash": lb2,
             "timestamp": ts2,
+            "envelope_nonce": str(nonce2),
             "pow_difficulty": 0,
             "target": "",
             "topic": "test",
@@ -2848,7 +3041,8 @@ def test_edge_cases(backend: str):
 
     def _try_post(topic, title, content, tag="", target="") -> Tuple[int, dict]:
         ts = _now_ms()
-        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, target, topic, title, content, tag, 0)
+        nonce = _fresh_nonce()
+        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, target, topic, title, content, tag, 0, None, nonce)
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
@@ -2857,6 +3051,7 @@ def test_edge_cases(backend: str):
             "signature": _b64(sig),
             "last_block_hash": lb,
             "timestamp": ts,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": target,
@@ -2916,7 +3111,8 @@ def test_edge_cases(backend: str):
 
     # 9.6 Timestamp too old rejected
     ts_old = _now_ms() - 120_000  # 2 minutes ago
-    base_old = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0)
+    nonce_old = _fresh_nonce()
+    base_old = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_old, "", "test", "old ts", "body", "", 0, None, nonce_old)
     proof_old = compute_pow(base_old, diff, base_bits, pow_factor, lb)
     signed_old = canon_signed_with_pow(base_old, int(proof_old))
     sig_old = sign_canonical(wallet, signed_old)
@@ -2925,6 +3121,7 @@ def test_edge_cases(backend: str):
         "signature": _b64(sig_old),
         "last_block_hash": lb,
         "timestamp": ts_old,
+        "envelope_nonce": str(nonce_old),
         "pow_difficulty": diff,
         "pow": int(proof_old),
         "target": "",
@@ -2942,7 +3139,8 @@ def test_edge_cases(backend: str):
 
     # 9.7 Timestamp too far in future rejected
     ts_future = _now_ms() + 120_000  # 2 minutes in future
-    base_fut = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0)
+    nonce_fut = _fresh_nonce()
+    base_fut = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_future, "", "test", "future ts", "body", "", 0, None, nonce_fut)
     proof_fut = compute_pow(base_fut, diff, base_bits, pow_factor, lb)
     signed_fut = canon_signed_with_pow(base_fut, int(proof_fut))
     sig_fut = sign_canonical(wallet, signed_fut)
@@ -2951,6 +3149,7 @@ def test_edge_cases(backend: str):
         "signature": _b64(sig_fut),
         "last_block_hash": lb,
         "timestamp": ts_future,
+        "envelope_nonce": str(nonce_fut),
         "pow_difficulty": diff,
         "pow": int(proof_fut),
         "target": "",
@@ -2981,7 +3180,8 @@ def test_edge_cases(backend: str):
 
     # 9.9 Invalid pubkey rejected
     ts = _now_ms()
-    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", "test", "bad pk", "body", "", 0)
+    nonce = _fresh_nonce()
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", "test", "bad pk", "body", "", 0, None, nonce)
     proof = compute_pow(base, diff, base_bits, pow_factor, lb)
     signed = canon_signed_with_pow(base, int(proof))
     sig = sign_canonical(wallet, signed)
@@ -2990,6 +3190,7 @@ def test_edge_cases(backend: str):
         "signature": _b64(sig),
         "last_block_hash": lb,
         "timestamp": ts,
+        "envelope_nonce": str(nonce),
         "pow_difficulty": diff,
         "pow": int(proof),
         "target": "",
@@ -3009,7 +3210,8 @@ def test_edge_cases(backend: str):
     wallet_b = WALLETS["sub1"]
     pub_b = wallet_b.public_key().public_key_bytes
     ts_mis = _now_ms()
-    base_mis = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0)
+    nonce_mis = _fresh_nonce()
+    base_mis = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_mis, "", "test", "mismatch", "body", "", 0, None, nonce_mis)
     proof_mis = compute_pow(base_mis, diff, base_bits, pow_factor, lb)
     signed_mis = canon_signed_with_pow(base_mis, int(proof_mis))
     sig_mis = sign_canonical(wallet, signed_mis)  # signed by wallet A
@@ -3018,6 +3220,7 @@ def test_edge_cases(backend: str):
         "signature": _b64(sig_mis),
         "last_block_hash": lb,
         "timestamp": ts_mis,
+        "envelope_nonce": str(nonce_mis),
         "pow_difficulty": diff,
         "pow": int(proof_mis),
         "target": "",
@@ -3035,9 +3238,10 @@ def test_edge_cases(backend: str):
 
     # 9.11 Stale/invalid block hash rejected
     ts_stale = _now_ms()
+    nonce_stale = _fresh_nonce()
     fake_lb = "aa" * 32  # valid hex but not a real block hash
     base_stale = _canon_base_post_raw(
-        pub, bytes.fromhex(fake_lb), diff, ts_stale, "", "test", "stale lb", "body", "", 0
+        pub, bytes.fromhex(fake_lb), diff, ts_stale, "", "test", "stale lb", "body", "", 0, None, nonce_stale
     )
     proof_stale = compute_pow(base_stale, diff, base_bits, pow_factor, fake_lb)
     signed_stale = canon_signed_with_pow(base_stale, int(proof_stale))
@@ -3047,6 +3251,7 @@ def test_edge_cases(backend: str):
         "signature": _b64(sig_stale),
         "last_block_hash": fake_lb,
         "timestamp": ts_stale,
+        "envelope_nonce": str(nonce_stale),
         "pow_difficulty": diff,
         "pow": int(proof_stale),
         "target": "",
@@ -3059,6 +3264,58 @@ def test_edge_cases(backend: str):
         _pass("edge.stale_block_hash_rejected")
     else:
         _fail("edge.stale_block_hash_rejected", f"code={code_stale}")
+
+    lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
+
+    # 9.11b Missing envelope_nonce rejected
+    ts = _now_ms()
+    nonce = _fresh_nonce()
+    base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", "test", "no nonce", "body", "", 0, None, nonce)
+    proof = compute_pow(base, diff, base_bits, pow_factor, lb)
+    signed = canon_signed_with_pow(base, int(proof))
+    sig = sign_canonical(wallet, signed)
+    payload_no_nonce = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig),
+        "last_block_hash": lb,
+        "timestamp": ts,
+        "pow_difficulty": diff,
+        "pow": int(proof),
+        "target": "",
+        "topic": "test",
+        "title": "no nonce",
+        "content": "body",
+    }
+    code_no_nonce, resp_no_nonce = _post(f"{backend}/api/core/post", payload_no_nonce)
+    if code_no_nonce == 400:
+        _pass("edge.missing_envelope_nonce_rejected")
+    else:
+        _fail("edge.missing_envelope_nonce_rejected", f"code={code_no_nonce} expected 400")
+
+    # 9.11c Zero envelope_nonce rejected (sign with nonce=0 so canonical bytes match)
+    ts_z = _now_ms()
+    base_z = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts_z, "", "test", "zero nonce", "body", "", 0, None, 0)
+    proof_z = compute_pow(base_z, diff, base_bits, pow_factor, lb)
+    signed_z = canon_signed_with_pow(base_z, int(proof_z))
+    sig_z = sign_canonical(wallet, signed_z)
+    payload_zero_nonce = {
+        "pubkey": _b64(pub),
+        "signature": _b64(sig_z),
+        "last_block_hash": lb,
+        "timestamp": ts_z,
+        "envelope_nonce": "0",
+        "pow_difficulty": diff,
+        "pow": int(proof_z),
+        "target": "",
+        "topic": "test",
+        "title": "zero nonce",
+        "content": "body",
+    }
+    code_zero, resp_zero = _post(f"{backend}/api/core/post", payload_zero_nonce)
+    if code_zero >= 400:
+        _pass("edge.zero_envelope_nonce_rejected")
+    else:
+        _fail("edge.zero_envelope_nonce_rejected", f"code={code_zero} expected 400")
 
     lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
 
@@ -3165,8 +3422,9 @@ def test_edge_cases(backend: str):
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
             pub = wallet.public_key().public_key_bytes
             ts = _now_ms()
+            nonce = _fresh_nonce()
             topic = f"vtag{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0)
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Valid tag", "body", tag, 0, None, nonce)
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(wallet, signed)
@@ -3175,6 +3433,7 @@ def test_edge_cases(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": diff,
                 "pow": int(proof),
                 "target": "",
@@ -3252,8 +3511,9 @@ def test_edge_cases(backend: str):
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
         pub = wallet.public_key().public_key_bytes
         ts = _now_ms()
+        nonce = _fresh_nonce()
         topic = f"med{_rand_str(4)}"
-        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", "body", "", 0, bad_media)
+        base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Title", "body", "", 0, bad_media, nonce)
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(wallet, signed)
@@ -3262,6 +3522,7 @@ def test_edge_cases(backend: str):
             "signature": _b64(sig),
             "last_block_hash": lb,
             "timestamp": ts,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": "",
@@ -3329,9 +3590,10 @@ def test_security(backend: str):
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
         pub = free_wallet.public_key().public_key_bytes
         ts = _now_ms()
+        nonce = _fresh_nonce()
         topic_a = f"topic{_rand_str(4)}"
 
-        base_a = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0)
+        base_a = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic_a, "Original", "original content", "", 0, None, nonce)
         proof = compute_pow(base_a, diff, base_bits, pow_factor, lb)
         signed_a = canon_signed_with_pow(base_a, int(proof))
         sig = sign_canonical(free_wallet, signed_a)
@@ -3342,6 +3604,7 @@ def test_security(backend: str):
             "signature": _b64(sig),
             "last_block_hash": lb,
             "timestamp": ts,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": "",
@@ -3362,15 +3625,17 @@ def test_security(backend: str):
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
         pub = free_wallet.public_key().public_key_bytes
         ts1 = _now_ms()
+        nonce1 = _fresh_nonce()
         topic1 = f"topic{_rand_str(4)}"
 
-        base1 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0)
+        base1 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts1, "", topic1, "First", "first content", "", 0, None, nonce1)
         proof1 = compute_pow(base1, diff, base_bits, pow_factor, lb)
 
         # Build a different message and reuse proof1
         ts2 = _now_ms()
+        nonce2 = _fresh_nonce()
         topic2 = f"topic{_rand_str(4)}"
-        base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0)
+        base2 = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts2, "", topic2, "Second", "second content", "", 0, None, nonce2)
         signed2 = canon_signed_with_pow(base2, int(proof1))
         sig2 = sign_canonical(free_wallet, signed2)
 
@@ -3379,6 +3644,7 @@ def test_security(backend: str):
             "signature": _b64(sig2),
             "last_block_hash": lb,
             "timestamp": ts2,
+            "envelope_nonce": str(nonce2),
             "pow_difficulty": diff,
             "pow": int(proof1),
             "target": "",
@@ -3464,9 +3730,10 @@ def test_security(backend: str):
         lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
         pub = free_wallet.public_key().public_key_bytes
         ts = _now_ms()
+        nonce = _fresh_nonce()
         uname = f"stolen-{_rand_str(4)}"
 
-        base = _canon_base_set_username_raw(pub, _lb_bytes(lb), diff, ts, sub_addr, uname)
+        base = _canon_base_set_username_raw(pub, _lb_bytes(lb), diff, ts, sub_addr, uname, nonce)
         proof = compute_pow(base, diff, base_bits, pow_factor, lb)
         signed = canon_signed_with_pow(base, int(proof))
         sig = sign_canonical(free_wallet, signed)
@@ -3475,6 +3742,7 @@ def test_security(backend: str):
             "signature": _b64(sig),
             "last_block_hash": lb,
             "timestamp": ts,
+            "envelope_nonce": str(nonce),
             "pow_difficulty": diff,
             "pow": int(proof),
             "target": sub_addr,
@@ -3613,7 +3881,8 @@ def test_security(backend: str):
             lb, _, _, _, _ = _fetch_params(backend, sub_addr)
             pub = sub_wallet.public_key().public_key_bytes
             ts = _now_ms()
-            base = _canon_base_award_raw(pub, _lb_bytes(lb), 0, ts, target_post, "quality_post")
+            nonce = _fresh_nonce()
+            base = _canon_base_award_raw(pub, _lb_bytes(lb), 0, ts, target_post, "quality_post", nonce)
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub_wallet, signed)
             payload = {
@@ -3621,6 +3890,7 @@ def test_security(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "pow": 0,
                 "target": target_post,
@@ -3639,7 +3909,8 @@ def test_security(backend: str):
             lb, _, _, _, _ = _fetch_params(backend, sub_addr)
             bad_pub = b"\x02" * 32
             ts = _now_ms()
-            base = _canon_base_award_raw(bad_pub, _lb_bytes(lb), 0, ts, target_post, "quality_post")
+            nonce = _fresh_nonce()
+            base = _canon_base_award_raw(bad_pub, _lb_bytes(lb), 0, ts, target_post, "quality_post", nonce)
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub_wallet, signed)
             payload = {
@@ -3647,6 +3918,7 @@ def test_security(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "pow": 0,
                 "target": target_post,
@@ -3903,8 +4175,9 @@ def test_validation(backend: str):
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, free_addr)
             pub = free_wallet.public_key().public_key_bytes
             ts = _now_ms()
+            nonce = _fresh_nonce()
             topic = f"topic{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0)
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), diff, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
             proof = compute_pow(base, diff, base_bits, pow_factor, lb)
             signed = canon_signed_with_pow(base, int(proof))
             sig = sign_canonical(free_wallet, signed)
@@ -3913,6 +4186,7 @@ def test_validation(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": diff,
                 "pow": int(proof),
                 "target": "",
@@ -4500,10 +4774,11 @@ def test_media(backend: str):
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, addr)
             pub = sub1.public_key().public_key_bytes
             ts = _now_ms()
+            nonce = _fresh_nonce()
             topic = edit_media_topic
             media_list = ["https://example.com/edited.jpg"]
             base = _canon_base_edit_raw(
-                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list
+                pub, _lb_bytes(lb), 0, ts, "", topic, "Edit media test", "updated body", "", base_post, media_list, nonce
             )
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub1, signed)
@@ -4512,6 +4787,7 @@ def test_media(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "target": "",
                 "topic": topic,
@@ -4771,8 +5047,9 @@ def test_frontend_bypass(backend: str):
             lb, diff, base_bits, pow_factor, _ = _fetch_params(backend, sub1_addr)
             pub = sub1.public_key().public_key_bytes
             ts = _now_ms()
+            nonce = _fresh_nonce()
             topic = f"tag{_rand_str(4)}"
-            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0)
+            base = _canon_base_post_raw(pub, _lb_bytes(lb), 0, ts, "", topic, "Tag test", "body", tag, 0, None, nonce)
             signed = canon_signed_with_pow(base, 0)
             sig = sign_canonical(sub1, signed)
             payload = {
@@ -4780,6 +5057,7 @@ def test_frontend_bypass(backend: str):
                 "signature": _b64(sig),
                 "last_block_hash": lb,
                 "timestamp": ts,
+                "envelope_nonce": str(nonce),
                 "pow_difficulty": 0,
                 "target": "",
                 "topic": topic,

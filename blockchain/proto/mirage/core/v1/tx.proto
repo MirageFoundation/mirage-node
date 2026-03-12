@@ -149,7 +149,8 @@ message MsgPost {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -176,7 +177,8 @@ message MsgEdit {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -204,7 +206,8 @@ message MsgVote {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -227,7 +230,8 @@ message MsgSetUsername {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -250,7 +254,8 @@ message MsgEnableAgent {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -273,7 +278,8 @@ message MsgDisableAgent {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -296,7 +302,8 @@ message MsgSetAgents {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -319,7 +326,8 @@ message MsgFollowUser {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -342,7 +350,8 @@ message MsgUnfollowUser {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -365,7 +374,8 @@ message MsgFollowTopic {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -388,7 +398,8 @@ message MsgUnfollowTopic {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -411,7 +422,8 @@ message MsgBlockPost {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -433,7 +445,8 @@ message MsgUnblockPost {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -455,7 +468,8 @@ message MsgBlockUser {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -477,7 +491,8 @@ message MsgUnblockUser {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -499,7 +514,8 @@ message MsgBlockTopic {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -522,7 +538,8 @@ message MsgUnblockTopic {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -545,7 +562,8 @@ message MsgDelete {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -567,7 +585,8 @@ message MsgDeleteUser {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -589,7 +608,8 @@ message MsgSendTokens {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -613,7 +633,8 @@ message MsgSetLevel {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -699,7 +720,8 @@ message MsgUpgradeLevel {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -721,7 +743,8 @@ message MsgSetAutoRenewal {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -743,7 +766,8 @@ message MsgBridgeBurn {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -824,7 +848,8 @@ message MsgAward {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -847,7 +872,8 @@ message MsgSetBiography {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload
@@ -871,7 +897,8 @@ message MsgAnnotate {
   uint64 envelope_difficulty = 4;
   uint64 envelope_pow = 5;
   uint64 envelope_timestamp = 6;
-  // tags 7-9 reserved
+  uint64 envelope_nonce = 7;
+  // tags 8-9 reserved
   bytes envelope_signature = 10;
 
   // Payload (no target — agents cannot re-parent posts)

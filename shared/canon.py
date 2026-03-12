@@ -78,12 +78,15 @@ def canon_base_set_username(
     timestamp: int,
     target: str,
     username: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgSetUsername"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, username)
     return bytes(out)
@@ -96,12 +99,15 @@ def canon_base_set_biography(
     timestamp: int,
     target: str,
     biography: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgSetBiography"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, biography)
     return bytes(out)
@@ -122,6 +128,7 @@ def canon_base_post(
     tag: str = "",
     pow_val: int = 0,
     media: list[str] | None = None,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgPost"))
     out += _enc_bytes(2, pubkey)
@@ -130,6 +137,8 @@ def canon_base_post(
     if pow_val > 0:
         out += _enc_u64(5, pow_val)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
@@ -152,12 +161,15 @@ def canon_base_edit(
     tag: str,
     override: str,
     media: list[str] | None = None,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgEdit"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
@@ -181,12 +193,15 @@ def canon_base_annotate(
     override: str,
     media: list[str] | None = None,
     appendix: str = "",
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgAnnotate"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(101, topic or "")
     out += _enc_str(102, title)
     out += _enc_str(103, content)
@@ -205,12 +220,15 @@ def canon_base_vote(
     timestamp: int,
     target: str,
     direction: int,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgVote"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     # Direction is int32 in proto, but Go converts to uint32 before encoding
     # int32(-1) -> uint32(4294967295)
@@ -226,12 +244,15 @@ def canon_base_enable_agent(
     timestamp: int,
     target: str,
     agent: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgEnableAgent"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, agent)
     return bytes(out)
@@ -244,12 +265,15 @@ def canon_base_disable_agent(
     timestamp: int,
     target: str,
     agent: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgDisableAgent"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, agent)
     return bytes(out)
@@ -262,12 +286,15 @@ def canon_base_set_agents(
     timestamp: int,
     target: str,
     agents: list[str],
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgSetAgents"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     for a in agents or []:
         out += _enc_str(101, a)
@@ -281,12 +308,15 @@ def canon_base_follow_user(
     timestamp: int,
     target: str,
     user: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgFollowUser"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, user)
     return bytes(out)
@@ -299,12 +329,15 @@ def canon_base_unfollow_user(
     timestamp: int,
     target: str,
     user: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUnfollowUser"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, user)
     return bytes(out)
@@ -317,12 +350,15 @@ def canon_base_follow_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgFollowTopic"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -335,12 +371,15 @@ def canon_base_unfollow_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUnfollowTopic"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -352,12 +391,15 @@ def canon_base_block_post(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgBlockPost"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -368,12 +410,15 @@ def canon_base_unblock_post(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUnblockPost"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -384,12 +429,15 @@ def canon_base_block_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgBlockUser"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -400,12 +448,15 @@ def canon_base_unblock_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUnblockUser"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -417,12 +468,15 @@ def canon_base_block_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgBlockTopic"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -435,12 +489,15 @@ def canon_base_unblock_topic(
     timestamp: int,
     target: str,
     topic: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUnblockTopic"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, topic)
     return bytes(out)
@@ -452,12 +509,15 @@ def canon_base_delete(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgDelete"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -468,12 +528,15 @@ def canon_base_delete_user(
     difficulty: int,
     timestamp: int,
     target: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgDeleteUser"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     return bytes(out)
 
@@ -486,12 +549,15 @@ def canon_base_send_tokens(
     sender: str,
     target: str,
     amount: int,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgSendTokens"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, sender)
     out += _enc_str(101, target)
     out += _enc_u64(102, amount)
@@ -505,12 +571,15 @@ def canon_base_report(
     timestamp: int,
     target: str,
     reason: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgReport"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, reason)
     return bytes(out)
@@ -522,12 +591,15 @@ def canon_base_upgrade_level(
     difficulty: int,
     timestamp: int,
     level: int,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgUpgradeLevel"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_u64(100, level)
     return bytes(out)
 
@@ -538,12 +610,15 @@ def canon_base_set_auto_renewal(
     difficulty: int,
     timestamp: int,
     auto_renew: bool,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgSetAutoRenewal"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_u64(100, 1 if auto_renew else 0)
     return bytes(out)
 
@@ -555,12 +630,15 @@ def canon_base_award(
     timestamp: int,
     target: str,
     award_type: str,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgAward"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, target)
     out += _enc_str(101, award_type)
     return bytes(out)
@@ -574,12 +652,15 @@ def canon_base_bridge_burn(
     destination_chain: str,
     destination_address: str,
     amount: int,
+    nonce: int = 0,
 ) -> bytes:
     out = bytearray(_prefix("MsgBridgeBurn"))
     out += _enc_bytes(2, pubkey)
     out += _enc_bytes(3, last_block_hash)
     out += _enc_u64(4, difficulty)
     out += _enc_u64(6, timestamp)
+    if nonce:
+        out += _enc_u64(7, nonce)
     out += _enc_str(100, destination_chain)
     out += _enc_str(101, destination_address)
     out += _enc_u64(102, amount)
@@ -593,7 +674,7 @@ def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
 
     Envelope layout in *base* (no pow) is always:
       prefix, tag2(pubkey bytes), tag3(last_block_hash bytes),
-      tag4(difficulty uvarint), tag6(timestamp uvarint), payload tags (100+)
+      tag4(difficulty uvarint), tag6(timestamp uvarint), tag7(nonce uvarint, optional), payload tags (100+)
     """
     base_arr = bytearray(base)
 
@@ -618,47 +699,29 @@ def canon_signed_with_pow(base: bytes, pow_val: int) -> bytes:
     if i < len(base_arr) and base_arr[i] == 0:
         i += 1
 
-    try:
-        # tag 2: pubkey bytes
-        if i >= len(base_arr) or base_arr[i] != 2:
-            raise ValueError("expected tag2")
-        i += 1
-        length_2, i = _read_uvarint(base_arr, i)
-        i += length_2
+    # tag 2: pubkey bytes
+    if i >= len(base_arr) or base_arr[i] != 2:
+        raise ValueError("expected tag2")
+    i += 1
+    length_2, i = _read_uvarint(base_arr, i)
+    i += length_2
 
-        # tag 3: last_block_hash bytes
-        if i >= len(base_arr) or base_arr[i] != 3:
-            raise ValueError("expected tag3")
-        i += 1
-        length_3, i = _read_uvarint(base_arr, i)
-        i += length_3
+    # tag 3: last_block_hash bytes
+    if i >= len(base_arr) or base_arr[i] != 3:
+        raise ValueError("expected tag3")
+    i += 1
+    length_3, i = _read_uvarint(base_arr, i)
+    i += length_3
 
-        # tag 4: difficulty uvarint
-        if i >= len(base_arr) or base_arr[i] != 4:
-            raise ValueError("expected tag4")
-        i += 1
-        # skip difficulty value
-        _, i = _read_uvarint(base_arr, i)
-        tag_4_end = i
+    # tag 4: difficulty uvarint
+    if i >= len(base_arr) or base_arr[i] != 4:
+        raise ValueError("expected tag4")
+    i += 1
+    _, i = _read_uvarint(base_arr, i)
 
-        # tag 6: timestamp uvarint (should immediately follow, but
-        # fall back to searching from tag_4_end to be robust)
-        tag_6_pos = -1
-        if tag_4_end < len(base_arr) and base_arr[tag_4_end] == 6:
-            tag_6_pos = tag_4_end
-        else:
-            for j in range(tag_4_end, len(base_arr)):
-                if base_arr[j] == 6:
-                    tag_6_pos = j
-                    break
+    # tag 6 must immediately follow tag 4
+    if i >= len(base_arr) or base_arr[i] != 6:
+        raise ValueError("expected tag6 after tag4")
 
-        if tag_6_pos >= 0:
-            pow_bytes = _enc_u64(5, int(pow_val))
-            return bytes(base_arr[:tag_6_pos] + pow_bytes + base_arr[tag_6_pos:])
-
-    except Exception:
-        # On any unexpected layout, fall through to append-at-end.
-        pass
-
-    # Fallback: append pow if we could not safely locate tag4/tag6
-    return bytes(base_arr + _enc_u64(5, int(pow_val)))
+    pow_bytes = _enc_u64(5, int(pow_val))
+    return bytes(base_arr[:i] + pow_bytes + base_arr[i:])

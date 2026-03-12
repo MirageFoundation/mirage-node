@@ -825,7 +825,8 @@ def _load_candidate_posts(
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
                COALESCE(p.media, '[]') AS media,
-               COALESCE(pr.created_at, 0) AS author_created_at
+               COALESCE(pr.created_at, 0) AS author_created_at,
+               COALESCE(p.relayer, '') AS relayer
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -858,6 +859,7 @@ def _load_candidate_posts(
             author_level,
             media_raw,
             author_created_at,
+            relayer,
         ) = row
         media = json.loads(media_raw)
         if not isinstance(media, list):
@@ -865,6 +867,7 @@ def _load_candidate_posts(
 
         pid = (txhash or "").lower()
         author = (owner or "").lower()
+        relayer_lower = (relayer or "").strip().lower()
         tag_lower = (tag or "").strip().lower()
         topic_raw = (topic or "").strip()
         topic_lower = topic_raw.lower()
@@ -897,6 +900,7 @@ def _load_candidate_posts(
                 "title": title or "",
                 "content": content or "",
                 "tag": tag or "",
+                "relayer": relayer_lower,
                 "edited": bool(edited_at),
                 "edited_at": int(edited_at or 0),
                 "thumbnail": thumbnail or "",
@@ -929,7 +933,8 @@ def _load_vote_and_comment_stats(
         blocked_ph = ",".join(["%s"] * len(blocked_users))
         cur.execute(
             f"""SELECT LOWER(target), COALESCE(SUM(user_weight), 0)
-                FROM votes WHERE LOWER(target) IN ({id_ph}) AND LOWER(owner) NOT IN ({blocked_ph})
+                FROM votes WHERE LOWER(target) IN ({id_ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
                 GROUP BY LOWER(target)""",
             post_ids + list(blocked_users),
         )
@@ -1031,7 +1036,8 @@ def _load_following_candidates(
                COALESCE(p.thumbnail_url, '') AS thumbnail,
                COALESCE(pr.level, 0) AS author_level,
                COALESCE(p.media, '[]') AS media,
-               COALESCE(pr.created_at, 0) AS author_created_at
+               COALESCE(pr.created_at, 0) AS author_created_at,
+               COALESCE(p.relayer, '') AS relayer
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE COALESCE(p.target,'') = ''
@@ -1123,7 +1129,7 @@ def _get_following_feed(
         vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
             cur, page_ids, blocked_posts, blocked_users, viewer_lower
         )
-        _, award_details = _load_award_aggregates(cur, page_ids)
+        _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
 
         for post in page_posts:
             pid = post["post_id"]
@@ -1166,7 +1172,7 @@ def _get_following_feed(
     similar_addrs = set(sim_lookup.keys())
     similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
-    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
     now_ts = int(time.time())
     topic_prefs: dict[str, float] = {}
     author_prefs: dict[str, float] = {}
@@ -1325,7 +1331,8 @@ def _get_home_feed_newest(
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
                    COALESCE(p.media, '[]') AS media,
-                   COALESCE(pr.created_at, 0) AS author_created_at"""
+                   COALESCE(pr.created_at, 0) AS author_created_at,
+                   COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
 
@@ -1380,7 +1387,7 @@ def _get_home_feed_newest(
     vote_totals, comment_counts, user_votes, user_weight_map = _load_vote_and_comment_stats(
         cur, page_ids, blocked_posts, blocked_users, viewer_lower
     )
-    _, award_details = _load_award_aggregates(cur, page_ids)
+    _, award_details = _load_award_aggregates(cur, page_ids, blocked_users)
 
     for post in page_posts:
         pid = post["post_id"]
@@ -1466,7 +1473,7 @@ def _get_home_feed_magic(
         cur, post_ids, blocked_posts, blocked_users, viewer_lower
     )
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
-    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     # 6. Score each post with Magic algorithm
     now_ts = int(time.time())
@@ -1828,6 +1835,7 @@ def _load_unique_commenter_counts(
 def _load_award_aggregates(
     cur,
     post_ids: list[str],
+    blocked_users: set[str] | None = None,
 ) -> tuple[dict[str, int], dict[str, list[dict]]]:
     """
     Load per-post award data:
@@ -1841,20 +1849,41 @@ def _load_award_aggregates(
     award_details: dict[str, list[dict]] = {}
     id_ph = ",".join(["%s"] * len(post_ids))
 
-    cur.execute(
-        f"SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
-        post_ids,
-    )
+    blocked_users = blocked_users or set()
+    if blocked_users:
+        blocked_ph = ",".join(["%s"] * len(blocked_users))
+        cur.execute(
+            f"""SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards
+                WHERE LOWER(target) IN ({id_ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
+                GROUP BY LOWER(target)""",
+            post_ids + list(blocked_users),
+        )
+    else:
+        cur.execute(
+            f"SELECT LOWER(target), COUNT(DISTINCT LOWER(owner)) FROM awards WHERE LOWER(target) IN ({id_ph}) GROUP BY LOWER(target)",
+            post_ids,
+        )
     for tgt, cnt in cur.fetchall():
         if tgt:
             unique_awarders[tgt] = int(cnt or 0)
 
-    cur.execute(
-        f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
-            FROM awards WHERE LOWER(target) IN ({id_ph})
-            GROUP BY LOWER(target), award_type""",
-        post_ids,
-    )
+    if blocked_users:
+        blocked_ph = ",".join(["%s"] * len(blocked_users))
+        cur.execute(
+            f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
+                FROM awards WHERE LOWER(target) IN ({id_ph})
+                  AND LOWER(owner) NOT IN ({blocked_ph})
+                GROUP BY LOWER(target), award_type""",
+            post_ids + list(blocked_users),
+        )
+    else:
+        cur.execute(
+            f"""SELECT LOWER(target), award_type, COUNT(*) AS cnt
+                FROM awards WHERE LOWER(target) IN ({id_ph})
+                GROUP BY LOWER(target), award_type""",
+            post_ids,
+        )
     for tgt, atype, cnt in cur.fetchall():
         if tgt:
             award_details.setdefault(tgt, []).append({"type": atype, "count": int(cnt or 0)})
@@ -1887,7 +1916,8 @@ def _load_home_candidates(
                    p.root_topic, p.root_post_id, pr.username, p.edited_at, p.thumbnail_url,
                    COALESCE(pr.level, 0) AS author_level,
                    COALESCE(p.media, '[]') AS media,
-                   COALESCE(pr.created_at, 0) AS author_created_at"""
+                   COALESCE(pr.created_at, 0) AS author_created_at,
+                   COALESCE(p.relayer, '') AS relayer"""
     _ROOT_FILTER = "(p.root_post_id IS NULL OR p.root_post_id = '' OR LOWER(p.root_post_id) = LOWER(p.txhash))"
     _TOPIC_FILTER = "p.topic IS NOT NULL AND TRIM(p.topic) != ''"
     bt_clause, bt_params = _blocked_topics_sql(blocked_topics or set(), blocked_topic_prefixes or tuple())
@@ -2022,8 +2052,8 @@ def _row_to_post(
     """Convert a DB row to a post dict, or None if should be skipped."""
     import json as _json
 
-    # 15-column rows (with media + author_created_at)
-    if len(row) >= 15:
+    # 16-column rows (with media + author_created_at + relayer)
+    if len(row) >= 16:
         (
             txhash,
             owner,
@@ -2040,8 +2070,10 @@ def _row_to_post(
             author_level,
             media_raw,
             author_created_at,
-        ) = row[:15]
-    elif len(row) >= 14:
+            relayer,
+        ) = row[:16]
+    # 15-column rows (with media + relayer)
+    elif len(row) >= 15:
         (
             txhash,
             owner,
@@ -2057,7 +2089,8 @@ def _row_to_post(
             thumbnail,
             author_level,
             media_raw,
-        ) = row[:14]
+            relayer,
+        ) = row[:15]
         author_created_at = 0
     else:
         (
@@ -2077,10 +2110,12 @@ def _row_to_post(
         ) = row
         media_raw = "[]"
         author_created_at = 0
+        relayer = ""
 
     pid = (txhash or "").lower()
     author = (owner or "").lower()
 
+    relayer_lower = (relayer or "").strip().lower()
     if pid in seen or pid in blocked_posts or author in blocked_users:
         return None
     topic_lower = (topic or "").strip().lower()
@@ -2116,6 +2151,7 @@ def _row_to_post(
         "edited_at": int(edited_at or 0),
         "thumbnail": thumbnail or "",
         "media": media,
+        "relayer": relayer_lower,
     }
 
 
@@ -2176,7 +2212,7 @@ def _get_guest_feed(
     # Load vote/comment/award stats (no viewer for guest)
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
-    _, award_details = _load_award_aggregates(cur, post_ids)
+    _, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     for post in candidates:
         pid = post["post_id"]
@@ -2242,7 +2278,7 @@ def _get_guest_feed_magic(
     post_ids = [c["post_id"] for c in candidates]
     vote_totals, comment_counts, _, _ = _load_vote_and_comment_stats(cur, post_ids, blocked_posts, blocked_users)
     unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
-    unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
+    unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
 
     now_ts = int(time.time())
     sim_lookup: dict[str, float] = {}
@@ -2366,7 +2402,7 @@ def get_tx_status():
                 # Check votes table
                 cur.execute(
                     """
-                    SELECT v.owner, v.target, v.user_vote, v.user_weight, v.created_at
+                    SELECT v.owner, v.target, v.user_vote, v.user_weight, v.created_at, COALESCE(v.relayer, '')
                     FROM votes v WHERE LOWER(v.txhash) = %s
                     """,
                     (tx_hash,),
@@ -2374,7 +2410,7 @@ def get_tx_status():
                 vote_row = cur.fetchone()
                 if vote_row:
                     tx_type = "vote"
-                    owner, target, user_vote_val, user_weight_val, created_at = vote_row
+                    owner, target, user_vote_val, user_weight_val, created_at, relayer = vote_row
                     # Get target post's current points
                     target_points = None
                     if target:
@@ -2387,6 +2423,7 @@ def get_tx_status():
                             target_points = float(pts_row[0])
                     details = {
                         "owner": owner,
+                        "relayer": (relayer or "").strip().lower(),
                         "target": target,
                         "user_vote": user_vote_val,
                         "user_weight": round(user_weight_val, 3) if user_weight_val else 0,
@@ -2395,7 +2432,7 @@ def get_tx_status():
                 else:
                     # Check posts table
                     cur.execute(
-                        "SELECT txhash, topic, title FROM posts WHERE LOWER(txhash) = %s",
+                        "SELECT txhash, topic, title, COALESCE(relayer, '') FROM posts WHERE LOWER(txhash) = %s",
                         (tx_hash,),
                     )
                     post_row = cur.fetchone()
@@ -2405,6 +2442,7 @@ def get_tx_status():
                             "post_id": post_row[0],
                             "topic": post_row[1] or "",
                             "title": post_row[2] or "",
+                            "relayer": (post_row[3] or "").strip().lower(),
                         }
 
         except Exception as db_err:
@@ -3935,7 +3973,8 @@ def search():
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
                            COALESCE(p.media, '[]') as media,
-                           COALESCE(pr.created_at, 0) as author_created_at
+                      COALESCE(pr.created_at, 0) as author_created_at,
+                      COALESCE(p.relayer, '') as relayer
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE LOWER(p.owner) = LOWER(%s)
@@ -4138,7 +4177,8 @@ def search():
                            COALESCE(p.thumbnail_url, '') as thumbnail,
                            COALESCE(pr.level, 0) as author_level,
                            COALESCE(p.media, '[]') as media,
-                           COALESCE(pr.created_at, 0) as author_created_at
+                           COALESCE(pr.created_at, 0) as author_created_at,
+                           COALESCE(p.relayer, '') as relayer
                     FROM posts p
                     LEFT JOIN profiles pr ON pr.owner = p.owner
                     WHERE COALESCE(p.target, '') = ''
@@ -4269,14 +4309,31 @@ def _format_search_posts(
                 user_weight_map[tgt] = float(weight) if weight else 0.0
 
     # Load awards for all posts
-    _, award_details = _load_award_aggregates(cur, post_ids) if post_ids else ({}, {})
+    _, award_details = _load_award_aggregates(cur, post_ids, blocked_users) if post_ids else ({}, {})
 
     posts = []
     for row in filtered:
         import json as _json
 
         author_created_at = 0
-        if len(row) >= 13:
+        if len(row) >= 14:
+            (
+                txhash,
+                owner,
+                ts,
+                topic,
+                title,
+                content,
+                username,
+                target,
+                tag,
+                thumbnail,
+                author_level,
+                media_raw,
+                author_created_at,
+                relayer,
+            ) = row[:14]
+        elif len(row) >= 13:
             (
                 txhash,
                 owner,
@@ -4292,13 +4349,16 @@ def _format_search_posts(
                 media_raw,
                 author_created_at,
             ) = row[:13]
+            relayer = ""
         elif len(row) >= 12:
             txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level, media_raw = row[
                 :12
             ]
+            relayer = ""
         else:
             txhash, owner, ts, topic, title, content, username, target, tag, thumbnail, author_level = row
             media_raw = "[]"
+            relayer = ""
         try:
             media_val = _json.loads(media_raw or "[]")
             if not isinstance(media_val, list):
@@ -4306,6 +4366,7 @@ def _format_search_posts(
         except Exception:
             media_val = []
         pid = (txhash or "").lower()
+        relayer_lower = (relayer or "").strip().lower()
         posts.append(
             {
                 "post_id": pid,
@@ -4320,6 +4381,7 @@ def _format_search_posts(
                 "tag": tag or "",
                 "thumbnail": thumbnail or "",
                 "media": media_val,
+                "relayer": relayer_lower,
                 "points": vote_totals.get(pid, 0),
                 "comments": comment_counts.get(pid, 0),
                 "user_vote": user_votes.get(pid, 0),
@@ -4469,7 +4531,8 @@ def get_posts():
                       COALESCE(p.thumbnail_url, '') as thumbnail,
                       COALESCE(pr.level, 0) as author_level,
                       COALESCE(p.media, '[]') as media,
-                      COALESCE(pr.created_at, 0) as author_created_at
+                      COALESCE(pr.created_at, 0) as author_created_at,
+                      COALESCE(p.relayer, '') as relayer
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LOWER(p.topic) = LOWER(%s) AND LENGTH(COALESCE(p.title,'')) > 0 {deleted_clause}
@@ -4495,7 +4558,8 @@ def get_posts():
                        COALESCE(p.thumbnail_url, '') as thumbnail,
                        COALESCE(pr.level, 0) as author_level,
                        COALESCE(p.media, '[]') as media,
-                       COALESCE(pr.created_at, 0) as author_created_at
+                       COALESCE(pr.created_at, 0) as author_created_at,
+                       COALESCE(p.relayer, '') as relayer
                 FROM posts p
                 LEFT JOIN profiles pr ON pr.owner = p.owner
                 WHERE COALESCE(p.target, '') = '' AND LENGTH(COALESCE(p.title,'')) > 0 {bt_clause} {deleted_clause}
@@ -4629,7 +4693,7 @@ def get_posts():
             post_ids = [p["post_id"] for p in candidates]
             similar_upvotes = _load_similar_user_upvotes(cur, post_ids, similar_addrs)
             unique_commenters = _load_unique_commenter_counts(cur, post_ids, blocked_posts, blocked_users)
-            unique_awarders, award_details = _load_award_aggregates(cur, post_ids)
+            unique_awarders, award_details = _load_award_aggregates(cur, post_ids, blocked_users)
             topic_prefs: dict[str, float] = {}
             author_prefs: dict[str, float] = {}
             now_ts = int(time.time())
@@ -4677,7 +4741,7 @@ def get_posts():
             end = start + limit
             page_posts = candidates[start:end] if start < len(candidates) else []
             page_pids = [p["post_id"] for p in page_posts]
-            _, award_details = _load_award_aggregates(cur, page_pids)
+            _, award_details = _load_award_aggregates(cur, page_pids, blocked_users)
             result = []
             for post in page_posts:
                 pid = post["post_id"]
@@ -4766,7 +4830,8 @@ def get_user_posts():
                    COALESCE(p.thumbnail_url, '') as thumbnail,
                    COALESCE(pr.level, 0) as author_level,
                    COALESCE(p.media, '[]') as media,
-                   COALESCE(pr.created_at, 0) as author_created_at
+                   COALESCE(pr.created_at, 0) as author_created_at,
+                   COALESCE(p.relayer, '') as relayer
             FROM posts p
             LEFT JOIN profiles pr ON pr.owner = p.owner
             WHERE LOWER(p.owner) = LOWER(%s)
@@ -4884,7 +4949,25 @@ def get_user_posts():
 
             media_raw = "[]"
             author_created_at = 0
-            if len(row) >= 14:
+            if len(row) >= 15:
+                (
+                    txhash,
+                    owner_addr,
+                    ts,
+                    topic,
+                    title,
+                    content,
+                    uname,
+                    target,
+                    edited,
+                    edited_at,
+                    thumbnail,
+                    author_level,
+                    media_raw,
+                    author_created_at,
+                    relayer,
+                ) = row[:15]
+            elif len(row) >= 14:
                 (
                     txhash,
                     owner_addr,
@@ -4901,6 +4984,7 @@ def get_user_posts():
                     media_raw,
                     author_created_at,
                 ) = row[:14]
+                relayer = ""
             elif len(row) >= 13:
                 (
                     txhash,
@@ -4917,6 +5001,7 @@ def get_user_posts():
                     author_level,
                     media_raw,
                 ) = row[:13]
+                relayer = ""
             elif len(row) >= 12:
                 (
                     txhash,
@@ -4932,18 +5017,22 @@ def get_user_posts():
                     thumbnail,
                     author_level,
                 ) = row
+                relayer = ""
             elif len(row) >= 11:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at, thumbnail = row
                 author_level = 0
+                relayer = ""
             elif len(row) == 10:
                 txhash, owner_addr, ts, topic, title, content, uname, target, edited, edited_at = row
                 thumbnail = ""
                 author_level = 0
+                relayer = ""
             else:
                 txhash, owner_addr, ts, topic, title, content, uname, target = row
                 edited, edited_at = 0, 0
                 thumbnail = ""
                 author_level = 0
+                relayer = ""
             try:
                 media_val = _json.loads(media_raw or "[]")
                 if not isinstance(media_val, list):
@@ -4951,6 +5040,7 @@ def get_user_posts():
             except Exception:
                 media_val = []
             pid = (txhash or "").lower()
+            relayer_lower = (relayer or "").strip().lower()
             result.append(
                 {
                     "post_id": pid,
@@ -4967,6 +5057,7 @@ def get_user_posts():
                     "edited_at": int(edited_at or 0),
                     "thumbnail": thumbnail,
                     "media": media_val,
+                    "relayer": relayer_lower,
                     "points": vote_totals.get(pid, 0),
                     "comments": comment_counts.get(pid, 0),
                     "user_vote": user_votes.get(pid, 0),
@@ -5093,7 +5184,8 @@ def _fetch_post(
                COALESCE(pr.level, 0) as author_level,
                COALESCE(p.comment_count, 0) as comment_count,
                COALESCE(p.media, '[]') as media,
-               COALESCE(pr.created_at, 0) as author_created_at
+               COALESCE(pr.created_at, 0) as author_created_at,
+               COALESCE(p.relayer, '') as relayer
         FROM posts p
         LEFT JOIN profiles pr ON pr.owner = p.owner
         WHERE LOWER(p.txhash) = LOWER(%s) {deleted_clause} LIMIT 1
@@ -5121,6 +5213,7 @@ def _fetch_post(
     stored_comment_count = int(row[15]) if len(row) > 15 and row[15] else 0
     media_raw_val = row[16] if len(row) > 16 else "[]"
     author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
+    relayer_val = (row[18] or "").strip().lower() if len(row) > 18 else ""
 
     # Parse media JSON array
     try:
@@ -5200,6 +5293,7 @@ def _fetch_post(
         "edited_at": edited_at_val,
         "thumbnail": thumbnail_val,
         "media": media_val,
+        "relayer": relayer_val,
         "points": points,
         "comments": comments,
         "children": [],
@@ -5238,7 +5332,8 @@ def _fetch_comment_tree_batch(
                    CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
                    0 as depth,
-                   COALESCE(p.media, '[]') as media
+                   COALESCE(p.media, '[]') as media,
+                   COALESCE(p.relayer, '') as relayer
             FROM posts p
             WHERE LOWER(p.txhash) = %s {deleted_clause}
             UNION ALL
@@ -5251,7 +5346,8 @@ def _fetch_comment_tree_batch(
                    CASE WHEN p.edited_at IS NULL THEN 0 ELSE 1 END as edited,
                    COALESCE(p.edited_at, 0) as edited_at,
                    s.depth + 1 as depth,
-                   COALESCE(p.media, '[]') as media
+                   COALESCE(p.media, '[]') as media,
+                   COALESCE(p.relayer, '') as relayer
             FROM posts p
             JOIN subtree s ON LOWER(p.target) = LOWER(s.txhash)
             WHERE s.depth < %s {deleted_clause}
@@ -5262,7 +5358,8 @@ def _fetch_comment_tree_batch(
                COALESCE(pr.username, '') as username,
                COALESCE(pr.level, 0) as author_level,
                st.media,
-               COALESCE(pr.created_at, 0) as author_created_at
+               COALESCE(pr.created_at, 0) as author_created_at,
+               st.relayer
         FROM subtree st
         LEFT JOIN profiles pr ON LOWER(pr.owner) = LOWER(st.owner)
         ORDER BY st.depth ASC, st.created_at ASC
@@ -5297,6 +5394,7 @@ def _fetch_comment_tree_batch(
         author_level_val = int(row[15]) if row[15] else 0
         media_raw_val = row[16] if len(row) > 16 else "[]"
         author_created_at_val = int(row[17]) if len(row) > 17 and row[17] else 0
+        relayer_val = (row[18] or "").strip().lower() if len(row) > 18 else ""
 
         # Parse media JSON array
         try:
@@ -5341,6 +5439,7 @@ def _fetch_comment_tree_batch(
             "edited_at": edited_at_val,
             "thumbnail": thumbnail_val,
             "media": media_val,
+            "relayer": relayer_val,
             "points": 0,  # Will be populated later
             "comments": 0,  # Will be computed from tree
             "children": [],
@@ -5563,7 +5662,7 @@ def get_comments():
                     collect_ids_for_awards(n["children"])
 
         collect_ids_for_awards(children)
-        _, award_details = _load_award_aggregates(cur, all_ids_for_awards)
+        _, award_details = _load_award_aggregates(cur, all_ids_for_awards, blocked_users)
         root["awards"] = award_details.get(root["post_id"], [])
 
         def apply_awards(nodes):
