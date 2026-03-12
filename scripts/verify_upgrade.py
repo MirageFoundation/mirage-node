@@ -217,8 +217,10 @@ def check_node_reachable() -> bool:
 def _extract_semver(s: str) -> str:
     """Extract the semver portion, stripping leading 'v' and any suffix after patch."""
     import re
+
     m = re.search(r"v?(\d+\.\d+\.\d+)", s)
     return m.group(1) if m else s
+
 
 def _version_matches(actual: str, upgrade_name: str) -> bool:
     if not actual or not upgrade_name:
@@ -484,8 +486,8 @@ def check_subscription_index_consistency() -> None:
 
 
 def check_biography_limits() -> None:
-    """v1.18.0: verify max_biography_length is set correctly on tier configs."""
-    section("Biography Length Limits (v1.18.0)")
+    """v1.18.0+: verify max_biography_length is set correctly on tier configs."""
+    section("Biography Length Limits (since v1.18.0)")
     data = http_get(f"{REST}/mirage/core/v1/params")
     if not data:
         fail("Could not fetch params for biography check")
@@ -502,6 +504,14 @@ def check_biography_limits() -> None:
             ok(f"Tier {idx} max_biography_length = {got}")
         else:
             fail(f"Tier {idx} max_biography_length = {got}, expected {exp_val}")
+
+
+def check_legacy_nonce_compatibility(upgrade_name: str) -> None:
+    section("Legacy Nonce Compatibility (v1.19.0)")
+    if _extract_semver(upgrade_name) != "1.19.0":
+        warn(f"Upgrade name is {upgrade_name}; legacy nonce compatibility not expected")
+        return
+    warn("Legacy nonce compatibility cannot be verified via queries. Submit a legacy-signed tx or inspect logs.")
 
 
 # ── Main ───────────────────────────────────────────────────
@@ -542,6 +552,7 @@ def main() -> int:
     check_core_params()
     check_subscription_index_consistency()
     check_biography_limits()
+    check_legacy_nonce_compatibility(upgrade_name)
     section("Summary")
     total = _passed + _failed + _warned
     print(f"  Passed: {_passed}/{total}  Failed: {_failed}  Warnings: {_warned}")

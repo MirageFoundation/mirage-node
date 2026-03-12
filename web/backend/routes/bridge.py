@@ -31,7 +31,14 @@ from chain import classify_reject, get_current_pow_difficulty, is_node_catching_
 from db import connect_db
 
 # Import shared helpers from core module
-from routes.core import is_subscriber, _verify_signature, get_user_level, _hex_to_bytes, GAS_BUFFER_MULTIPLIER
+from routes.core import (
+    is_subscriber,
+    _verify_signature,
+    get_user_level,
+    _hex_to_bytes,
+    GAS_BUFFER_MULTIPLIER,
+    _parse_envelope_nonce,
+)
 
 
 bridge_bp = Blueprint("bridge", __name__)
@@ -364,14 +371,16 @@ def bridge_burn():
             timestamp = int(data.get("timestamp"))
         except (TypeError, ValueError):
             return jsonify({"error": "invalid timestamp"}), 400
+        # Nonce generation (for clients):
+        #   nonce = (Date.now() * 1_000_000) ^ (rand32)
+        #   Must be >0; for JS keep <=2^53-1. Include in signature.
+        # LEGACY_NONCE_COMPAT: accept missing nonce for pre-1.18 clients.
+        # Remove this legacy path after all clients send envelope_nonce.
         if "envelope_nonce" not in data:
-            return jsonify({"error": "envelope_nonce required"}), 400
-        try:
-            nonce = int(data.get("envelope_nonce"))
-            if nonce <= 0:
-                return jsonify({"error": "envelope_nonce must be > 0"}), 400
-        except (TypeError, ValueError):
-            return jsonify({"error": "invalid envelope_nonce"}), 400
+            log_event(rid, "legacy_nonce_missing", route="bridge_burn")
+        nonce, err = _parse_envelope_nonce(data)
+        if err is not None:
+            return err[0], err[1]
 
         destination_chain = str(data.get("destination_chain", "")).strip()
         if not destination_chain:

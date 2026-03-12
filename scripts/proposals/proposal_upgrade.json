@@ -1,12 +1,12 @@
 {
-    "title": "Upgrade to v1.18.0 (Replay Protection + Security Fixes)",
-    "summary": "Security upgrade: C-1 relay envelope replay protection via client nonce + on-chain dedup, M-1 biography length enforcement per tier (0 free / 512 sub / 512 agent), M-2 BlockPost gas fee error propagation fix, I-1 governance SetLevel validation, I-2 orchestrator typed errors, I-3 per-watcher PRNG seeding.",
+    "title": "Upgrade to v1.19.0 (Legacy Client Compatibility)",
+    "summary": "Compatibility upgrade: restore posting for older desktop/mobile clients by accepting legacy relay messages without the envelope nonce while keeping full replay protection for updated clients. This is a temporary bridge release; legacy mode will be removed once all clients are updated.",
     "messages": [
         {
             "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
             "authority": "mirage10d07y265gmmuvt4z0w9aw880jnsr700jvealeg",
             "plan": {
-                "name": "v1.18.0",
+                "name": "v1.19.0",
                 "height": "T+50",
                 "info": ""
             }
