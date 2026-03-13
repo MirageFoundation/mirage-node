@@ -1048,12 +1048,26 @@ def main():
             proposal_id = proposal_id_from_tx
 
     if not proposal:
-        # Fallback: find proposal by matching title (must be exact match and recent)
-        proposals_result = query_json_rpc(rpc_endpoint, ["q", "gov", "proposals"])
-        proposals_list = proposals_result.get("proposals", [])
+        # Fallback: find proposal by matching title in active proposals.
+        # Filter by status to avoid deserializing old passed/rejected proposals
+        # that may contain message types no longer in the protobuf registry
+        # (e.g. MsgMintTo removed after v1.20.0).
+        proposals_list: list[dict] = []
+        for status_filter in ["voting_period", "deposit_period", ""]:
+            try:
+                cmd = ["q", "gov", "proposals"]
+                if status_filter:
+                    cmd += ["--status", status_filter]
+                proposals_result = query_json_rpc(rpc_endpoint, cmd, fatal=False)
+                proposals_list = proposals_result.get("proposals", [])
+                if proposals_list:
+                    break
+            except (QueryError, Exception) as e:
+                log(f"q gov proposals (status={status_filter or 'all'}): {e}")
+                continue
 
         if not proposals_list:
-            info("ERROR: No proposals found")
+            info("ERROR: No proposals found (all queries failed or returned empty)")
             return 1
 
         # Search backwards (most recent first) for matching title
